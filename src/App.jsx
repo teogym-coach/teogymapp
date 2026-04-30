@@ -134,14 +134,6 @@ export default function App() {
     finally { setLoading(false); }
   }, []);
 
-  const loadSessions = useCallback(async (m) => {
-    if (!m?.id) return;
-    setLoading(true);
-    try { setSessions(await getSessions(m.id)); }
-    catch(e) { showToast("수업 불러오기 실패", "err"); }
-    finally { setLoading(false); }
-  }, []);
-
   function goHub(m) {
     setMember(m);
     setSessions([]);

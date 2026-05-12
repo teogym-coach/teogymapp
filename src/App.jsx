@@ -64,8 +64,43 @@ function formatTypes(raw) {
   return arr.length ? arr.join(" · ") : "";
 }
 
-function mkSet() { return {weight:"",reps:"",volume:0}; }
-function mkEx()  { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""}; }
+function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightReps"}; }
+function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
+function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""}; }
+
+// 기능운동 여부 판별
+function isFuncEx(ex) { return ex.muscleTop === "기능"; }
+
+// 기능운동 세트 표시 문자열 (입력된 값만)
+function funcSetLabel(row) {
+  const w = row.weight   !== "" && row.weight   != null ? parseFloat(row.weight)   : null;
+  const r = row.reps     !== "" && row.reps     != null ? parseInt(row.reps)       : null;
+  const d = row.durationSec !== "" && row.durationSec != null ? parseInt(row.durationSec) : null;
+  const parts = [];
+  if (w) parts.push(w + "kg");
+  if (d) parts.push(d + "초");
+  if (r) parts.push(r + "회");
+  return parts.join(" × ") || "—";
+}
+
+// 기능운동 볼륨 (중량+횟수 있을 때만)
+function funcExVol(ex) {
+  return (ex.sets||[]).reduce((sum, row) => {
+    const w = parseFloat(row.weight) || 0;
+    const r = parseInt(row.reps)     || 0;
+    return sum + (w > 0 && r > 0 ? w * r : 0);
+  }, 0);
+}
+
+// 기능운동 총 시간(초), 총 횟수
+function funcExStats(ex) {
+  let totalSec = 0, totalReps = 0;
+  (ex.sets||[]).forEach(row => {
+    totalSec  += parseInt(row.durationSec) || 0;
+    totalReps += parseInt(row.reps)        || 0;
+  });
+  return { totalSec, totalReps };
+}
 
 
 // ── Pointer Event 기반 드래그 정렬 훅 ──────────────────
@@ -201,10 +236,10 @@ function getRealWeight(w, exType, memberBodyWeight) {
 }
 
 function exVol(ex, memberBodyWeight) {
+  if (isFuncEx(ex)) return funcExVol(ex);  // 기능운동은 별도 계산
   const exType = getExerciseType(ex.name);
   return (ex.sets||[]).reduce((s,r) => {
     if (exType === "assist" && memberBodyWeight) {
-      // 저장된 volume 재계산 (memberBodyWeight 있을 때)
       const bw    = parseFloat(memberBodyWeight) || 0;
       const assist= parseFloat(r.weight) || 0;
       const reps  = parseInt(r.reps) || 0;
@@ -1038,7 +1073,26 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     setExercises(prev => prev.map((ex,i) => {
       if (i !== ei) return ex;
       const u = {...ex, [key]:val};
-      if (key === "muscleTop") u.muscleSub = mSubs(val)[0] || "";
+      if (key === "muscleTop") {
+        u.muscleSub = mSubs(val)[0] || "";
+        // 기능 ↔ 일반 전환 시 세트 형식 변환
+        const wasFunc = ex.muscleTop === "기능";
+        const isFunc  = val === "기능";
+        if (!wasFunc && isFunc) {
+          // 일반 → 기능: 기존 세트를 funcSet 형식으로 변환
+          u.sets = ex.sets.map(s => ({
+            weight: s.weight || "", reps: s.reps || "", durationSec: "",
+            volume: 0, recordType: "function"
+          }));
+        } else if (wasFunc && !isFunc) {
+          // 기능 → 일반: 기능 세트를 일반 세트 형식으로 변환
+          u.sets = ex.sets.map(s => ({
+            weight: s.weight || "", reps: s.reps || "",
+            volume: (parseFloat(s.weight)||0)*(parseInt(s.reps)||0),
+            recordType: "weightReps"
+          }));
+        }
+      }
       return u;
     }));
   }
@@ -1047,15 +1101,14 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   function updateSet(ei, si, key, val) {
     setExercises(prev => prev.map((ex,i) => {
       if (i !== ei) return ex;
+      const isFunc = isFuncEx(ex);
       const exType = getExerciseType(ex.name);
       const sets   = ex.sets.map((row,j) => {
         if (j !== si) return row;
         const u = {...row, [key]:val};
-        if (key==="weight"||key==="reps") {
+        if (!isFunc && (key==="weight"||key==="reps")) {
           const w = key==="weight" ? val : row.weight;
           const r = key==="reps"   ? val : row.reps;
-          // memberBodyWeight: 오늘 입력한 체중 → 없으면 최근 세션 체중 사용
-          // 체중 우선순위: 오늘 입력 > 바디체크 최신기록 > 이전 세션
           const latestBodyRec = bodyData?.records?.length > 0
             ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
             : null;
@@ -1065,12 +1118,18 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
             || "";
           u.volume = calcVol(w, r, exType, mbw);
         }
+        // 기능운동은 durationSec 필드도 허용, volume=0 유지
+        if (isFunc) u.recordType = "function";
         return u;
       });
       return {...ex, sets};
     }));
   }
-  function addSet(ei) { setExercises(prev => prev.map((ex,i) => i===ei ? {...ex,sets:[...ex.sets,mkSet()]} : ex)); }
+  function addSet(ei) {
+    setExercises(prev => prev.map((ex,i) =>
+      i===ei ? {...ex, sets:[...ex.sets, isFuncEx(ex) ? mkFuncSet() : mkSet()]} : ex
+    ));
+  }
   function removeSet(ei, si) { setExercises(prev => prev.map((ex,i) => i===ei ? {...ex,sets:ex.sets.filter((_,j)=>j!==si)} : ex)); }
 
   function handleSave() {
@@ -1247,6 +1306,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               // 불러오기 핸들러 (단일 setExercises 호출로 원자적 업데이트)
               function loadRecord() {
                 if (!rec) return;
+                const isFunc = rec.muscleTop === "기능" || ex.muscleTop === "기능";
                 const exType = getExerciseType(rec.exName || ex.name);
                 const mbw = bodyWeight
                   || (bodyData?.records?.length > 0
@@ -1257,8 +1317,12 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 const newSets = rec.sets.map(s => {
                   const w = String(s.weight ?? "");
                   const r = String(s.reps   ?? "");
+                  const d = String(s.durationSec ?? "");
+                  if (isFunc) {
+                    return { weight: w, reps: r, durationSec: d, volume: 0, recordType: "function" };
+                  }
                   const vol = calcVol(w, r, exType, mbw);
-                  return { weight: w, reps: r, volume: vol };
+                  return { weight: w, reps: r, volume: vol, recordType: "weightReps" };
                 });
                 setExercises(prev => prev.map((e, i) => {
                   if (i !== ei) return e;
@@ -1386,65 +1450,114 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:mColor(ex.muscleTop)+"22",color:mColor(ex.muscleTop)}}>{ex.muscleTop}</span>
               <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"#1a1a24",color:"#7070a0"}}>{ex.muscleSub}</span>
             </div>
-            {(() => {
-              const exType2 = getExerciseType(ex.name);
-              const h1 = exType2==="assist" ? "보조kg" : "무게kg";
-              return (
-                <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 65px 18px",gap:4,marginBottom:3}}>
-                  {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#2a2a3a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+            {/* ── 세트 입력 UI ── */}
+            {isFuncEx(ex) ? (
+              /* ── 기능운동 모드 ── */
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr 18px",gap:4,marginBottom:3}}>
+                  {["SET","중량kg","시간초","횟수",""].map((h,i) =>
+                    <Mo key={i} c="#2a2a3a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                 </div>
-              );
-            })()}
-            {ex.sets.map((row, si) => {
-              const exTypeRow = getExerciseType(ex.name);
-              const latestRec2 = bodyData?.records?.length > 0
-                ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
-                : null;
-              const mbwRow = bodyWeight || latestRec2?.weight || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "") || "";
-              const realWRow  = exTypeRow==="assist" ? getRealWeight(row.weight, exTypeRow, mbwRow) : null;
-              return (
-                <div key={si} style={{marginBottom:3}}>
-                  <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 65px 18px",gap:4,alignItems:"center"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111116",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
-                    <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
-                    <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#00e5a0",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,229,160,.06)",borderRadius:5}}>
-                      {row.volume>0 ? row.volume.toLocaleString() : "—"}
+                {ex.sets.map((row, si) => (
+                  <div key={si} style={{marginBottom:3}}>
+                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr 18px",gap:4,alignItems:"center"}}>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111116",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
+                      <input value={row.weight||""} onChange={e => updateSet(ei,si,"weight",e.target.value)}
+                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
+                      <input value={row.durationSec||""} onChange={e => updateSet(ei,si,"durationSec",e.target.value)}
+                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
+                      <input value={row.reps||""} onChange={e => updateSet(ei,si,"reps",e.target.value)}
+                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
+                      {ex.sets.length>1
+                        ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#2a2a3a",fontSize:11,padding:0,textAlign:"center"}}>✕</button>
+                        : <div />}
                     </div>
-                    {ex.sets.length>1 ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#2a2a3a",fontSize:11,padding:0,textAlign:"center"}}>✕</button> : <div />}
-                  </div>
-                  {exTypeRow==="assist" && row.weight && mbwRow && (
-                    <div style={{marginTop:2,padding:"3px 8px",background:"rgba(124,111,255,.08)",borderRadius:5,display:"flex",gap:8,alignItems:"center"}}>
-                      <Mo c="#7c6fff" s={8}>체중 {mbwRow}kg − 보조 {row.weight}kg = 실제 {realWRow}kg</Mo>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed #1a1a24",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
-            {(() => {
-              const exType3 = getExerciseType(ex.name);
-              const latestRec3 = bodyData?.records?.length > 0
-                ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
-                : null;
-              const mbw3 = bodyWeight || latestRec3?.weight || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "") || "";
-              const vol3    = exVol(ex, mbw3);
-              return (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:7}}>
-                  <div style={{display:"flex",alignItems:"center",gap:7}}>
-                    <Mo c="#00e5a0" s={9}>볼륨 {vol3.toLocaleString()} kg</Mo>
-                    {exType3==="assist" && mbw3 && (
-                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
-                        background:"rgba(124,111,255,.18)",color:"#7c6fff"}}>체중 {mbw3}kg 기준 보정</span>
-                    )}
-                    {exType3==="assist" && !mbw3 && (
-                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
-                        background:"rgba(255,107,107,.18)",color:"#ff6b6b"}}>⚠ 체중 입력 필요</span>
+                    {/* 세트 미리보기 */}
+                    {funcSetLabel(row) !== "—" && (
+                      <div style={{marginTop:2,padding:"2px 8px",background:"rgba(84,160,255,.07)",borderRadius:4}}>
+                        <Mo c="#54a0ff" s={9}>{si+1}세트 {funcSetLabel(row)}</Mo>
+                      </div>
                     )}
                   </div>
-                </div>
-              );
-            })()}
+                ))}
+                <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed #1a1a24",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
+                {/* 기능운동 통계 */}
+                {(() => {
+                  const vol  = funcExVol(ex);
+                  const stat = funcExStats(ex);
+                  return (
+                    <div style={{marginTop:7,display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {vol > 0 && <Mo c="#00e5a0" s={9}>볼륨 {vol.toLocaleString()} kg</Mo>}
+                      {stat.totalSec > 0 && <Mo c="#54a0ff" s={9}>총 {stat.totalSec}초</Mo>}
+                      {stat.totalReps > 0 && <Mo c="#ffd166" s={9}>총 {stat.totalReps}회</Mo>}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              /* ── 일반 웨이트 모드 ── */
+              <div>
+                {(() => {
+                  const exType2 = getExerciseType(ex.name);
+                  const h1 = exType2==="assist" ? "보조kg" : "무게kg";
+                  return (
+                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 65px 18px",gap:4,marginBottom:3}}>
+                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#2a2a3a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                    </div>
+                  );
+                })()}
+                {ex.sets.map((row, si) => {
+                  const exTypeRow = getExerciseType(ex.name);
+                  const latestRec2 = bodyData?.records?.length > 0
+                    ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
+                    : null;
+                  const mbwRow = bodyWeight || latestRec2?.weight || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "") || "";
+                  const realWRow  = exTypeRow==="assist" ? getRealWeight(row.weight, exTypeRow, mbwRow) : null;
+                  return (
+                    <div key={si} style={{marginBottom:3}}>
+                      <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 65px 18px",gap:4,alignItems:"center"}}>
+                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111116",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
+                        <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
+                        <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
+                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#00e5a0",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,229,160,.06)",borderRadius:5}}>
+                          {row.volume>0 ? row.volume.toLocaleString() : "—"}
+                        </div>
+                        {ex.sets.length>1 ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#2a2a3a",fontSize:11,padding:0,textAlign:"center"}}>✕</button> : <div />}
+                      </div>
+                      {exTypeRow==="assist" && row.weight && mbwRow && (
+                        <div style={{marginTop:2,padding:"3px 8px",background:"rgba(124,111,255,.08)",borderRadius:5,display:"flex",gap:8,alignItems:"center"}}>
+                          <Mo c="#7c6fff" s={8}>체중 {mbwRow}kg − 보조 {row.weight}kg = 실제 {realWRow}kg</Mo>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed #1a1a24",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
+                {(() => {
+                  const exType3 = getExerciseType(ex.name);
+                  const latestRec3 = bodyData?.records?.length > 0
+                    ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
+                    : null;
+                  const mbw3 = bodyWeight || latestRec3?.weight || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "") || "";
+                  const vol3    = exVol(ex, mbw3);
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:7}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                        <Mo c="#00e5a0" s={9}>볼륨 {vol3.toLocaleString()} kg</Mo>
+                        {exType3==="assist" && mbw3 && (
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
+                            background:"rgba(124,111,255,.18)",color:"#7c6fff"}}>체중 {mbw3}kg 기준 보정</span>
+                        )}
+                        {exType3==="assist" && !mbw3 && (
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
+                            background:"rgba(255,107,107,.18)",color:"#ff6b6b"}}>⚠ 체중 입력 필요</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
             {/* RPE 선택 */}
             <div style={{marginTop:8,marginBottom:5}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
@@ -1657,17 +1770,35 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                 </div>
               </div>
               <div style={{padding:"6px 12px"}}>
-                <div style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
-                  {["SET","무게","횟수","볼륨"].map((h,i) => <Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
-                </div>
-                {(ex.sets||[]).map((row,si) => (
-                  <div key={si} style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
-                    <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0d0d10",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
-                    <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
-                    <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                    <Mo c="#00e5a0" s={10} style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                {isFuncEx(ex) ? (
+                  /* 기능운동 — 입력된 값만 표시 */
+                  <div>
+                    {(ex.sets||[]).map((row,si) => {
+                      const lbl = funcSetLabel(row);
+                      return lbl !== "—" ? (
+                        <div key={si} style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,padding:"3px 0"}}>
+                          <Mo c="#3a3a4a" s={9} style={{background:"#0d0d10",borderRadius:3,padding:"2px 7px",minWidth:32,textAlign:"center"}}>{si+1}</Mo>
+                          <Mo c="#54a0ff" s={10}>{lbl}</Mo>
+                        </div>
+                      ) : null;
+                    })}
                   </div>
-                ))}
+                ) : (
+                  /* 일반 웨이트 */
+                  <div>
+                    <div style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
+                      {["SET","무게","횟수","볼륨"].map((h,i) => <Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                    </div>
+                    {(ex.sets||[]).map((row,si) => (
+                      <div key={si} style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
+                        <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0d0d10",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
+                        <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
+                        <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
+                        <Mo c="#00e5a0" s={10} style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           );

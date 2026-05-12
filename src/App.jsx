@@ -68,72 +68,70 @@ function mkSet() { return {weight:"",reps:"",volume:0}; }
 function mkEx()  { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""}; }
 
 
-// ── 드래그앤드롭 정렬 훅 (터치/마우스 공통) ───────────────
-function useDragSort(items, setItems) {
-  const dragIdx  = { current: null };
-  const overIdx  = { current: null };
+// ── Pointer Event 기반 드래그 정렬 훅 ──────────────────
+// - 마우스/터치/스타일러스 통합 (PointerEvent API)
+// - 모바일 iOS/Android Safari 완전 지원
+// - 핸들 요소에만 부착, 카드 내부 입력칸 간섭 없음
+function usePointerSort(setItems) {
+  const drag = useRef({
+    active: false,
+    fromIdx: null,
+    toIdx: null,
+    startY: 0,
+    currentY: 0,
+    cardHeight: 140,
+  });
 
-  function onDragStart(ei) {
-    dragIdx.current = ei;
-  }
-  function onDragOver(ei) {
-    if (ei === dragIdx.current) return;
-    overIdx.current = ei;
-  }
-  function onDrop() {
-    const from = dragIdx.current;
-    const to   = overIdx.current;
-    if (from == null || to == null || from === to) {
-      dragIdx.current = overIdx.current = null;
-      return;
-    }
-    setItems(prev => {
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-    dragIdx.current = overIdx.current = null;
-  }
-
-  return { onDragStart, onDragOver, onDrop };
-}
-
-// ── 터치 드래그 정렬 훅 ──────────────────────────────────
-function useTouchSort(items, setItems) {
-  const state = { current: { dragging: null, startY: 0, currentY: 0, cardEls: [] } };
-
-  function handleTouchStart(ei, e) {
-    const touch = e.touches[0];
-    state.current = { dragging: ei, startY: touch.clientY, currentY: touch.clientY, cardEls: [] };
-  }
-  function handleTouchMove(ei, e) {
-    if (state.current.dragging == null) return;
+  // 핸들에서 pointerdown → 드래그 시작
+  function onHandlePointerDown(ei, e) {
     e.preventDefault();
-    state.current.currentY = e.touches[0].clientY;
-  }
-  function handleTouchEnd(ei, e) {
-    const s = state.current;
-    if (s.dragging == null) return;
-    const dy   = s.currentY - s.startY;
-    const CARD = 120; // 카드 높이 추정
-    const steps = Math.round(dy / CARD);
-    if (steps !== 0) {
-      const from = s.dragging;
-      const to   = Math.max(0, Math.min(items.length - 1, from + steps));
-      if (from !== to) {
-        setItems(prev => {
-          const next = [...prev];
-          const [moved] = next.splice(from, 1);
-          next.splice(to, 0, moved);
-          return next;
-        });
-      }
-    }
-    state.current = { dragging: null, startY: 0, currentY: 0, cardEls: [] };
+    e.stopPropagation();
+    drag.current = {
+      active: true,
+      fromIdx: ei,
+      toIdx: ei,
+      startY: e.clientY,
+      currentY: e.clientY,
+      cardHeight: 140,
+    };
+    // pointerId 캡처 (멀티터치 방지)
+    try { e.target.setPointerCapture(e.pointerId); } catch {}
   }
 
-  return { handleTouchStart, handleTouchMove, handleTouchEnd };
+  // 전역 pointermove → 현재 위치로 toIdx 계산
+  function onPointerMove(ei, e, totalCount) {
+    if (!drag.current.active || drag.current.fromIdx !== ei) return;
+    e.preventDefault();
+    drag.current.currentY = e.clientY;
+    const dy    = e.clientY - drag.current.startY;
+    const steps = Math.round(dy / drag.current.cardHeight);
+    const to    = Math.max(0, Math.min(totalCount - 1, drag.current.fromIdx + steps));
+    if (to !== drag.current.toIdx) drag.current.toIdx = to;
+  }
+
+  // pointerup → 실제 배열 reorder
+  function onPointerUp(ei) {
+    if (!drag.current.active || drag.current.fromIdx !== ei) return;
+    const from = drag.current.fromIdx;
+    const to   = drag.current.toIdx;
+    drag.current.active = false;
+    drag.current.fromIdx = null;
+    drag.current.toIdx = null;
+    if (from !== to && from !== null && to !== null) {
+      setItems(prev => {
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    }
+  }
+
+  function isDragging(ei) {
+    return drag.current.active && drag.current.fromIdx === ei;
+  }
+
+  return { onHandlePointerDown, onPointerMove, onPointerUp, isDragging, drag };
 }
 
 // ── 운동 이름 정규화 (띄어쓰기·대소문자 무시) ──────────
@@ -1023,9 +1021,9 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
 
   const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
 
-  // 드래그앤드롭 정렬
+  // 드래그앤드롭 정렬 (Pointer Event 기반)
   const [draggingIdx, setDraggingIdx] = useState(null);
-  const touchSort = useTouchSort(exercises, setExercises);
+  const ptrSort = usePointerSort(setExercises);
   function moveEx(from, to) {
     if (from === to || to < 0 || to >= exercises.length) return;
     setExercises(prev => {
@@ -1178,36 +1176,43 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       </Card>
 
       <Card title="운동 목록" style={{marginTop:11}}>
-        {exercises.map((ex, ei) => (
+        {exercises.map((ex, ei) => {
+          const isDrag = draggingIdx === ei;
+          return (
           <div key={ei}
-            onMouseEnter={draggingIdx!==null && draggingIdx!==ei ? ()=>moveEx(draggingIdx,ei) : undefined}
+            onPointerMove={e => { ptrSort.onPointerMove(ei, e, exercises.length); if (ptrSort.drag.current.active && ptrSort.drag.current.fromIdx===ei) setDraggingIdx(ei); }}
+            onPointerUp={e => { ptrSort.onPointerUp(ei); setDraggingIdx(null); }}
+            onPointerCancel={() => { ptrSort.drag.current.active=false; ptrSort.drag.current.fromIdx=null; setDraggingIdx(null); }}
             style={{
               background:"#09090c",
-              border:"1px solid "+(draggingIdx===ei?"#7c6fff":"#1a1a24"),
+              border:"1px solid "+(isDrag?"#7c6fff":"#1a1a24"),
               borderRadius:10,padding:11,marginBottom:9,
-              transform:draggingIdx===ei?"scale(1.015)":"scale(1)",
-              boxShadow:draggingIdx===ei?"0 6px 24px rgba(124,111,255,.25)":"none",
-              transition:"transform .15s, box-shadow .15s, border-color .15s",
-              position:"relative",zIndex:draggingIdx===ei?10:1,
+              opacity:isDrag?0.85:1,
+              transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
+              boxShadow:isDrag?"0 8px 28px rgba(124,111,255,.30)":"none",
+              transition:"transform .12s, box-shadow .12s, border-color .12s, opacity .12s",
+              position:"relative",zIndex:isDrag?20:1,
+              touchAction:"pan-y",
             }}>
             {/* 드래그 핸들 + 헤더 */}
             <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9,flexWrap:"wrap"}}>
-              {/* 드래그 핸들 (≡) */}
+              {/* 드래그 핸들 — pointer 이벤트만 처리 */}
               <div
-                title="길게 눌러 순서 변경"
-                onMouseDown={()=>setDraggingIdx(ei)}
-                onMouseUp={()=>setDraggingIdx(null)}
-                onTouchStart={e=>{setDraggingIdx(ei);touchSort.handleTouchStart(ei,e);}}
-                onTouchMove={e=>touchSort.handleTouchMove(ei,e)}
-                onTouchEnd={e=>{touchSort.handleTouchEnd(ei,e);setDraggingIdx(null);}}
-                style={{cursor:"grab",flexShrink:0,padding:"2px 4px",
-                  color:"#2a2a3a",fontSize:14,lineHeight:1,touchAction:"none",userSelect:"none"}}>
+                title="잡고 위아래로 이동"
+                onPointerDown={e => { ptrSort.onHandlePointerDown(ei, e); setDraggingIdx(ei); }}
+                style={{
+                  cursor:"grab", flexShrink:0, padding:"4px 6px",
+                  color: isDrag ? "#7c6fff" : "#2a2a3a",
+                  fontSize:16, lineHeight:1,
+                  touchAction:"none", userSelect:"none",
+                  transition:"color .12s",
+                }}>
                 ⠿
               </div>
               <Mo c="#2a2a3a" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 placeholder="운동 이름" style={{flex:1,minWidth:90,fontWeight:700,fontSize:14}} />
-              {/* 위아래 이동 버튼 */}
+              {/* 위아래 버튼 (보조) */}
               {exercises.length > 1 && (
                 <div style={{display:"flex",gap:2,flexShrink:0}}>
                   <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0}
@@ -1466,7 +1471,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" style={{fontSize:12,color:"#8080a0"}} />
             </div>
           </div>
-        ))}
+        );})}
         <button onClick={addEx} style={{width:"100%",padding:10,border:"1px dashed #1a1a24",borderRadius:8,background:"none",color:"#54546a",fontSize:12,fontWeight:700}}>+ 운동 종목 추가</button>
         <div style={{marginTop:9,padding:"9px 13px",background:"linear-gradient(135deg,#0d2018,#09090c)",border:"1px solid rgba(0,229,160,.2)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <Mo c="#54546a" s={9}>TOTAL VOLUME</Mo>

@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════
+//  TEO GYM — Firestore 보안 규칙 v2
+//
+//  마이그레이션 대응:
+//    trainerUid 없는 문서도 로그인한 사용자가 읽고 업데이트 가능
+//    → 마이그레이션 완료 후 이 조건 제거 가능
+// ═══════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function getMemberTrainerUid(memberId) {
+      return get(/databases/$(database)/documents/members/$(memberId)).data.trainerUid;
+    }
+
+    // 내 회원 OR trainerUid 없는 회원 (마이그레이션용)
+    function canAccessMember(memberId) {
+      let trainerUid = getMemberTrainerUid(memberId);
+      return isSignedIn() && (trainerUid == uid() || trainerUid == null);
+    }
+
+    match /members/{memberId} {
+
+      // 읽기: 내 회원 OR trainerUid 미설정 문서 (마이그레이션 전)
+      allow read: if isSignedIn() && (
+        !("trainerUid" in resource.data) ||
+        resource.data.trainerUid == uid()
+      );
+
+      // 생성: 반드시 내 uid로 trainerUid 설정
+      allow create: if isSignedIn()
+                    && request.resource.data.trainerUid == uid();
+
+      // 수정: 내 회원 OR trainerUid 없는 문서 (마이그레이션 허용)
+      allow update: if isSignedIn() && (
+        !("trainerUid" in resource.data) ||
+        resource.data.trainerUid == uid()
+      ) && request.resource.data.trainerUid == uid();
+
+      // 삭제: 내 회원만
+      allow delete: if isSignedIn()
+                    && resource.data.trainerUid == uid();
+
+      match /sessions/{sessionId} {
+        allow read, write: if canAccessMember(memberId);
+      }
+
+      match /bodyCheck/{docId} {
+        allow read, write: if canAccessMember(memberId);
+      }
+
+      match /nutrition/{docId} {
+        allow read, write: if canAccessMember(memberId);
+      }
+
+      match /{subCollection}/{docId} {
+        allow read, write: if canAccessMember(memberId);
+      }
+    }
+  }
+}

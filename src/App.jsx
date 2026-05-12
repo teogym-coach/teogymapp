@@ -179,17 +179,21 @@ function findPastExRecords(sessions, exName, limit=3, excludeSessionId=null) {
   if (!exName || !sessions) return [];
   const norm = normExName(exName);
   const found = [];
-  // 날짜 역순 정렬 후 탐색
   const sorted = [...sessions].sort((a,b) => (b.date||"").localeCompare(a.date||""));
   for (const s of sorted) {
     if (found.length >= limit) break;
-    // 현재 수정 중인 세션 제외
     if (excludeSessionId && s.id === excludeSessionId) continue;
     const match = (s.exercises||[]).find(e => normExName(e.name) === norm);
     if (match) {
-      const sets = (match.sets || []);
-      // 세트 데이터가 완전히 비어있는 경우 제외
-      const hasData = sets.some(row => (row.weight && row.weight !== "") || (row.reps && row.reps !== "") || (row.durationSec && row.durationSec !== ""));
+      // sets 필드명 호환 (구버전 데이터 대응)
+      const sets = match.sets || match.exerciseSets || match.workoutSets || [];
+      // 세트가 하나도 없으면 스킵
+      if (!sets.length) continue;
+      // 모든 값이 완전히 비어있는 경우만 스킵 (null/undefined/0/"" 모두 빈 값으로 처리)
+      const isEmpty = v => v === null || v === undefined || v === "" || v === 0;
+      const hasData = sets.some(row =>
+        !isEmpty(row.weight) || !isEmpty(row.reps) || !isEmpty(row.durationSec)
+      );
       if (!hasData) continue;
       found.push({
         sessionId:  s.id,
@@ -1140,19 +1144,32 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
 
   function handleSave() {
     if (!sessionNo) { showToast("회차를 입력해주세요","err"); return; }
+
+    // 내부 state 필드 제거 후 저장 (_histIdx, _loaded 등 Firestore에 불필요)
+    const cleanExercises = exercises.map(e => {
+      const { _histIdx, _loaded, ...rest } = e;
+      return {
+        ...rest,
+        sets: (rest.sets || []).map(s => {
+          const { ...setClean } = s;
+          return setClean;
+        }),
+      };
+    });
+
     const payload = {
       memberName:member.name, memberId:member.id,
       trainerName, gymName, date, sessionNo:Number(sessionNo),
       programType:member.programType||"일반 PT",
       type: selectedTypes.length ? selectedTypes.join(" · ") : "기타",
       selectedTypes: selectedTypes.length ? selectedTypes : ["기타"],
-      intensity, condition, exercises,
+      intensity, condition,
+      exercises: cleanExercises,
       stretchingNotes:stretchNotes, nextPlan, trainerComment,
       referenceVideo:refVideo, bodyWeight, calories, dietNote,
       romData, painData, totalVolume:totalVol,
     };
-    console.log("[저장 직전] exercises:", JSON.parse(JSON.stringify(exercises)));
-    console.log("[저장 직전] payload:", JSON.parse(JSON.stringify(payload)));
+    console.log("[저장 직전] exercises:", JSON.stringify(cleanExercises.map(e=>({name:e.name,sets:e.sets?.length}))));
     onSave(payload);
   }
 
@@ -1313,7 +1330,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 );
               }
 
-              // ── 불러오기 핸들러 (완전 교체 방식) ──────────────
+              // ── 불러오기 핸들러 ──────────────────────────────
               function handleLoadPreviousRecord(e) {
                 e.stopPropagation();
                 if (!rec) return;
@@ -1327,13 +1344,12 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   || (sessions.length > 0 ? sessions[sessions.length-1]?.bodyWeight : "")
                   || "";
 
-                console.log("[불러오기] 원본 기록:", JSON.parse(JSON.stringify(rec)));
-
-                // deep clone 후 세트 생성
-                const newSets = rec.sets.map(s => {
-                  const w = s.weight   != null && s.weight   !== "" ? String(s.weight)   : "";
-                  const r = s.reps     != null && s.reps     !== "" ? String(s.reps)     : "";
-                  const d = s.durationSec != null && s.durationSec !== "" ? String(s.durationSec) : "";
+                // sets deep copy (Firestore 원본 참조 방지)
+                const recSets = rec.sets || rec.exerciseSets || [];
+                const newSets = recSets.map(s => {
+                  const w = (s.weight   != null && s.weight   !== "") ? String(s.weight)   : "";
+                  const r = (s.reps     != null && s.reps     !== "") ? String(s.reps)     : "";
+                  const d = (s.durationSec != null && s.durationSec !== "") ? String(s.durationSec) : "";
                   if (isFunc) {
                     return { weight: w, reps: r, durationSec: d, volume: 0, recordType: "function" };
                   }
@@ -1341,30 +1357,25 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   return { weight: w, reps: r, volume: vol, recordType: "weightReps" };
                 });
 
-                console.log("[불러오기] 적용할 sets:", JSON.parse(JSON.stringify(newSets)));
+                console.log("[불러오기] rec:", rec.date, rec.sessionNo, "sets:", newSets.length);
 
                 const newTop = rec.muscleTop || ex.muscleTop;
-                const updated = {
-                  ...JSON.parse(JSON.stringify(ex)), // deep clone
-                  sets:      newSets,
-                  rpe:       rec.rpe      ?? ex.rpe,
-                  feedback:  rec.feedback ?? ex.feedback,
-                  equipment: rec.equipment || ex.equipment,
-                  muscleTop: newTop,
-                  muscleSub: rec.muscleSub && mSubs(newTop).includes(rec.muscleSub)
-                               ? rec.muscleSub
-                               : (mSubs(newTop)[0] || ex.muscleSub),
-                  _loaded:   true,
-                  _histIdx:  ex._histIdx,
-                };
-
-                console.log("[불러오기] 최종 exercise 상태:", JSON.parse(JSON.stringify(updated)));
-
-                setExercises(prev => {
-                  const next = prev.map((e, i) => i === ei ? updated : e);
-                  console.log("[불러오기] exercises 갱신 완료:", next.length, "개");
-                  return next;
-                });
+                setExercises(prev => prev.map((e, i) => {
+                  if (i !== ei) return e;
+                  return {
+                    ...e,
+                    sets:      newSets,
+                    rpe:       rec.rpe      ?? e.rpe,
+                    feedback:  rec.feedback != null ? rec.feedback : e.feedback,
+                    equipment: rec.equipment || e.equipment,
+                    muscleTop: newTop,
+                    muscleSub: rec.muscleSub && mSubs(newTop).includes(rec.muscleSub)
+                                 ? rec.muscleSub
+                                 : (mSubs(newTop)[0] || e.muscleSub),
+                    _loaded:   true,
+                    _histIdx:  e._histIdx,
+                  };
+                }));
                 showToast("이전 기록을 불러왔습니다 ✓");
               }
 
@@ -1408,9 +1419,9 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
 
                     {/* 세트 목록 */}
                     <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:rec.feedback?6:8}}>
-                      {rec.sets.map((s, si) => {
-                        const w = s.weight ?? "";
-                        const r = s.reps   ?? "";
+                      {(rec.sets || rec.exerciseSets || []).map((s, si) => {
+                        const w = (s.weight   != null && s.weight   !== "") ? String(s.weight)   : "";
+                        const r = (s.reps     != null && s.reps     !== "") ? String(s.reps)     : "";
                         const hasData = w !== "" || r !== "";
                         return (
                           <span key={si} style={{fontFamily:"'DM Mono',monospace",fontSize:10,

@@ -24,7 +24,7 @@ const MUSCLE_MAP   = {
   "등":        ["등상부","광배근","전체"],
   "어깨":      ["전면","측면","후면","전면+측면","전체"],
   "팔-이두근": ["하부","상부","전체","전완근+상완근"],
-  "팔-삼두근": ["장두","단두","내측두","전체"],
+  "팔-삼두근": ["장두","외측두","내측두","전체"],
   "하체":      ["대퇴사두","햄스트링","둔근","종아리","내전근","전체"],
   "복근":      ["복근"],
   "코어":      ["코어"],
@@ -40,6 +40,8 @@ const MUSCLE_COLOR = {
 };
 function mColor(top) { return MUSCLE_COLOR[top] || "#888"; }
 function mSubs(top)  { return MUSCLE_MAP[top] || ["기타"]; }
+// 구버전 데이터 호환: 단두 → 외측두
+function normMuscleSub(sub) { return sub === "단두" ? "외측두" : sub; }
 
 const CPARTS    = ["경추/목","흉추/등","요추/허리","어깨","고관절","무릎","발목"];
 const ROMLEVELS = ["정상","약간 제한","중등도 제한","심한 제한"];
@@ -1064,7 +1066,10 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [selectedTypes,  setSelectedTypes]  = useState(() => normalizeTypes(editData?.selectedTypes || editData?.type));
   const [intensity,      setIntensity]      = useState(editData?.intensity      || "중강도");
   const [condition,      setCondition]      = useState(editData?.condition      || "상");
-  const [exercises,      setExercises]      = useState(editData?.exercises      || [mkEx()]);
+  const [exercises,      setExercises]      = useState(() => {
+    const raw = editData?.exercises || [mkEx()];
+    return raw.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+  });
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");

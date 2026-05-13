@@ -4090,7 +4090,7 @@ ${longTermPattern || "기록 없음"}
               {/* RPE 평균 */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
                 <StatTile label="최근 RPE 평균" value={stats.avgRpe ? "RPE "+stats.avgRpe : "—"} />
-                <StatTile label="분석 수업 수" value={recent.length+"회"} />
+                <StatTile label="분석 수업 수" value={sorted.length+"회"} />
               </div>
 
               {/* 많이 한 부위 */}

@@ -3785,11 +3785,12 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
 // AI 루틴 추천 화면
 // ════════════════════════════════════════════
 function AIRoutineScreen({ member, sessions, onBack, showToast }) {
-  const [loading,  setLoading]  = useState(false);
-  const [result,   setResult]   = useState(null);   // 파싱된 JSON 결과
-  const [rawText,  setRawText]  = useState("");
-  const [error,    setError]    = useState("");
-  const [tab,      setTab]      = useState("routine"); // routine|stats
+  const [loading,    setLoading]    = useState(false);
+  const [result,     setResult]     = useState(null);
+  const [rawText,    setRawText]    = useState("");
+  const [error,      setError]      = useState("");
+  const [tab,        setTab]        = useState("routine");
+  const [targetPart, setTargetPart] = useState(""); // 선택한 추천 부위
 
   // 우선순위별 세션 분류
   const sorted   = [...sessions].sort((a,b) => (b.date||"").localeCompare(a.date||""));
@@ -3871,6 +3872,9 @@ ${summary10 || "기록 없음"}
 ## 【장기 참고만】 전체 기록 부위 분포
 ${longTermPattern || "기록 없음"}
 
+## 이번 추천 목표 부위
+${targetPart ? "목표 부위: "+targetPart+"\n"+targetPart+" 관련 기록을 우선 분석하되, 통증/컨디션/RPE/교정 기록은 전체적으로 참고하세요." : "특정 부위 미선택 — 최근 기록 기반 전신 균형 루틴 구성"}
+
 ## 요청
 최근 3회 기록의 통증·컨디션·RPE를 최우선으로 반영하여 다음 수업 루틴을 추천하세요.
 반드시 아래 JSON 형식으로만 응답하세요. JSON 외 다른 텍스트는 절대 포함하지 마세요.
@@ -3899,26 +3903,50 @@ ${longTermPattern || "기록 없음"}
 }`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1600,
-          messages:[{role:"user",content:prompt}]
-        })
+      const res = await fetch("/api/generate-routine", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ prompt }),
       });
+
+      // 에러 타입 구분
+      if (!res.ok) {
+        let errData;
+        try { errData = await res.json(); } catch { errData = {}; }
+        const code = errData.error || "UNKNOWN";
+        const msg  = errData.message || "알 수 없는 오류";
+        if (code === "API_KEY_MISSING") {
+          setError("🔑 API 키 없음: " + msg);
+        } else if (code === "AI_API_FAILED") {
+          setError("🤖 AI API 응답 실패: " + msg);
+        } else if (code === "NETWORK_ERROR") {
+          setError("🌐 네트워크 오류: " + msg);
+        } else if (code === "NO_PROMPT") {
+          setError("📋 요청 데이터 부족: " + msg);
+        } else {
+          setError("❌ 서버 오류 (" + res.status + "): " + msg);
+        }
+        setLoading(false);
+        return;
+      }
+
       const data = await res.json();
-      const text = (data.content||[]).map(c=>c.text||"").join("").trim();
+      const text = (data.text || "").trim();
+      if (!text) { setError("AI 응답이 비어있습니다."); setLoading(false); return; }
       setRawText(text);
       try {
         const cleaned = text.replace(/```json|```/g,"").trim();
         setResult(JSON.parse(cleaned));
       } catch {
-        setResult(null); // JSON 파싱 실패 시 rawText로 표시
+        setResult(null);
       }
     } catch(e) {
-      setError("AI 연결 실패: "+e.message);
+      // 서버 API 라우트 자체가 없을 때
+      if (e.message.includes("404") || e.message.includes("Failed to fetch")) {
+        setError("🚫 서버 API 라우트를 찾을 수 없습니다. /api/generate-routine 파일이 배포되었는지 확인해주세요.");
+      } else {
+        setError("🌐 네트워크 오류: " + e.message);
+      }
     }
     setLoading(false);
   }
@@ -3954,19 +3982,49 @@ ${longTermPattern || "기록 없음"}
       {/* ── 루틴 추천 탭 ── */}
       {tab==="routine" && (
         <div>
+          {/* 부위 선택 */}
+          <Card title="💪 추천 받을 운동 부위 선택" style={{marginBottom:12}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {["하체","가슴","등","어깨","팔","코어","전신","교정","유산소"].map(p => (
+                <button key={p} onClick={() => setTargetPart(prev => prev===p ? "" : p)}
+                  style={{padding:"6px 13px",borderRadius:16,border:"1px solid",cursor:"pointer",
+                    fontSize:12,fontWeight:700,transition:"all .12s",
+                    borderColor: targetPart===p ? "#a29bfe" : "#1a1a24",
+                    background:  targetPart===p ? "rgba(162,155,254,.2)" : "transparent",
+                    color:       targetPart===p ? "#a29bfe" : "#54546a"}}>
+                  {p}
+                </button>
+              ))}
+            </div>
+            {targetPart && (
+              <div style={{marginTop:8,padding:"6px 10px",background:"rgba(162,155,254,.08)",
+                borderRadius:7,border:"1px solid rgba(162,155,254,.25)"}}>
+                <Mo c="#a29bfe" s={10}>선택 부위: <b>{targetPart}</b> — 이 부위 기록을 우선 분석합니다</Mo>
+              </div>
+            )}
+          </Card>
+
           {/* 생성 버튼 */}
           <button onClick={generateRoutine} disabled={loading}
             style={{width:"100%",padding:"14px",borderRadius:12,border:"none",cursor:loading?"not-allowed":"pointer",
               background:loading?"#1a1a24":"linear-gradient(135deg,#a29bfe,#7c6fff)",
               color:loading?"#3a3a5a":"#fff",fontSize:14,fontWeight:800,marginBottom:14,
               boxShadow:loading?"none":"0 4px 18px rgba(124,111,255,.35)"}}>
-            {loading ? "⏳ 분석 중... (10~20초 소요)" : "🤖 AI 루틴 추천 생성"}
+            {loading ? "⏳ 분석 중... (10~20초 소요)" : targetPart ? `🤖 ${targetPart} 루틴 추천 생성` : "🤖 AI 루틴 추천 생성"}
           </button>
 
           {error && (
-            <div style={{padding:"10px 14px",background:"rgba(255,107,107,.1)",borderRadius:8,
-              border:"1px solid #ff6b6b44",color:"#ff9f43",fontSize:12,marginBottom:10}}>
-              {error}
+            <div style={{padding:"12px 14px",background:"rgba(255,107,107,.08)",borderRadius:8,
+              border:"1px solid #ff6b6b44",color:"#ff9f43",fontSize:12,marginBottom:10,lineHeight:1.7}}>
+              <div style={{fontWeight:700,marginBottom:4}}>오류가 발생했습니다</div>
+              <div>{error}</div>
+              {error.includes("API 키") && (
+                <div style={{marginTop:8,padding:"8px 10px",background:"rgba(255,209,102,.08)",
+                  borderRadius:6,border:"1px solid rgba(255,209,102,.25)",color:"#ffd166",fontSize:11}}>
+                  📌 Vercel 대시보드 → Settings → Environment Variables →<br/>
+                  ANTHROPIC_API_KEY = sk-ant-... 값 추가 후 재배포
+                </div>
+              )}
             </div>
           )}
 
@@ -3997,9 +4055,10 @@ ${longTermPattern || "기록 없음"}
               {/* 현재 상태 — 최근 3회 기반 (최우선) */}
               {result.currentStatus && (
                 <Card style={{marginBottom:10,border:"1px solid rgba(0,229,160,.3)",background:"rgba(0,229,160,.07)"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
                     <Mo c="#00e5a0" s={8} style={{letterSpacing:".1em"}}>⚡ 현재 상태 평가</Mo>
                     <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 6px",borderRadius:3,background:"rgba(0,229,160,.2)",color:"#00e5a0"}}>최근 3회 기반</span>
+                    {targetPart && <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 6px",borderRadius:3,background:"rgba(162,155,254,.2)",color:"#a29bfe"}}>💪 {targetPart} 집중</span>}
                   </div>
                   <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.8}}>{result.currentStatus}</div>
                 </Card>

@@ -589,6 +589,7 @@ export default function App() {
         {screen==="history"    && <HistoryScreen sessions={sessions} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
+        {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="nutrition"  && member && <NutritionScreen member={member} onBack={() => setScreen("hub")} nutritionData={nutritionData} onSaveNutrition={async d => { try { await saveNutrition(member.id, d); setNutritionData(d); } catch(e) { showToast(e.message || "저장 실패", "err"); } }} showToast={showToast} targetCal={(() => { const g=bodyData?.goal; if(!g||!g.currentWeight||!g.height||!g.age) return 0; const mult={'거의 안함':1.2,'가벼운 활동 (주 1-2회)':1.375,'보통 활동 (주 3-5회)':1.55,'활동적 (주 6-7회)':1.725,'매우 활동적':1.9}; const bmr=10*parseFloat(g.currentWeight)+6.25*parseFloat(g.height)-5*parseInt(g.age)+(g.gender==='여성'?-161:5); const tdee=Math.round(bmr*(mult[g.activityLevel]||1.375)); const days=g.targetDate?Math.max(1,Math.ceil((new Date(g.targetDate+'T00:00:00')-new Date())/86400000)):null; const loss=parseFloat(g.currentWeight)-parseFloat(g.targetWeight||0); const def=days&&loss>0?Math.round(loss*7700/days):0; return def>0?Math.max(1200,tdee-def):tdee; })()} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
@@ -945,6 +946,7 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
                            .map(s => ({name:s.sessionNo+"회", w:parseFloat(s.bodyWeight)}));
   const menus = [
     {icon:"✏️",label:"수업 기록",    desc:"오늘 수업 입력",           sc:"session",    c:"#00e5a0"},
+    {icon:"🤖",label:"AI 루틴 추천", desc:"수업기록 기반 다음 루틴",  sc:"ai_routine", c:"#a29bfe"},
     {icon:"📅",label:"히스토리",     desc:"전체 수업 · 수정 · 삭제",  sc:"history",    c:"#7c6fff"},
     {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",         sc:"library",    c:"#00bfff"},
     {icon:"📊",label:"블록 피드백",  desc:"부위/기구별 볼륨 분석",    sc:"feedback",   c:"#ffd166"},
@@ -3779,6 +3781,362 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
 // ════════════════════════════════════════════
 // ROUTINE ANALYSIS SCREEN — 루틴 분석
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+// AI 루틴 추천 화면
+// ════════════════════════════════════════════
+function AIRoutineScreen({ member, sessions, onBack, showToast }) {
+  const [loading,  setLoading]  = useState(false);
+  const [result,   setResult]   = useState(null);   // 파싱된 JSON 결과
+  const [rawText,  setRawText]  = useState("");
+  const [error,    setError]    = useState("");
+  const [tab,      setTab]      = useState("routine"); // routine|stats
+
+  // 우선순위별 세션 분류
+  const sorted   = [...sessions].sort((a,b) => (b.date||"").localeCompare(a.date||""));
+  const recent3  = sorted.slice(0, 3);   // 최근 3회: 현재 상태
+  const recent10 = sorted.slice(0, 10);  // 최근 10회: 루틴 방향
+  const allSess  = sorted;               // 전체: 장기 패턴 참고용
+
+  // 통계 계산 (최근 10회 기준)
+  const stats = (() => {
+    if (!recent10.length) return null;
+    const rpeList = recent10.filter(s=>s.exercises?.some(e=>e.rpe)).flatMap(s=>s.exercises.filter(e=>e.rpe).map(e=>Number(e.rpe)));
+    const avgRpe  = rpeList.length ? (rpeList.reduce((a,b)=>a+b,0)/rpeList.length).toFixed(1) : null;
+    // 최근 3회 RPE vs 최근 10회 RPE 비교
+    const rpe3 = recent3.flatMap(s=>(s.exercises||[]).filter(e=>e.rpe).map(e=>Number(e.rpe)));
+    const avgRpe3 = rpe3.length ? (rpe3.reduce((a,b)=>a+b,0)/rpe3.length).toFixed(1) : null;
+    const volList = recent10.map((s,i) => ({ no: s.sessionNo||i+1, vol: s.totalVolume||0, date: s.date||"" }));
+    const partCount = {};
+    recent10.forEach(s => (s.exercises||[]).forEach(e => { if(e.muscleTop) partCount[e.muscleTop]=(partCount[e.muscleTop]||0)+1; }));
+    const topParts = Object.entries(partCount).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([p])=>p);
+    const painSessions3 = recent3.filter(s => s.exercises?.some(e=>e.feedback?.includes("통증")||e.feedback?.includes("불편")));
+    const condChange = recent3.map(s=>s.condition).filter(Boolean);
+    return { avgRpe, avgRpe3, volList, topParts, painSessions3: painSessions3.length, condChange };
+  })();
+
+  async function generateRoutine() {
+    if (!sorted.length) { showToast("수업 기록이 없습니다", "err"); return; }
+    setLoading(true); setError(""); setResult(null); setRawText("");
+
+    // 우선순위 1: 최근 3회 — 현재 상태 (상세)
+    const summary3 = recent3.map(s => {
+      const exList = (s.exercises||[]).map(e => {
+        const maxW = Math.max(0,...(e.sets||[]).map(r=>parseFloat(r.weight)||0));
+        return `  - ${e.name||"미입력"} (${e.muscleTop||""}) ${e.sets?.length||0}세트 최고${maxW}kg${e.rpe?" RPE"+e.rpe:""}${e.feedback?" [⚠️"+e.feedback+"]":""}`;
+      }).join("\n");
+      return `[${s.date} ${s.sessionNo}회차] 컨디션:${s.condition||"미기록"} 강도:${s.intensity||"미기록"} 볼륨:${(s.totalVolume||0).toLocaleString()}kg\n${exList}`;
+    }).join("\n\n");
+
+    // 우선순위 2: 최근 4~10회 — 루틴 방향 (요약)
+    const summary10 = recent10.slice(3).map(s => {
+      const parts = [...new Set((s.exercises||[]).map(e=>e.muscleTop).filter(Boolean))].join("·");
+      const rpes = (s.exercises||[]).filter(e=>e.rpe).map(e=>Number(e.rpe));
+      const avgR = rpes.length ? (rpes.reduce((a,b)=>a+b,0)/rpes.length).toFixed(1) : null;
+      return `[${s.date} ${s.sessionNo}회차] ${parts} 볼륨:${(s.totalVolume||0).toLocaleString()}kg${avgR?" RPE평균"+avgR:""}`;
+    }).join("\n");
+
+    // 우선순위 3: 전체 장기 패턴 (참고만)
+    const allPartCount = {};
+    allSess.forEach(s=>(s.exercises||[]).forEach(e=>{if(e.muscleTop)allPartCount[e.muscleTop]=(allPartCount[e.muscleTop]||0)+1;}));
+    const longTermPattern = Object.entries(allPartCount).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([p,c])=>`${p}:${c}회`).join(", ");
+
+    const painNote = member.painArea ? `주요 통증/불편 부위: ${member.painArea}` : "";
+    const goalNote = member.goal     ? `회원 목표: ${member.goal}` : "";
+
+    const prompt = `당신은 TEO GYM의 전문 PT 트레이너입니다. 수업 기록 분석 시 아래 우선순위를 반드시 따르세요.
+
+## 분석 우선순위
+1. 【최우선】 최근 3회 = 현재 신체 상태, 통증, 컨디션, RPE 반응 → 루틴의 핵심 근거
+2. 【중간】 최근 4~10회 = 루틴 방향성, 부위 균형, 볼륨 트렌드 → 방향 설정 참고
+3. 【참고만】 전체 기록 = 장기 패턴 → 절대 최근 기록보다 높은 비중 두지 말 것
+
+## TEO GYM 코칭 철학
+- 통증 감소 및 기능 회복 최우선
+- 교정 → 활성화 → 기능 강화 순서 유지
+- 머신 안정성 확보 후 프리웨이트 진행
+- 컨디션/통증 반응에 따라 부하 조절
+- 기록 기반 점진적 과부하 적용
+
+## 회원 정보
+이름: ${member.name} / 총 수업: ${allSess.length}회
+${goalNote}
+${painNote}
+
+## 【최우선 분석】 최근 3회 — 현재 상태
+${summary3 || "기록 없음"}
+
+## 【방향 참고】 최근 4~10회 — 루틴 패턴
+${summary10 || "기록 없음"}
+
+## 【장기 참고만】 전체 기록 부위 분포
+${longTermPattern || "기록 없음"}
+
+## 요청
+최근 3회 기록의 통증·컨디션·RPE를 최우선으로 반영하여 다음 수업 루틴을 추천하세요.
+반드시 아래 JSON 형식으로만 응답하세요. JSON 외 다른 텍스트는 절대 포함하지 마세요.
+
+{
+  "currentStatus": "최근 3회 기반 현재 상태 평가 (통증/컨디션/RPE 중심, 2~3문장)",
+  "summary": "최근 루틴 패턴 요약 (최근 10회 기반, 2문장)",
+  "warnings": ["주의사항1 (통증/RPE 기반)", "주의사항2"],
+  "routine": [
+    {
+      "phase": "단계명 (웜업/교정, 주운동, 보조운동, 마무리 중 하나)",
+      "exercises": [
+        {
+          "name": "운동명",
+          "sets": "세트수",
+          "reps": "횟수 또는 시간",
+          "rpe": "목표 RPE",
+          "weight": "추천 중량 또는 이전 대비 증감",
+          "note": "코칭 포인트 (통증/RPE 반응 고려)"
+        }
+      ]
+    }
+  ],
+  "coachComment": "회원 동기부여 코멘트 1~2문장",
+  "nextFocus": "다음 수업 집중 포인트 (최근 3회 반응 기반)"
+}`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1600,
+          messages:[{role:"user",content:prompt}]
+        })
+      });
+      const data = await res.json();
+      const text = (data.content||[]).map(c=>c.text||"").join("").trim();
+      setRawText(text);
+      try {
+        const cleaned = text.replace(/```json|```/g,"").trim();
+        setResult(JSON.parse(cleaned));
+      } catch {
+        setResult(null); // JSON 파싱 실패 시 rawText로 표시
+      }
+    } catch(e) {
+      setError("AI 연결 실패: "+e.message);
+    }
+    setLoading(false);
+  }
+
+  const PHASE_COLORS = {
+    "웜업": "#54a0ff", "교정": "#a29bfe", "웜업/교정": "#a29bfe",
+    "주운동": "#00e5a0", "보조운동": "#ffd166", "마무리": "#ff9f43",
+  };
+  function phaseColor(ph) {
+    for (const [k,v] of Object.entries(PHASE_COLORS)) if (ph?.includes(k)) return v;
+    return "#7c6fff";
+  }
+
+  return (
+    <div>
+      <SH title="🤖 AI 루틴 추천" sub={member.name}
+        right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+      {/* 탭 */}
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {[["routine","🤖 루틴 추천"],["stats","📊 수업 통계"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)}
+            style={{padding:"6px 14px",borderRadius:20,border:"1px solid",cursor:"pointer",
+              fontSize:11,fontWeight:700,
+              borderColor:tab===k?"#a29bfe":"#1a1a24",
+              background:tab===k?"rgba(162,155,254,.15)":"transparent",
+              color:tab===k?"#a29bfe":"#54546a"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── 루틴 추천 탭 ── */}
+      {tab==="routine" && (
+        <div>
+          {/* 생성 버튼 */}
+          <button onClick={generateRoutine} disabled={loading}
+            style={{width:"100%",padding:"14px",borderRadius:12,border:"none",cursor:loading?"not-allowed":"pointer",
+              background:loading?"#1a1a24":"linear-gradient(135deg,#a29bfe,#7c6fff)",
+              color:loading?"#3a3a5a":"#fff",fontSize:14,fontWeight:800,marginBottom:14,
+              boxShadow:loading?"none":"0 4px 18px rgba(124,111,255,.35)"}}>
+            {loading ? "⏳ 분석 중... (10~20초 소요)" : "🤖 AI 루틴 추천 생성"}
+          </button>
+
+          {error && (
+            <div style={{padding:"10px 14px",background:"rgba(255,107,107,.1)",borderRadius:8,
+              border:"1px solid #ff6b6b44",color:"#ff9f43",fontSize:12,marginBottom:10}}>
+              {error}
+            </div>
+          )}
+
+          {/* 최근 기록 요약 (버튼 아래 항상 표시) */}
+          {!result && !loading && (
+            <Card title="📋 분석 대상 기록" style={{marginBottom:10}}>
+              {recent10.length === 0
+                ? <Emp msg="수업 기록이 없습니다" />
+                : recent10.map((s,i) => {
+                  const parts = [...new Set((s.exercises||[]).map(e=>e.muscleTop).filter(Boolean))].join("·");
+                  return (
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"6px 0",borderBottom:"1px solid #1a1a24"}}>
+                      <Mo c="#54546a" s={9}>{s.date} {s.sessionNo}회차</Mo>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {parts && <Mo c="#7070a0" s={8}>{parts}</Mo>}
+                        <Mo c="#00e5a0" s={9}>{(s.totalVolume||0).toLocaleString()}kg</Mo>
+                      </div>
+                    </div>
+                  );
+                })}
+            </Card>
+          )}
+
+          {/* AI 결과 — JSON 파싱 성공 */}
+          {result && (
+            <div>
+              {/* 현재 상태 — 최근 3회 기반 (최우선) */}
+              {result.currentStatus && (
+                <Card style={{marginBottom:10,border:"1px solid rgba(0,229,160,.3)",background:"rgba(0,229,160,.07)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                    <Mo c="#00e5a0" s={8} style={{letterSpacing:".1em"}}>⚡ 현재 상태 평가</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 6px",borderRadius:3,background:"rgba(0,229,160,.2)",color:"#00e5a0"}}>최근 3회 기반</span>
+                  </div>
+                  <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.8}}>{result.currentStatus}</div>
+                </Card>
+              )}
+              {/* 루틴 패턴 요약 */}
+              {result.summary && (
+                <Card style={{marginBottom:10,border:"1px solid rgba(162,155,254,.3)",background:"rgba(162,155,254,.06)"}}>
+                  <Mo c="#a29bfe" s={8} style={{display:"block",marginBottom:6,letterSpacing:".1em"}}>📝 루틴 패턴 요약</Mo>
+                  <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.8}}>{result.summary}</div>
+                </Card>
+              )}
+
+              {/* 주의사항 */}
+              {result.warnings?.length > 0 && (
+                <Card style={{marginBottom:10,border:"1px solid rgba(255,159,67,.3)",background:"rgba(255,159,67,.06)"}}>
+                  <Mo c="#ff9f43" s={8} style={{display:"block",marginBottom:6,letterSpacing:".1em"}}>⚠️ 주의사항</Mo>
+                  {result.warnings.map((w,i)=>(
+                    <div key={i} style={{fontSize:12,color:"#ffd166",lineHeight:1.8,marginBottom:2}}>· {w}</div>
+                  ))}
+                </Card>
+              )}
+
+              {/* 운동 루틴 */}
+              {(result.routine||[]).map((phase, pi) => {
+                const pc = phaseColor(phase.phase);
+                return (
+                  <Card key={pi} style={{marginBottom:10,border:`1px solid ${pc}33`,background:`${pc}07`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+                      <div style={{width:3,height:16,borderRadius:2,background:pc,flexShrink:0}}/>
+                      <Mo c={pc} s={10} style={{fontWeight:800,letterSpacing:".05em"}}>{phase.phase}</Mo>
+                    </div>
+                    {(phase.exercises||[]).map((ex, ei) => (
+                      <div key={ei} style={{background:"#111116",borderRadius:9,padding:"10px 12px",
+                        marginBottom:7,border:"1px solid #1a1a24"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
+                          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff"}}>{ex.name}</div>
+                          <div style={{display:"flex",gap:4,flexShrink:0,marginLeft:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                            {ex.sets && <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:3,background:"rgba(0,229,160,.15)",color:"#00e5a0"}}>{ex.sets}세트</span>}
+                            {ex.reps && <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:3,background:"rgba(255,209,102,.15)",color:"#ffd166"}}>{ex.reps}</span>}
+                            {ex.rpe  && <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:3,background:"rgba(255,159,67,.15)",color:"#ff9f43"}}>RPE {ex.rpe}</span>}
+                          </div>
+                        </div>
+                        {ex.weight && <Mo c="#54a0ff" s={10} style={{display:"block",marginBottom:3}}>💪 {ex.weight}</Mo>}
+                        {ex.note   && <Mo c="#54546a" s={9}  style={{display:"block"}}>📌 {ex.note}</Mo>}
+                      </div>
+                    ))}
+                  </Card>
+                );
+              })}
+
+              {/* 코치 코멘트 */}
+              {result.coachComment && (
+                <Card style={{marginBottom:10,border:"1px solid rgba(0,229,160,.25)",background:"rgba(0,229,160,.06)"}}>
+                  <Mo c="#00e5a0" s={8} style={{display:"block",marginBottom:6,letterSpacing:".1em"}}>💬 트레이너 코멘트</Mo>
+                  <div style={{fontSize:13,color:"#ddddf0",lineHeight:1.8,fontStyle:"italic"}}>{result.coachComment}</div>
+                </Card>
+              )}
+              {result.nextFocus && (
+                <Card style={{border:"1px solid rgba(255,209,102,.25)",background:"rgba(255,209,102,.06)"}}>
+                  <Mo c="#ffd166" s={8} style={{display:"block",marginBottom:6,letterSpacing:".1em"}}>📌 다음 수업 포커스</Mo>
+                  <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.8}}>{result.nextFocus}</div>
+                </Card>
+              )}
+
+              {/* 재생성 버튼 */}
+              <button onClick={generateRoutine} disabled={loading}
+                style={{width:"100%",marginTop:12,padding:"10px",borderRadius:9,border:"1px solid #a29bfe44",
+                  background:"transparent",color:"#a29bfe",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                🔄 다시 생성
+              </button>
+            </div>
+          )}
+
+          {/* JSON 파싱 실패 시 rawText 표시 */}
+          {!result && rawText && (
+            <Card title="🤖 AI 응답" style={{border:"1px solid rgba(162,155,254,.3)"}}>
+              <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{rawText}</div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ── 통계 탭 ── */}
+      {tab==="stats" && (
+        <div>
+          {!stats ? <Emp msg="수업 기록이 없습니다" /> : (
+            <div>
+              {/* RPE 평균 */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
+                <StatTile label="최근 RPE 평균" value={stats.avgRpe ? "RPE "+stats.avgRpe : "—"} />
+                <StatTile label="분석 수업 수" value={recent.length+"회"} />
+              </div>
+
+              {/* 많이 한 부위 */}
+              <Card title="💪 최근 운동 부위 순위" style={{marginBottom:10}}>
+                {stats.topParts.map((p,i) => (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",
+                    borderBottom:"1px solid #1a1a24"}}>
+                    <Mo c="#3a3a5a" s={10} style={{width:20,textAlign:"center",fontWeight:800}}>{i+1}</Mo>
+                    <Mo c="#ddddf0" s={12} style={{fontWeight:700}}>{p}</Mo>
+                  </div>
+                ))}
+              </Card>
+
+              {/* 볼륨 변화 */}
+              <Card title="📈 최근 수업별 총볼륨" style={{marginBottom:10}}>
+                {stats.volList.map((v,i) => {
+                  const max = Math.max(...stats.volList.map(x=>x.vol));
+                  const pct = max > 0 ? (v.vol/max*100) : 0;
+                  return (
+                    <div key={i} style={{marginBottom:6}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                        <Mo c="#54546a" s={9}>{v.no}회차</Mo>
+                        <Mo c="#00e5a0" s={9}>{(v.vol||0).toLocaleString()} kg</Mo>
+                      </div>
+                      <div style={{height:6,borderRadius:3,background:"#1a1a24",overflow:"hidden"}}>
+                        <div style={{height:"100%",width:pct+"%",borderRadius:3,
+                          background:"linear-gradient(90deg,#00e5a0,#00b37e)",transition:"width .3s"}}/>
+                      </div>
+                    </div>
+                  );
+                })}
+              </Card>
+
+              {stats.painSessions3 > 0 && (
+                <Card style={{border:"1px solid rgba(255,107,107,.3)",background:"rgba(255,107,107,.05)"}}>
+                  <Mo c="#ff9f43" s={10}>⚠️ 최근 {stats.painSessions}회 수업에서 통증/불편 피드백이 있었습니다. AI 루틴 생성 시 우선 반영됩니다.</Mo>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RoutineAnalysisScreen({ member, sessions, onBack }) {
   const [view, setView] = useState("overview");
 

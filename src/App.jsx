@@ -807,6 +807,12 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
             const isToday   = meta.lastDate === today;
             const isWarning = meta.daysSince !== null && meta.daysSince > 14;
             const isAlert7  = !isToday && meta.daysSince !== null && meta.daysSince > 7;
+            // 통증 관리 회원 태그: 최근 3회 중 VAS 5 이상 존재
+            const recentSess3 = (sessionsMap[m.id] || [])
+              .sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,3);
+            const isPainMgmt = recentSess3.some(s=>
+              (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
+            ) || !!(m.painArea);
 
             const borderCol = isToday ? "#00e5a0" : isWarning ? "#ff6b6b44" : "#1a1a24";
             const bgCol     = isToday ? "rgba(0,229,160,.06)" : isWarning ? "rgba(255,107,107,.04)" : "#111116";
@@ -845,6 +851,10 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                       {isAlert7 && !isWarning && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,209,102,.15)",color:"#ffd166",fontWeight:700}}>7일 미방문</span>
+                      )}
+                      {isPainMgmt && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>💢 통증관리</span>
                       )}
                     </div>
                     {/* 서브 정보 */}
@@ -1064,6 +1074,10 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [dietNote,       setDietNote]       = useState(editData?.dietNote       || "");
   const [romData,        setRomData]        = useState(editData?.romData  || CPARTS.reduce((o,k) => ({...o,[k]:"정상"}), {}));
   const [painData,       setPainData]       = useState(editData?.painData || CPARTS.reduce((o,k) => ({...o,[k]:0}), {}));
+  // 통증 기록 (운동 전/후)
+  const [painRecord,     setPainRecord]     = useState(editData?.painRecord || { before:{vas:0,part:"",situation:"",memo:""}, after:{vas:0,change:"",memo:""} });
+  const [showPainBefore, setShowPainBefore] = useState(!!(editData?.painRecord?.before?.vas > 0 || editData?.painRecord?.before?.part));
+  const [showPainAfter,  setShowPainAfter]  = useState(!!(editData?.painRecord?.after?.vas > 0 || editData?.painRecord?.after?.memo));
   const [showCard,       setShowCard]       = useState(false);
 
   const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
@@ -1169,7 +1183,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       exercises: cleanExercises,
       stretchingNotes:stretchNotes, nextPlan, trainerComment,
       referenceVideo:refVideo, bodyWeight, calories, dietNote,
-      romData, painData, totalVolume:totalVol,
+      romData, painData, painRecord, totalVolume:totalVol,
     };
     console.log("[저장 직전] exercises:", JSON.stringify(cleanExercises.map(e=>({name:e.name,sets:e.sets?.length}))));
     onSave(payload);
@@ -1260,6 +1274,147 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
             </div>
           </div>
         </div>
+      </Card>
+
+      {/* ── 통증 기록 카드 ──────────────────────────── */}
+      <Card style={{marginTop:9,border:"1px solid #1a1a2e"}}>
+        {/* 헤더 */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showPainBefore||showPainAfter?10:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <Mo c="#ff9f43" s={10} style={{fontWeight:700}}>💢 통증 기록</Mo>
+            <Mo c="#3a3a5a" s={8}>(선택 입력)</Mo>
+          </div>
+          <div style={{display:"flex",gap:5}}>
+            <button onClick={()=>setShowPainBefore(v=>!v)}
+              style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                borderColor:showPainBefore?"#ff9f43":"#1a1a24",
+                background:showPainBefore?"rgba(255,159,67,.15)":"transparent",
+                color:showPainBefore?"#ff9f43":"#54546a"}}>
+              운동 전
+            </button>
+            <button onClick={()=>setShowPainAfter(v=>!v)}
+              style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                borderColor:showPainAfter?"#00e5a0":"#1a1a24",
+                background:showPainAfter?"rgba(0,229,160,.15)":"transparent",
+                color:showPainAfter?"#00e5a0":"#54546a"}}>
+              운동 후
+            </button>
+          </div>
+        </div>
+
+        {/* 운동 전 통증 */}
+        {showPainBefore && (
+          <div style={{background:"#09090c",borderRadius:8,padding:"10px 12px",marginBottom:showPainAfter?8:0,border:"1px solid rgba(255,159,67,.2)"}}>
+            <Mo c="#ff9f43" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 전 통증</Mo>
+            {/* VAS 슬라이더 */}
+            <div style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <Mo c="#54546a" s={9}>통증 강도 (VAS)</Mo>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
+                  color:painRecord.before.vas>=7?"#ff6b6b":painRecord.before.vas>=4?"#ffd166":"#00e5a0"}}>
+                  {painRecord.before.vas}/10
+                </span>
+              </div>
+              <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                {[0,1,2,3,4,5,6,7,8,9,10].map(v=>(
+                  <button key={v} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,vas:v}}))}
+                    style={{flex:1,minWidth:26,height:32,borderRadius:5,border:"1px solid",cursor:"pointer",
+                      fontSize:11,fontWeight:800,
+                      borderColor:painRecord.before.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#00e5a0"):"#1a1a24",
+                      background:painRecord.before.vas===v?(v>=7?"rgba(255,107,107,.25)":v>=4?"rgba(255,209,102,.25)":"rgba(0,229,160,.25)"):"transparent",
+                      color:painRecord.before.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#00e5a0"):"#3a3a5a"}}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 통증 부위 */}
+            <div style={{marginBottom:8}}>
+              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:4}}>통증 부위</Mo>
+              <input value={painRecord.before.part}
+                onChange={e=>setPainRecord(p=>({...p,before:{...p.before,part:e.target.value}}))}
+                placeholder="예: 우측 무릎 내측"
+                style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #1a1a24",
+                  background:"#111116",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+            </div>
+            {/* 발생 상황 */}
+            <div style={{marginBottom:8}}>
+              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:4}}>발생 상황</Mo>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {["아침","오래 앉을 때","걷기","운동 중","특정 동작 시","계단","기타"].map(sit=>(
+                  <button key={sit} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,situation:p.before.situation===sit?"":sit}}))}
+                    style={{padding:"5px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                      borderColor:painRecord.before.situation===sit?"#ff9f43":"#1a1a24",
+                      background:painRecord.before.situation===sit?"rgba(255,159,67,.2)":"transparent",
+                      color:painRecord.before.situation===sit?"#ff9f43":"#54546a"}}>
+                    {sit}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 메모 */}
+            <textarea value={painRecord.before.memo}
+              onChange={e=>setPainRecord(p=>({...p,before:{...p.before,memo:e.target.value}}))}
+              placeholder="예: 계단 내려갈 때 통증, 앉았다 일어날 때 불편"
+              rows={2}
+              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #1a1a24",
+                background:"#111116",color:"#ddddf0",fontSize:11,resize:"none",
+                boxSizing:"border-box",lineHeight:1.6}} />
+          </div>
+        )}
+
+        {/* 운동 후 통증 */}
+        {showPainAfter && (
+          <div style={{background:"#09090c",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)"}}>
+            <Mo c="#00e5a0" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 후 통증 변화</Mo>
+            {/* VAS */}
+            <div style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <Mo c="#54546a" s={9}>운동 후 통증 강도 (VAS)</Mo>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
+                  color:painRecord.after.vas>=7?"#ff6b6b":painRecord.after.vas>=4?"#ffd166":"#00e5a0"}}>
+                  {painRecord.after.vas}/10
+                </span>
+              </div>
+              <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                {[0,1,2,3,4,5,6,7,8,9,10].map(v=>(
+                  <button key={v} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,vas:v}}))}
+                    style={{flex:1,minWidth:26,height:32,borderRadius:5,border:"1px solid",cursor:"pointer",
+                      fontSize:11,fontWeight:800,
+                      borderColor:painRecord.after.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#00e5a0"):"#1a1a24",
+                      background:painRecord.after.vas===v?(v>=7?"rgba(255,107,107,.25)":v>=4?"rgba(255,209,102,.25)":"rgba(0,229,160,.25)"):"transparent",
+                      color:painRecord.after.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#00e5a0"):"#3a3a5a"}}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 변화 선택 */}
+            <div style={{marginBottom:8}}>
+              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:4}}>통증 변화</Mo>
+              <div style={{display:"flex",gap:5}}>
+                {[["감소","#00e5a0"],["동일","#ffd166"],["증가","#ff6b6b"]].map(([ch,color])=>(
+                  <button key={ch} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,change:p.after.change===ch?"":ch}}))}
+                    style={{flex:1,padding:"8px 0",borderRadius:7,border:"1px solid",cursor:"pointer",
+                      fontSize:12,fontWeight:800,
+                      borderColor:painRecord.after.change===ch?color:"#1a1a24",
+                      background:painRecord.after.change===ch?color+"22":"transparent",
+                      color:painRecord.after.change===ch?color:"#54546a"}}>
+                    {ch==="감소"?"✅ 감소":ch==="동일"?"➡️ 동일":"⚠️ 증가"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 메모 */}
+            <textarea value={painRecord.after.memo}
+              onChange={e=>setPainRecord(p=>({...p,after:{...p.after,memo:e.target.value}}))}
+              placeholder="예: 스쿼트 시 안정감 증가, 허리 압박 감소, 고관절 움직임 편해짐"
+              rows={2}
+              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #1a1a24",
+                background:"#111116",color:"#ddddf0",fontSize:11,resize:"none",
+                boxSizing:"border-box",lineHeight:1.6}} />
+          </div>
+        )}
       </Card>
 
       <Card title="운동 목록" style={{marginTop:11}}>
@@ -1937,6 +2092,35 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
                     {s.trainerComment}
                   </div>
                 )}
+                {/* 통증 기록 요약 — 기록 있을 때만 표시 */}
+                {(s.painRecord?.before?.vas > 0 || s.painRecord?.after?.vas > 0 || s.painRecord?.before?.part || s.painRecord?.after?.change) && (() => {
+                  const b  = s.painRecord?.before || {};
+                  const a  = s.painRecord?.after  || {};
+                  const bColor = b.vas>=7?"#ff6b6b":b.vas>=4?"#ffd166":"#00e5a0";
+                  const aColor = a.change==="감소"?"#00e5a0":a.change==="증가"?"#ff6b6b":"#ffd166";
+                  return (
+                    <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {(b.vas > 0 || b.part) && (
+                        <div style={{flex:1,minWidth:120,padding:"6px 9px",borderRadius:7,
+                          background:"rgba(255,159,67,.07)",border:"1px solid rgba(255,159,67,.2)"}}>
+                          <Mo c="#ff9f43" s={7} style={{display:"block",marginBottom:3,fontWeight:700}}>운동 전</Mo>
+                          {b.vas > 0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:bColor,fontWeight:800}}>VAS {b.vas}</span>}
+                          {b.part && <Mo c="#7070a0" s={9} style={{display:"block",marginTop:1}}>{b.part}</Mo>}
+                          {b.situation && <Mo c="#3a3a5a" s={8} style={{display:"block"}}>{b.situation}</Mo>}
+                        </div>
+                      )}
+                      {(a.vas > 0 || a.change || a.memo) && (
+                        <div style={{flex:1,minWidth:120,padding:"6px 9px",borderRadius:7,
+                          background:"rgba(0,229,160,.05)",border:"1px solid rgba(0,229,160,.18)"}}>
+                          <Mo c="#00e5a0" s={7} style={{display:"block",marginBottom:3,fontWeight:700}}>운동 후</Mo>
+                          {a.vas > 0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:aColor,fontWeight:800}}>VAS {a.vas}</span>}
+                          {a.change && <Mo c={aColor} s={9} style={{display:"block",marginTop:1,fontWeight:700}}>{a.change==="감소"?"✅":a.change==="증가"?"⚠️":"➡️"} {a.change}</Mo>}
+                          {a.memo && <Mo c="#3a3a5a" s={8} style={{display:"block",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.memo}</Mo>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end"}}
                   onClick={e => e.stopPropagation()}>
                   <button onClick={() => onEdit(s)}
@@ -1965,6 +2149,7 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
   const trainerComment= s.trainerComment|| "";
   const stretchNotes  = s.stretchingNotes || s.stretchNotes || "";
   const nextPlan      = s.nextPlan      || "";
+  const painRecord    = s.painRecord    || null;
   const bodyWeight    = s.bodyWeight    || "";
   const trainerName   = s.trainerName   || "김태오";
   const gymName       = s.gymName       || "테오짐";
@@ -2160,9 +2345,42 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
               )}
             </div>
 
-            {/* ─ 상세 모드: 자세 피드백 + 총평 + 다음 계획 ─ */}
+            {/* ─ 상세 모드: 통증 기록 + 자세 피드백 + 총평 + 다음 계획 ─ */}
             {cardMode === "detail" && (
               <div>
+                {/* 통증 기록 */}
+                {painRecord && (painRecord.before?.vas > 0 || painRecord.after?.vas > 0 || painRecord.before?.part) && (() => {
+                  const b = painRecord.before || {};
+                  const a = painRecord.after  || {};
+                  const bColor = b.vas>=7?"#ff6b6b":b.vas>=4?"#ffd166":"#00e5a0";
+                  const aColor = a.change==="감소"?"#00e5a0":a.change==="증가"?"#ff6b6b":"#ffd166";
+                  return (
+                    <div style={{marginBottom:10,background:"rgba(255,159,67,.06)",borderRadius:10,
+                      padding:"11px 14px",border:"1px solid rgba(255,159,67,.2)"}}>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#ff9f43",
+                        letterSpacing:".1em",marginBottom:8}}>💢 통증 기록</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {(b.vas > 0 || b.part) && (
+                          <div style={{flex:1,minWidth:120}}>
+                            <Mo c="#ff9f43" s={8} style={{fontWeight:700,display:"block",marginBottom:3}}>운동 전</Mo>
+                            {b.vas > 0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:bColor,fontWeight:800}}>VAS {b.vas}</div>}
+                            {b.part && <Mo c="#ddddf0" s={11} style={{display:"block",marginTop:2}}>{b.part}</Mo>}
+                            {b.situation && <Mo c="#7070a0" s={9} style={{display:"block"}}>{b.situation}</Mo>}
+                            {b.memo && <Mo c="#54546a" s={9} style={{display:"block",marginTop:2}}>{b.memo}</Mo>}
+                          </div>
+                        )}
+                        {(a.vas > 0 || a.change) && (
+                          <div style={{flex:1,minWidth:120}}>
+                            <Mo c="#00e5a0" s={8} style={{fontWeight:700,display:"block",marginBottom:3}}>운동 후</Mo>
+                            {a.vas > 0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:aColor,fontWeight:800}}>VAS {a.vas}</div>}
+                            {a.change && <Mo c={aColor} s={11} style={{display:"block",marginTop:2,fontWeight:700}}>{a.change==="감소"?"✅ 통증 감소":a.change==="증가"?"⚠️ 통증 증가":"➡️ 동일"}</Mo>}
+                            {a.memo && <Mo c="#54546a" s={9} style={{display:"block",marginTop:2}}>{a.memo}</Mo>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {feedbacks.length > 0 && (
                   <div style={{marginBottom:10,background:"rgba(124,111,255,.07)",borderRadius:10,
                     padding:"11px 14px",border:"1px solid rgba(124,111,255,.2)"}}>

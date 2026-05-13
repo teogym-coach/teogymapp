@@ -3919,8 +3919,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
     lines.push("4. 트레이너 코멘트 (회원 동기부여)");
     lines.push("5. 다음 수업 집중 포인트");
 
-    setSummaryText(lines.join("
-"));
+    setSummaryText(lines.join("\n"));
     setCopied(false);
   }
 

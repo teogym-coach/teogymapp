@@ -440,8 +440,38 @@ export default function App() {
   }
 
   async function handleAddMember(d) {
+    // survey 데이터 → bodyData.goal 자동 연동 (회원 등록 시 한 번만)
     setLoading(true);
-    try { await addMember(d); showToast("회원 등록 완료 ✓"); setMembers(await getMembers()); setScreen("members"); }
+    try {
+      const saved = await addMember(d);
+      // survey 데이터가 있으면 bodyCheck.goal 자동 초기화 (중복 입력 방지)
+      const sv = d.survey || {};
+      if (sv && (sv.weight || sv.height || sv.purposes?.length || sv.priorityGoal)) {
+        const memberId = saved?.id || d.id;
+        if (memberId) {
+          const autoGoal = {
+            currentWeight: sv.weight || "",
+            goalType: sv.purposes?.includes("체지방 감량") ? "diet"
+                    : sv.purposes?.includes("근력 증가")  ? "strength"
+                    : sv.purposes?.includes("벌크업")     ? "bulk"
+                    : sv.purposes?.includes("체형 교정")  ? "posture"
+                    : sv.purposes?.includes("재활")       ? "rehab"
+                    : "",
+            sleepHours:    sv.sleepHours    || "",
+            stressLevel:   sv.stressLevel   || 3,
+            activityLevel: sv.actLv         || sv.activityLevel || "",
+            mealsPerDay:   sv.mealsPerDay   || "",
+            cardioFreq:    sv.cardioFreq    || "",
+            hasPain:       sv.hasPain       || false,
+            height:        sv.height        || "",
+            age:           sv.age           || "",
+            gender:        sv.gender        || "",
+          };
+          try { await saveBodyCheck(memberId, { goal: autoGoal }); } catch(e) { console.warn("bodyCheck 자동 연동 실패:", e); }
+        }
+      }
+      showToast("회원 등록 완료 ✓"); setMembers(await getMembers()); setScreen("members");
+    }
     catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }
@@ -810,12 +840,14 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
             const isToday   = meta.lastDate === today;
             const isWarning = meta.daysSince !== null && meta.daysSince > 14;
             const isAlert7  = !isToday && meta.daysSince !== null && meta.daysSince > 7;
-            // 통증 관리 회원 태그: 최근 3회 중 VAS 5 이상 존재
+            // 실제 우선순위 목표 배지 (설문 데이터 기반)
+            const priorityGoalBadge = m.survey?.priorityGoal || "";
             const recentSess3 = (sessionsMap[m.id] || [])
               .sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,3);
+            // 통증관리: 실제 VAS 기록이 있을 때만 표시 (painArea 단독으로는 표시 안 함)
             const isPainMgmt = recentSess3.some(s=>
               (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
-            ) || !!(m.painArea);
+            );
 
             const borderCol = isToday ? "#5EEAD4" : isWarning ? "#ff6b6b44" : "rgba(255,255,255,0.08)";
             const bgCol     = isToday ? "rgba(0,229,160,.06)" : isWarning ? "rgba(255,107,107,.04)" : "#111827";
@@ -854,6 +886,10 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                       {isAlert7 && !isWarning && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,209,102,.15)",color:"#ffd166",fontWeight:700}}>7일 미방문</span>
+                      )}
+                      {priorityGoalBadge && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontWeight:700}}>🎯 {priorityGoalBadge.replace(" 우선","")}</span>
                       )}
                       {isPainMgmt && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
@@ -957,7 +993,7 @@ function MemberForm({ initial, onSave, onBack }) {
   const [medHistory,   setMedHistory]   = useState(sv.medHistory   || "");
   const [exCaution,    setExCaution]    = useState(sv.exCaution    || "");
   // 8단계
-  const [preferTime,   setPreferTime]   = useState(sv.preferTime   || "");
+  const [preferTime,   setPreferTime]   = useState(sv.preferTime   || []);
   const [daysPerWeek,  setDaysPerWeek]  = useState(sv.daysPerWeek  || "");
   const [goalPeriod,   setGoalPeriod]   = useState(sv.goalPeriod   || "");
   // 운동 설문 (통합)
@@ -1378,8 +1414,13 @@ function MemberForm({ initial, onSave, onBack }) {
             <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>운동 스케줄을 알려주세요</Mo>
             <StepLabel label="선호 시간대" />
             <ChipSelect
-              options={["오전 6~9시","오전 9~12시","오후 12~3시","오후 3~6시","오후 6~9시","오후 9시 이후","주말 위주"]}
+              multi
+              options={["[평일] 오전 10~12시","[평일] 오후 12~3시","[평일] 오후 3~6시","[평일] 오후 6~8시","[평일] 오후 8~10시","[토요일] 오전","[토요일] 오후"]}
               value={preferTime} onChange={setPreferTime} />
+            <div style={{marginTop:7,padding:"6px 10px",borderRadius:6,background:"rgba(94,234,212,.05)",
+              border:"1px solid rgba(94,234,212,.15)"}}>
+              <Mo c="#64748b" s={9}>운영시간: 평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
+            </div>
             <StepLabel label="주 운동 가능 횟수" />
             <ChipSelect options={["주 1회","주 2회","주 3회","주 4회","주 5회 이상"]}
               value={daysPerWeek} onChange={setDaysPerWeek} />
@@ -3332,13 +3373,15 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   const records   = bodyData?.records || [];
   const inbodyList = bodyData?.inbody  || [];
 
-  const [gCW, setGCW] = useState(goal.currentWeight || "");
+  // 회원 등록 survey 데이터 fallback (중복 입력 방지)
+  const sv0 = member?.survey || {};
+  const [gCW, setGCW] = useState(goal.currentWeight || sv0.weight  || "");
   const [gTW, setGTW] = useState(goal.targetWeight  || "");
   const [gTD, setGTD] = useState(goal.targetDate    || "");
-  const [gGen,setGGen]= useState(goal.gender        || "남성");
-  const [gAge,setGAge]= useState(goal.age           || "");
-  const [gH,  setGH]  = useState(goal.height        || "");
-  const [gAct,setGAct]= useState(goal.activityLevel || "보통 활동 (주 3-5회)");
+  const [gGen,setGGen]= useState(goal.gender        || sv0.gender  || "남성");
+  const [gAge,setGAge]= useState(goal.age           || sv0.age     || "");
+  const [gH,  setGH]  = useState(goal.height        || sv0.height  || "");
+  const [gAct,setGAct]= useState(goal.activityLevel || sv0.actLv   || sv0.activityLevel || "보통 활동 (주 3-5회)");
 
   const [rDate, setRDate] = useState(new Date().toISOString().split("T")[0]);
   const [rW,    setRW]    = useState("");

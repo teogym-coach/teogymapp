@@ -1153,6 +1153,7 @@ function MemberForm({ initial, onSave, onBack }) {
   const [exStyle,      setExStyle]      = useState(sv.exStyle      || []);
   const [intensity,    setIntensity]    = useState(sv.intensity    || "");
   const [priorityGoal, setPriorityGoal] = useState(sv.priorityGoal || "");
+  const [activityLevel,setActivityLevel]= useState(sv.actLv || sv.activityLevel || "");
   // AI 분석 리포트 표시 여부
   const [showReport,   setShowReport]   = useState(false);
 
@@ -1218,7 +1219,7 @@ function MemberForm({ initial, onSave, onBack }) {
       painParts, painSituation,
       medications, surgeries, hasDisk, hasHyper, hasDiabetes, medHistory, exCaution,
       preferTime, daysPerWeek, goalPeriod,
-      weakParts, exStyle, intensity, priorityGoal,
+      weakParts, exStyle, intensity, priorityGoal, actLv: activityLevel,
       surveyDone: true, surveyDate: new Date().toISOString().split("T")[0],
     };
     // painArea 자동 동기화 (6단계 통증 부위)
@@ -1408,7 +1409,7 @@ function MemberForm({ initial, onSave, onBack }) {
                 {l:"하루 식사 횟수",opts:["1끼","2끼","3끼","4끼 이상"],val:mealsPerDay,set:setMealsPerDay},
                 {l:"수면 시간",opts:["5시간 미만","5~6시간","6~7시간","7~8시간","8시간 이상"],val:sleepHours,set:setSleepHours},
                 {l:"음주 빈도",opts:["안 마심","월 1~2회","주 1회","주 2회 이상"],val:alcohol,set:setAlcohol},
-                {l:"활동량",opts:["거의 안함","가벼운 활동","보통 활동","활동적"],val:actLv,set:()=>{}},
+                {l:"활동량",opts:["거의 안함","가벼운 활동","보통 활동","활동적"],val:activityLevel,set:setActivityLevel},
               ].map(({l,opts,val,set})=>(
                 <div key={l} style={{marginBottom:10}}>
                   <StepLabel label={l} />

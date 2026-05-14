@@ -950,96 +950,308 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
 // ════════════════════════════════════════════
 // 공통: 초기 상담 AI 분석 리포트 생성
 // ════════════════════════════════════════════
-function buildConsultReport(sv) {
+// ── 운동 수준 판별 헬퍼 ──────────────────────────────────────
+function getExLvl(exLevel) {
+  if (!exLevel) return "초급";
+  if (exLevel.includes("고급") || exLevel.includes("상급") || exLevel.includes("선수")) return "고급";
+  if (exLevel.includes("중급")) return "중급";
+  return "초급";
+}
+
+// ── BMR / TDEE 추정 ──────────────────────────────────────────
+function calcBmrTdee(weight, height, age, gender, actLvl) {
+  const w = parseFloat(weight)||0, h = parseFloat(height)||0, a = parseInt(age)||30;
+  if (!w || !h) return null;
+  const bmr = gender==="여성"
+    ? 10*w + 6.25*h - 5*a - 161
+    : 10*w + 6.25*h - 5*a + 5;
+  const actMap = {
+    "거의 안함":1.2,"가벼운 활동":1.375,"보통 활동":1.55,"활동적":1.725,"매우 활동적":1.9,
+    "거의 안함":1.2,"가벼운 활동 (주 1-2회)":1.375,"보통 활동 (주 3-5회)":1.55,"활동적 (주 6-7회)":1.725,
+  };
+  const tdee = Math.round(bmr * (actMap[actLvl] || 1.375));
+  return { bmr: Math.round(bmr), tdee };
+}
+
+// ── 체지방률 추정 ─────────────────────────────────────────────
+function estBodyFat(weight, height, age, gender, bf) {
+  if (bf && parseFloat(bf) > 0) return { bf: parseFloat(bf), estimated: false };
+  // BMI 기반 추정 (Deurenberg 공식, 참고용)
+  const w = parseFloat(weight)||0, h = parseFloat(height)/100||0;
+  if (!w || !h) return null;
+  const bmi = w / (h*h);
+  const est = gender==="여성"
+    ? (1.20*bmi + 0.23*parseInt(age||30) - 5.4)
+    : (1.20*bmi + 0.23*parseInt(age||30) - 16.2);
+  return { bf: Math.max(5, Math.min(50, parseFloat(est.toFixed(1)))), estimated: true };
+}
+
+// ── 핵심 buildConsultReport (완전 확장) ──────────────────────
+function buildConsultReport(sv, goal = {}) {
   const LEVEL = {
     danger:{border:"rgba(239,68,68,.25)",bg:"rgba(239,68,68,.08)",dot:"#ef4444",text:"#fca5a5"},
     warn:  {border:"rgba(245,158,11,.25)",bg:"rgba(245,158,11,.08)",dot:"#f59e0b",text:"#fcd34d"},
     ok:    {border:"rgba(34,197,94,.25)",bg:"rgba(34,197,94,.08)",dot:"#22c55e",text:"#86efac"},
     info:  {border:"rgba(94,234,212,.2)",bg:"rgba(94,234,212,.06)",dot:"#5EEAD4",text:"#99f6e4"},
+    praise:{border:"rgba(251,191,36,.3)",bg:"rgba(251,191,36,.08)",dot:"#fbbf24",text:"#fde68a"},
   };
+
   const { weakParts=[], exStyle=[], intensity="", priorityGoal="",
-          purposes=[], exLevel="", daysPerWeek="", sleepHours="",
-          stressLevel=3, painParts=[], hasDisk=false, hasHyper=false,
-          hasDiabetes=false, medications="", surgeries="" } = sv;
+          purposes=[], exLevel="", daysPerWeek="", daysPerW="", sleepHours="", sleepH="",
+          stressLevel=3, stressLv=3, painParts=[], hasDisk=false, hasHyper=false,
+          hasDiabetes=false, medications="", surgeries="",
+          gender="", age="", height="", weight="" } = sv;
+
+  // goal 탭 데이터 병합
+  const gW  = goal.currentWeight || weight || "";
+  const gTW = goal.targetWeight  || "";
+  const gBF = goal.currentBf     || sv.currentBf || "";
+  const gH  = goal.height        || height        || "";
+  const gAge= goal.age           || age           || "";
+  const gGen= goal.gender        || gender        || "남성";
+  const gAct= goal.activityLevel || sv.actLv      || sv.activityLevel || "";
+
+  const slp = sleepHours || sleepH;
+  const str = Number(stressLevel || stressLv || 3);
+  const days = daysPerWeek || daysPerW;
+  const pb = (painParts||[]).filter(p=>p!=="없음");
+  const lvl = getExLvl(exLevel);
   const rc = [];
 
-  // 1. 현재 상태 분석
+  // ── A. 칭찬 포인트 ──────────────────────────────
+  const pr=[];
+  if(days==="주 3회"||days==="주 4회"||days==="주 5회 이상")pr.push("주 "+days.replace("주 ","")+" 운동 가능 → 목표 달성에 유리한 빈도입니다");
+  if(slp==="7~8시간"||slp==="8시간 이상")pr.push("수면 시간 충분 → 회복 능력에 긍정적 조건입니다");
+  if(lvl==="중급"||lvl==="고급")pr.push("운동 경험 있음 → 자세 습득 속도가 빠를 가능성이 높습니다");
+  if(priorityGoal)pr.push(`목표가 명확함(${priorityGoal}) → 프로그램 지속률에 유리합니다`);
+  if(pb.length>0&&pb.length<=2)pr.push("통증 부위를 정확히 인지함 → 교정 방향 설정에 도움이 됩니다");
+  if(str<=2)pr.push("스트레스 낮음 → 심리적 회복 환경이 운동에 유리합니다");
+  if(pr.length)rc.push({title:"⭐ 칭찬 포인트", items:pr.map(t=>({level:"praise",text:t}))});
+
+  // ── B. 현재 상태 분석 ────────────────────────────
   const st=[];
-  if(sleepHours==="5시간 미만")st.push({level:"danger",text:"수면 심각 부족 — 회복 저하, 고강도 훈련 제한 권장"});
-  else if(sleepHours==="5~6시간")st.push({level:"warn",text:"수면 부족 — 회복 영향 가능"});
-  else if(sleepHours)st.push({level:"ok",text:"수면 양호 — 회복 정상 범위"});
-  if(Number(stressLevel)>=4)st.push({level:"danger",text:"스트레스 고조 — 가벼운 운동 위주 구성 권장"});
-  else if(Number(stressLevel)>=3)st.push({level:"warn",text:"스트레스 보통 — 회복 운동 병행 권장"});
-  const pb=(painParts||[]).filter(p=>p!=="없음");
-  if(pb.length>0)st.push({level:"warn",text:`통증 부위 존재: ${pb.join(", ")} — 교정 운동 우선 배치`});
-  if(exLevel==="운동 경험 없음"||exLevel==="초급 (1년 미만)")st.push({level:"info",text:"초급 단계 — 기초 패턴 습득 + 안전한 중량 설정이 우선"});
+  if(slp==="5시간 미만")st.push({level:"danger",text:"수면 심각 부족 — 코르티솔 상승·회복 저하·고강도 훈련 제한 권장"});
+  else if(slp==="5~6시간")st.push({level:"warn",text:"수면 부족 — 근합성 및 회복에 영향 가능"});
+  else if(slp)st.push({level:"ok",text:"수면 양호 — 회복 정상 범위"});
+  if(str>=4)st.push({level:"danger",text:"스트레스 고조 — 코르티솔 상승으로 체지방 분해·근합성 저해 가능"});
+  else if(str>=3)st.push({level:"warn",text:"스트레스 보통 — 회복 운동 및 이완 전략 병행 권장"});
+  if(pb.length)st.push({level:"warn",text:`통증 부위: ${pb.join(", ")} — 교정·기능 운동 우선 배치 권장`});
+  if(lvl==="초급")st.push({level:"info",text:"초급 단계 — 기초 패턴 습득과 안전한 중량 설정이 최우선"});
+  else if(lvl==="중급")st.push({level:"ok",text:"중급 단계 — 점진적 과부하 적용 가능한 수준"});
+  else st.push({level:"ok",text:"고급 단계 — 주기화 및 볼륨 조절이 핵심"});
+  if(hasDisk)st.push({level:"danger",text:"디스크 병력 — 굴곡·회전 제한 동작 주의 (운동 지도 참고용)"});
+  if(hasHyper)st.push({level:"warn",text:"고혈압 병력 — 고강도 인터벌, 발살바 호흡 주의 (운동 지도 참고용)"});
+  if(hasDiabetes)st.push({level:"warn",text:"당뇨 병력 — 운동 전후 혈당 반응 모니터링 권장 (운동 지도 참고용)"});
   if(st.length)rc.push({title:"📊 현재 상태 분석", items:st});
 
-  // 2. 추천 운동 방향
-  const ex=[];
-  if(daysPerWeek==="주 1회")ex.push({level:"info",text:"주 1회 → 전신 운동 (Full Body) 추천"});
-  else if(daysPerWeek==="주 2회")ex.push({level:"info",text:"주 2회 → 상체 / 하체 2분할 추천"});
-  else if(daysPerWeek==="주 3회")ex.push({level:"info",text:"주 3회 → 밀기 / 당기기 / 하체 3분할 추천"});
-  else if(daysPerWeek==="주 4회")ex.push({level:"info",text:"주 4회 → 가슴·삼두 / 등·이두 / 어깨 / 하체 4분할 추천"});
-  else if(daysPerWeek==="주 5회 이상")ex.push({level:"info",text:"주 5회 이상 → 5분할 부위별 루틴 추천"});
-  if(weakParts.length>0)ex.push({level:"warn",text:`약점 부위 주 2회 이상 배치 권장: ${weakParts.join(", ")}`});
-  if((exStyle||[]).includes("교정 운동")||(purposes||[]).includes("체형 교정"))ex.push({level:"warn",text:"교정 운동 매 세션 10~15분 필수 포함 권장"});
-  if((exStyle||[]).includes("머신 위주"))ex.push({level:"ok",text:"머신 위주 → 초반 안정성 확보 후 프리웨이트 비중 증가 예정"});
-  if(ex.length)rc.push({title:"🏋️ 추천 운동 방향", items:ex});
+  // ── C. 목표 체중·체지방률 예측 ──────────────────
+  if(gW) {
+    const comp=[];
+    const curW = parseFloat(gW)||0;
+    const tgtW = parseFloat(gTW)||0;
+    const bfInfo = estBodyFat(gW, gH, gAge, gGen, gBF);
 
-  // 3. 주의사항
+    comp.push({level:"info",text:`현재 체중: ${curW}kg${tgtW>0?` → 목표 체중: ${tgtW}kg`:""}${tgtW>0?` (감량 목표: ${(curW-tgtW).toFixed(1)}kg)`:""}`});
+
+    if(bfInfo) {
+      if(bfInfo.estimated) {
+        comp.push({level:"info",text:`추정 현재 체지방률: 약 ${bfInfo.bf}% (BMI 기반 추정, 참고용 — 정확도 향상을 위해 인바디 측정 권장)`});
+      } else {
+        comp.push({level:"ok",text:`현재 체지방률: ${bfInfo.bf}%`});
+      }
+      if(tgtW>0 && curW>0) {
+        // 감량량의 75%가 지방, 25%는 수분+글리코겐으로 가정 (단백질 충분 시)
+        const loss  = curW - tgtW;
+        const fatLoss = loss > 0 ? loss * 0.75 : 0;
+        const curFatKg = curW * bfInfo.bf / 100;
+        const estFatKg = Math.max(0, curFatKg - fatLoss);
+        const estBF    = ((estFatKg / tgtW) * 100).toFixed(1);
+        comp.push({level:"ok",text:`목표 도달 시 예상 체지방률: 약 ${estBF}% (단백질 충분·저항운동 병행 기준 참고 추정치)`});
+        // 감량 속도 분석
+        const weeklyLoss = 0.5;
+        const weeks = Math.round(loss / weeklyLoss);
+        if(loss > 0) comp.push({level:"ok",text:`권장 감량 속도 기준(주 0.5kg): 약 ${weeks}주 소요 예상`});
+        if(loss > 10) comp.push({level:"warn",text:"총 감량 폭이 크므로 단기 속성 감량보다 장기 지속 가능한 방향 권장"});
+        if(loss/curW > 0.15) comp.push({level:"warn",text:"체중의 15% 이상 감량 목표 — 근손실 방지를 위한 단백질·저항운동 관리가 핵심"});
+      }
+    } else if(tgtW>0) {
+      comp.push({level:"info",text:"체지방률 예측을 위해 키·나이·인바디 데이터 입력 권장"});
+    }
+    if(comp.length)rc.push({title:"⚖️ 목표 체중·체지방률 예측", items:comp, collapsible:true});
+  }
+
+  // ── D. 추정 권장 섭취량 (참고용) ────────────────
+  const tdeeResult = calcBmrTdee(gW, gH, gAge, gGen, gAct);
+  if(tdeeResult) {
+    const nut=[];
+    const { bmr, tdee } = tdeeResult;
+    const curW = parseFloat(gW)||0;
+    const tgtW = parseFloat(gTW)||0;
+    const isLoss  = tgtW>0 && tgtW<curW;
+    const isGain  = tgtW>0 && tgtW>curW;
+    const goal_kcal = isLoss ? Math.max(1200, tdee-400) : isGain ? tdee+300 : tdee;
+    const protein_min = Math.round(curW*1.6), protein_max = Math.round(curW*2.2);
+    const fat_kcal = Math.round(goal_kcal*0.25);
+    const fat_g    = Math.round(fat_kcal/9);
+    const prot_kcal= Math.round(protein_min*4);
+    const carb_kcal= Math.max(0, goal_kcal - fat_kcal - prot_kcal);
+    const carb_g   = Math.round(carb_kcal/4);
+
+    nut.push({level:"info",text:`추정 유지 칼로리(TDEE): 약 ${tdee.toLocaleString()}kcal / 기초대사량(BMR): 약 ${bmr.toLocaleString()}kcal`});
+    if(isLoss)  nut.push({level:"ok",text:`감량 권장 섭취량: 약 ${goal_kcal.toLocaleString()}kcal/일 (유지 대비 -400kcal)`});
+    else if(isGain) nut.push({level:"ok",text:`증량 권장 섭취량: 약 ${goal_kcal.toLocaleString()}kcal/일 (유지 대비 +300kcal)`});
+    else nut.push({level:"ok",text:`유지 권장 섭취량: 약 ${goal_kcal.toLocaleString()}kcal/일`});
+    nut.push({level:"ok",text:`단백질: ${protein_min}~${protein_max}g/일 (체중 kg × 1.6~2.2g)`});
+    nut.push({level:"info",text:`지방: 약 ${fat_g}g/일 · 탄수화물: 약 ${carb_g}g/일 (나머지 배분)`});
+    nut.push({level:"info",text:"※ 운동 지도 및 식단 상담 참고용 추정치 — 개인 대사 차이 존재 / 전문 영양사 상담 권장"});
+    rc.push({title:"🥗 추정 권장 섭취량 (참고용)", items:nut, collapsible:true});
+  }
+
+  // ── E. 체성분 변화 예측 ──────────────────────────
+  const bc=[];
+  bc.push({level:"info",text:"체중 감량 시 지방·수분·글리코겐이 함께 감소하며, 저항운동 부족 시 근육량도 일부 감소할 수 있습니다"});
+  bc.push({level:"ok",text:"단백질 충분 섭취(체중×1.8g 이상) + 저항운동 병행 시 근손실을 최소화할 수 있습니다"});
+  if(slp==="5시간 미만"||slp==="5~6시간")bc.push({level:"warn",text:"수면 부족은 성장호르몬 분비를 억제하고 식욕 조절 호르몬(렙틴·그렐린)에 영향을 줄 수 있습니다"});
+  if(str>=4)bc.push({level:"warn",text:"만성 스트레스는 코르티솔 상승을 통해 체지방 축적과 근단백질 분해를 촉진할 수 있습니다"});
+  bc.push({level:"info",text:"너무 빠른 감량(주 1kg 이상)은 운동 수행력 저하·리바운드·근손실 위험이 증가합니다"});
+  rc.push({title:"🔬 체성분 변화 예측 (참고용)", items:bc, collapsible:true});
+
+  // ── F. 운동 수준별 전략 + 주기화 ─────────────────
+  const strat=[];
+  if(lvl==="초급") {
+    strat.push({level:"info",text:"관절 가동성 확보 + 기본 패턴 습득(스쿼트·힌지·밀기·당기기) 우선"});
+    strat.push({level:"info",text:"4주 적응 블록: 1~2주차 자세 학습 → 3주차 볼륨 소폭 증가 → 4주차 안정화"});
+    strat.push({level:"ok",text:"디로딩 불필요 (강도가 낮으므로 피로 누적 미미)"});
+    strat.push({level:"info",text:"RIR 기반 강도: 대부분 RIR 3~4 유지 — 자세 안정이 강도보다 우선"});
+  } else if(lvl==="중급") {
+    strat.push({level:"info",text:"점진적 과부하 적용: 4~6주 주기로 중량 또는 볼륨 증가"});
+    strat.push({level:"info",text:"마지막 주 피로도 확인 후 필요 시 1주 디로딩 적용"});
+    strat.push({level:"ok",text:"약점 부위 우선 배치 + Push/Pull/Legs 구조 적용 가능"});
+    strat.push({level:"info",text:"RIR 기반 강도: 메인 운동 RIR 1~3 / 보조 운동 RIR 2~4"});
+  } else {
+    strat.push({level:"ok",text:"강도 블록 / 볼륨 블록 분리한 선형·파동 주기화 적용"});
+    strat.push({level:"warn",text:"약점 부위 특화 블록 트레이닝 + 회복 관리 강화 필수"});
+    strat.push({level:"info",text:"4~8주 주기화, 피킹 또는 디로딩 주 삽입 권장"});
+    strat.push({level:"info",text:"RIR 기반 강도: 블록에 따라 RIR 0~3 조절 (피로도 누적 주의)"});
+  }
+  if(pb.length) strat.push({level:"danger",text:"통증 부위 동작은 RIR보다 통증 반응 우선 — 통증 3/10 이상 시 즉시 강도 조절"});
+  rc.push({title:`💡 운동 전략 (${lvl}자 기준)`, items:strat, collapsible:true});
+
+  // ── G. 추천 분할법 ──────────────────────────────
+  const split=[];
+  const splitReason=[];
+  if(days==="주 1회") {
+    split.push({level:"ok",text:"추천: 전신 루틴 (Full Body) — 하체·등·가슴·코어 균형 구성"});
+    splitReason.push({level:"info",text:"주 1회는 부위 분할보다 전신을 고르게 자극하는 것이 회복 및 적응에 효율적입니다"});
+  } else if(days==="주 2회") {
+    split.push({level:"ok",text:"추천: 상체 A / 하체 B 또는 전신 2회"});
+    splitReason.push({level:"info",text:"주 2회는 상하체 분할이 각 근육군 72시간 회복과 부합하는 기본 구조입니다"});
+  } else if(days==="주 3회") {
+    if(lvl==="초급") {
+      split.push({level:"ok",text:"추천: 전신 3회 또는 상체/하체/전신 구성"});
+      splitReason.push({level:"info",text:"초급자는 같은 패턴을 주 3회 반복하면 신경근 적응이 빠릅니다"});
+    } else {
+      split.push({level:"ok",text:"추천: Push / Pull / Legs (PPL) 3분할"});
+      splitReason.push({level:"info",text:"PPL은 주 3회에서 각 근육군을 충분히 자극하면서 회복 시간을 확보하는 효율적 구조입니다"});
+    }
+  } else if(days==="주 4회") {
+    split.push({level:"ok",text:"추천: 상체 A·하체 A / 상체 B·하체 B (상하체 2분할 × 2)"});
+    splitReason.push({level:"info",text:"주 4회 상하체 분할은 각 근육군을 주 2회 자극하면서 48~72시간 회복을 보장합니다"});
+  } else if(days==="주 5회 이상") {
+    split.push({level:"ok",text:`추천: ${lvl==="초급"?"상체/하체/전신/하체/상체 변형":"PPL + 약점 부위 특화 1~2회 추가"}`});
+    splitReason.push({level:"info",text:"주 5회 이상은 볼륨과 회복의 균형이 핵심 — 약점 부위 우선 배치"});
+  }
+  if(weakParts.length>0) {
+    split.push({level:"warn",text:`약점 부위(${weakParts.join(", ")}) 우선 배치 — 가장 컨디션 좋을 때 훈련`});
+    splitReason.push({level:"info",text:"약점 부위는 루틴 초반 배치가 집중력·에너지 측면에서 효과적입니다"});
+  }
+  // 부위별 주간 세트 수
+  const setTbl = {초급:{주요:"8~10",보조:"6~8"},중급:{주요:"12~16",보조:"10~12"},고급:{주요:"16~20",보조:"12~16"}};
+  const st2 = setTbl[lvl]||setTbl["초급"];
+  split.push({level:"info",text:`부위별 권장 주간 세트 수: 주요 부위 ${st2.주요}세트 / 보조 부위 ${st2.보조}세트`});
+  rc.push({title:"📋 추천 분할법", items:[...split,...splitReason], collapsible:true});
+
+  // ── H. RIR 강도 가이드 ───────────────────────────
+  const rir=[];
+  const isDiet = (purposes||[]).includes("체지방 감량")||(priorityGoal||"").includes("감량");
+  const isBulk = (purposes||[]).includes("벌크업")||(purposes||[]).includes("근력 증가");
+  if(lvl==="초급") {
+    rir.push({level:"info",text:"적응기(1~4주): RIR 3~4 — 자세 안정이 강도보다 우선"});
+    rir.push({level:"ok",text:"메인 운동: RIR 3 / 보조 운동: RIR 3~4"});
+    rir.push({level:"info",text:"실패 지점 훈련: 권장하지 않음 (자세 붕괴 위험)"});
+  } else if(lvl==="중급") {
+    rir.push({level:"info",text:"메인 운동: RIR 1~2 / 보조 운동: RIR 2~3"});
+    rir.push({level:"ok",text:"실패 지점 훈련: 고립 운동(이두·삼두 등) 제한적 허용"});
+  } else {
+    rir.push({level:"info",text:"메인 운동: RIR 0~1 (블록에 따라 조절) / 보조 운동: RIR 1~2"});
+    rir.push({level:"ok",text:"실패 지점 훈련: 전략적 사용 가능 (피로도 모니터링 필수)"});
+  }
+  if(isDiet)  rir.push({level:"warn",text:"감량기: 에너지 부족 시 RIR을 1씩 올려 부상·피로 누적 방지"});
+  if(isBulk)  rir.push({level:"ok",text:"증량기: 충분한 칼로리 확보 시 RIR을 낮춰 볼륨·강도 극대화 가능"});
+  if(pb.length) rir.push({level:"danger",text:"통증 부위 관련 동작: RIR 기준 무시 — 통증 반응 기반으로 조절 (운동 지도 참고용)"});
+  rc.push({title:"⚡ RIR 강도 가이드", items:rir, collapsible:true});
+
+  // ── I. 주의사항 ──────────────────────────────────
   const wa=[];
-  if(pb.includes("무릎"))wa.push({level:"danger",text:"무릎 통증 → 하체 충격성 동작(점프, 깊은 스쿼트) 제한 / 운동 지도 참고용"});
-  if(pb.includes("어깨"))wa.push({level:"danger",text:"어깨 불편 → 오버헤드 동작 제한, 회전근개 강화 우선 / 운동 지도 참고용"});
-  if(pb.includes("허리"))wa.push({level:"danger",text:"허리 통증 → 고중량 컴파운드 제한, 코어 안정화 우선 / 운동 지도 참고용"});
-  if(hasDisk)wa.push({level:"danger",text:"디스크 병력 → 굴곡/회전 제한 동작 주의, 의료진 지도 병행 권장"});
-  if(hasHyper)wa.push({level:"warn",text:"고혈압 병력 → 고강도 인터벌, 발살바 호흡 주의"});
-  if(hasDiabetes)wa.push({level:"warn",text:"당뇨 병력 → 저혈당 징후 모니터링, 운동 전후 혈당 확인 권장"});
-  if(medications)wa.push({level:"warn",text:`복용 약물(${medications.slice(0,20)}) → 운동 반응 변화 가능, 이상 시 즉시 중단`});
-  if(intensity==="강하게")wa.push({level:"warn",text:"고강도 선호 → 초반 4주는 패턴 습득 위주, 이후 점진적 강도 증가"});
+  if(pb.includes("무릎"))wa.push({level:"danger",text:"무릎 통증 → 점프·깊은 스쿼트 등 충격성 동작 제한 (운동 지도 참고용)"});
+  if(pb.includes("어깨"))wa.push({level:"danger",text:"어깨 불편 → 오버헤드 동작 제한, 회전근개 강화 우선 (운동 지도 참고용)"});
+  if(pb.includes("허리"))wa.push({level:"danger",text:"허리 통증 → 고중량 컴파운드 제한, 코어 안정화 선행 (운동 지도 참고용)"});
+  if(pb.includes("목"))wa.push({level:"warn",text:"목 불편 → 경추 부담 동작(백스쿼트 등) 주의 (운동 지도 참고용)"});
+  if(hasDisk)wa.push({level:"danger",text:"디스크 병력 → 굴곡·회전 복합 동작 제한, 의료진 지도 병행 권장"});
+  if(hasHyper)wa.push({level:"warn",text:"고혈압 병력 → 발살바 호흡·고강도 인터벌 주의"});
+  if(hasDiabetes)wa.push({level:"warn",text:"당뇨 병력 → 저혈당 징후 모니터링 (운동 지도 참고용)"});
+  if(medications)wa.push({level:"warn",text:`복용 약물(${medications.slice(0,20)}...) → 운동 반응 변화 가능, 이상 시 즉시 중단`});
+  if(intensity==="강하게")wa.push({level:"warn",text:"고강도 선호 → 초반 4주는 패턴 우선, 이후 점진적 강도 증가 권장"});
   if(wa.length)rc.push({title:"⚠️ 주의사항 (운동 지도 참고용)", items:wa});
 
-  // 4. 첫 4주 운동 방향
-  const w4=[];
-  w4.push({level:"info",text:"1주차: 기초 평가 + 기본 패턴 습득 (가벼운 중량, RPE 5~6)"});
-  w4.push({level:"info",text:"2주차: 패턴 안정화 + 교정 운동 비중 조절"});
-  w4.push({level:"info",text:"3주차: 점진적 강도 증가 시작 (RPE 6~7)"});
-  w4.push({level:"ok",text:"4주차: 루틴 고정 + 재평가 및 다음 단계 방향 설정"});
-  rc.push({title:"📅 첫 4주 운동 방향", items:w4});
-
-  // 5. 추천 주간 볼륨
-  const vol=[];
-  const lvl = (exLevel||"").includes("고급")?"고급":(exLevel||"").includes("중급")?"중급":"초급";
-  const sets = {초급:"주 8~10세트",중급:"주 12~16세트",고급:"주 16~20세트"};
-  vol.push({level:"ok",text:`경험 수준(${lvl}): 부위별 ${sets[lvl]} 목표`});
-  (weakParts||[]).forEach(p=>vol.push({level:"info",text:`${p} (약점): 타 부위 대비 20~30% 볼륨 증가 배치`}));
-  if(vol.length)rc.push({title:"📊 추천 주간 볼륨", items:vol});
-
-  // 6. PT 방향 제안
-  const pt=[];
-  if(priorityGoal)pt.push({level:"ok",text:`우선 목표: ${priorityGoal}`});
-  if((purposes||[]).includes("체형 교정")||priorityGoal?.includes("교정"))pt.push({level:"info",text:"교정 우선 접근 → 기능 회복 확인 후 부하 증가"});
-  if((purposes||[]).includes("체지방 감량")||priorityGoal?.includes("감량"))pt.push({level:"info",text:"감량 방향 → 권장 속도 주 0.5~0.7kg, 단백질 체중×1.8g 이상"});
-  if((purposes||[]).includes("근력 증가")||(purposes||[]).includes("벌크업"))pt.push({level:"info",text:"근성장 방향 → 점진적 과부하 + 충분한 칼로리 확보 필요"});
-  if(((purposes||[]).includes("통증 개선")||pb.length>0))pt.push({level:"warn",text:"통증 관리 병행 → 교정 운동 우선, 통증 악화 시 즉시 강도 조절"});
-  pt.push({level:"info",text:"TEO GYM 기록 기반 PT → 매 수업 데이터로 실시간 방향 수정"});
-  if(pt.length)rc.push({title:"🎯 PT 방향 제안", items:pt});
-
-  // 7. 상담 멘트 추천
+  // ── J. 상담 멘트 ────────────────────────────────
   const ment=[];
-  if(priorityGoal?.includes("감량"))ment.push({level:"ok",text:"\"체중 숫자보다 체지방률과 근육량 변화를 함께 보면 더 정확한 진행을 확인할 수 있습니다\""});
-  if(priorityGoal?.includes("교정")||priorityGoal?.includes("자세"))ment.push({level:"ok",text:"\"자세 교정은 보통 6~8주면 일상에서 변화를 느끼실 수 있습니다\""});
-  if(pb.length>0)ment.push({level:"info",text:"\"통증은 운동을 못 하는 이유가 아니라 교정 운동이 필요한 신호입니다\""});
-  ment.push({level:"info",text:"\"처음 4주는 몸이 운동에 적응하는 기간으로 인내심이 필요하지만, 기초를 잘 잡으면 그 이후 변화 속도가 빨라집니다\""});
+  if(priorityGoal?.includes("감량"))ment.push({level:"ok",text:"\"체중 숫자보다 체지방률과 근육량 변화를 함께 확인하면 더 정확하게 진행 상황을 파악할 수 있습니다\""});
+  if(priorityGoal?.includes("교정")||priorityGoal?.includes("자세"))ment.push({level:"ok",text:"\"자세 교정은 보통 6~8주면 일상에서 변화를 느끼실 수 있습니다. 조금 느려 보여도 가장 오래 가는 변화입니다\""});
+  if(pb.length>0)ment.push({level:"info",text:"\"통증은 운동을 못 하는 이유가 아니라 교정 운동이 필요한 신호입니다. 여기서 제대로 잡으면 훨씬 빠르게 갈 수 있습니다\""});
+  ment.push({level:"info",text:"\"처음 4주는 몸이 적응하는 기간입니다. 빠른 결과보다 바른 패턴이 먼저입니다. 기초를 잘 잡으면 그 이후 변화 속도가 확실히 빨라집니다\""});
   if(ment.length)rc.push({title:"💬 상담 멘트 추천", items:ment});
 
   return { cards: rc, LEVEL };
 }
 
+// 상세 보기 펼침 카드 컴포넌트
+function ReportCard({ card, LEVEL }) {
+  const [open, setOpen] = useState(!card.collapsible);
+  return (
+    <div style={{marginBottom:9,borderRadius:12,background:"#111827",
+      border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
+      <div style={{padding:"11px 14px",borderBottom:open?"1px solid rgba(255,255,255,0.06)":"none",
+        display:"flex",justifyContent:"space-between",alignItems:"center",
+        cursor:card.collapsible?"pointer":"default"}}
+        onClick={()=>card.collapsible&&setOpen(v=>!v)}>
+        <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
+        {card.collapsible && (
+          <Mo c="#64748b" s={10}>{open?"▲ 접기":"▼ 상세 보기"}</Mo>
+        )}
+      </div>
+      {open && (
+        <div style={{padding:"9px 14px",display:"flex",flexDirection:"column",gap:5}}>
+          {card.items.map((item,ii)=>{
+            const s=LEVEL[item.level]||LEVEL.info;
+            return(
+              <div key={ii} style={{padding:"8px 11px",borderRadius:7,background:s.bg,
+                border:`1px solid ${s.border}`,display:"flex",alignItems:"flex-start",gap:8}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:s.dot,flexShrink:0,marginTop:4}}/>
+                <span style={{fontSize:11,color:s.text,lineHeight:1.7}}>{item.text}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 초기 상담 AI 리포트 컴포넌트 (재사용)
-function ConsultReportView({ member, onClose, showClose=true }) {
+function ConsultReportView({ member, goal={}, onClose, showClose=true }) {
   const sv   = member?.survey || {};
-  const { cards, LEVEL } = buildConsultReport(sv);
+  const { cards, LEVEL } = buildConsultReport(sv, goal);
   const pg   = sv.priorityGoal || (sv.purposes||[])[0] || "";
 
   return (
@@ -1052,42 +1264,29 @@ function ConsultReportView({ member, onClose, showClose=true }) {
               background:"#111827",color:"#64748b",fontSize:10,cursor:"pointer"}}>✕ 닫기</button>
         </div>
       )}
-      {/* 헤더 카드 */}
-      <div style={{padding:"14px 16px",borderRadius:12,marginBottom:12,
+      {/* 헤더 */}
+      <div style={{padding:"14px 16px",borderRadius:12,marginBottom:10,
         background:"linear-gradient(135deg,rgba(94,234,212,.10),rgba(129,140,248,.06))",
         border:"1px solid rgba(94,234,212,.2)"}}>
-        <Mo c="#5EEAD4" s={8} style={{display:"block",letterSpacing:".1em",marginBottom:4}}>TEO GYM · 초기 상담 분석</Mo>
+        <Mo c="#5EEAD4" s={8} style={{display:"block",letterSpacing:".1em",marginBottom:4}}>TEO GYM · 초기 상담 분석 리포트</Mo>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,color:"#e2e8f0",marginBottom:3}}>{member?.name||"회원"}</div>
         <Mo c="#64748b" s={10}>
-          {sv.surveyDate||"등록일 미기록"} 등록 · {(sv.purposes||[]).slice(0,2).join(", ")||"목표 미설정"}
+          {sv.surveyDate||"등록일 미기록"} · {(sv.purposes||[]).slice(0,2).join(", ")||"목표 미설정"}
           {pg ? ` · ${pg}` : ""}
         </Mo>
       </div>
       {!sv.surveyDone ? (
         <div style={{padding:"20px",borderRadius:12,background:"#111827",
           border:"1px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
-          <Mo c="#64748b" s={12} style={{lineHeight:1.8}}>초기 상담 설문이 완료되지 않았습니다<br/>회원 수정 → 운동목적 탭에서 설문을 완료해주세요</Mo>
+          <Mo c="#64748b" s={12} style={{lineHeight:1.8}}>초기 상담 설문이 완료되지 않았습니다<br/>회원 수정 → 목표·목적 탭에서 설문을 완료해주세요</Mo>
         </div>
       ) : cards.map((card,ci)=>(
-        <div key={ci} style={{marginBottom:10,borderRadius:12,background:"#111827",
-          border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
-          <div style={{padding:"11px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-            <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
-          </div>
-          <div style={{padding:"9px 14px",display:"flex",flexDirection:"column",gap:5}}>
-            {card.items.map((item,ii)=>{
-              const s=LEVEL[item.level]||LEVEL.info;
-              return(
-                <div key={ii} style={{padding:"8px 11px",borderRadius:7,background:s.bg,
-                  border:`1px solid ${s.border}`,display:"flex",alignItems:"flex-start",gap:8}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",background:s.dot,flexShrink:0,marginTop:4}}/>
-                  <span style={{fontSize:11,color:s.text,lineHeight:1.7}}>{item.text}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <ReportCard key={ci} card={card} LEVEL={LEVEL} />
       ))}
+      <div style={{marginTop:8,padding:"9px 12px",borderRadius:8,
+        background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",textAlign:"center"}}>
+        <Mo c="#475569" s={9}>본 리포트는 운동 지도 및 상담 참고용입니다 · 의료 진단이 아닙니다 · TEO GYM</Mo>
+      </div>
     </div>
   );
 }

@@ -598,7 +598,7 @@ export default function App() {
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
-        {screen==="bodycheck"  && member && (() => { console.log("[TEO GYM] BodyCheckScreen — memberId:", member.id, "bodyData:", !!bodyData); return true; })() && <BodyCheckScreen member={member} onBack={() => setScreen("hub")} bodyData={bodyData} onSaveBodyData={async d => {
+        {screen==="bodycheck"  && member && (() => { console.log("[TEO GYM] BodyCheckScreen — memberId:", member.id, "bodyData:", !!bodyData); return true; })() && <BodyCheckScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} bodyData={bodyData} onSaveBodyData={async d => {
             try {
               console.log("[TEO GYM] saveBodyCheck — memberId:", member.id, d);
               const saved = await saveBodyCheck(member.id, d);
@@ -3130,7 +3130,7 @@ function calcDaysLeft(d) {
 // ════════════════════════════════════════════
 // BODY CHECK SCREEN
 // ════════════════════════════════════════════
-function BodyCheckScreen({ member, onBack, bodyData, onSaveBodyData, showToast }) {
+function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData, showToast }) {
   const [tab,    setTab]    = useState("대시보드");
   const [saving, setSaving] = useState(false);
 
@@ -3235,6 +3235,7 @@ function BodyCheckScreen({ member, onBack, bodyData, onSaveBodyData, showToast }
   const TABS = [
     { key:"대시보드", icon:"📊" }, { key:"기록", icon:"✏️" },
     { key:"목표",   icon:"🎯" }, { key:"인바디", icon:"📋" },
+    { key:"캘린더", icon:"📅" }, { key:"설문",   icon:"📝" },
   ];
 
   return (
@@ -3551,6 +3552,391 @@ function BodyCheckScreen({ member, onBack, bodyData, onSaveBodyData, showToast }
           )}
         </div>
       )}
+
+      {/* ── 캘린더 탭 ── */}
+      {tab === "캘린더" && (
+        <ChangeCalendar sessions={sessions} records={records} />
+      )}
+
+      {/* ── 설문 탭 ── */}
+      {tab === "설문" && (
+        <SurveyAnalysis member={member} bodyData={bodyData} sessions={sessions} onSave={onSaveBodyData} showToast={showToast} />
+      )}
+    </div>
+  );
+}
+
+
+
+// ════════════════════════════════════════════
+// 변화 캘린더
+// ════════════════════════════════════════════
+function ChangeCalendar({ sessions=[], records=[] }) {
+  const today    = new Date();
+  const [year,  setYear]  = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth()); // 0-based
+  const [sel,   setSel]   = useState(null); // 클릭된 날짜 "YYYY-MM-DD"
+
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstDay    = new Date(year, month, 1).getDay(); // 0=일
+  const todayStr    = today.toISOString().split("T")[0];
+
+  // 날짜별 데이터 인덱스
+  const sessionByDate = {};
+  sessions.forEach(s => { if(s.date) sessionByDate[s.date] = (sessionByDate[s.date]||[]); sessionByDate[s.date].push(s); });
+  const weightByDate  = {};
+  records.forEach(r  => { if(r.date) weightByDate[r.date] = r.weight; });
+
+  // 통증 날짜
+  const painDates = new Set(
+    sessions.filter(s=>s.painRecord?.before?.vas>=4||s.painRecord?.after?.vas>=4).map(s=>s.date)
+  );
+
+  function dateStr(d) {
+    const mm = String(month+1).padStart(2,"0");
+    const dd = String(d).padStart(2,"0");
+    return `${year}-${mm}-${dd}`;
+  }
+
+  const selSessions = sel ? (sessionByDate[sel]||[]) : [];
+  const selWeight   = sel ? weightByDate[sel] : null;
+
+  const MONTH_NAMES = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
+
+  return (
+    <div>
+      {/* 월 탐색 */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <button onClick={()=>{ if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); }}
+          style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,
+            color:"#94a3b8",fontSize:16,padding:"6px 12px",cursor:"pointer"}}>‹</button>
+        <Mo c="#e2e8f0" s={14} style={{fontWeight:700}}>{year}년 {MONTH_NAMES[month]}</Mo>
+        <button onClick={()=>{ if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); }}
+          style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,
+            color:"#94a3b8",fontSize:16,padding:"6px 12px",cursor:"pointer"}}>›</button>
+      </div>
+
+      {/* 요일 헤더 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2}}>
+        {["일","월","화","수","목","금","토"].map((d,i)=>(
+          <div key={d} style={{textAlign:"center",padding:"4px 0",
+            fontSize:10,color:i===0?"#ef4444":i===6?"#818cf8":"#64748b",fontWeight:700}}>{d}</div>
+        ))}
+      </div>
+
+      {/* 달력 그리드 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+        {Array(firstDay).fill(null).map((_,i)=><div key={"e"+i}/>)}
+        {Array(daysInMonth).fill(null).map((_,i)=>{
+          const d     = i+1;
+          const ds    = dateStr(d);
+          const hasSess = sessionByDate[ds]?.length > 0;
+          const hasW    = !!weightByDate[ds];
+          const hasPain = painDates.has(ds);
+          const isToday = ds === todayStr;
+          const isSel   = ds === sel;
+          return (
+            <div key={d} onClick={()=>setSel(isSel?null:ds)}
+              style={{
+                minHeight:44,padding:"4px 3px",borderRadius:7,cursor:"pointer",
+                background:isSel?"rgba(94,234,212,.2)":isToday?"rgba(94,234,212,.08)":"#111827",
+                border:`1px solid ${isSel?"#5EEAD4":isToday?"rgba(94,234,212,.3)":"rgba(255,255,255,0.06)"}`,
+                position:"relative",
+              }}>
+              <div style={{fontSize:11,fontWeight:isToday?800:400,
+                color:isToday?"#5EEAD4":"#94a3b8",textAlign:"center",marginBottom:3}}>{d}</div>
+              {/* 도트 표시 */}
+              <div style={{display:"flex",justifyContent:"center",gap:2,flexWrap:"wrap"}}>
+                {hasSess  && <div style={{width:5,height:5,borderRadius:"50%",background:"#5EEAD4"}}/>}
+                {hasW     && <div style={{width:5,height:5,borderRadius:"50%",background:"#818cf8"}}/>}
+                {hasPain  && <div style={{width:5,height:5,borderRadius:"50%",background:"#ef4444"}}/>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 범례 */}
+      <div style={{display:"flex",gap:12,marginTop:8,flexWrap:"wrap"}}>
+        {[["#5EEAD4","PT 수업"],["#818cf8","체중 기록"],["#ef4444","통증 기록"]].map(([c,l])=>(
+          <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:c}}/>
+            <Mo c="#64748b" s={9}>{l}</Mo>
+          </div>
+        ))}
+      </div>
+
+      {/* 선택 날짜 상세 */}
+      {sel && (
+        <div style={{marginTop:12,padding:"12px 14px",borderRadius:10,
+          background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
+          <Mo c="#e2e8f0" s={12} style={{fontWeight:700,display:"block",marginBottom:8}}>{sel}</Mo>
+          {selWeight && <Mo c="#818cf8" s={11} style={{display:"block",marginBottom:4}}>⚖️ 체중: {selWeight}kg</Mo>}
+          {selSessions.length===0 && !selWeight && <Mo c="#64748b" s={10}>기록 없음</Mo>}
+          {selSessions.map((s,i)=>(
+            <div key={i} style={{marginBottom:6,padding:"8px 10px",background:"#0F172A",borderRadius:7}}>
+              <Mo c="#5EEAD4" s={10} style={{fontWeight:700,display:"block",marginBottom:3}}>
+                {s.sessionNo}회차 PT · 볼륨 {(s.totalVolume||0).toLocaleString()}kg
+              </Mo>
+              {(s.exercises||[]).slice(0,3).map((e,j)=>(
+                <Mo key={j} c="#64748b" s={9} style={{display:"block"}}>· {e.name}</Mo>
+              ))}
+              {s.painRecord?.before?.vas > 0 && (
+                <Mo c="#ef4444" s={9} style={{display:"block",marginTop:3}}>
+                  💢 운동 전 VAS {s.painRecord.before.vas} {s.painRecord.after?.change?`→ ${s.painRecord.after.change}`:""}
+                </Mo>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 운동 설문 + 분석 리포트
+// ════════════════════════════════════════════
+function SurveyAnalysis({ member, bodyData, sessions=[], onSave, showToast }) {
+  const sv = bodyData?.survey || {};
+  const [step, setStep]     = useState(sv.surveyDone ? -1 : 0); // -1 = 결과 보기
+  const [saving, setSaving] = useState(false);
+
+  // 설문 state
+  const [purpose,    setPurpose]    = useState(sv.purpose    || []);
+  const [exLevel,    setExLevel]    = useState(sv.exLevel    || "");
+  const [daysPerW,   setDaysPerW]   = useState(sv.daysPerW   || "");
+  const [weakParts,  setWeakParts]  = useState(sv.weakParts  || []);
+  const [hasPain,    setHasPain]    = useState(sv.hasPain    ?? false);
+  const [sleepH,     setSleepH]     = useState(sv.sleepH     || "");
+  const [stressLv,   setStressLv]   = useState(sv.stressLv   || 3);
+  const [cardioFreq, setCardioFreq] = useState(sv.cardioFreq || "");
+  const [actLv,      setActLv]      = useState(sv.actLv      || "");
+  const [eating,     setEating]     = useState(sv.eating     || "");
+
+  async function finishSurvey() {
+    setSaving(true);
+    const survey = { purpose,exLevel,daysPerW,weakParts,hasPain,sleepH,stressLv,cardioFreq,actLv,eating,surveyDone:true };
+    await onSave({ ...bodyData, survey });
+    setSaving(false);
+    showToast("설문 저장 완료 ✓");
+    setStep(-1);
+  }
+
+  // ── 룰 기반 분석 리포트 생성 ────────────────────────────
+  function makeReport() {
+    const cards = [];
+    const sorted = [...sessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const rec10  = sorted.slice(0,10);
+    const rpeList = rec10.flatMap(s=>(s.exercises||[]).filter(e=>e.rpe).map(e=>Number(e.rpe)));
+    const avgRpe  = rpeList.length ? (rpeList.reduce((a,b)=>a+b,0)/rpeList.length).toFixed(1) : null;
+
+    // 추천 분할
+    const splitCards = { items:[] };
+    if (daysPerW==="주 1회") splitCards.items.push({level:"info",text:"추천 분할: 전신 운동 (Full Body)"});
+    else if (daysPerW==="주 2회") splitCards.items.push({level:"info",text:"추천 분할: 상체 / 하체 2분할"});
+    else if (daysPerW==="주 3회") splitCards.items.push({level:"info",text:"추천 분할: 밀기 / 당기기 / 하체 3분할"});
+    else if (daysPerW==="주 4회") splitCards.items.push({level:"info",text:"추천 분할: 가슴·삼두 / 등·이두 / 어깨 / 하체 4분할"});
+    else if (daysPerW==="주 5회 이상") splitCards.items.push({level:"info",text:"추천 분할: 5분할 (부위별)"});
+    if (weakParts.length) splitCards.items.push({level:"warn",text:`약점 부위 주 2회 이상 배치 권장: ${weakParts.join(", ")}`});
+    if (purpose.includes("체형 교정")) splitCards.items.push({level:"warn",text:"교정 운동 매 세션 10~15분 필수 포함"});
+    if (splitCards.items.length) cards.push({title:"📋 추천 분할 루틴", items:splitCards.items});
+
+    // 볼륨 가이드
+    const volItems = [];
+    if (exLevel==="운동 경험 없음") volItems.push({level:"ok",text:"초보자: 부위별 주 10~12세트 목표"});
+    else if (exLevel==="중급") volItems.push({level:"ok",text:"중급자: 부위별 주 14~18세트 목표"});
+    else volItems.push({level:"ok",text:"고급자: 부위별 주 18~22세트 목표"});
+    if (avgRpe && parseFloat(avgRpe)>=8.5) volItems.push({level:"warn",text:`현재 평균 RPE ${avgRpe} — 볼륨 10% 감소 권장`});
+    if (volItems.length) cards.push({title:"📊 추천 주간 볼륨", items:volItems});
+
+    // 회복 가이드
+    const recItems = [];
+    if (sleepH==="5시간 미만") recItems.push({level:"danger",text:"수면 심각 부족 — 고강도 훈련 제한 권장"});
+    else if (sleepH==="5~6시간") recItems.push({level:"warn",text:"수면 부족 — 운동 후 회복 저하 가능"});
+    else recItems.push({level:"ok",text:"수면 양호 — 회복 정상 범위"});
+    if (stressLv>=4) recItems.push({level:"danger",text:"스트레스 고조 — 가벼운 운동 위주 권장"});
+    if (hasPain) recItems.push({level:"warn",text:"통증 있음 — 고중량 훈련 전 교정 선행"});
+    if (recItems.length) cards.push({title:"😴 회복 가이드", items:recItems});
+
+    // 유산소
+    const cardioItems = [];
+    if (purpose.includes("체지방 감량")) {
+      if (cardioFreq==="거의 안 함") cardioItems.push({level:"warn",text:"감량 목표 — 유산소 주 3회 이상 권장"});
+      else cardioItems.push({level:"ok",text:"유산소 빈도 적절 — 강도 관리 중요"});
+    } else if (purpose.includes("근력 증가")||purpose.includes("벌크업")) {
+      if (cardioFreq==="주 5회 이상") cardioItems.push({level:"warn",text:"근성장 목표 — 유산소 과다. 주 2회 이하 권장"});
+    }
+    if (cardioItems.length) cards.push({title:"🏃 유산소 권장 빈도", items:cardioItems});
+
+    // 강도
+    const intItems = [];
+    if (exLevel==="운동 경험 없음") intItems.push({level:"ok",text:"추천 강도: RPE 5~6 (가볍게 시작)"});
+    else if (exLevel==="중급") intItems.push({level:"ok",text:"추천 강도: RPE 7~8 (충분한 자극)"});
+    else intItems.push({level:"ok",text:"추천 강도: RPE 8~9 (고강도 훈련 가능)"});
+    if (eating==="불규칙") intItems.push({level:"warn",text:"식습관 불규칙 — 고강도 훈련 시 에너지 부족 주의"});
+    if (intItems.length) cards.push({title:"⚡ 추천 운동 강도", items:intItems});
+
+    // 종합 피드백
+    const feedItems = [];
+    if (purpose.includes("체형 교정")&&purpose.includes("근력 증가")) feedItems.push({level:"ok",text:"교정 + 근력 목표 — TEO GYM 통합 PT에 최적화된 목표입니다"});
+    if (weakParts.includes("하체")) feedItems.push({level:"warn",text:"하체 약점 — 스쿼트 패턴 교정 + 점진적 부하 설계 필요"});
+    if (weakParts.includes("코어")) feedItems.push({level:"warn",text:"코어 약점 — 모든 세션에 코어 안정화 운동 포함 권장"});
+    feedItems.push({level:"info",text:"기록 기반 PT — 매 수업 후 수업일지 작성이 효과를 극대화합니다"});
+    if (feedItems.length) cards.push({title:"🎯 운동 방향 피드백", items:feedItems});
+
+    return cards;
+  }
+
+  const LEVEL_STYLE = {
+    danger:{border:"rgba(239,68,68,.25)",bg:"rgba(239,68,68,.08)",dot:"#ef4444",text:"#fca5a5"},
+    warn:  {border:"rgba(245,158,11,.25)",bg:"rgba(245,158,11,.08)",dot:"#f59e0b",text:"#fcd34d"},
+    ok:    {border:"rgba(34,197,94,.25)",bg:"rgba(34,197,94,.08)",dot:"#22c55e",text:"#86efac"},
+    info:  {border:"rgba(94,234,212,.2)",bg:"rgba(94,234,212,.06)",dot:"#5EEAD4",text:"#99f6e4"},
+  };
+
+  function ChipSel({ options, value, onChange, multi=false }) {
+    return (
+      <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}}>
+        {options.map(o=>{
+          const active = multi ? (value||[]).includes(o) : value===o;
+          return (
+            <button key={o} onClick={()=>multi?onChange(p=>p.includes(o)?p.filter(x=>x!==o):[...p,o]):onChange(active?"":o)}
+              style={{padding:"6px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:active?700:400,
+                borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
+                background:active?"rgba(94,234,212,.15)":"#111827",
+                color:active?"#5EEAD4":"#64748b"}}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const STEPS = [
+    { title:"운동 목적", content: (
+      <div>
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:6}}>복수 선택 가능</Mo>
+        <ChipSel multi options={["체지방 감량","근력 증가","체형 교정","통증 개선","자세 개선","벌크업","바디프로필","재활","체력 증가"]} value={purpose} onChange={setPurpose} />
+      </div>
+    )},
+    { title:"운동 경험", content: (
+      <div>
+        <ChipSel options={["운동 경험 없음","초급 (1년 미만)","중급 (1~3년)","고급 (3년 이상)"]} value={exLevel} onChange={setExLevel} />
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:5,marginTop:10}}>주 운동 횟수</Mo>
+        <ChipSel options={["주 1회","주 2회","주 3회","주 4회","주 5회 이상"]} value={daysPerW} onChange={setDaysPerW} />
+      </div>
+    )},
+    { title:"약점 부위", content: (
+      <div>
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:6}}>복수 선택 가능</Mo>
+        <ChipSel multi options={["가슴","등","어깨","팔","하체","코어","전신 균형"]} value={weakParts} onChange={setWeakParts} />
+        <div style={{marginTop:10,display:"flex",justifyContent:"space-between",alignItems:"center",
+          padding:"12px",background:"#0F172A",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)"}}>
+          <Mo c="#e2e8f0" s={13}>현재 통증/불편 있음</Mo>
+          <div onClick={()=>setHasPain(v=>!v)}
+            style={{width:46,height:26,borderRadius:13,cursor:"pointer",
+              background:hasPain?"#5EEAD4":"rgba(255,255,255,0.1)",position:"relative",transition:"background .2s"}}>
+            <div style={{position:"absolute",top:3,left:hasPain?22:3,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+          </div>
+        </div>
+      </div>
+    )},
+    { title:"생활 습관", content: (
+      <div>
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:5}}>수면 시간</Mo>
+        <ChipSel options={["5시간 미만","5~6시간","6~7시간","7~8시간","8시간 이상"]} value={sleepH} onChange={setSleepH} />
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:5,marginTop:10}}>유산소 빈도</Mo>
+        <ChipSel options={["거의 안 함","주 1~2회","주 3~4회","주 5회 이상"]} value={cardioFreq} onChange={setCardioFreq} />
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:5,marginTop:10}}>활동량</Mo>
+        <ChipSel options={["거의 안함","가벼운 활동","보통 활동","활동적"]} value={actLv} onChange={setActLv} />
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:5,marginTop:10}}>식습관</Mo>
+        <ChipSel options={["규칙적","불규칙","식단 관리 중"]} value={eating} onChange={setEating} />
+        <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:5,marginTop:10}}>{`스트레스 수준 — ${stressLv}/5`}</Mo>
+        <input type="range" min={1} max={5} value={stressLv} onChange={e=>setStressLv(Number(e.target.value))}
+          style={{width:"100%",accentColor:"#5EEAD4"}} />
+      </div>
+    )},
+  ];
+
+  // 결과 화면
+  if (step === -1) {
+    const reportCards = makeReport();
+    const hasSurvey   = sv.surveyDone;
+    return (
+      <div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>📝 PT 분석 리포트</Mo>
+          <button onClick={()=>setStep(0)}
+            style={{padding:"5px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
+              background:"#111827",color:"#64748b",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+            설문 다시하기
+          </button>
+        </div>
+        {!hasSurvey && (
+          <div style={{padding:"20px",borderRadius:12,background:"#111827",
+            border:"1px solid rgba(255,255,255,0.08)",textAlign:"center",marginBottom:12}}>
+            <Mo c="#64748b" s={11} style={{lineHeight:1.8}}>설문을 완료하면<br/>맞춤 PT 분석 리포트가 생성됩니다</Mo>
+            <button onClick={()=>setStep(0)}
+              style={{marginTop:12,padding:"9px 20px",borderRadius:9,border:"none",cursor:"pointer",
+                background:"rgba(94,234,212,.2)",color:"#5EEAD4",fontSize:12,fontWeight:700}}>
+              설문 시작하기 →
+            </button>
+          </div>
+        )}
+        {reportCards.map((card,ci)=>(
+          <div key={ci} style={{marginBottom:10,borderRadius:12,background:"#111827",
+            border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
+            <div style={{padding:"12px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+              <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
+            </div>
+            <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
+              {card.items.map((item,ii)=>{
+                const st=LEVEL_STYLE[item.level]||LEVEL_STYLE.info;
+                return(
+                  <div key={ii} style={{padding:"9px 12px",borderRadius:8,background:st.bg,
+                    border:`1px solid ${st.border}`,display:"flex",alignItems:"flex-start",gap:8}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:st.dot,flexShrink:0,marginTop:4}}/>
+                    <span style={{fontSize:12,color:st.text,lineHeight:1.6}}>{item.text}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // 설문 스텝
+  const cur = STEPS[step];
+  return (
+    <div>
+      <div style={{marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+          <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>{cur.title}</Mo>
+          <Mo c="#64748b" s={9}>{step+1} / {STEPS.length}</Mo>
+        </div>
+        <div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.08)",overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${((step+1)/STEPS.length)*100}%`,
+            background:"linear-gradient(90deg,#5EEAD4,#2DD4BF)",transition:"width .3s"}}/>
+        </div>
+      </div>
+
+      <Card style={{borderColor:"rgba(255,255,255,0.08)",marginBottom:14}}>
+        <Mo c="#e2e8f0" s={15} style={{fontWeight:700,display:"block",marginBottom:12}}>{cur.title}</Mo>
+        {cur.content}
+      </Card>
+
+      <div style={{display:"flex",gap:9}}>
+        {step>0 && <Btn ghost onClick={()=>setStep(s=>s-1)} style={{flex:1}}>← 이전</Btn>}
+        {step<STEPS.length-1
+          ? <Btn onClick={()=>setStep(s=>s+1)} style={{flex:2}}>다음 →</Btn>
+          : <Btn full onClick={finishSurvey} disabled={saving} style={{flex:2}}>
+              {saving?"저장 중...":"✅ 분석 리포트 생성"}
+            </Btn>}
+      </div>
     </div>
   );
 }

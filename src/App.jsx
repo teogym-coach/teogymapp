@@ -621,6 +621,13 @@ export default function App() {
         {screen==="history"    && <HistoryScreen sessions={sessions} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
+        {screen==="consultReport" && member && (
+          <div>
+            <SH title="🤖 AI 초기 분석 리포트" sub={member.name}
+              right={<Btn ghost sm onClick={()=>setScreen("hub")}>← 뒤로</Btn>} />
+            <ConsultReportView member={member} onClose={()=>setScreen("hub")} showClose={false} />
+          </div>
+        )}
         {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
@@ -940,6 +947,151 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
 // ════════════════════════════════════════════
 // MEMBER FORM
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+// 공통: 초기 상담 AI 분석 리포트 생성
+// ════════════════════════════════════════════
+function buildConsultReport(sv) {
+  const LEVEL = {
+    danger:{border:"rgba(239,68,68,.25)",bg:"rgba(239,68,68,.08)",dot:"#ef4444",text:"#fca5a5"},
+    warn:  {border:"rgba(245,158,11,.25)",bg:"rgba(245,158,11,.08)",dot:"#f59e0b",text:"#fcd34d"},
+    ok:    {border:"rgba(34,197,94,.25)",bg:"rgba(34,197,94,.08)",dot:"#22c55e",text:"#86efac"},
+    info:  {border:"rgba(94,234,212,.2)",bg:"rgba(94,234,212,.06)",dot:"#5EEAD4",text:"#99f6e4"},
+  };
+  const { weakParts=[], exStyle=[], intensity="", priorityGoal="",
+          purposes=[], exLevel="", daysPerWeek="", sleepHours="",
+          stressLevel=3, painParts=[], hasDisk=false, hasHyper=false,
+          hasDiabetes=false, medications="", surgeries="" } = sv;
+  const rc = [];
+
+  // 1. 현재 상태 분석
+  const st=[];
+  if(sleepHours==="5시간 미만")st.push({level:"danger",text:"수면 심각 부족 — 회복 저하, 고강도 훈련 제한 권장"});
+  else if(sleepHours==="5~6시간")st.push({level:"warn",text:"수면 부족 — 회복 영향 가능"});
+  else if(sleepHours)st.push({level:"ok",text:"수면 양호 — 회복 정상 범위"});
+  if(Number(stressLevel)>=4)st.push({level:"danger",text:"스트레스 고조 — 가벼운 운동 위주 구성 권장"});
+  else if(Number(stressLevel)>=3)st.push({level:"warn",text:"스트레스 보통 — 회복 운동 병행 권장"});
+  const pb=(painParts||[]).filter(p=>p!=="없음");
+  if(pb.length>0)st.push({level:"warn",text:`통증 부위 존재: ${pb.join(", ")} — 교정 운동 우선 배치`});
+  if(exLevel==="운동 경험 없음"||exLevel==="초급 (1년 미만)")st.push({level:"info",text:"초급 단계 — 기초 패턴 습득 + 안전한 중량 설정이 우선"});
+  if(st.length)rc.push({title:"📊 현재 상태 분석", items:st});
+
+  // 2. 추천 운동 방향
+  const ex=[];
+  if(daysPerWeek==="주 1회")ex.push({level:"info",text:"주 1회 → 전신 운동 (Full Body) 추천"});
+  else if(daysPerWeek==="주 2회")ex.push({level:"info",text:"주 2회 → 상체 / 하체 2분할 추천"});
+  else if(daysPerWeek==="주 3회")ex.push({level:"info",text:"주 3회 → 밀기 / 당기기 / 하체 3분할 추천"});
+  else if(daysPerWeek==="주 4회")ex.push({level:"info",text:"주 4회 → 가슴·삼두 / 등·이두 / 어깨 / 하체 4분할 추천"});
+  else if(daysPerWeek==="주 5회 이상")ex.push({level:"info",text:"주 5회 이상 → 5분할 부위별 루틴 추천"});
+  if(weakParts.length>0)ex.push({level:"warn",text:`약점 부위 주 2회 이상 배치 권장: ${weakParts.join(", ")}`});
+  if((exStyle||[]).includes("교정 운동")||(purposes||[]).includes("체형 교정"))ex.push({level:"warn",text:"교정 운동 매 세션 10~15분 필수 포함 권장"});
+  if((exStyle||[]).includes("머신 위주"))ex.push({level:"ok",text:"머신 위주 → 초반 안정성 확보 후 프리웨이트 비중 증가 예정"});
+  if(ex.length)rc.push({title:"🏋️ 추천 운동 방향", items:ex});
+
+  // 3. 주의사항
+  const wa=[];
+  if(pb.includes("무릎"))wa.push({level:"danger",text:"무릎 통증 → 하체 충격성 동작(점프, 깊은 스쿼트) 제한 / 운동 지도 참고용"});
+  if(pb.includes("어깨"))wa.push({level:"danger",text:"어깨 불편 → 오버헤드 동작 제한, 회전근개 강화 우선 / 운동 지도 참고용"});
+  if(pb.includes("허리"))wa.push({level:"danger",text:"허리 통증 → 고중량 컴파운드 제한, 코어 안정화 우선 / 운동 지도 참고용"});
+  if(hasDisk)wa.push({level:"danger",text:"디스크 병력 → 굴곡/회전 제한 동작 주의, 의료진 지도 병행 권장"});
+  if(hasHyper)wa.push({level:"warn",text:"고혈압 병력 → 고강도 인터벌, 발살바 호흡 주의"});
+  if(hasDiabetes)wa.push({level:"warn",text:"당뇨 병력 → 저혈당 징후 모니터링, 운동 전후 혈당 확인 권장"});
+  if(medications)wa.push({level:"warn",text:`복용 약물(${medications.slice(0,20)}) → 운동 반응 변화 가능, 이상 시 즉시 중단`});
+  if(intensity==="강하게")wa.push({level:"warn",text:"고강도 선호 → 초반 4주는 패턴 습득 위주, 이후 점진적 강도 증가"});
+  if(wa.length)rc.push({title:"⚠️ 주의사항 (운동 지도 참고용)", items:wa});
+
+  // 4. 첫 4주 운동 방향
+  const w4=[];
+  w4.push({level:"info",text:"1주차: 기초 평가 + 기본 패턴 습득 (가벼운 중량, RPE 5~6)"});
+  w4.push({level:"info",text:"2주차: 패턴 안정화 + 교정 운동 비중 조절"});
+  w4.push({level:"info",text:"3주차: 점진적 강도 증가 시작 (RPE 6~7)"});
+  w4.push({level:"ok",text:"4주차: 루틴 고정 + 재평가 및 다음 단계 방향 설정"});
+  rc.push({title:"📅 첫 4주 운동 방향", items:w4});
+
+  // 5. 추천 주간 볼륨
+  const vol=[];
+  const lvl = (exLevel||"").includes("고급")?"고급":(exLevel||"").includes("중급")?"중급":"초급";
+  const sets = {초급:"주 8~10세트",중급:"주 12~16세트",고급:"주 16~20세트"};
+  vol.push({level:"ok",text:`경험 수준(${lvl}): 부위별 ${sets[lvl]} 목표`});
+  (weakParts||[]).forEach(p=>vol.push({level:"info",text:`${p} (약점): 타 부위 대비 20~30% 볼륨 증가 배치`}));
+  if(vol.length)rc.push({title:"📊 추천 주간 볼륨", items:vol});
+
+  // 6. PT 방향 제안
+  const pt=[];
+  if(priorityGoal)pt.push({level:"ok",text:`우선 목표: ${priorityGoal}`});
+  if((purposes||[]).includes("체형 교정")||priorityGoal?.includes("교정"))pt.push({level:"info",text:"교정 우선 접근 → 기능 회복 확인 후 부하 증가"});
+  if((purposes||[]).includes("체지방 감량")||priorityGoal?.includes("감량"))pt.push({level:"info",text:"감량 방향 → 권장 속도 주 0.5~0.7kg, 단백질 체중×1.8g 이상"});
+  if((purposes||[]).includes("근력 증가")||(purposes||[]).includes("벌크업"))pt.push({level:"info",text:"근성장 방향 → 점진적 과부하 + 충분한 칼로리 확보 필요"});
+  if(((purposes||[]).includes("통증 개선")||pb.length>0))pt.push({level:"warn",text:"통증 관리 병행 → 교정 운동 우선, 통증 악화 시 즉시 강도 조절"});
+  pt.push({level:"info",text:"TEO GYM 기록 기반 PT → 매 수업 데이터로 실시간 방향 수정"});
+  if(pt.length)rc.push({title:"🎯 PT 방향 제안", items:pt});
+
+  // 7. 상담 멘트 추천
+  const ment=[];
+  if(priorityGoal?.includes("감량"))ment.push({level:"ok",text:""체중 숫자보다 체지방률과 근육량 변화를 함께 보면 더 정확한 진행을 확인할 수 있습니다""});
+  if(priorityGoal?.includes("교정")||priorityGoal?.includes("자세"))ment.push({level:"ok",text:""자세 교정은 보통 6~8주면 일상에서 변화를 느끼실 수 있습니다""});
+  if(pb.length>0)ment.push({level:"info",text:""통증은 운동을 못 하는 이유가 아니라 교정 운동이 필요한 신호입니다""});
+  ment.push({level:"info",text:""처음 4주는 몸이 운동에 적응하는 기간으로 인내심이 필요하지만, 기초를 잘 잡으면 그 이후 변화 속도가 빨라집니다""});
+  if(ment.length)rc.push({title:"💬 상담 멘트 추천", items:ment});
+
+  return { cards: rc, LEVEL };
+}
+
+// 초기 상담 AI 리포트 컴포넌트 (재사용)
+function ConsultReportView({ member, onClose, showClose=true }) {
+  const sv   = member?.survey || {};
+  const { cards, LEVEL } = buildConsultReport(sv);
+  const pg   = sv.priorityGoal || (sv.purposes||[])[0] || "";
+
+  return (
+    <div>
+      {showClose && (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <Mo c="#e2e8f0" s={14} style={{fontWeight:700}}>🤖 AI 초기 평가 리포트</Mo>
+          <button onClick={onClose}
+            style={{padding:"5px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
+              background:"#111827",color:"#64748b",fontSize:10,cursor:"pointer"}}>✕ 닫기</button>
+        </div>
+      )}
+      {/* 헤더 카드 */}
+      <div style={{padding:"14px 16px",borderRadius:12,marginBottom:12,
+        background:"linear-gradient(135deg,rgba(94,234,212,.10),rgba(129,140,248,.06))",
+        border:"1px solid rgba(94,234,212,.2)"}}>
+        <Mo c="#5EEAD4" s={8} style={{display:"block",letterSpacing:".1em",marginBottom:4}}>TEO GYM · 초기 상담 분석</Mo>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,color:"#e2e8f0",marginBottom:3}}>{member?.name||"회원"}</div>
+        <Mo c="#64748b" s={10}>
+          {sv.surveyDate||"등록일 미기록"} 등록 · {(sv.purposes||[]).slice(0,2).join(", ")||"목표 미설정"}
+          {pg ? ` · ${pg}` : ""}
+        </Mo>
+      </div>
+      {!sv.surveyDone ? (
+        <div style={{padding:"20px",borderRadius:12,background:"#111827",
+          border:"1px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
+          <Mo c="#64748b" s={12} style={{lineHeight:1.8}}>초기 상담 설문이 완료되지 않았습니다<br/>회원 수정 → 운동목적 탭에서 설문을 완료해주세요</Mo>
+        </div>
+      ) : cards.map((card,ci)=>(
+        <div key={ci} style={{marginBottom:10,borderRadius:12,background:"#111827",
+          border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
+          <div style={{padding:"11px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+            <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
+          </div>
+          <div style={{padding:"9px 14px",display:"flex",flexDirection:"column",gap:5}}>
+            {card.items.map((item,ii)=>{
+              const s=LEVEL[item.level]||LEVEL.info;
+              return(
+                <div key={ii} style={{padding:"8px 11px",borderRadius:7,background:s.bg,
+                  border:`1px solid ${s.border}`,display:"flex",alignItems:"flex-start",gap:8}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:s.dot,flexShrink:0,marginTop:4}}/>
+                  <span style={{fontSize:11,color:s.text,lineHeight:1.7}}>{item.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MemberForm({ initial, onSave, onBack }) {
   const isEdit = !!initial;
   const sv     = initial?.survey || {};
@@ -1082,28 +1234,224 @@ function MemberForm({ initial, onSave, onBack }) {
     if (!isEdit) setShowReport(true);
   }
 
-  // ── 수정 모드: 기존 단순 폼 ────────────────────
+  // ── 수정 모드: 탭형 전체 프로필 수정 ────────────────────
+  const [editTab, setEditTab] = useState("기본");
+  const [showAiReport, setShowAiReport] = useState(false);
+
   if (isEdit) {
+    const EDIT_TABS = ["기본","목표·목적","통증·건강","운동경험","생활습관","스케줄","메모"];
+
+    if (showAiReport) {
+      // handleSave로 저장된 최신 survey 데이터 기반 리포트
+      const tempMember = { ...initial, name,
+        survey:{ ...sv, purposes, primaryGoal, weakParts, exStyle, intensity, priorityGoal,
+          exLevel, exDuration, prevPT, sleepHours, stressLevel, painParts, painSituation,
+          hasDisk, hasHyper, hasDiabetes, medications, surgeries, exCaution,
+          preferTime, daysPerWeek, goalPeriod, mealsPerDay, surveyDone:true }
+      };
+      return (
+        <div>
+          <SH title="🤖 AI 분석 리포트" sub={name}
+            right={<Btn ghost sm onClick={()=>setShowAiReport(false)}>← 뒤로</Btn>} />
+          <ConsultReportView member={tempMember} onClose={()=>setShowAiReport(false)} showClose={false} />
+        </div>
+      );
+    }
+
     return (
       <div>
-        <SH title="✏️ 회원 수정" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+        <SH title="✏️ 회원 프로필 수정" sub={name}
+          right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+        {/* AI 리포트 버튼 */}
+        <button onClick={()=>setShowAiReport(true)}
+          style={{width:"100%",marginBottom:12,padding:"10px 14px",borderRadius:10,cursor:"pointer",
+            background:"rgba(94,234,212,.08)",border:"1px solid rgba(94,234,212,.2)",
+            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>🤖</span>
+            <Mo c="#5EEAD4" s={11} style={{fontWeight:700}}>AI 초기 분석 리포트 보기</Mo>
+          </div>
+          <Mo c="#64748b" s={9}>→</Mo>
+        </button>
+
+        {/* 탭 네비게이션 */}
+        <div style={{display:"flex",gap:4,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
+          {EDIT_TABS.map(t=>(
+            <button key={t} onClick={()=>setEditTab(t)}
+              style={{padding:"6px 11px",borderRadius:16,border:"1px solid",cursor:"pointer",
+                fontSize:10,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,
+                borderColor:editTab===t?"#5EEAD4":"rgba(255,255,255,0.08)",
+                background:editTab===t?"rgba(94,234,212,.12)":"#111827",
+                color:editTab===t?"#5EEAD4":"#64748b"}}>
+              {t}
+            </button>
+          ))}
+        </div>
+
         <Card>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-            <Field label="이름 *"   value={name}  onChange={setName}  placeholder="김회원" />
-            <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
-          </div>
-          <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:9}}>
-            <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
-            <TextArea label="목표" value={goal} onChange={setGoal} placeholder="체지방 감량, 자세 교정 등" />
-            <TextArea label="불편 부위 / 통증" value={painArea} onChange={setPainArea} placeholder="우측 무릎, 허리 등" />
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-              <Field label="등록 횟수" value={sessions} onChange={setSessions2} placeholder="예: 20회" />
-              <Field label="이용권 정보" value={ticketInfo} onChange={setTicketInfo} placeholder="예: 3개월권" />
+          {/* ─ 기본 탭 ─ */}
+          {editTab==="기본" && (
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <Field label="이름 *" value={name} onChange={setName} placeholder="김회원" />
+                <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
+              </div>
+              <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <StepLabel label="성별" />
+                <div/>
+              </div>
+              <ChipSelect options={["남성","여성"]} value={gender} onChange={setGender} />
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
+                <Field label="나이" value={age} onChange={setAge} placeholder="32" type="number" />
+                <Field label="키(cm)" value={height} onChange={setHeight} placeholder="170" type="number" />
+                <Field label="체중(kg)" value={weight} onChange={setWeight} placeholder="65" type="number" />
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <Field label="등록 횟수" value={sessions} onChange={setSessions2} placeholder="20회" />
+                <Field label="이용권 정보" value={ticketInfo} onChange={setTicketInfo} placeholder="3개월권" />
+              </div>
             </div>
-            <TextArea label="메모 / 특이사항" value={memo} onChange={setMemo} placeholder="부상 이력, 운동 경력 등" />
-          </div>
-          <div style={{marginTop:14}}>
-            <Btn full onClick={handleSave} disabled={!name}>수정 저장 →</Btn>
+          )}
+
+          {/* ─ 목표·목적 탭 ─ */}
+          {editTab==="목표·목적" && (
+            <div>
+              <StepLabel label="운동 목적 (복수 선택)" />
+              <ChipSelect multi
+                options={["체지방 감량","근력 증가","체형 교정","통증 개선","자세 개선","근육 증가","건강 관리","바디프로필","재활 목적","체력 증가"]}
+                value={purposes} onChange={setPurposes} />
+              <StepLabel label="가장 우선순위 목표" />
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:4}}>
+                {["체형 교정 우선","근비대 우선","체지방 감량 우선","통증 개선 우선","자세 개선 우선","체력 향상 우선"].map(l=>{
+                  const active=priorityGoal===l;
+                  return(
+                    <button key={l} onClick={()=>setPriorityGoal(active?"":l)}
+                      style={{padding:"10px 14px",borderRadius:9,border:"1px solid",cursor:"pointer",textAlign:"left",
+                        borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
+                        background:active?"rgba(94,234,212,.1)":"#111827",
+                        color:active?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:active?700:400}}>
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+              <StepLabel label="약점 부위" />
+              <ChipSelect multi options={["가슴","등","어깨","팔","하체","둔근","코어","심폐지구력"]} value={weakParts} onChange={setWeakParts} />
+              <StepLabel label="선호 운동 스타일" />
+              <ChipSelect multi options={["머신 위주","프리웨이트 위주","기능성 운동","교정 운동","유산소 위주","바디프로필 스타일","재활 중심"]} value={exStyle} onChange={setExStyle} />
+            </div>
+          )}
+
+          {/* ─ 통증·건강 탭 ─ */}
+          {editTab==="통증·건강" && (
+            <div>
+              <StepLabel label="통증/불편 부위 (복수 선택)" />
+              <ChipSelect multi options={["목","어깨","팔꿈치","손목","허리","고관절","무릎","발목","없음"]}
+                value={painParts} onChange={setPainParts} />
+              <StepLabel label="언제 가장 불편한지" />
+              <textarea value={painSituation} onChange={e=>setPainSituation(e.target.value)}
+                placeholder="예: 계단 내려갈 때 무릎 통증" rows={2}
+                style={{width:"100%",padding:"9px",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",
+                  background:"#111827",color:"#e2e8f0",fontSize:12,resize:"none",boxSizing:"border-box"}} />
+              <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
+                {[["디스크 병력",hasDisk,setHasDisk],["고혈압",hasHyper,setHasHyper],["당뇨",hasDiabetes,setHasDiabetes]].map(([label,val,set])=>(
+                  <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                    padding:"11px 13px",background:"#0F172A",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)"}}>
+                    <Mo c="#e2e8f0" s={13}>{label}</Mo>
+                    <div onClick={()=>set(v=>!v)}
+                      style={{width:44,height:24,borderRadius:12,cursor:"pointer",transition:"background .2s",
+                        background:val?"#5EEAD4":"rgba(255,255,255,0.1)",position:"relative"}}>
+                      <div style={{position:"absolute",top:2,left:val?22:2,width:20,height:20,
+                        borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{marginTop:9,display:"flex",flexDirection:"column",gap:7}}>
+                <Field label="복용 약물" value={medications} onChange={setMedications} placeholder="혈압약 등 (없으면 빈칸)" />
+                <Field label="수술 경험" value={surgeries} onChange={setSurgeries} placeholder="2022년 무릎 수술 등" />
+                <textarea value={exCaution} onChange={e=>setExCaution(e.target.value)}
+                  placeholder="운동 시 주의사항" rows={2}
+                  style={{width:"100%",padding:"9px",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",
+                    background:"#111827",color:"#e2e8f0",fontSize:12,resize:"none",boxSizing:"border-box"}} />
+              </div>
+            </div>
+          )}
+
+          {/* ─ 운동경험 탭 ─ */}
+          {editTab==="운동경험" && (
+            <div>
+              <StepLabel label="운동 경험 수준" />
+              <ChipSelect options={["운동 경험 없음","초급 (1년 미만)","중급 (1~3년)","고급 (3년 이상)"]} value={exLevel} onChange={setExLevel} />
+              <StepLabel label="운동 지속 기간" />
+              <ChipSelect options={["없음","1개월 미만","1~6개월","6개월~1년","1~3년","3년 이상"]} value={exDuration} onChange={setExDuration} />
+              <StepLabel label="이전 PT 경험" />
+              <ChipSelect options={["없음","있음 (만족)","있음 (불만족)","있음 (중립)"]} value={prevPT} onChange={setPrevPT} />
+              {prevPT && prevPT !== "없음" && (
+                <textarea value={prevPTNote} onChange={e=>setPrevPTNote(e.target.value)}
+                  placeholder="이전 PT 좋았던 점 / 아쉬웠던 점" rows={2}
+                  style={{width:"100%",padding:"9px",borderRadius:7,marginTop:7,
+                    border:"1px solid rgba(255,255,255,0.08)",background:"#111827",
+                    color:"#e2e8f0",fontSize:12,resize:"none",boxSizing:"border-box"}} />
+              )}
+              <StepLabel label="운동 강도 성향" />
+              <ChipSelect options={["천천히","보통","강하게"]} value={intensity} onChange={setIntensity} />
+            </div>
+          )}
+
+          {/* ─ 생활습관 탭 ─ */}
+          {editTab==="생활습관" && (
+            <div>
+              {[
+                {l:"하루 식사 횟수",opts:["1끼","2끼","3끼","4끼 이상"],val:mealsPerDay,set:setMealsPerDay},
+                {l:"수면 시간",opts:["5시간 미만","5~6시간","6~7시간","7~8시간","8시간 이상"],val:sleepHours,set:setSleepHours},
+                {l:"음주 빈도",opts:["안 마심","월 1~2회","주 1회","주 2회 이상"],val:alcohol,set:setAlcohol},
+                {l:"활동량",opts:["거의 안함","가벼운 활동","보통 활동","활동적"],val:actLv,set:()=>{}},
+              ].map(({l,opts,val,set})=>(
+                <div key={l} style={{marginBottom:10}}>
+                  <StepLabel label={l} />
+                  <ChipSelect options={opts} value={val} onChange={set} />
+                </div>
+              ))}
+              <StepLabel label={`스트레스 수준 — ${stressLevel}/5`} />
+              <input type="range" min={1} max={5} value={stressLevel}
+                onChange={e=>setStressLevel(Number(e.target.value))}
+                style={{width:"100%",accentColor:"#5EEAD4",marginBottom:8}} />
+            </div>
+          )}
+
+          {/* ─ 스케줄 탭 ─ */}
+          {editTab==="스케줄" && (
+            <div>
+              <StepLabel label="선호 시간대 (복수 선택)" />
+              <ChipSelect multi
+                options={["[평일] 오전 10~12시","[평일] 오후 12~3시","[평일] 오후 3~6시","[평일] 오후 6~8시","[평일] 오후 8~10시","[토요일] 오전","[토요일] 오후"]}
+                value={preferTime} onChange={setPreferTime} />
+              <div style={{marginTop:6,padding:"6px 10px",borderRadius:6,background:"rgba(94,234,212,.05)",
+                border:"1px solid rgba(94,234,212,.12)",marginBottom:10}}>
+                <Mo c="#64748b" s={9}>평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
+              </div>
+              <StepLabel label="주 운동 가능 횟수" />
+              <ChipSelect options={["주 1회","주 2회","주 3회","주 4회","주 5회 이상"]} value={daysPerWeek} onChange={setDaysPerWeek} />
+              <StepLabel label="목표 기간" />
+              <ChipSelect options={["1개월","3개월","6개월","1년","꾸준히"]} value={goalPeriod} onChange={setGoalPeriod} />
+            </div>
+          )}
+
+          {/* ─ 메모 탭 ─ */}
+          {editTab==="메모" && (
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <TextArea label="목표 메모" value={goal} onChange={setGoal} placeholder="체지방 감량, 자세 교정 등" />
+              <TextArea label="불편 부위 / 통증 요약" value={painArea} onChange={setPainArea} placeholder="우측 무릎, 허리 등" />
+              <TextArea label="기타 메모 / 특이사항" value={memo} onChange={setMemo} placeholder="부상 이력, 특이사항 등" />
+            </div>
+          )}
+
+          {/* 저장 버튼 */}
+          <div style={{marginTop:16}}>
+            <Btn full onClick={handleSave} disabled={!name}>💾 저장 →</Btn>
           </div>
         </Card>
       </div>
@@ -1112,103 +1460,16 @@ function MemberForm({ initial, onSave, onBack }) {
 
   // ── AI 분석 리포트 (등록 완료 후) ──────────────
   if (showReport) {
-    const sv2 = { weakParts, exStyle, intensity, priorityGoal, purposes, exLevel, daysPerWeek, sleepHours, stressLevel, painParts };
-    const LEVEL = {
-      danger:{border:"rgba(239,68,68,.25)",bg:"rgba(239,68,68,.08)",dot:"#ef4444",text:"#fca5a5"},
-      warn:  {border:"rgba(245,158,11,.25)",bg:"rgba(245,158,11,.08)",dot:"#f59e0b",text:"#fcd34d"},
-      ok:    {border:"rgba(34,197,94,.25)",bg:"rgba(34,197,94,.08)",dot:"#22c55e",text:"#86efac"},
-      info:  {border:"rgba(94,234,212,.2)",bg:"rgba(94,234,212,.06)",dot:"#5EEAD4",text:"#99f6e4"},
+    const tempMember = { name,
+      survey:{ weakParts, exStyle, intensity, priorityGoal, purposes, exLevel, daysPerWeek,
+               sleepHours, stressLevel, painParts, hasDisk, hasHyper, hasDiabetes,
+               medications, surgeries, exCaution, surveyDate: new Date().toISOString().split("T")[0], surveyDone:true }
     };
-    // 룰 기반 분석 카드 생성
-    const rc = [];
-    // 1. 현재 상태
-    const st=[];
-    if(sleepHours==="5시간 미만")st.push({level:"danger",text:"수면 심각 부족 — 회복 저하, 고강도 훈련 제한 권장"});
-    else if(sleepHours==="5~6시간")st.push({level:"warn",text:"수면 부족 — 회복 영향 가능"});
-    else if(sleepHours)st.push({level:"ok",text:"수면 양호 — 회복 정상 범위"});
-    if(stressLevel>=4)st.push({level:"danger",text:"스트레스 고조 — 가벼운 운동 위주 구성 권장"});
-    else if(stressLevel>=3)st.push({level:"warn",text:"스트레스 보통 — 회복 운동 병행 권장"});
-    if(painParts.length>0&&!painParts.includes("없음"))st.push({level:"warn",text:`통증 부위 존재: ${painParts.filter(p=>p!=="없음").join(", ")} — 교정 운동 우선 배치`});
-    if(exLevel==="운동 경험 없음"||exLevel==="초급 (1년 미만)")st.push({level:"info",text:"초급 단계 — 기초 패턴 습득 + 안전한 중량 설정이 우선입니다"});
-    if(st.length)rc.push({title:"📊 현재 상태 분석", items:st});
-    // 2. 추천 운동 방향
-    const ex=[];
-    if(daysPerWeek==="주 1회")ex.push({level:"info",text:"주 1회 → 전신 운동 (Full Body) 추천"});
-    else if(daysPerWeek==="주 2회")ex.push({level:"info",text:"주 2회 → 상체 / 하체 2분할 추천"});
-    else if(daysPerWeek==="주 3회")ex.push({level:"info",text:"주 3회 → 밀기 / 당기기 / 하체 3분할 추천"});
-    else if(daysPerWeek==="주 4회")ex.push({level:"info",text:"주 4회 → 가슴·삼두 / 등·이두 / 어깨 / 하체 4분할 추천"});
-    if(weakParts.length>0)ex.push({level:"warn",text:`약점 부위 주 2회 이상 배치 권장: ${weakParts.join(", ")}`});
-    if(exStyle.includes("교정 운동")||purposes.includes("체형 교정"))ex.push({level:"warn",text:"교정 운동 매 세션 10~15분 필수 포함 권장"});
-    if(exStyle.includes("머신 위주"))ex.push({level:"ok",text:"머신 위주 → 초반 안정성 확보 후 프리웨이트 비중 증가 예정"});
-    if(ex.length)rc.push({title:"🏋️ 추천 운동 방향", items:ex});
-    // 3. 주의사항
-    const wa=[];
-    const pb=painParts.filter(p=>p!=="없음");
-    if(pb.includes("무릎"))wa.push({level:"danger",text:"무릎 통증 → 하체 충격성 동작(점프, 깊은 스쿼트) 제한"});
-    if(pb.includes("어깨"))wa.push({level:"danger",text:"어깨 불편 → 오버헤드 동작 제한, 회전근개 강화 우선"});
-    if(pb.includes("허리"))wa.push({level:"danger",text:"허리 통증 → 고중량 컴파운드 제한, 코어 안정화 우선"});
-    if(intensity==="강하게")wa.push({level:"warn",text:"고강도 선호 → 초반 4주는 패턴 습득 위주, 이후 점진적 강도 증가"});
-    if(wa.length)rc.push({title:"⚠️ 주의사항", items:wa});
-    // 4. 추천 볼륨
-    const vol=[];
-    const lvl = exLevel?.includes("고급")?"고급":exLevel?.includes("중급")?"중급":"초급";
-    const sets = {초급:"주 8~10세트",중급:"주 12~16세트",고급:"주 16~20세트"};
-    vol.push({level:"ok",text:`경험 수준(${lvl}): 부위별 ${sets[lvl]} 목표`});
-    weakParts.forEach(p=>vol.push({level:"info",text:`${p} (약점): 타 부위 대비 20~30% 볼륨 증가 배치`}));
-    if(vol.length)rc.push({title:"📊 추천 주간 볼륨", items:vol});
-    // 5. PT 방향
-    const pt=[];
-    if(priorityGoal)pt.push({level:"ok",text:`우선 목표: ${priorityGoal}`});
-    if(purposes.includes("체형 교정")||priorityGoal?.includes("교정"))pt.push({level:"info",text:"교정 우선 접근 → 기능 회복 확인 후 부하 증가"});
-    if(purposes.includes("체지방 감량")||priorityGoal?.includes("감량"))pt.push({level:"info",text:"감량 방향 → 권장 속도 주 0.5~0.7kg, 단백질 체중×1.8g 이상"});
-    if(purposes.includes("근력 증가")||purposes.includes("벌크업"))pt.push({level:"info",text:"근성장 방향 → 점진적 과부하 + 충분한 칼로리 확보 필요"});
-    if(pt.length)rc.push({title:"🎯 PT 방향 제안", items:pt});
-    // 6. 목표 달성 예상
-    const goal2=[];
-    if(priorityGoal?.includes("감량"))goal2.push({level:"ok",text:"권장 감량 속도: 주 0.5~0.7kg (3개월 기준 6~9kg)"});
-    if(priorityGoal?.includes("교정")||priorityGoal?.includes("자세"))goal2.push({level:"ok",text:"자세 교정 체감 기간: 6~12주 (매 세션 기록 기반 추적)"});
-    if(priorityGoal?.includes("근비대"))goal2.push({level:"ok",text:"근비대 체감 기간: 8~12주 (볼륨 + 영양 최적화 시)"});
-    goal2.push({level:"info",text:"TEO GYM 기록 기반 PT → 매 수업 데이터로 실시간 방향 수정"});
-    if(goal2.length)rc.push({title:"📈 목표 달성 예상", items:goal2});
-
     return (
       <div>
         <SH title="🤖 AI 초기 평가 리포트" sub={name}
           right={<Btn ghost sm onClick={onBack}>완료 →</Btn>} />
-        <div style={{padding:"12px 14px",borderRadius:12,marginBottom:12,
-          background:"linear-gradient(135deg,rgba(94,234,212,.12),rgba(129,140,248,.08))",
-          border:"1px solid rgba(94,234,212,.25)"}}>
-          <Mo c="#5EEAD4" s={9} style={{display:"block",letterSpacing:".1em",marginBottom:4}}>TEO GYM · 초기 상담 분석 리포트</Mo>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"#e2e8f0",marginBottom:3}}>{name}</div>
-          <Mo c="#64748b" s={10}>
-            {new Date().toLocaleDateString("ko-KR")} 등록 · {purposes.slice(0,2).join(", ")||"목표 미설정"}
-            {priorityGoal ? ` · ${priorityGoal}` : ""}
-          </Mo>
-        </div>
-        {rc.map((card,ci)=>(
-          <div key={ci} style={{marginBottom:10,borderRadius:12,background:"#111827",
-            border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
-            <div style={{padding:"12px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-              <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
-            </div>
-            <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
-              {card.items.map((item,ii)=>{
-                const s=LEVEL[item.level]||LEVEL.info;
-                return(
-                  <div key={ii} style={{padding:"9px 12px",borderRadius:8,background:s.bg,
-                    border:`1px solid ${s.border}`,display:"flex",alignItems:"flex-start",gap:8}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:s.dot,flexShrink:0,marginTop:4}}/>
-                    <span style={{fontSize:12,color:s.text,lineHeight:1.6}}>{item.text}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-        <div style={{marginTop:6,padding:"10px 14px",borderRadius:10,
-          background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.15)",textAlign:"center"}}>
-          <Mo c="#64748b" s={10}>이 리포트는 회원 설문 데이터 기반으로 자동 생성됩니다<br/>수업이 쌓일수록 분석이 더욱 정교해집니다</Mo>
-        </div>
+        <ConsultReportView member={tempMember} onClose={onBack} showClose={false} />
         <div style={{marginTop:10}}>
           <Btn full onClick={onBack}>✅ 상담 완료 — 회원 목록으로</Btn>
         </div>
@@ -1601,6 +1862,23 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
           <StatTile label="누적 볼륨" value={(totalVol/1000).toFixed(1)+"t"} />
           <StatTile label="최근 회차" value={last ? last.sessionNo+"회" : "—"} sub={last?.date||""} />
         </div>
+      )}
+
+      {/* AI 초기 분석 리포트 버튼 */}
+      {member.survey?.surveyDone && (
+        <button onClick={()=>setScreen("consultReport")}
+          style={{width:"100%",marginBottom:12,padding:"11px 14px",borderRadius:10,cursor:"pointer",
+            background:"rgba(94,234,212,.07)",border:"1px solid rgba(94,234,212,.18)",
+            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>🤖</span>
+            <div style={{textAlign:"left"}}>
+              <Mo c="#5EEAD4" s={11} style={{fontWeight:700,display:"block"}}>AI 초기 분석 리포트</Mo>
+              <Mo c="#64748b" s={9}>상담 설문 기반 · 수업 방향 가이드</Mo>
+            </div>
+          </div>
+          <Mo c="#5EEAD4" s={12}>→</Mo>
+        </button>
       )}
 
       {wData.length >= 2 && (

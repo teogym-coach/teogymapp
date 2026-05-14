@@ -1027,10 +1027,10 @@ function buildConsultReport(sv) {
 
   // 7. 상담 멘트 추천
   const ment=[];
-  if(priorityGoal?.includes("감량"))ment.push({level:"ok",text:""체중 숫자보다 체지방률과 근육량 변화를 함께 보면 더 정확한 진행을 확인할 수 있습니다""});
-  if(priorityGoal?.includes("교정")||priorityGoal?.includes("자세"))ment.push({level:"ok",text:""자세 교정은 보통 6~8주면 일상에서 변화를 느끼실 수 있습니다""});
-  if(pb.length>0)ment.push({level:"info",text:""통증은 운동을 못 하는 이유가 아니라 교정 운동이 필요한 신호입니다""});
-  ment.push({level:"info",text:""처음 4주는 몸이 운동에 적응하는 기간으로 인내심이 필요하지만, 기초를 잘 잡으면 그 이후 변화 속도가 빨라집니다""});
+  if(priorityGoal?.includes("감량"))ment.push({level:"ok",text:"\"체중 숫자보다 체지방률과 근육량 변화를 함께 보면 더 정확한 진행을 확인할 수 있습니다\""});
+  if(priorityGoal?.includes("교정")||priorityGoal?.includes("자세"))ment.push({level:"ok",text:"\"자세 교정은 보통 6~8주면 일상에서 변화를 느끼실 수 있습니다\""});
+  if(pb.length>0)ment.push({level:"info",text:"\"통증은 운동을 못 하는 이유가 아니라 교정 운동이 필요한 신호입니다\""});
+  ment.push({level:"info",text:"\"처음 4주는 몸이 운동에 적응하는 기간으로 인내심이 필요하지만, 기초를 잘 잡으면 그 이후 변화 속도가 빨라집니다\""});
   if(ment.length)rc.push({title:"💬 상담 멘트 추천", items:ment});
 
   return { cards: rc, LEVEL };

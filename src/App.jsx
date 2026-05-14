@@ -4384,226 +4384,138 @@ const GOAL_TYPES = [
 ];
 
 function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSaveBodyData }) {
-  const goal      = bodyData?.goal || {};
-  const [tab, setTab] = useState("report"); // report | set
+  const goal = bodyData?.goal || {};
 
-  // 목표 입력 state
-  const [goalType,      setGoalType]      = useState(goal.goalType      || "");
-  const [curWeight,     setCurWeight]     = useState(goal.currentWeight  || "");
-  const [tgtWeight,     setTgtWeight]     = useState(goal.targetWeight   || "");
-  const [curBf,         setCurBf]         = useState(goal.currentBf      || "");
-  const [exHistory,     setExHistory]     = useState(goal.exHistory      || "");
-  const [sleepHours,    setSleepHours]    = useState(goal.sleepHours     || "");
-  const [stressLevel,   setStressLevel]   = useState(goal.stressLevel    || 3);
-  const [activityLevel, setActivityLevel] = useState(goal.activityLevel  || "");
-  const [mealsPerDay,   setMealsPerDay]   = useState(goal.mealsPerDay    || "");
-  const [proteinLevel,  setProteinLevel]  = useState(goal.proteinLevel   || "");
-  const [cardioFreq,    setCardioFreq]    = useState(goal.cardioFreq     || "");
-  const [hasPain,       setHasPain]       = useState(goal.hasPain       ?? false);
-  const [targetDate,    setTargetDate]    = useState(goal.targetDate     || "");
-  const [saving,        setSaving]        = useState(false);
-
-  async function saveGoal() {
-    setSaving(true);
-    const newGoal = {
-      goalType, currentWeight: curWeight, targetWeight: tgtWeight,
-      currentBf: curBf, exHistory, sleepHours, stressLevel,
-      activityLevel, mealsPerDay, proteinLevel, cardioFreq,
-      hasPain, targetDate,
-    };
-    await onSaveBodyData({ ...bodyData, goal: newGoal });
-    setSaving(false);
-    showToast("목표 저장 완료 ✓");
-    setTab("report");
-  }
-
-  // ── 분석 카드 생성 (룰 기반, API 없음) ─────────────────
   function makeReportCards() {
-    const cards = [];
-    const g     = goal;
+    const cards  = [];
+    const g      = goal;
     const sorted = [...sessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-    const rec3  = sorted.slice(0,3);
-    const rec10 = sorted.slice(0,10);
+    const rec3   = sorted.slice(0,3);
+    const rec10  = sorted.slice(0,10);
 
-    // 체중 변화
-    const wSessions = sorted.filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0).slice(0,5);
-    const wDelta = wSessions.length>=2
-      ? (parseFloat(wSessions[0].bodyWeight)-parseFloat(wSessions[wSessions.length-1].bodyWeight)).toFixed(1)
-      : null;
+    const wS     = sorted.filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0).slice(0,5);
+    const wDelta = wS.length>=2 ? (parseFloat(wS[0].bodyWeight)-parseFloat(wS[wS.length-1].bodyWeight)).toFixed(1) : null;
 
-    // RPE 평균
     const rpeList = rec10.flatMap(s=>(s.exercises||[]).filter(e=>e.rpe).map(e=>Number(e.rpe)));
     const avgRpe  = rpeList.length ? (rpeList.reduce((a,b)=>a+b,0)/rpeList.length).toFixed(1) : null;
+    const painSess= rec3.filter(s=>s.painRecord?.before?.vas>=5||s.exercises?.some(e=>e.feedback?.includes("통증")));
+    const pc={};rec10.forEach(s=>(s.exercises||[]).forEach(e=>{if(e.muscleTop)pc[e.muscleTop]=(pc[e.muscleTop]||0)+1;}));
+    const topParts=Object.entries(pc).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([p])=>p);
 
-    // 통증 피드백
-    const painSess = rec3.filter(s=>s.painRecord?.before?.vas>=5||s.exercises?.some(e=>e.feedback?.includes("통증")));
+    const stateItems=[];
+    if(g.sleepHours==="5시간 미만")stateItems.push({level:"danger",text:"수면 부족 — 회복 저하 위험"});
+    else if(g.sleepHours==="5~6시간")stateItems.push({level:"warn",text:"수면 부족 — 회복 영향 가능"});
+    else if(g.sleepHours)stateItems.push({level:"ok",text:"수면 양호"});
+    if(g.stressLevel>=4)stateItems.push({level:"danger",text:"스트레스 높음 — 코르티솔 ↑ 주의"});
+    else if(g.stressLevel>=3)stateItems.push({level:"warn",text:"스트레스 보통 — 관리 필요"});
+    if(avgRpe&&parseFloat(avgRpe)>=9)stateItems.push({level:"danger",text:`평균 RPE ${avgRpe} — 과훈련 위험`});
+    else if(avgRpe&&parseFloat(avgRpe)>=7.5)stateItems.push({level:"ok",text:`평균 RPE ${avgRpe} — 적절한 강도`});
+    if(painSess.length>0)stateItems.push({level:"warn",text:`최근 ${painSess.length}회 수업 통증 기록 존재`});
+    if(wDelta!==null){const d=parseFloat(wDelta);if(d<-1.5)stateItems.push({level:"warn",text:`체중 ${Math.abs(wDelta)}kg 감량 — 속도 과다`});else if(d<0)stateItems.push({level:"ok",text:`체중 ${Math.abs(wDelta)}kg 감량 — 적절한 속도`});else if(d>1)stateItems.push({level:"ok",text:`체중 ${wDelta}kg 증가 — 벌크 진행 중`});}
+    if(stateItems.length)cards.push({title:"📊 현재 상태 분석",items:stateItems});
 
-    // 부위 분포
-    const partCount = {};
-    rec10.forEach(s=>(s.exercises||[]).forEach(e=>{if(e.muscleTop)partCount[e.muscleTop]=(partCount[e.muscleTop]||0)+1;}));
-    const topParts = Object.entries(partCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([p])=>p);
+    const exItems=[];
+    if(!topParts.includes("하체"))exItems.push({level:"warn",text:"하체 볼륨 부족 — 하체 운동 추가 권장"});
+    if(!["가슴","등","어깨"].some(p=>topParts.includes(p)))exItems.push({level:"warn",text:"상체 훈련 부족 — 균형 유지 필요"});
+    if(g.cardioFreq==="주 5회 이상")exItems.push({level:"warn",text:"유산소 과다 — 근력 훈련 비중 확인"});
+    if(rec3.length>=2){const lv=rec3[0].totalVolume||0,pv=rec3[rec3.length-1].totalVolume||0;if(lv>0&&pv>0){const pct=Math.round(((lv-pv)/pv)*100);if(pct>20)exItems.push({level:"warn",text:`볼륨 ${pct}% 급증 — 과부하 주의`});else if(pct>5)exItems.push({level:"ok",text:`볼륨 ${pct}% 증가 — 점진적 과부하 양호`});}}
+    if(exItems.length)cards.push({title:"🏋️ 운동 분석",items:exItems});
 
-    // ── 카드 1: 현재 상태 분석 ──
-    const stateItems = [];
-    if (g.sleepHours === "5시간 미만") stateItems.push({level:"danger", text:"수면 부족 — 회복 저하 위험"});
-    else if (g.sleepHours === "5~6시간") stateItems.push({level:"warn", text:"수면 부족 — 회복 영향 가능"});
-    else if (g.sleepHours) stateItems.push({level:"ok", text:"수면 양호"});
+    const nutItems=[];
+    if(g.proteinLevel==="거의 안 먹음")nutItems.push({level:"danger",text:"단백질 심각 부족 — 근손실 위험"});
+    else if(g.proteinLevel==="가끔 챙김")nutItems.push({level:"warn",text:"단백질 부족 — 체중 ×1.5~2g 목표"});
+    if(g.mealsPerDay==="1끼")nutItems.push({level:"danger",text:"식사 빈도 낮음 — 근합성 저해 가능"});
+    else if(g.mealsPerDay==="2끼")nutItems.push({level:"warn",text:"식사 횟수 부족 — 3끼 이상 권장"});
+    if(nutItems.length)cards.push({title:"🥗 영양 분석",items:nutItems});
 
-    if (g.stressLevel >= 4) stateItems.push({level:"danger", text:"스트레스 높음 — 코르티솔 ↑ 주의"});
-    else if (g.stressLevel >= 3) stateItems.push({level:"warn", text:"스트레스 보통 — 관리 필요"});
+    const painItems=[];
+    if(g.hasPain)painItems.push({level:"warn",text:"통증 있음 — 교정 운동 비중 증가 권장"});
+    const mb=member.painArea||"";
+    if(mb.includes("무릎"))painItems.push({level:"danger",text:"무릎 통증 — 하체 충격성 동작 제한 권장"});
+    if(mb.includes("어깨"))painItems.push({level:"danger",text:"어깨 불편 — 오버헤드 동작 제한 권장"});
+    if(mb.includes("허리"))painItems.push({level:"danger",text:"허리 통증 — 고중량 컴파운드 주의"});
+    if(painItems.length)cards.push({title:"💢 교정 / 통증 분석",items:painItems});
 
-    if (avgRpe && parseFloat(avgRpe) >= 9) stateItems.push({level:"danger", text:`평균 RPE ${avgRpe} — 과훈련 위험`});
-    else if (avgRpe && parseFloat(avgRpe) >= 7.5) stateItems.push({level:"ok", text:`평균 RPE ${avgRpe} — 적절한 강도`});
-
-    if (painSess.length > 0) stateItems.push({level:"warn", text:`최근 ${painSess.length}회 수업 통증 기록 존재`});
-
-    if (wDelta !== null) {
-      const delta = parseFloat(wDelta);
-      if (delta < -1.5) stateItems.push({level:"warn", text:`체중 ${Math.abs(wDelta)}kg 감량 — 속도 과다, 근손실 위험`});
-      else if (delta < 0) stateItems.push({level:"ok", text:`체중 ${Math.abs(wDelta)}kg 감량 — 적절한 속도`});
-      else if (delta > 1) stateItems.push({level:"ok", text:`체중 ${wDelta}kg 증가 — 벌크 진행 중`});
-    }
-
-    if (stateItems.length) cards.push({ title:"📊 현재 상태 분석", items: stateItems });
-
-    // ── 카드 2: 운동 분석 ──
-    const exItems = [];
-    const hasLower = topParts.includes("하체");
-    const hasUpper = ["가슴","등","어깨"].some(p=>topParts.includes(p));
-    if (!hasLower) exItems.push({level:"warn", text:"하체 볼륨 부족 — 하체 운동 추가 권장"});
-    if (!hasUpper) exItems.push({level:"warn", text:"상체 훈련 부족 — 균형 유지 필요"});
-    if (g.cardioFreq === "주 5회 이상") exItems.push({level:"warn", text:"유산소 과다 — 근력 훈련 비중 확인 필요"});
-    if (rec3.length > 0) {
-      const lastVol  = rec3[0].totalVolume || 0;
-      const prevVol  = rec3[rec3.length-1].totalVolume || 0;
-      if (lastVol > 0 && prevVol > 0) {
-        const pct = Math.round(((lastVol-prevVol)/prevVol)*100);
-        if (pct > 20) exItems.push({level:"warn", text:`볼륨 ${pct}% 급증 — 과부하 주의`});
-        else if (pct > 5) exItems.push({level:"ok", text:`볼륨 ${pct}% 증가 — 점진적 과부하 양호`});
-        else exItems.push({level:"info", text:`볼륨 변화 미미 — 부하 재검토 고려`});
-      }
-    }
-    if (exItems.length) cards.push({ title:"🏋️ 운동 분석", items: exItems });
-
-    // ── 카드 3: 영양 분석 ──
-    const nutItems = [];
-    if (g.proteinLevel === "거의 안 먹음") nutItems.push({level:"danger", text:"단백질 심각 부족 — 근손실 위험"});
-    else if (g.proteinLevel === "가끔 챙김") nutItems.push({level:"warn", text:"단백질 부족 — 체중 ×1.5~2g 목표"});
-    if (g.mealsPerDay === "1끼") nutItems.push({level:"danger", text:"식사 빈도 낮음 — 근합성 저해 가능"});
-    else if (g.mealsPerDay === "2끼") nutItems.push({level:"warn", text:"식사 횟수 부족 — 3끼 이상 권장"});
-    if (nutItems.length) cards.push({ title:"🥗 영양 분석", items: nutItems });
-
-    // ── 카드 4: 교정 / 통증 ──
-    const painItems = [];
-    if (g.hasPain) painItems.push({level:"warn", text:"통증 있음 — 교정 운동 비중 증가 권장"});
-    const mb = member.painArea;
-    if (mb?.includes("무릎")) painItems.push({level:"danger", text:"무릎 통증 — 하체 충격성 동작 제한 권장"});
-    if (mb?.includes("어깨")) painItems.push({level:"danger", text:"어깨 불편 — 오버헤드 동작 제한 권장"});
-    if (mb?.includes("허리")) painItems.push({level:"danger", text:"허리 통증 — 고중량 컴파운드 주의"});
-    if (painItems.length) cards.push({ title:"💢 교정 / 통증 분석", items: painItems });
-
-    // ── 카드 5: 행동 가이드 ──
-    const guideItems = [];
-    const cw = parseFloat(g.currentWeight) || 0;
-    if (cw > 0) guideItems.push({level:"ok", text:`권장 단백질: ${Math.round(cw*1.8)}g 이상/일`});
-    if (g.goalType === "diet") {
-      guideItems.push({level:"ok", text:"권장 감량 속도: 주 0.5~0.7kg"});
-      guideItems.push({level:"ok", text:"유산소 권장: 주 3~4회 / 30분"});
-    } else if (g.goalType === "bulk") {
-      guideItems.push({level:"ok", text:"체중 증가 목표: 월 0.5~1kg"});
-      guideItems.push({level:"ok", text:"유산소 최소화: 주 1~2회 권장"});
-    }
-    if (g.sleepHours && g.sleepHours !== "7~8시간" && g.sleepHours !== "8시간 이상") {
-      guideItems.push({level:"warn", text:"권장 수면: 7~8시간 확보 목표"});
-    }
-    if (guideItems.length) cards.push({ title:"✅ 행동 가이드", items: guideItems });
+    const guideItems=[];
+    const cw=parseFloat(g.currentWeight)||0;
+    if(cw>0)guideItems.push({level:"ok",text:`권장 단백질: ${Math.round(cw*1.8)}g 이상/일`});
+    if(g.goalType==="diet"){guideItems.push({level:"ok",text:"권장 감량 속도: 주 0.5~0.7kg"});guideItems.push({level:"ok",text:"유산소 권장: 주 3~4회 / 30분"});}
+    else if(g.goalType==="bulk"){guideItems.push({level:"ok",text:"체중 증가 목표: 월 0.5~1kg"});guideItems.push({level:"ok",text:"유산소 최소화: 주 1~2회 권장"});}
+    if(g.sleepHours&&!["7~8시간","8시간 이상"].includes(g.sleepHours))guideItems.push({level:"warn",text:"권장 수면: 7~8시간 확보 목표"});
+    if(guideItems.length)cards.push({title:"✅ 행동 가이드",items:guideItems});
 
     return cards;
   }
 
-  // 목표 달성률
   const progressPct = (() => {
-    const cw = parseFloat(goal.currentWeight) || 0;
-    const tw = parseFloat(goal.targetWeight)  || 0;
-    const wSorted = [...sessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""))
-      .filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0);
-    const curW = wSorted.length ? parseFloat(wSorted[0].bodyWeight) : cw;
-    if (!cw || !tw || cw === tw) return null;
-    const total = Math.abs(cw - tw);
-    const done  = Math.abs(cw - curW);
-    return Math.min(100, Math.round((done / total) * 100));
+    const cw=parseFloat(goal.currentWeight)||0, tw=parseFloat(goal.targetWeight)||0;
+    const wS=[...sessions].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0);
+    const curW=wS.length?parseFloat(wS[0].bodyWeight):cw;
+    if(!cw||!tw||cw===tw)return null;
+    return Math.min(100,Math.round((Math.abs(cw-curW)/Math.abs(cw-tw))*100));
   })();
 
   const reportCards  = makeReportCards();
   const selectedType = GOAL_TYPES.find(g=>g.key===goal.goalType);
-
-  const LEVEL_STYLE = {
-    danger: { border:"rgba(239,68,68,.25)",  bg:"rgba(239,68,68,.08)",  dot:"#ef4444", text:"#fca5a5" },
-    warn:   { border:"rgba(245,158,11,.25)", bg:"rgba(245,158,11,.08)", dot:"#f59e0b", text:"#fcd34d" },
-    ok:     { border:"rgba(34,197,94,.25)",  bg:"rgba(34,197,94,.08)",  dot:"#22c55e", text:"#86efac" },
-    info:   { border:"rgba(94,234,212,.2)",  bg:"rgba(94,234,212,.06)", dot:"#5EEAD4", text:"#99f6e4" },
+  const hasGoal      = !!(goal.goalType||goal.currentWeight||goal.targetWeight);
+  const LEVEL_STYLE  = {
+    danger:{border:"rgba(239,68,68,.25)",bg:"rgba(239,68,68,.08)",dot:"#ef4444",text:"#fca5a5"},
+    warn:  {border:"rgba(245,158,11,.25)",bg:"rgba(245,158,11,.08)",dot:"#f59e0b",text:"#fcd34d"},
+    ok:    {border:"rgba(34,197,94,.25)",bg:"rgba(34,197,94,.08)",dot:"#22c55e",text:"#86efac"},
+    info:  {border:"rgba(94,234,212,.2)",bg:"rgba(94,234,212,.06)",dot:"#5EEAD4",text:"#99f6e4"},
   };
 
   return (
     <div>
-      <SH title="🎯 목표 관리" sub={member.name}
+      <SH title="🎯 목표 분석 리포트" sub={member.name}
         right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
 
-      {/* 탭 */}
-      <div style={{display:"flex",gap:6,marginBottom:14}}>
-        {[["report","📊 분석 리포트"],["set","⚙️ 목표 설정"]].map(([k,l])=>(
-          <button key={k} onClick={()=>setTab(k)}
-            style={{padding:"7px 16px",borderRadius:20,border:"1px solid",cursor:"pointer",
-              fontSize:12,fontWeight:700,
-              borderColor:tab===k?"#818cf8":"rgba(255,255,255,0.08)",
-              background:tab===k?"rgba(129,140,248,.15)":"transparent",
-              color:tab===k?"#a5b4fc":"#64748b"}}>
-            {l}
-          </button>
-        ))}
-      </div>
-
-      {/* ── 리포트 탭 ── */}
-      {tab==="report" && (
+      {!hasGoal ? (
+        <div style={{padding:"24px 16px",borderRadius:12,background:"#111827",
+          border:"1px solid rgba(255,255,255,0.08)",textAlign:"center",marginBottom:12}}>
+          <div style={{fontSize:32,marginBottom:10}}>🎯</div>
+          <Mo c="#e2e8f0" s={14} style={{fontWeight:700,display:"block",marginBottom:6}}>목표가 설정되지 않았습니다</Mo>
+          <Mo c="#64748b" s={11} style={{display:"block",marginBottom:4,lineHeight:1.8}}>
+            바디체크 → 목표 탭에서<br/>목표를 설정하면 분석 리포트가 생성됩니다
+          </Mo>
+          <div style={{marginTop:10,padding:"8px 12px",borderRadius:8,
+            background:"rgba(94,234,212,.08)",border:"1px solid rgba(94,234,212,.2)",display:"inline-block"}}>
+            <Mo c="#5EEAD4" s={10}>⚖️ 바디체크 메뉴 → 목표 탭에서 설정</Mo>
+          </div>
+        </div>
+      ) : (
         <div>
-          {/* 목표 타입 배지 */}
           {selectedType && (
             <div style={{marginBottom:12,padding:"14px 16px",borderRadius:12,
-              border:`1px solid ${selectedType.color}33`,
-              background:`${selectedType.color}11`,
+              border:`1px solid ${selectedType.color}33`,background:`${selectedType.color}11`,
               display:"flex",alignItems:"center",gap:12}}>
               <div style={{fontSize:28}}>{selectedType.icon}</div>
-              <div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:selectedType.color}}>
-                  {selectedType.label}
-                </div>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:selectedType.color}}>{selectedType.label}</div>
                 <Mo c="#64748b" s={11}>{selectedType.desc}</Mo>
               </div>
+              <Mo c="#64748b" s={9} style={{textAlign:"right",lineHeight:1.6}}>바디체크 →<br/>목표 탭에서 수정</Mo>
             </div>
           )}
 
-          {/* 목표 달성률 + 체중 */}
-          {(goal.currentWeight || goal.targetWeight) && (
+          {(goal.currentWeight||goal.targetWeight) && (
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:12}}>
-              <div style={{padding:"12px 14px",borderRadius:10,background:"#111827",
-                border:"1px solid rgba(255,255,255,0.08)"}}>
+              <div style={{padding:"12px 14px",borderRadius:10,background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
                 <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>현재 체중</Mo>
                 <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:20,color:"#e2e8f0"}}>
-                  {goal.currentWeight || "—"}<span style={{fontSize:11,color:"#64748b",fontWeight:400}}> kg</span>
+                  {goal.currentWeight||"—"}<span style={{fontSize:11,color:"#64748b",fontWeight:400}}> kg</span>
                 </div>
               </div>
-              <div style={{padding:"12px 14px",borderRadius:10,background:"#111827",
-                border:"1px solid rgba(255,255,255,0.08)"}}>
+              <div style={{padding:"12px 14px",borderRadius:10,background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
                 <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>목표 체중</Mo>
                 <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:20,color:"#5EEAD4"}}>
-                  {goal.targetWeight || "—"}<span style={{fontSize:11,color:"#64748b",fontWeight:400}}> kg</span>
+                  {goal.targetWeight||"—"}<span style={{fontSize:11,color:"#64748b",fontWeight:400}}> kg</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 진행률 링 */}
-          {progressPct !== null && (
+          {progressPct!==null && (
             <div style={{marginBottom:12,padding:"14px 16px",borderRadius:12,background:"#111827",
               border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",gap:16}}>
               <svg width={64} height={64} viewBox="0 0 64 64">
@@ -4615,40 +4527,27 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
               </svg>
               <div>
                 <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#e2e8f0",marginBottom:3}}>목표 달성률</div>
-                <Mo c="#64748b" s={10}>
-                  {goal.targetDate ? `D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음` : "목표일 미설정"}
-                </Mo>
+                <Mo c="#64748b" s={10}>{goal.targetDate?`D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음`:"목표일 미설정"}</Mo>
               </div>
             </div>
           )}
 
-          {/* 분석 카드 */}
-          {reportCards.length === 0 ? (
-            <div style={{padding:"24px",borderRadius:12,background:"#111827",
-              border:"1px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
-              <Mo c="#64748b" s={12} style={{display:"block",marginBottom:8}}>📋 목표 설정 탭에서</Mo>
-              <Mo c="#64748b" s={12}>기본 정보를 입력하면 AI 분석 리포트가 생성됩니다</Mo>
-              <button onClick={()=>setTab("set")}
-                style={{marginTop:14,padding:"9px 20px",borderRadius:9,border:"none",cursor:"pointer",
-                  background:"rgba(129,140,248,.2)",color:"#a5b4fc",fontSize:12,fontWeight:700}}>
-                목표 설정하기 →
-              </button>
+          {reportCards.length===0 ? (
+            <div style={{padding:"20px",borderRadius:12,background:"#111827",border:"1px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
+              <Mo c="#64748b" s={12} style={{lineHeight:1.7}}>수업 기록과 생활습관 정보가 쌓이면<br/>분석 리포트가 자동으로 생성됩니다</Mo>
             </div>
-          ) : reportCards.map((card, ci) => (
+          ) : reportCards.map((card,ci)=>(
             <div key={ci} style={{marginBottom:10,borderRadius:12,background:"#111827",
               border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
               <div style={{padding:"12px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
                 <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
               </div>
               <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
-                {card.items.map((item, ii) => {
-                  const st = LEVEL_STYLE[item.level] || LEVEL_STYLE.info;
-                  return (
-                    <div key={ii} style={{padding:"9px 12px",borderRadius:8,
-                      background:st.bg,border:`1px solid ${st.border}`,
-                      display:"flex",alignItems:"flex-start",gap:8}}>
-                      <div style={{width:6,height:6,borderRadius:"50%",background:st.dot,
-                        flexShrink:0,marginTop:4}}/>
+                {card.items.map((item,ii)=>{
+                  const st=LEVEL_STYLE[item.level]||LEVEL_STYLE.info;
+                  return(
+                    <div key={ii} style={{padding:"9px 12px",borderRadius:8,background:st.bg,border:`1px solid ${st.border}`,display:"flex",alignItems:"flex-start",gap:8}}>
+                      <div style={{width:6,height:6,borderRadius:"50%",background:st.dot,flexShrink:0,marginTop:4}}/>
                       <span style={{fontSize:12,color:st.text,lineHeight:1.6}}>{item.text}</span>
                     </div>
                   );
@@ -4656,97 +4555,6 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* ── 목표 설정 탭 ── */}
-      {tab==="set" && (
-        <div>
-          {/* 목표 유형 선택 */}
-          <div style={{marginBottom:12}}>
-            <Mo c="#64748b" s={9} style={{display:"block",marginBottom:8,letterSpacing:".08em"}}>목표 유형 선택</Mo>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
-              {GOAL_TYPES.map(gt => {
-                const active = goalType === gt.key;
-                return (
-                  <button key={gt.key} onClick={()=>setGoalType(active ? "" : gt.key)}
-                    style={{padding:"12px 8px",borderRadius:10,border:"1px solid",cursor:"pointer",
-                      textAlign:"center",transition:"all .12s",
-                      borderColor:active?gt.color:"rgba(255,255,255,0.08)",
-                      background:active?`${gt.color}18`:"#111827",
-                      color:active?gt.color:"#64748b"}}>
-                    <div style={{fontSize:20,marginBottom:4}}>{gt.icon}</div>
-                    <div style={{fontSize:10,fontWeight:700}}>{gt.label}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <Card style={{borderColor:"rgba(255,255,255,0.08)"}}>
-            {/* 체중 */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
-              <Field label="현재 체중 (kg)" value={curWeight} onChange={setCurWeight} placeholder="65" type="number" />
-              <Field label="목표 체중 (kg)" value={tgtWeight} onChange={setTgtWeight} placeholder="60" type="number" />
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
-              <Field label="현재 체지방률 (%)" value={curBf} onChange={setCurBf} placeholder="25" type="number" />
-              <Field label="목표 기간 (날짜)" type="date" value={targetDate} onChange={setTargetDate} />
-            </div>
-
-            {/* 생활습관 */}
-            <Mo c="#64748b" s={9} style={{display:"block",marginBottom:6,letterSpacing:".08em",marginTop:4}}>생활 습관</Mo>
-            {[
-              {label:"수면 시간", opts:["5시간 미만","5~6시간","6~7시간","7~8시간","8시간 이상"], val:sleepHours, set:setSleepHours},
-              {label:"활동량",   opts:["거의 안함","가벼운 활동 (주 1-2회)","보통 활동 (주 3-5회)","활동적 (주 6-7회)","매우 활동적"], val:activityLevel, set:setActivityLevel},
-              {label:"하루 식사 횟수", opts:["1끼","2끼","3끼","4끼 이상"], val:mealsPerDay, set:setMealsPerDay},
-              {label:"단백질 섭취",   opts:["거의 안 먹음","가끔 챙김","매끼 챙김","충분히 섭취"], val:proteinLevel, set:setProteinLevel},
-              {label:"유산소 빈도",   opts:["거의 안 함","주 1~2회","주 3~4회","주 5회 이상"], val:cardioFreq, set:setCardioFreq},
-            ].map(({label, opts, val, set}) => (
-              <div key={label} style={{marginBottom:10}}>
-                <Mo c="#94a3b8" s={10} style={{display:"block",marginBottom:5}}>{label}</Mo>
-                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                  {opts.map(opt => {
-                    const active = val === opt;
-                    return (
-                      <button key={opt} onClick={()=>set(active?"":opt)}
-                        style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
-                          fontSize:11,fontWeight:active?700:400,transition:"all .1s",
-                          borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
-                          background:active?"rgba(94,234,212,.15)":"#111827",
-                          color:active?"#5EEAD4":"#64748b"}}>
-                        {opt}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            {/* 스트레스 */}
-            <Mo c="#94a3b8" s={10} style={{display:"block",marginBottom:6}}>스트레스 수준 — {stressLevel}/5</Mo>
-            <input type="range" min={1} max={5} value={stressLevel}
-              onChange={e=>setStressLevel(Number(e.target.value))}
-              style={{width:"100%",accentColor:"#5EEAD4",marginBottom:10}} />
-
-            {/* 통증 */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-              padding:"12px 14px",background:"#0F172A",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)"}}>
-              <Mo c="#e2e8f0" s={13}>현재 통증 있음</Mo>
-              <div onClick={()=>setHasPain(v=>!v)}
-                style={{width:46,height:26,borderRadius:13,cursor:"pointer",transition:"background .2s",
-                  background:hasPain?"#5EEAD4":"rgba(255,255,255,0.1)",position:"relative"}}>
-                <div style={{position:"absolute",top:3,left:hasPain?22:3,width:20,height:20,borderRadius:"50%",
-                  background:"#fff",transition:"left .2s"}}/>
-              </div>
-            </div>
-
-            <div style={{marginTop:14}}>
-              <Btn full onClick={saveGoal} disabled={saving}>
-                {saving ? "저장 중..." : "💾 목표 저장 →"}
-              </Btn>
-            </div>
-          </Card>
         </div>
       )}
     </div>

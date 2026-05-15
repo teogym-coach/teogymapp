@@ -3071,12 +3071,15 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                   <div>
                     {(ex.sets||[]).map((row,si) => {
                       const lbl = funcSetLabel(row);
-                      return lbl !== "—" ? (
-                        <div key={si} style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,padding:"3px 0"}}>
-                          <Mo c="#3a3a4a" s={9} style={{background:"#0F172A",borderRadius:3,padding:"2px 7px",minWidth:32,textAlign:"center"}}>{si+1}</Mo>
-                          <Mo c="#54a0ff" s={10}>{lbl}</Mo>
+                      return (
+                        <div key={si} style={{display:"flex",gap:6,alignItems:"center",
+                          marginBottom:4,padding:"4px 6px",borderRadius:5,
+                          background:"rgba(84,160,255,.07)"}}>
+                          <Mo c="#3a3a4a" s={9} style={{background:"#0F172A",borderRadius:3,
+                            padding:"2px 7px",minWidth:28,textAlign:"center",flexShrink:0}}>{si+1}</Mo>
+                          <Mo c="#54a0ff" s={11} style={{fontWeight:700}}>{lbl !== "—" ? lbl : "값 없음"}</Mo>
                         </div>
-                      ) : null;
+                      );
                     })}
                   </div>
                 ) : (
@@ -3379,11 +3382,15 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
               letterSpacing:".1em",marginBottom:10}}>TODAY'S WORKOUT</div>
 
             {exercises.filter(e=>e.name).map((ex, ei) => {
-              const vol  = exVol(ex);
-              const ec   = EQUIP_COLOR[ex.equipment]||"#888";
-              const gc   = mColor(ex.muscleTop);
-              const maxW = Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
+              const isFunc = isFuncEx(ex);
+              const vol   = exVol(ex);
+              const ec    = EQUIP_COLOR[ex.equipment]||"#888";
+              const gc    = mColor(ex.muscleTop);
+              const maxW  = Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
               const avgRPE = ex.rpe ? ex.rpe : null;
+              // 기능운동 통계
+              const totalSec  = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.durationSec)||0),0) : 0;
+              const totalReps = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.reps)||0),0) : 0;
               return (
                 <div key={ei} style={{marginBottom:8,background:"#111827",borderRadius:10,
                   overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
@@ -3403,24 +3410,54 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
                       </div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,
-                        color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
-                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,
-                        color:"#3a3a5a"}}>최고 {maxW}kg</div>
+                      {isFunc ? (
+                        <div>
+                          {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:700}}>총 {totalSec}초</div>}
+                          {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
+                          {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()}kg</div>}
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>{(ex.sets||[]).length}세트</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div style={{padding:"6px 12px"}}>
-                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:3,marginBottom:3}}>
-                      {["SET","무게","횟수","볼륨"].map((h,i)=><Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
-                    </div>
-                    {(ex.sets||[]).map((row,si)=>(
-                      <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:3,marginBottom:2}}>
-                        <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"1px 0"}}>{si+1}</Mo>
-                        <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
-                        <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                        <Mo c="#5EEAD4" s={10} style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                    {isFunc ? (
+                      /* 기능운동: 입력된 값만 표시 */
+                      <div>
+                        {(ex.sets||[]).map((row,si) => {
+                          const lbl = funcSetLabel(row);
+                          return (
+                            <div key={si} style={{display:"flex",gap:6,alignItems:"center",
+                              marginBottom:4,padding:"4px 6px",borderRadius:5,
+                              background:"rgba(84,160,255,.07)"}}>
+                              <Mo c="#3a3a5a" s={9} style={{background:"#0F172A",borderRadius:3,
+                                padding:"2px 7px",minWidth:28,textAlign:"center",flexShrink:0}}>{si+1}</Mo>
+                              <Mo c="#54a0ff" s={11} style={{fontWeight:700}}>{lbl !== "—" ? lbl : "값 없음"}</Mo>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    ) : (
+                      /* 일반 웨이트: 무게·횟수·볼륨 테이블 */
+                      <div>
+                        <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:3,marginBottom:3}}>
+                          {["SET","무게","횟수","볼륨"].map((h,i)=><Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                        </div>
+                        {(ex.sets||[]).map((row,si)=>(
+                          <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:3,marginBottom:2}}>
+                            <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"1px 0"}}>{si+1}</Mo>
+                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
+                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
+                            <Mo c="#5EEAD4" s={10} style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

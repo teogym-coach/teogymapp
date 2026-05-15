@@ -996,124 +996,6 @@ function estBodyFat(weight, height, age, gender, bf) {
 
 // ── 핵심 buildConsultReport (완전 확장) ──────────────────────
 
-// ════════════════════════════════════════════
-// 근육 시각화 SVG 맵
-// ════════════════════════════════════════════
-const MUSCLE_SVG_MAP = {
-  // 전면
-  "대흉근":    {side:"front", paths:["m 120,90 c -10,5 -18,20 -15,35 l 25,5 c 5,-12 8,-28 0,-40 z"]},
-  "윗가슴":   {side:"front", paths:["m 118,85 c -8,3 -15,12 -12,22 l 22,3 c 3,-8 5,-18 0,-25 z"]},
-  "아랫가슴": {side:"front", paths:["m 122,105 c -8,3 -12,12 -8,20 l 20,2 c 2,-8 3,-16 -2,-22 z"]},
-  "전면삼각근":{side:"front", paths:["m 100,80 c -8,0 -14,8 -12,18 l 15,2 c 1,-6 2,-14 -3,-20 z"]},
-  "측면삼각근":{side:"front", paths:["m 93,85 c -6,0 -10,7 -8,15 l 12,2 z"]},
-  "이두근":   {side:"front", paths:["m 88,105 c -5,0 -9,15 -6,30 l 12,0 c 3,-12 3,-26 -6,-30 z"]},
-  "대퇴사두근":{side:"front", paths:["m 110,190 c -8,0 -14,20 -12,50 l 22,0 c 2,-25 2,-45 -10,-50 z","m 145,190 c -5,0 -9,18 -7,50 l 20,0 c 1,-25 -2,-45 -13,-50 z"]},
-  "내전근":   {side:"front", paths:["m 128,200 c -4,0 -6,15 -4,45 l 10,0 c 1,-25 -1,-40 -6,-45 z"]},
-  "복직근":   {side:"front", paths:["m 118,130 c -6,0 -10,5 -10,50 l 18,0 c 0,-40 -4,-48 -8,-50 z"]},
-  "외복사근": {side:"front", paths:["m 107,135 c -4,0 -8,10 -7,40 l 12,0 c 0,-25 -2,-36 -5,-40 z","m 148,135 c -3,0 -6,8 -5,38 l 11,0 c 1,-24 -2,-34 -6,-38 z"]},
-  "종아리":   {side:"front", paths:["m 108,260 c -4,0 -7,15 -5,35 l 14,0 c 1,-18 -3,-32 -9,-35 z","m 144,260 c -3,0 -6,13 -4,33 l 13,0 c 1,-17 -3,-30 -9,-33 z"]},
-  // 후면
-  "광배근":   {side:"back",  paths:["m 120,95 c -12,5 -20,25 -15,50 l 22,5 c 3,-18 5,-40 -7,-55 z"]},
-  "중하부승모근":{side:"back",paths:["m 118,75 c -10,3 -18,12 -15,25 l 25,3 c 2,-10 2,-22 -10,-28 z"]},
-  "능형근":   {side:"back",  paths:["m 120,90 c -5,2 -8,8 -6,16 l 15,2 c 0,-6 -3,-14 -9,-18 z"]},
-  "후면삼각근":{side:"back",  paths:["m 100,82 c -6,0 -10,7 -8,16 l 14,2 c 0,-6 -1,-13 -6,-18 z"]},
-  "척추기립근":{side:"back",  paths:["m 122,100 c -4,0 -6,5 -6,50 l 10,0 c 0,-42 -1,-48 -4,-50 z"]},
-  "둔근":     {side:"back",  paths:["m 108,185 c -8,0 -14,12 -12,30 l 22,3 c 2,-14 2,-28 -10,-33 z","m 143,185 c -5,0 -9,10 -7,28 l 20,2 c 1,-13 -2,-25 -13,-30 z"]},
-  "햄스트링": {side:"back",  paths:["m 110,215 c -7,0 -12,18 -10,45 l 20,0 c 1,-22 -2,-40 -10,-45 z","m 143,215 c -5,0 -9,16 -7,43 l 18,0 c 1,-20 -2,-38 -11,-43 z"]},
-  "삼두근 외측두":{side:"back",paths:["m 86,105 c -4,0 -7,12 -5,28 l 11,0 c 1,-12 -1,-24 -6,-28 z"]},
-  "삼두근 장두":{side:"back", paths:["m 89,100 c -5,0 -8,14 -6,32 l 12,0 c 1,-14 -1,-27 -6,-32 z"]},
-  "삼두근 내측두":{side:"back",paths:["m 84,115 c -3,0 -5,10 -3,22 l 9,0 c 1,-10 -1,-18 -6,-22 z"]},
-};
-
-// 부위/세부부위 → 근육 키 매핑
-const PART_TO_MUSCLES = {
-  "가슴":    {primary:["대흉근"],      secondary:["전면삼각근"]},
-  "윗가슴":  {primary:["윗가슴"],      secondary:["전면삼각근"]},
-  "아랫가슴":{primary:["아랫가슴"],    secondary:[]},
-  "중간가슴":{primary:["대흉근"],      secondary:[]},
-  "등":      {primary:["광배근"],      secondary:["중하부승모근","능형근"]},
-  "전체":    {primary:["광배근"],      secondary:["척추기립근","중하부승모근"]},
-  "어깨":    {primary:["측면삼각근"],  secondary:["전면삼각근","후면삼각근"]},
-  "전면":    {primary:["전면삼각근"],  secondary:[]},
-  "전면+측면":{primary:["전면삼각근","측면삼각근"],secondary:[]},
-  "측면":    {primary:["측면삼각근"],  secondary:[]},
-  "후면":    {primary:["후면삼각근"],  secondary:[]},
-  "이두":    {primary:["이두근"],      secondary:[]},
-  "전체(이두)":{primary:["이두근"],   secondary:[]},
-  "삼두":    {primary:["삼두근 외측두"],secondary:["삼두근 장두","삼두근 내측두"]},
-  "장두":    {primary:["삼두근 장두"], secondary:[]},
-  "외측두":  {primary:["삼두근 외측두"],secondary:[]},
-  "내측두":  {primary:["삼두근 내측두"],secondary:[]},
-  "하체":    {primary:["대퇴사두근"],  secondary:["햄스트링","둔근"]},
-  "대퇴사두":{primary:["대퇴사두근"],  secondary:[]},
-  "햄스트링":{primary:["햄스트링"],    secondary:[]},
-  "둔근":    {primary:["둔근"],        secondary:[]},
-  "내전근":  {primary:["내전근"],      secondary:[]},
-  "종아리":  {primary:["종아리"],      secondary:[]},
-  "코어":    {primary:["복직근"],      secondary:["외복사근","척추기립근"]},
-  "복직근":  {primary:["복직근"],      secondary:[]},
-  "외복사근":{primary:["외복사근"],    secondary:[]},
-  "척추기립근":{primary:["척추기립근"],secondary:[]},
-};
-
-// 운동명 자동 매핑 (향후 확장용)
-const EX_MUSCLE_MAP = {
-  "벤치프레스":     {primary:["대흉근"],       secondary:["전면삼각근","삼두근 외측두"]},
-  "인클라인 벤치":  {primary:["윗가슴"],       secondary:["전면삼각근"]},
-  "랫풀다운":       {primary:["광배근"],       secondary:["이두근","중하부승모근"]},
-  "스쿼트":        {primary:["대퇴사두근","둔근"],secondary:["햄스트링"]},
-  "데드리프트":     {primary:["척추기립근","햄스트링"],secondary:["둔근","대퇴사두근"]},
-  "오버헤드프레스": {primary:["측면삼각근"],   secondary:["전면삼각근","삼두근 외측두"]},
-  "플랭크":        {primary:["복직근"],        secondary:["외복사근","척추기립근"]},
-  "데드버그":      {primary:["복직근"],        secondary:["외복사근"]},
-  "힙쓰러스트":    {primary:["둔근"],          secondary:["햄스트링"]},
-};
-
-function getMusclesForEx(ex) {
-  if (!ex) return {primary:[], secondary:[], side:"front"};
-  // 운동명 자동 매핑
-  const nameKey = Object.keys(EX_MUSCLE_MAP).find(k => (ex.name||"").includes(k));
-  if (nameKey) {
-    const m = EX_MUSCLE_MAP[nameKey];
-    const allMuscles = [...m.primary, ...m.secondary];
-    const side = allMuscles.some(mm => MUSCLE_SVG_MAP[mm]?.side==="back") ? "back" : "front";
-    return { primary: m.primary, secondary: m.secondary, side };
-  }
-  // 세부부위 기반
-  const sub = ex.muscleSub || ex.muscleTop || "";
-  const topMap = PART_TO_MUSCLES[sub] || PART_TO_MUSCLES[ex.muscleTop] || {primary:[], secondary:[]};
-  const allMuscles = [...topMap.primary, ...topMap.secondary];
-  const side = allMuscles.some(mm => MUSCLE_SVG_MAP[mm]?.side==="back") ? "back" : "front";
-  return { primary: topMap.primary, secondary: topMap.secondary, side };
-}
-
-// SVG 인체 근육 맵 컴포넌트
-function MuscleSvgMap({ muscleTop, muscleSub, exName, size=80 }) {
-  const ex = {name:exName||"", muscleTop, muscleSub};
-  const { primary, secondary, side } = getMusclesForEx(ex);
-  if (!primary.length && !secondary.length) return null;
-
-  const isFront = side !== "back";
-  // 인체 실루엣 (전면/후면 단순화)
-  const silhouette = isFront
-    ? "M 128,20 C 110,20 100,35 100,55 C 100,70 108,78 108,85 L 95,90 L 82,150 L 92,155 L 88,200 L 78,295 L 92,295 L 98,240 L 118,240 L 118,295 L 133,295 L 133,240 L 153,240 L 153,295 L 167,295 L 161,200 L 165,155 L 175,150 L 162,90 L 150,85 C 150,78 157,70 157,55 C 157,35 147,20 128,20 Z"
-    : "M 128,20 C 110,20 100,35 100,55 C 100,70 108,78 108,85 L 95,90 L 82,150 L 92,155 L 88,200 L 78,295 L 92,295 L 98,240 L 118,240 L 118,295 L 133,295 L 133,240 L 153,240 L 153,295 L 167,295 L 161,200 L 165,155 L 175,150 L 162,90 L 150,85 C 150,78 157,70 157,55 C 157,35 147,20 128,20 Z";
-
-  return (
-    <svg viewBox="0 0 256 310" width={size} height={size*310/256} style={{flexShrink:0}}>
-      {/* 배경 실루엣 */}
-      <path d={silhouette} fill="#1e293b" stroke="#334155" strokeWidth={1.5}/>
-      {/* 보조근 (연한 색) */}
-      {secondary.map((m,i) => (MUSCLE_SVG_MAP[m]||{paths:[]}).paths.map((p,j)=>(
-        <path key={`s${i}${j}`} d={p} fill="rgba(239,68,68,0.35)" stroke="rgba(239,68,68,0.5)" strokeWidth={0.5}/>
-      )))}
-      {/* 주동근 (진한 색) */}
-      {primary.map((m,i) => (MUSCLE_SVG_MAP[m]||{paths:[]}).paths.map((p,j)=>(
-        <path key={`p${i}${j}`} d={p} fill="rgba(239,68,68,0.75)" stroke="#ef4444" strokeWidth={0.8}/>
-      )))}
-    </svg>
-  );
-}
 
 function buildConsultReport(sv, goal = {}) {
   const LEVEL = {
@@ -3544,23 +3426,20 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
                           color:"#ffd166"}}>RPE {avgRPE}</span>}
                       </div>
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:8}}>
-                      <MuscleSvgMap muscleTop={ex.muscleTop} muscleSub={ex.muscleSub} exName={ex.name} size={44} />
-                      <div style={{textAlign:"right"}}>
-                        {isFunc ? (
-                          <div>
-                            {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:700}}>총 {totalSec}초</div>}
-                            {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
-                            {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()}kg</div>}
-                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>{(ex.sets||[]).length}세트</div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
-                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
-                          </div>
-                        )}
-                      </div>
+                    <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                      {isFunc ? (
+                        <div>
+                          {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:700}}>총 {totalSec}초</div>}
+                          {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
+                          {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()}kg</div>}
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>{(ex.sets||[]).length}세트</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div style={{padding:"6px 12px"}}>

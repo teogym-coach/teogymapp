@@ -3562,6 +3562,7 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
                         )}
                       </div>
                     </div>
+                  </div>
                   <div style={{padding:"6px 12px"}}>
                     {isFunc ? (
                       /* 기능운동: 입력된 값만 표시 */

@@ -71,7 +71,11 @@ function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, record
 function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""}; }
 
 // 기능운동 여부 판별
-function isFuncEx(ex) { return ex.muscleTop === "기능"; }
+function isFuncEx(ex) {
+  // muscleTop이 기능이거나, 세트 중 recordType:"function"이 있으면 기능운동
+  return ex.muscleTop === "기능"
+    || (ex.sets||[]).some(s => s.recordType === "function");
+}
 
 // 기능운동 세트 표시 문자열 (입력된 값만)
 function funcSetLabel(row) {
@@ -3031,8 +3035,11 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
       <div style={{padding:"14px 18px"}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",letterSpacing:".1em",marginBottom:10}}>TODAY'S WORKOUT</div>
         {exList.map((ex, ei) => {
+          const isFunc = isFuncEx(ex);
           const vol=exVol(ex); const ec=EQUIP_COLOR[ex.equipment]||"#888"; const gc=mColor(ex.muscleTop);
           const maxW=Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
+          const totalSec  = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.durationSec)||0),0) : 0;
+          const totalReps = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.reps)||0),0) : 0;
           return (
             <div key={ei} style={{marginBottom:10,background:"#111827",borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
               <div style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -3044,8 +3051,18 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                   </div>
                 </div>
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>{vol.toLocaleString()} kg</div>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a"}}>최고 {maxW}kg</div>
+                  {isFunc ? (
+                    <div>
+                      {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:500}}>총 {totalSec}초</div>}
+                      {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
+                      {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()} kg</div>}
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>{vol.toLocaleString()} kg</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a"}}>최고 {maxW}kg</div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{padding:"6px 12px"}}>

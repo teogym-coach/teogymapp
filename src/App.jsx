@@ -3546,22 +3546,22 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:8}}>
                       <MuscleSvgMap muscleTop={ex.muscleTop} muscleSub={ex.muscleSub} exName={ex.name} size={44} />
-                    <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                      {isFunc ? (
-                        <div>
-                          {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:700}}>총 {totalSec}초</div>}
-                          {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
-                          {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()}kg</div>}
-                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>{(ex.sets||[]).length}세트</div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
-                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
-                        </div>
-                      )}
+                      <div style={{textAlign:"right"}}>
+                        {isFunc ? (
+                          <div>
+                            {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:700}}>총 {totalSec}초</div>}
+                            {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
+                            {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()}kg</div>}
+                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>{(ex.sets||[]).length}세트</div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
+                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
                   <div style={{padding:"6px 12px"}}>
                     {isFunc ? (
                       /* 기능운동: 입력된 값만 표시 */

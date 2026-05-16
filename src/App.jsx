@@ -497,6 +497,23 @@ export default function App() {
     finally { setLoading(false); }
   }
 
+  // 회원 상태 변경 (active | paused | ended)
+  async function handleStatusChange(id, newStatus) {
+    const labels = { active:"진행중", paused:"휴식중", ended:"종료" };
+    const msg = newStatus === "ended"
+      ? `종료 처리하시겠습니까?\n수업 기록은 유지됩니다.`
+      : `${labels[newStatus]}으로 변경하시겠습니까?`;
+    if (!window.confirm(msg)) return;
+    try {
+      const patch = { status: newStatus };
+      if (newStatus === "ended")  patch.endedAt = new Date().toISOString().split("T")[0];
+      if (newStatus === "active") patch.endedAt = null;
+      await updateMember(id, patch);
+      setMembers(prev => prev.map(m => m.id === id ? {...m, ...patch} : m));
+      showToast(`${labels[newStatus]} 처리 완료 ✓`);
+    } catch(e) { showToast(e.message, "err"); }
+  }
+
   async function handleDeleteMember(id) {
     if (!window.confirm("이 회원의 모든 기록이 삭제됩니다. 계속할까요?")) return;
     setLoading(true);
@@ -621,7 +638,7 @@ export default function App() {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))"}}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} />}
-        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} />}
+        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={member} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} />}
@@ -739,12 +756,15 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
 
   // 필터
   const FILTERS = [
-    {key:"all",      label:"전체"},
-    {key:"today",    label:"오늘 수업"},
-    {key:"7days",    label:"7일 미방문"},
-    {key:"14days",   label:"14일 미방문"},
-    {key:"diet",     label:"다이어트"},
-    {key:"bulk",     label:"벌크업"},
+    {key:"active",  label:"진행중",   color:"#5EEAD4"},
+    {key:"paused",  label:"휴식중",   color:"#ffd166"},
+    {key:"ended",   label:"종료회원", color:"#64748b"},
+    {key:"all",     label:"전체",     color:"#94a3b8"},
+    {key:"today",   label:"오늘 수업",color:"#5EEAD4"},
+    {key:"7days",   label:"7일 미방문",color:"#ff9f43"},
+    {key:"14days",  label:"14일 미방문",color:"#ff6b6b"},
+    {key:"diet",    label:"다이어트", color:"#a29bfe"},
+    {key:"bulk",    label:"벌크업",   color:"#f97316"},
   ];
   const SORTS = [
     {key:"recent",    label:"최근 기록순"},
@@ -753,14 +773,26 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     {key:"remaining", label:"남은 횟수 적은순"},
   ];
 
+  // 회원 상태 헬퍼 (status 없으면 active)
+  function mStatus(m) { return m.status || "active"; }
+
   // 필터 적용
   function passFilter(m) {
-    const meta = getMemberMeta(m);
-    if (filter === "today")  return meta.lastDate === today; // lastDate = m.lastSessionDate || sessionsMap
-    if (filter === "7days")  return meta.daysSince !== null && meta.daysSince > 7;
-    if (filter === "14days") return meta.daysSince !== null && meta.daysSince > 14;
-    if (filter === "diet")   return (m.goal||"").includes("다이어트") || (m.goal||"").includes("감량");
-    if (filter === "bulk")   return (m.goal||"").includes("벌크") || (m.goal||"").includes("증량") || (m.goal||"").includes("근육");
+    const meta   = getMemberMeta(m);
+    const status = mStatus(m);
+    // 검색 시에는 ended도 포함
+    const isSearching = search.trim().length > 0;
+    if (filter === "active")  return status === "active";
+    if (filter === "paused")  return status === "paused";
+    if (filter === "ended")   return status === "ended";
+    if (filter === "all")     return true;
+    // 아래 필터는 active/paused만 (종료 회원 제외, 검색 시 포함)
+    if (!isSearching && status === "ended") return false;
+    if (filter === "today")   return meta.lastDate === today;
+    if (filter === "7days")   return meta.daysSince !== null && meta.daysSince > 7;
+    if (filter === "14days")  return meta.daysSince !== null && meta.daysSince > 14;
+    if (filter === "diet")    return (m.goal||"").includes("다이어트") || (m.goal||"").includes("감량");
+    if (filter === "bulk")    return (m.goal||"").includes("벌크") || (m.goal||"").includes("증량") || (m.goal||"").includes("근육");
     return true;
   }
 
@@ -774,16 +806,25 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
         const rb = getMemberMeta(b).remaining ?? 9999;
         return ra - rb;
       }
-      // recent: 최근 세션 날짜순
-      const da = getMemberMeta(a).lastDate || "0000-00-00";
-      const db = getMemberMeta(b).lastDate || "0000-00-00";
-      return db.localeCompare(da);
+      // recent: 오늘 수업 1순위 → 최근 세션일 2순위 → 이름 3순위
+      const metaA = getMemberMeta(a), metaB = getMemberMeta(b);
+      const aToday = metaA.lastDate === today ? 1 : 0;
+      const bToday = metaB.lastDate === today ? 1 : 0;
+      if (bToday !== aToday) return bToday - aToday;
+      const da = metaA.lastDate || "0000-00-00";
+      const db = metaB.lastDate || "0000-00-00";
+      if (da !== db) return db.localeCompare(da);
+      return (a.name||"").localeCompare(b.name||"");
     });
   }
 
+  // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용
   const filtered = sortMembers(
-    members.filter(m => matchSearch(m.name, search) && passFilter(m))
-  );
+    members.filter(m => matchSearch(m.name, search) && (search.trim() ? true : passFilter(m)) && (search.trim() ? true : true))
+  ).filter(m => {
+    if (search.trim()) return matchSearch(m.name, search); // 검색 시 전체 상태 포함
+    return passFilter(m);
+  });
 
   return (
     <div>
@@ -817,9 +858,9 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
         {FILTERS.map(f => (
           <button key={f.key} onClick={()=>setFilter(f.key)}
             style={{flexShrink:0,padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
-              borderColor:filter===f.key?"#5EEAD4":"rgba(255,255,255,0.08)",
-              background:filter===f.key?"rgba(0,229,160,.12)":"transparent",
-              color:filter===f.key?"#5EEAD4":"#54546a"}}>
+              borderColor:filter===f.key?(f.color||"#5EEAD4"):"rgba(255,255,255,0.08)",
+              background:filter===f.key?`${f.color||"#5EEAD4"}18`:"transparent",
+              color:filter===f.key?(f.color||"#5EEAD4"):"#54546a"}}>
             {f.label}
           </button>
         ))}
@@ -864,49 +905,72 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
               (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
             );
 
-            const borderCol = isToday ? "#5EEAD4" : isWarning ? "#ff6b6b44" : "rgba(255,255,255,0.08)";
-            const bgCol     = isToday ? "rgba(0,229,160,.06)" : isWarning ? "rgba(255,107,107,.04)" : "#111827";
+            const status    = mStatus(m);
+            const isEnded   = status === "ended";
+            const isPaused  = status === "paused";
+            const borderCol = isEnded ? "rgba(255,255,255,0.04)"
+                            : isToday ? "#5EEAD4"
+                            : isWarning ? "#ff6b6b44"
+                            : "rgba(255,255,255,0.08)";
+            const bgCol     = isEnded ? "#0d1117"
+                            : isToday ? "rgba(0,229,160,.06)"
+                            : isWarning ? "rgba(255,107,107,.04)"
+                            : "#111827";
 
             return (
-              <div key={m.id}
+              <div key={m.id} style={{position:"relative"}}
+                onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
+              <div
                 style={{background:bgCol, border:"1px solid "+borderCol, borderRadius:10,
-                  padding:"11px 13px", display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                  padding:"11px 13px", display:"flex", alignItems:"center", justifyContent:"space-between",
+                  opacity: isEnded ? 0.65 : 1, transition:"opacity .15s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",flex:1,minWidth:0}}
                   onClick={()=>onSelect(m)}>
                   {/* 아이콘 */}
                   <div style={{width:38,height:38,borderRadius:10,flexShrink:0,
-                    background: isToday ? "rgba(0,229,160,.18)" : isWarning ? "rgba(255,107,107,.12)" : "rgba(255,255,255,0.08)",
+                    background: isEnded ? "rgba(255,255,255,0.05)"
+                              : isToday ? "rgba(0,229,160,.18)"
+                              : isWarning ? "rgba(255,107,107,.12)"
+                              : "rgba(255,255,255,0.08)",
                     display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>
-                    {isToday ? "🟢" : isWarning ? "⚠️" : "💪"}
+                    {isEnded ? "🔒" : isPaused ? "⏸️" : isToday ? "🟢" : isWarning ? "⚠️" : "💪"}
                   </div>
                   {/* 정보 */}
                   <div style={{minWidth:0,flex:1}}>
                     {/* 이름 + 배지 */}
                     <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
                       <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,
-                        color:isToday?"#5EEAD4":isWarning?"#ff9f43":"#fff",
+                        color:isEnded?"#475569":isToday?"#5EEAD4":isWarning?"#ff9f43":"#fff",
                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>
                         {m.name}
                       </span>
-                      {isToday && (
+                      {isEnded && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(100,116,139,.2)",color:"#64748b",fontWeight:700}}>종료</span>
+                      )}
+                      {isPaused && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(255,209,102,.2)",color:"#ffd166",fontWeight:700}}>휴식중</span>
+                      )}
+                      {!isEnded && !isPaused && isToday && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(0,229,160,.2)",color:"#5EEAD4",fontWeight:700}}>오늘 수업</span>
                       )}
-                      {isWarning && !isToday && (
+                      {!isEnded && isWarning && !isToday && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>
                           {meta.daysSince}일 미방문
                         </span>
                       )}
-                      {isAlert7 && !isWarning && (
+                      {!isEnded && isAlert7 && !isWarning && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,209,102,.15)",color:"#ffd166",fontWeight:700}}>7일 미방문</span>
                       )}
-                      {priorityGoalBadge && (
+                      {!isEnded && priorityGoalBadge && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontWeight:700}}>🎯 {priorityGoalBadge.replace(" 우선","")}</span>
                       )}
-                      {isPainMgmt && (
+                      {!isEnded && isPainMgmt && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>💢 통증관리</span>
                       )}
@@ -939,11 +1003,51 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                     )}
                   </div>
                 </div>
-                <button onClick={e=>{e.stopPropagation();onDelete(m.id);}}
-                  style={{background:"none",border:"none",color:"#1e2a3a",fontSize:16,padding:"4px 8px",flexShrink:0,cursor:"pointer"}}>
-                  🗑
-                </button>
+                  </div>
+                </div>
+                {/* 우측 버튼 영역 */}
+                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,marginLeft:8,alignItems:"flex-end"}}>
+                  {/* 상태 변경 버튼 */}
+                  <button onClick={e=>{e.stopPropagation();setStatusMenu(statusMenu===m.id?null:m.id);}}
+                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
+                      color:"#64748b",fontSize:10,padding:"3px 8px",cursor:"pointer",fontWeight:700}}>
+                    ···
+                  </button>
+                  <button onClick={e=>{e.stopPropagation();onDelete(m.id);}}
+                    style={{background:"none",border:"none",color:"#1e2a3a",fontSize:14,padding:"2px 6px",cursor:"pointer"}}>
+                    🗑
+                  </button>
+                </div>
               </div>
+              {/* 상태 변경 드롭다운 */}
+              {statusMenu === m.id && (
+                <div style={{position:"absolute",right:0,top:52,zIndex:100,
+                  background:"#1e293b",border:"1px solid rgba(255,255,255,0.12)",
+                  borderRadius:10,padding:"6px",minWidth:140,boxShadow:"0 8px 24px rgba(0,0,0,.5)"}}>
+                  {status !== "active" && (
+                    <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"active");}}
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",borderRadius:7,
+                        border:"none",background:"none",color:"#5EEAD4",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      ✅ 진행중으로 변경
+                    </button>
+                  )}
+                  {status !== "paused" && (
+                    <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"paused");}}
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",borderRadius:7,
+                        border:"none",background:"none",color:"#ffd166",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      ⏸️ 휴식 처리
+                    </button>
+                  )}
+                  {status !== "ended" && (
+                    <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"ended");}}
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",borderRadius:7,
+                        border:"none",background:"none",color:"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      🔒 종료 처리
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             );
           })}
         </div>

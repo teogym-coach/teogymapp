@@ -292,6 +292,11 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .g2{grid-template-columns:1fr!important;}
   input[type=number]{-moz-appearance:textfield;}
 }
+@media(max-width:430px){
+  .set-grid{grid-template-columns:28px 1fr 1fr!important;}
+  .set-grid .vol-cell{display:none;}
+  .eq-grid{grid-template-columns:1fr 1fr!important;}
+}
 @media print{.noprint{display:none!important;}#pportal{display:block!important;position:fixed;top:0;left:0;width:210mm;}body{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 `;
 
@@ -2639,7 +2644,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
             style={{
               background:"#0B1120",
               border:"1px solid "+(isDrag?"#7c6fff":"rgba(255,255,255,0.08)"),
-              borderRadius:10,padding:11,marginBottom:9,
+              borderRadius:10,padding:"9px 8px",marginBottom:9,
               opacity:isDrag?0.85:1,
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
               boxShadow:isDrag?"0 8px 28px rgba(124,111,255,.30)":"none",
@@ -2665,31 +2670,31 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               <Mo c="#1e2a3a" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
-                placeholder="운동 이름" style={{flex:1,minWidth:90,fontWeight:700,fontSize:14}} />
+                placeholder="운동 이름" style={{flex:1,minWidth:0,fontWeight:700,fontSize:14}} />
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
-                <div style={{display:"flex",gap:2,flexShrink:0}}>
+                <div style={{display:"flex",gap:1,flexShrink:0}}>
                   <button onClick={()=>moveEx(ei,0)} disabled={ei===0}
                     title="맨 위로"
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
-                      color:ei===0?"rgba(255,255,255,0.08)":"#5EEAD4",fontSize:9,padding:"2px 5px",
-                      cursor:ei===0?"default":"pointer",fontWeight:700}}>⇈</button>
+                    style={{background:"none",border:"none",borderRadius:3,
+                      color:ei===0?"rgba(255,255,255,0.1)":"#5EEAD4",fontSize:10,padding:"2px 3px",
+                      cursor:ei===0?"default":"pointer",fontWeight:700,lineHeight:1}}>⇈</button>
                   <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0}
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
-                      color:ei===0?"rgba(255,255,255,0.08)":"#54546a",fontSize:11,padding:"2px 5px",cursor:ei===0?"default":"pointer"}}>▲</button>
+                    style={{background:"none",border:"none",borderRadius:3,
+                      color:ei===0?"rgba(255,255,255,0.1)":"#64748b",fontSize:11,padding:"2px 3px",cursor:ei===0?"default":"pointer",lineHeight:1}}>▲</button>
                   <button onClick={()=>moveEx(ei,ei+1)} disabled={ei===exercises.length-1}
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
-                      color:ei===exercises.length-1?"rgba(255,255,255,0.08)":"#54546a",fontSize:11,padding:"2px 5px",cursor:ei===exercises.length-1?"default":"pointer"}}>▼</button>
+                    style={{background:"none",border:"none",borderRadius:3,
+                      color:ei===exercises.length-1?"rgba(255,255,255,0.1)":"#64748b",fontSize:11,padding:"2px 3px",cursor:ei===exercises.length-1?"default":"pointer",lineHeight:1}}>▼</button>
                   <button onClick={()=>moveEx(ei,exercises.length-1)} disabled={ei===exercises.length-1}
                     title="맨 아래로"
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
-                      color:ei===exercises.length-1?"rgba(255,255,255,0.08)":"#5EEAD4",fontSize:9,padding:"2px 5px",
-                      cursor:ei===exercises.length-1?"default":"pointer",fontWeight:700}}>⇊</button>
+                    style={{background:"none",border:"none",borderRadius:3,
+                      color:ei===exercises.length-1?"rgba(255,255,255,0.1)":"#5EEAD4",fontSize:10,padding:"2px 3px",
+                      cursor:ei===exercises.length-1?"default":"pointer",fontWeight:700,lineHeight:1}}>⇊</button>
                 </div>
               )}
               {exercises.length > 1 && (
                 <button onClick={() => removeEx(ei)}
-                  style={{background:"none",border:"none",color:"#ff6b6b",fontSize:11,padding:0,whiteSpace:"nowrap"}}>✕ 삭제</button>
+                  style={{background:"none",border:"none",color:"#ff6b6b",fontSize:10,padding:"0 2px",flexShrink:0}}>✕</button>
               )}
             </div>
             {/* ── 이전 기록 불러오기 ── */}
@@ -2835,7 +2840,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 </div>
               );
             })()}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+            <div className="eq-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
               <div>
                 <label>기구</label>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
@@ -2982,7 +2987,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 <Mo c="#54546a" s={8}>RPE</Mo>
                 {ex.rpe && <Mo c="#ffd166" s={9}>{ex.rpe} — {["","극저강도","매우 쉬움","쉬움","가벼움","보통","약간 힘듦","힘듦","매우 힘듦","한계 근접","한계"][ex.rpe]}</Mo>}
               </div>
-              <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:2,flexWrap:"wrap",width:"100%"}}>
                 {[1,2,3,4,5,6,7,8,9,10].map(n => {
                   const active = ex.rpe === n;
                   const col = n<=4?"#5EEAD4":n<=6?"#ffd166":n<=8?"#ff9f43":"#ff6b6b";
@@ -7390,7 +7395,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
 // ════════════════════════════════════════════
 function SH({ title, sub, right }) {
   return (
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:8,flexWrap:"wrap"}}>
       <div>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#fff",letterSpacing:"-0.5px"}}>{title}</div>
         {sub && <Mo c="#54546a" s={9} style={{marginTop:2}}>{sub}</Mo>}

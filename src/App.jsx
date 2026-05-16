@@ -725,14 +725,16 @@ function matchSearch(name, query) {
   return false;
 }
 
-function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete }) {
+function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange }) {
   const today = new Date().toISOString().split("T")[0];
-  const [search,  setSearch]  = useState("");
-  const [sortBy,  setSortBy]  = useState("recent");   // recent|name|startDate|remaining
-  const [filter,  setFilter]  = useState("all");      // all|today|7days|14days|correction|diet|bulk
-  const [showSort, setShowSort]= useState(false);
+  const [search,     setSearch]     = useState("");
+  const [sortBy,     setSortBy]     = useState("recent");
+  const [filter,     setFilter]     = useState("active");
+  const [showSort,   setShowSort]   = useState(false);
+  const [statusMenu, setStatusMenu] = useState(null); // 상태 메뉴 열린 회원 id
 
-  // 각 회원의 세션 요약 계산
+  // 상태 헬퍼 (status 없으면 active)
+  function mStatus(m) { return m.status || "active"; }
   function getMemberMeta(m) {
     const ss = (sessionsMap[m.id] || []);
     const sorted = [...ss].sort((a,b) => (b.date||"").localeCompare(a.date||""));
@@ -772,9 +774,6 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     {key:"startDate", label:"등록일순"},
     {key:"remaining", label:"남은 횟수 적은순"},
   ];
-
-  // 회원 상태 헬퍼 (status 없으면 active)
-  function mStatus(m) { return m.status || "active"; }
 
   // 필터 적용
   function passFilter(m) {

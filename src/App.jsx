@@ -1003,8 +1003,6 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                     )}
                   </div>
                 </div>
-                  </div>
-                </div>
                 {/* 우측 버튼 영역 */}
                 <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,marginLeft:8,alignItems:"flex-end"}}>
                   {/* 상태 변경 버튼 */}

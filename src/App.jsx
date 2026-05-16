@@ -2292,11 +2292,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     onSave(payload);
   }
 
-  function handlePrint() {
-    const p = document.getElementById("pportal");
-    if (p && pRef.current) p.innerHTML = pRef.current.innerHTML;
-    window.print();
-  }
+  function handleSaveTop() { handleSave(); }
 
   if (showCard) {
     return (
@@ -2313,9 +2309,14 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     <div>
       <SH title={isEdit?"🔧 수업 수정":"✏️ 수업 기록"} sub={member.name}
         right={
-          <div style={{display:"flex",gap:7}}>
+          <div style={{display:"flex",gap:6,flexWrap:"nowrap"}}>
             <Btn ghost sm onClick={() => setShowCard(true)} style={{color:"#00bfff",borderColor:"#00bfff33"}}>📸 카드</Btn>
-            <Btn ghost sm onClick={handlePrint}>🖨</Btn>
+            <button onClick={handleSaveTop}
+              style={{padding:"5px 12px",borderRadius:8,border:"1px solid #5EEAD4",cursor:"pointer",
+                background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:11,fontWeight:700,
+                whiteSpace:"nowrap"}}>
+              💾 저장
+            </button>
             <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
           </div>
         } />
@@ -2558,15 +2559,25 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
                 placeholder="운동 이름" style={{flex:1,minWidth:90,fontWeight:700,fontSize:14}} />
-              {/* 위아래 버튼 (보조) */}
+              {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
                 <div style={{display:"flex",gap:2,flexShrink:0}}>
+                  <button onClick={()=>moveEx(ei,0)} disabled={ei===0}
+                    title="맨 위로"
+                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
+                      color:ei===0?"rgba(255,255,255,0.08)":"#5EEAD4",fontSize:9,padding:"2px 5px",
+                      cursor:ei===0?"default":"pointer",fontWeight:700}}>⇈</button>
                   <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0}
                     style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
                       color:ei===0?"rgba(255,255,255,0.08)":"#54546a",fontSize:11,padding:"2px 5px",cursor:ei===0?"default":"pointer"}}>▲</button>
                   <button onClick={()=>moveEx(ei,ei+1)} disabled={ei===exercises.length-1}
                     style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
                       color:ei===exercises.length-1?"rgba(255,255,255,0.08)":"#54546a",fontSize:11,padding:"2px 5px",cursor:ei===exercises.length-1?"default":"pointer"}}>▼</button>
+                  <button onClick={()=>moveEx(ei,exercises.length-1)} disabled={ei===exercises.length-1}
+                    title="맨 아래로"
+                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,
+                      color:ei===exercises.length-1?"rgba(255,255,255,0.08)":"#5EEAD4",fontSize:9,padding:"2px 5px",
+                      cursor:ei===exercises.length-1?"default":"pointer",fontWeight:700}}>⇊</button>
                 </div>
               )}
               {exercises.length > 1 && (
@@ -2885,7 +2896,18 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
             </div>
           </div>
         );})}
-        <button onClick={addEx} style={{width:"100%",padding:10,border:"1px dashed rgba(255,255,255,0.08)",borderRadius:8,background:"none",color:"#54546a",fontSize:12,fontWeight:700}}>+ 운동 종목 추가</button>
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button onClick={() => setExercises(prev=>[...prev, {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""}])}
+            style={{flex:1,padding:"9px 0",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:8,
+              background:"transparent",color:"#64748b",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+            + 마지막에 추가
+          </button>
+          <button onClick={() => setExercises(prev=>[{name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""},...prev])}
+            style={{flex:1,padding:"9px 0",border:"1px dashed rgba(94,234,212,.3)",borderRadius:8,
+              background:"rgba(94,234,212,.05)",color:"#5EEAD4",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+            ↑ 맨 위에 추가
+          </button>
+        </div> style={{width:"100%",padding:10,border:"1px dashed rgba(255,255,255,0.08)",borderRadius:8,background:"none",color:"#54546a",fontSize:12,fontWeight:700}}>+ 운동 종목 추가</button>
         <div style={{marginTop:9,padding:"9px 13px",background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.2)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <Mo c="#54546a" s={9}>TOTAL VOLUME</Mo>
           <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#54546a"}}>kg</span></span>

@@ -273,9 +273,10 @@ function exVol(ex, memberBodyWeight) {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
+html{height:-webkit-fill-available;overflow-x:hidden;width:100%;}
 html,body,#root{min-height:100%;min-height:-webkit-fill-available;}
-html{height:-webkit-fill-available;}
-body{background:#0B1120;color:#e2e8f0;font-family:'Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;overscroll-behavior:none;}
+body{background:#0B1120;color:#e2e8f0;font-family:'Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;overscroll-behavior:none;overflow-x:hidden;width:100%;max-width:100vw;}
+#root{overflow-x:hidden;width:100%;}
 input,textarea,select{font-family:'Noto Sans KR',sans-serif;background:#111827;border:1px solid rgba(255,255,255,0.10);color:#ddddf0;border-radius:7px;padding:8px 12px;font-size:16px;width:100%;outline:none;transition:border-color .18s;-webkit-appearance:none;}
 input:focus,textarea:focus,select:focus{border-color:#5EEAD4;box-shadow:0 0 0 3px rgba(0,229,160,.07);}
 input::placeholder,textarea::placeholder{color:#2e2e3e;}
@@ -286,7 +287,11 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#0B1120;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.10);border-radius:4px;}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fi{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
-@media(max-width:600px){.g3{grid-template-columns:1fr 1fr!important;}.g2{grid-template-columns:1fr!important;}}
+@media(max-width:600px){
+  .g3{grid-template-columns:1fr 1fr!important;}
+  .g2{grid-template-columns:1fr!important;}
+  input[type=number]{-moz-appearance:textfield;}
+}
 @media print{.noprint{display:none!important;}#pportal{display:block!important;position:fixed;top:0;left:0;width:210mm;}body{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 `;
 
@@ -636,6 +641,7 @@ export default function App() {
       {/* SCREENS */}
       <div className="noprint" style={{
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
+          width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))"}}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} />}
         {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
@@ -2913,7 +2919,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   const exType2 = getExerciseType(ex.name);
                   const h1 = exType2==="assist" ? "보조kg" : "무게kg";
                   return (
-                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 65px 18px",gap:4,marginBottom:3}}>
+                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3}}>
                       {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#1e2a3a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                     </div>
                   );
@@ -2927,7 +2933,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   const realWRow  = exTypeRow==="assist" ? getRealWeight(row.weight, exTypeRow, mbwRow) : null;
                   return (
                     <div key={si} style={{marginBottom:3}}>
-                      <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 65px 18px",gap:4,alignItems:"center"}}>
+                      <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,alignItems:"center"}}>
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111827",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
                         <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
                         <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />

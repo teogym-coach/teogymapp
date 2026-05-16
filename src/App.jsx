@@ -292,10 +292,20 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .g2{grid-template-columns:1fr!important;}
   input[type=number]{-moz-appearance:textfield;}
 }
-@media(max-width:430px){
+@media(max-width:480px){
+  /* 기본 정보 3컬럼 → 2컬럼 */
+  .g3{grid-template-columns:1fr 1fr!important;}
+  /* 식단/체중 2컬럼 → 1컬럼 */
+  .diet-grid{grid-template-columns:1fr!important;}
+  /* 세트 입력 그리드 */
   .set-grid{grid-template-columns:28px 1fr 1fr!important;}
   .set-grid .vol-cell{display:none;}
+  /* 기구/부위/세부부위 */
   .eq-grid{grid-template-columns:1fr 1fr!important;}
+}
+@media(max-width:390px){
+  /* 아이폰 mini / SE 기준 */
+  .g3{grid-template-columns:1fr!important;}
 }
 @media print{.noprint{display:none!important;}#pportal{display:block!important;position:fixed;top:0;left:0;width:210mm;}body{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 `;
@@ -611,11 +621,12 @@ export default function App() {
 
       {/* NAV */}
       <nav className="noprint" style={{
-        borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"0 16px",
+        borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"0 clamp(10px,3vw,16px)",
         paddingTop:"env(safe-area-inset-top, 0px)",
         display:"flex",alignItems:"center",justifyContent:"space-between",
         height:"calc(50px + env(safe-area-inset-top, 0px))",
-        background:"#0B1120",position:"sticky",top:0,zIndex:100}}>
+        background:"#0B1120",position:"sticky",top:0,zIndex:100,
+        maxWidth:"100%",overflowX:"clip"}}>
         <div style={{display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}
           onClick={() => { setMember(null); setScreen("home"); }}>
           <div style={{width:26,height:26,borderRadius:7,background:"#5EEAD4",
@@ -2421,11 +2432,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     <div>
       <SH title={isEdit?"🔧 수업 수정":"✏️ 수업 기록"} sub={member.name}
         right={
-          <div style={{display:"flex",gap:6,flexWrap:"nowrap"}}>
-            <Btn ghost sm onClick={() => setShowCard(true)} style={{color:"#00bfff",borderColor:"#00bfff33"}}>📸 카드</Btn>
+          <div style={{display:"flex",gap:4,flexWrap:"nowrap",flexShrink:0,minWidth:0}}>
+            <Btn ghost sm onClick={() => setShowCard(true)} style={{color:"#00bfff",borderColor:"#00bfff33",padding:"5px 9px",fontSize:10}}>📸 카드</Btn>
             <button onClick={handleSaveTop}
-              style={{padding:"5px 12px",borderRadius:8,border:"1px solid #5EEAD4",cursor:"pointer",
-                background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:11,fontWeight:700,
+              style={{padding:"5px 9px",borderRadius:8,border:"1px solid #5EEAD4",cursor:"pointer",
+                background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:10,fontWeight:700,
                 whiteSpace:"nowrap"}}>
               💾 저장
             </button>
@@ -2441,7 +2452,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
           <Field label="회차 *"   value={String(sessionNo)} onChange={v => setSessionNo(parseInt(v)||v)} placeholder="1" />
         </div>
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginTop:9}}>
-          <div style={{gridColumn:"1 / -1"}}>
+          <div style={{gridColumn:"1 / -1",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
             <label>수업 유형 <span style={{fontWeight:400,fontSize:10,color:"#54546a"}}>(복수 선택 가능)</span></label>
             <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}}>
               {SESSION_TYPE_OPTIONS.map(t => {
@@ -2451,8 +2462,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                     onClick={() => setSelectedTypes(prev =>
                       prev.includes(t) ? prev.filter(x=>x!==t) : [...prev, t]
                     )}
-                    style={{padding:"5px 11px",borderRadius:16,border:"1px solid",cursor:"pointer",
-                      fontSize:12,fontWeight:active?700:400,transition:"all .12s",
+                    style={{padding:"4px 9px",borderRadius:14,border:"1px solid",cursor:"pointer",
+                      fontSize:11,fontWeight:active?700:400,transition:"all .12s",
                       borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
                       background:active?"rgba(0,229,160,.15)":"transparent",
                       color:active?"#5EEAD4":"#54546a"}}>
@@ -2473,7 +2484,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
           </div>
           <div>
             <label>컨디션</label>
-            <div style={{display:"flex",gap:4}}>
+            <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
               {["상","중","하"].map(c => {
                 const cfg = CC[c]; const active = condition===c;
                 return (
@@ -3036,7 +3047,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       </Card>
 
       <Card title="식단 & 체중 (선택)" style={{marginTop:11}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+        <div className="diet-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
           <Field label="체중 (kg)"   value={bodyWeight} onChange={setBodyWeight} placeholder="75.5" />
           <Field label="섭취 칼로리" value={calories}   onChange={setCalories}   placeholder="2200" />
         </div>
@@ -7419,7 +7430,7 @@ function TextArea({ label, value, onChange, placeholder }) {
   return <div><label>{label}</label><textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/></div>;
 }
 function Btn({ children, onClick, sm, full, disabled, ghost, style }) {
-  if (ghost) return <button onClick={onClick} style={{padding:sm?"6px 14px":"12px 16px",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",background:"transparent",color:"#7070a0",fontSize:sm?11:13,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",...(style||{})}}>{children}</button>;
+  if (ghost) return <button onClick={onClick} style={{padding:sm?"5px 10px":"12px 16px",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",background:"transparent",color:"#7070a0",fontSize:sm?10:13,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",...(style||{})}}>{children}</button>;
   return <button onClick={onClick} disabled={disabled} style={{padding:sm?"6px 14px":"12px 16px",borderRadius:7,border:"none",background:disabled?"rgba(255,255,255,0.08)":"#5EEAD4",color:disabled?"#54546a":"#0B1120",fontSize:sm?11:13,fontWeight:800,width:full?"100%":"auto",opacity:disabled?0.5:1,cursor:"pointer",whiteSpace:"nowrap",...(style||{})}}>{children}</button>;
 }
 function Mo({ children, c, s, style }) { return <span style={{fontFamily:"'DM Mono',monospace",fontSize:s||11,color:c,...(style||{})}}>{children}</span>; }

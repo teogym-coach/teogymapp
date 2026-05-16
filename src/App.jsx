@@ -2907,7 +2907,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               background:"rgba(94,234,212,.05)",color:"#5EEAD4",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             ↑ 맨 위에 추가
           </button>
-        </div> style={{width:"100%",padding:10,border:"1px dashed rgba(255,255,255,0.08)",borderRadius:8,background:"none",color:"#54546a",fontSize:12,fontWeight:700}}>+ 운동 종목 추가</button>
+        </div>
         <div style={{marginTop:9,padding:"9px 13px",background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.2)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <Mo c="#54546a" s={9}>TOTAL VOLUME</Mo>
           <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#54546a"}}>kg</span></span>

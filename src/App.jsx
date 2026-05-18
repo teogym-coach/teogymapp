@@ -2866,12 +2866,6 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                       <Mo c="#54546a" s={9}>{rec.date}</Mo>
                       {rec.sessionNo && <Mo c="#3a3a5a" s={9}>{rec.sessionNo}회차</Mo>}
-                      {rec.rpe != null && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 7px",
-                          borderRadius:3,background:"rgba(124,111,255,.2)",color:"#a29bfe",fontWeight:700}}>
-                          RPE {rec.rpe}
-                        </span>
-                      )}
                       {ex._loaded && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 7px",
                           borderRadius:3,background:"rgba(0,229,160,.15)",color:"#5EEAD4",fontWeight:700}}>
@@ -2880,26 +2874,46 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                       )}
                     </div>
 
-                    {/* 세트 목록 */}
+                    {/* 세트 목록 + 세트별 RPE */}
                     <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:rec.feedback?6:8}}>
                       {(rec.sets || rec.exerciseSets || []).map((s, si) => {
                         const w = (s.weight   != null && s.weight   !== "") ? String(s.weight)   : "";
                         const r = (s.reps     != null && s.reps     !== "") ? String(s.reps)     : "";
-                        const hasData = w !== "" || r !== "";
+                        const d = (s.durationSec != null && s.durationSec !== "") ? String(s.durationSec) : "";
+                        const hasData = w !== "" || r !== "" || d !== "";
                         return (
                           <span key={si} style={{fontFamily:"'DM Mono',monospace",fontSize:10,
                             padding:"3px 8px",borderRadius:5,fontWeight:700,
                             background:"rgba(255,255,255,.05)",
                             color: hasData ? "#ddddf0" : "#3a3a4a",
-                            border:"1px solid #1a1a2e"}}>
+                            border:"1px solid #1a1a2e",
+                            display:"inline-flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
                             {si+1}세트&nbsp;
-                            <span style={{color:"#5EEAD4"}}>{w !== "" ? w+"kg" : "—"}</span>
-                            &nbsp;×&nbsp;
-                            <span style={{color:"#ffd166"}}>{r !== "" ? r+"회" : "—"}</span>
+                            {d !== "" ? (
+                              <span style={{color:"#54a0ff"}}>{d}초</span>
+                            ) : (
+                              <>
+                                <span style={{color:"#5EEAD4"}}>{w !== "" ? w+"kg" : "—"}</span>
+                                &nbsp;×&nbsp;
+                                <span style={{color:"#ffd166"}}>{r !== "" ? r+"회" : "—"}</span>
+                              </>
+                            )}
                           </span>
                         );
                       })}
                     </div>
+
+                    {/* 전체 RPE 참고 안내 (세트별 RPE 없을 때) */}
+                    {rec.rpe != null && (
+                      <div style={{marginBottom:6,padding:"4px 8px",borderRadius:6,
+                        background:"rgba(124,111,255,.08)",border:"1px solid rgba(124,111,255,.2)",
+                        display:"inline-flex",alignItems:"center",gap:6}}>
+                        <Mo c="#a29bfe" s={8} style={{fontWeight:700}}>이전 RPE 참고</Mo>
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,
+                          color:"#a29bfe",fontWeight:800}}>RPE {rec.rpe}</span>
+                        <Mo c="#64748b" s={8}>— {["","극저","매우쉬움","쉬움","가벼움","보통","약간힘","힘듦","매우힘","한계근접","한계"][rec.rpe]||""}</Mo>
+                      </div>
+                    )}
 
                     {rec.feedback && (
                       <Mo c="#3a3a5a" s={9} style={{display:"block",marginBottom:8}}>💬 {rec.feedback}</Mo>

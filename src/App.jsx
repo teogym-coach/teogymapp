@@ -317,6 +317,8 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .set-grid-header,.set-grid-row{grid-template-columns:20px 1fr 1fr 14px!important;gap:3px!important;}
   .vol-col{display:none!important;}
 }
+/* 운동 이름 input 부모 너비 초과 완전 방지 */
+input,select,textarea{max-width:100%!important;box-sizing:border-box!important;}
 @media print{.noprint{display:none!important;}#pportal{display:block!important;position:fixed;top:0;left:0;width:210mm;}body{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 `;
 
@@ -2693,9 +2695,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 ⠿
               </div>
               <Mo c="#1e2a3a" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
+              <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
-                placeholder="운동 이름" style={{flex:1,minWidth:0,fontWeight:700,fontSize:14}} />
+                placeholder="운동 이름" style={{width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",fontWeight:700,fontSize:14,display:"block"}} />
+              </div>
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
                 <div style={{display:"flex",gap:1,flexShrink:0}}>

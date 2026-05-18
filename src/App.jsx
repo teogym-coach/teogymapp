@@ -3635,9 +3635,7 @@ function SessionReportModal({ s, member, cardMode, setCardMode, onClose, onEdit 
                           borderRadius:3,background:ec+"22",color:ec}}>{ex.equipment}</span>
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 5px",
                           borderRadius:3,background:gc+"22",color:gc}}>{ex.muscleTop}</span>
-                        {avgRPE && <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,
-                          padding:"1px 5px",borderRadius:3,background:"rgba(255,209,102,.15)",
-                          color:"#ffd166"}}>RPE {avgRPE}</span>}
+                        {/* RPE는 회원 공유 카드에서 제외 — 트레이너 전용 데이터 */}
                       </div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>

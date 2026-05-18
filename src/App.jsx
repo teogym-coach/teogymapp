@@ -2167,18 +2167,22 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
   const wData    = sessions.filter(s => s.bodyWeight && parseFloat(s.bodyWeight) > 0)
                            .map(s => ({name:s.sessionNo+"회", w:parseFloat(s.bodyWeight)}));
   const menus = [
-    {icon:"✏️",label:"수업 기록",    desc:"오늘 수업 입력",           sc:"session",      c:"#5EEAD4"},
-    {icon:"💪",label:"근력 분석",    desc:"1RM·5RM·10RM 예측 분석",  sc:"strength",     c:"#ef4444"},
-    {icon:"🎯",label:"목표 관리",    desc:"목표 설정 + AI 분석 리포트", sc:"goal_manage",  c:"#818cf8"},
-    {icon:"🤖",label:"AI 루틴 추천", desc:"수업기록 기반 다음 루틴",  sc:"ai_routine",   c:"#a29bfe"},
-    {icon:"📅",label:"히스토리",     desc:"전체 수업 · 수정 · 삭제",  sc:"history",      c:"#7c6fff"},
-    {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",         sc:"library",      c:"#00bfff"},
-    {icon:"📊",label:"블록 피드백",  desc:"부위/기구별 볼륨 분석",    sc:"feedback",     c:"#ffd166"},
-    {icon:"⚖️",label:"바디 체크",    desc:"체중·칼로리·인바디 분석",  sc:"bodycheck",    c:"#00cec9"},
-    {icon:"💢",label:"근육통 기록",  desc:"부위별 근육통 0~5 기록",    sc:"soreness",     c:"#ff9f43"},
-    {icon:"📈",label:"루틴 분석",    desc:"RPE·근육통·볼륨 반응 분석", sc:"analysis",     c:"#7c6fff"},
-    {icon:"📋",label:"평가 기록",    desc:"체형·기능·인체도 평가",     sc:"assessment",   c:"#a29bfe"},
-    {icon:"🥗",label:"영양 관리",    desc:"식단·탄단지·보충제 기록",  sc:"nutrition",    c:"#00b894"},
+    // ── 핵심: 수업 중 가장 자주 사용 ───────────────────
+    {icon:"✏️",label:"수업 기록",      desc:"오늘 수업 입력",              sc:"session",    c:"#5EEAD4"},
+    {icon:"📅",label:"히스토리",       desc:"전체 수업 · 수정 · 삭제",    sc:"history",    c:"#7c6fff"},
+    {icon:"⚖️",label:"바디 체크",      desc:"체중·칼로리·인바디 분석",    sc:"bodycheck",  c:"#00cec9"},
+    // ── 분석·설계 ──────────────────────────────────────
+    {icon:"💪",label:"근력 분석",      desc:"1RM·5RM·10RM 예측 분석",     sc:"strength",   c:"#ef4444"},
+    {icon:"🤖",label:"AI 루틴 추천",   desc:"수업기록 기반 다음 루틴",     sc:"ai_routine", c:"#a29bfe"},
+    {icon:"🎯",label:"목표 관리",      desc:"목표 설정 + AI 분석 리포트",  sc:"goal_manage",c:"#818cf8"},
+    // ── 기록·분석 보조 ────────────────────────────────
+    {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",            sc:"library",    c:"#00bfff"},
+    {icon:"📈",label:"루틴 분석",      desc:"RPE·근육통·볼륨 반응 분석",  sc:"analysis",   c:"#7c6fff"},
+    {icon:"📊",label:"블록 피드백",    desc:"부위/기구별 볼륨 분석",      sc:"feedback",   c:"#ffd166"},
+    {icon:"💢",label:"근육통 기록",    desc:"부위별 근육통 0~5 기록",     sc:"soreness",   c:"#ff9f43"},
+    // ── 보조 관리 ─────────────────────────────────────
+    {icon:"📋",label:"평가 기록",      desc:"체형·기능·인체도 평가",      sc:"assessment", c:"#a29bfe"},
+    {icon:"🥗",label:"영양 관리",      desc:"식단·탄단지·보충제 기록",    sc:"nutrition",  c:"#00b894"},
   ];
 
   return (

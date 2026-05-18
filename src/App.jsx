@@ -2726,6 +2726,48 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   style={{background:"none",border:"none",color:"#ff6b6b",fontSize:10,padding:"0 2px",flexShrink:0}}>✕</button>
               )}
             </div>
+            {/* ── 실시간 근력 참고 (트레이너 전용, 카드 미포함) ── */}
+            {ex.name && !isSkipForStrength({...ex, sets: ex.sets}) && (() => {
+              // 같은 종목명 과거 기록에서 최고 예상 1RM 세트 탐색
+              let best1RM = 0, bestSet = null;
+              sessions.forEach(sess => {
+                (sess.exercises||[]).forEach(e => {
+                  if (e.name !== ex.name) return;
+                  (e.sets||[]).filter(s=>{
+                    const w=parseFloat(s.weight), r=parseInt(s.reps);
+                    return w>0&&r>=1&&r<=12;
+                  }).forEach(s=>{
+                    const rm = calcEpley1RM(parseFloat(s.weight), parseInt(s.reps));
+                    if (rm && rm > best1RM) { best1RM = rm; bestSet = s; }
+                  });
+                });
+              });
+              if (!best1RM || !bestSet) return null;
+              const e1RM = best1RM.toFixed(1);
+              const e5RM = (best1RM / (1 + 5/30)).toFixed(1);
+              const e10RM= (best1RM / (1 + 10/30)).toFixed(1);
+              return (
+                <div style={{marginBottom:8,padding:"7px 10px",borderRadius:7,
+                  background:"rgba(239,68,68,.06)",border:"1px solid rgba(239,68,68,.15)",
+                  minWidth:0,maxWidth:"100%",boxSizing:"border-box",overflow:"hidden"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",minWidth:0}}>
+                    <Mo c="#ef4444" s={8} style={{fontWeight:700,flexShrink:0}}>💪 예상 근력</Mo>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",minWidth:0}}>
+                      {[["1RM",e1RM],["5RM",e5RM],["10RM",e10RM]].map(([label,val])=>(
+                        <span key={label} style={{fontFamily:"'DM Mono',monospace",fontSize:11,
+                          color:"#fca5a5",fontWeight:600,whiteSpace:"nowrap"}}>
+                          <span style={{color:"#64748b",fontSize:9}}>{label} </span>{val}kg
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <Mo c="#3a3a5a" s={8} style={{marginTop:2,display:"block"}}>
+                    기준: {parseFloat(bestSet.weight)}kg × {bestSet.reps}회 · Epley 추정
+                  </Mo>
+                </div>
+              );
+            })()}
+
             {/* ── 이전 기록 불러오기 ── */}
             {ex.name && (() => {
               const pastRecs = findPastExRecords(sessions, ex.name, 3, editData?.id);

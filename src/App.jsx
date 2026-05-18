@@ -317,8 +317,13 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .set-grid-header,.set-grid-row{grid-template-columns:20px 1fr 1fr 14px!important;gap:3px!important;}
   .vol-col{display:none!important;}
 }
-/* 운동 이름 input 부모 너비 초과 완전 방지 */
-input,select,textarea{max-width:100%!important;box-sizing:border-box!important;}
+/* iPhone Safari zoom 방지: 모든 input 16px 이상 필수 */
+input,select,textarea{
+  max-width:100%!important;
+  box-sizing:border-box!important;
+  font-size:16px!important;
+  -webkit-text-size-adjust:100%;
+}
 @media print{.noprint{display:none!important;}#pportal{display:block!important;position:fixed;top:0;left:0;width:210mm;}body{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 `;
 
@@ -2698,7 +2703,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
-                placeholder="운동 이름" style={{width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",fontWeight:700,fontSize:14,display:"block"}} />
+                placeholder="운동 이름" style={{width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",fontWeight:700,fontSize:16,display:"block"}} />
               </div>
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
@@ -3011,8 +3016,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                     <div key={si} style={{marginBottom:3}}>
                       <div className="set-grid-row" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,alignItems:"center",width:"100%"}}>
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111827",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
-                        <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
-                        <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
+                        <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:36,padding:"0 4px",fontSize:16}} />
+                        <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:36,padding:"0 4px",fontSize:16}} />
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,229,160,.06)",borderRadius:5}}>
                           {row.volume>0 ? row.volume.toLocaleString() : "—"}
                         </div>

@@ -307,6 +307,16 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   /* 아이폰 mini / SE 기준 */
   .g3{grid-template-columns:1fr!important;}
 }
+/* 전역: 모든 flex/grid 자식 min-width:0 — overflow 방지의 핵심 */
+*{min-width:0;}
+/* 운동 카드 전역 */
+.ex-card{max-width:100%;box-sizing:border-box;overflow:hidden;}
+.ex-card *{max-width:100%;box-sizing:border-box;}
+/* 세트 그리드 반응형: 볼륨 컬럼 숨기고 좁혀서 iPhone에서 overflow 방지 */
+@media(max-width:480px){
+  .set-grid-header,.set-grid-row{grid-template-columns:20px 1fr 1fr 14px!important;gap:3px!important;}
+  .vol-col{display:none!important;}
+}
 @media print{.noprint{display:none!important;}#pportal{display:block!important;position:fixed;top:0;left:0;width:210mm;}body{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 `;
 
@@ -2662,9 +2672,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               transition:"transform .12s, box-shadow .12s, border-color .12s, opacity .12s",
               position:"relative",zIndex:isDrag?20:1,
               touchAction:"pan-y",
+              width:"100%",maxWidth:"100%",minWidth:0,
+              boxSizing:"border-box",overflow:"hidden",
             }}>
             {/* 드래그 핸들 + 헤더 */}
-            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               {/* 드래그 핸들 — pointer 이벤트만 처리 */}
               <div
                 title="잡고 위아래로 이동"
@@ -2935,8 +2947,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   const exType2 = getExerciseType(ex.name);
                   const h1 = exType2==="assist" ? "보조kg" : "무게kg";
                   return (
-                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3}}>
-                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#1e2a3a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                    <div className="set-grid-header" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3,width:"100%"}}>
+                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#1e2a3a" s={8} className={i===3?"vol-col":""} style={{textAlign:"center"}}>{h}</Mo>)}
                     </div>
                   );
                 })()}
@@ -2949,7 +2961,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   const realWRow  = exTypeRow==="assist" ? getRealWeight(row.weight, exTypeRow, mbwRow) : null;
                   return (
                     <div key={si} style={{marginBottom:3}}>
-                      <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,alignItems:"center"}}>
+                      <div className="set-grid-row" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,alignItems:"center",width:"100%"}}>
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111827",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
                         <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
                         <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:14}} />
@@ -3255,7 +3267,7 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                         <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
                         <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
                         <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                        <Mo c="#5EEAD4" s={10} style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                        <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
                       </div>
                     ))}
                   </div>

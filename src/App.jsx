@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -687,6 +687,7 @@ export default function App() {
         )}
         {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
+        {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="nutrition"  && member && <NutritionScreen member={member} onBack={() => setScreen("hub")} nutritionData={nutritionData} onSaveNutrition={async d => { try { await saveNutrition(member.id, d); setNutritionData(d); } catch(e) { showToast(e.message || "저장 실패", "err"); } }} showToast={showToast} targetCal={(() => { const g=bodyData?.goal; if(!g||!g.currentWeight||!g.height||!g.age) return 0; const mult={'거의 안함':1.2,'가벼운 활동 (주 1-2회)':1.375,'보통 활동 (주 3-5회)':1.55,'활동적 (주 6-7회)':1.725,'매우 활동적':1.9}; const bmr=10*parseFloat(g.currentWeight)+6.25*parseFloat(g.height)-5*parseInt(g.age)+(g.gender==='여성'?-161:5); const tdee=Math.round(bmr*(mult[g.activityLevel]||1.375)); const days=g.targetDate?Math.max(1,Math.ceil((new Date(g.targetDate+'T00:00:00')-new Date())/86400000)):null; const loss=parseFloat(g.currentWeight)-parseFloat(g.targetWeight||0); const def=days&&loss>0?Math.round(loss*7700/days):0; return def>0?Math.max(1200,tdee-def):tdee; })()} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
@@ -2159,17 +2160,18 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
   const wData    = sessions.filter(s => s.bodyWeight && parseFloat(s.bodyWeight) > 0)
                            .map(s => ({name:s.sessionNo+"회", w:parseFloat(s.bodyWeight)}));
   const menus = [
-    {icon:"✏️",label:"수업 기록",    desc:"오늘 수업 입력",           sc:"session",    c:"#5EEAD4"},
-    {icon:"🎯",label:"목표 관리",    desc:"목표 설정 + AI 분석 리포트", sc:"goal_manage",c:"#818cf8"},
-    {icon:"🤖",label:"AI 루틴 추천", desc:"수업기록 기반 다음 루틴",  sc:"ai_routine", c:"#a29bfe"},
-    {icon:"📅",label:"히스토리",     desc:"전체 수업 · 수정 · 삭제",  sc:"history",    c:"#7c6fff"},
-    {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",         sc:"library",    c:"#00bfff"},
-    {icon:"📊",label:"블록 피드백",  desc:"부위/기구별 볼륨 분석",    sc:"feedback",   c:"#ffd166"},
-    {icon:"⚖️",label:"바디 체크",    desc:"체중·칼로리·인바디 분석",  sc:"bodycheck",  c:"#00cec9"},
-    {icon:"💢",label:"근육통 기록",  desc:"부위별 근육통 0~5 기록",    sc:"soreness",   c:"#ff9f43"},
-    {icon:"📈",label:"루틴 분석",    desc:"RPE·근육통·볼륨 반응 분석", sc:"analysis",   c:"#7c6fff"},
-    {icon:"📋",label:"평가 기록",    desc:"체형·기능·인체도 평가",     sc:"assessment", c:"#a29bfe"},
-    {icon:"🥗",label:"영양 관리",    desc:"식단·탄단지·보충제 기록",  sc:"nutrition",  c:"#00b894"},
+    {icon:"✏️",label:"수업 기록",    desc:"오늘 수업 입력",           sc:"session",      c:"#5EEAD4"},
+    {icon:"💪",label:"근력 분석",    desc:"1RM·5RM·10RM 예측 분석",  sc:"strength",     c:"#ef4444"},
+    {icon:"🎯",label:"목표 관리",    desc:"목표 설정 + AI 분석 리포트", sc:"goal_manage",  c:"#818cf8"},
+    {icon:"🤖",label:"AI 루틴 추천", desc:"수업기록 기반 다음 루틴",  sc:"ai_routine",   c:"#a29bfe"},
+    {icon:"📅",label:"히스토리",     desc:"전체 수업 · 수정 · 삭제",  sc:"history",      c:"#7c6fff"},
+    {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",         sc:"library",      c:"#00bfff"},
+    {icon:"📊",label:"블록 피드백",  desc:"부위/기구별 볼륨 분석",    sc:"feedback",     c:"#ffd166"},
+    {icon:"⚖️",label:"바디 체크",    desc:"체중·칼로리·인바디 분석",  sc:"bodycheck",    c:"#00cec9"},
+    {icon:"💢",label:"근육통 기록",  desc:"부위별 근육통 0~5 기록",    sc:"soreness",     c:"#ff9f43"},
+    {icon:"📈",label:"루틴 분석",    desc:"RPE·근육통·볼륨 반응 분석", sc:"analysis",     c:"#7c6fff"},
+    {icon:"📋",label:"평가 기록",    desc:"체형·기능·인체도 평가",     sc:"assessment",   c:"#a29bfe"},
+    {icon:"🥗",label:"영양 관리",    desc:"식단·탄단지·보충제 기록",  sc:"nutrition",    c:"#00b894"},
   ];
 
   return (
@@ -5698,7 +5700,305 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
 // ROUTINE ANALYSIS SCREEN — 루틴 분석
 // ════════════════════════════════════════════
 // ════════════════════════════════════════════
+
+// ════════════════════════════════════════════
+// 💪 근력 분석 화면 (트레이너 전용)
+// ════════════════════════════════════════════
+
+// Epley 공식 기반 RM 계산
+function calcEpley1RM(weight, reps) {
+  if (!weight || !reps || weight <= 0 || reps <= 0) return null;
+  if (reps === 1) return weight;
+  return weight * (1 + reps / 30);
+}
+
+// 기능/코어 운동 제외 여부
+function isSkipForStrength(ex) {
+  if (ex.muscleTop === "기능") return true;
+  if (ex.equipment === "맨몸" && ex.muscleTop === "코어") return true;
+  if ((ex.sets||[]).some(s => s.recordType === "function")) return true;
+  return false;
+}
+
+// 세션 목록에서 운동별 1RM 분석 데이터 생성
+function buildStrengthData(sessions) {
+  const map = {}; // { exName: [{date, sets, best1RM, bestSet}] }
+
+  sessions.forEach(sess => {
+    const date = sess.date || "";
+    (sess.exercises || []).forEach(ex => {
+      if (!ex.name || isSkipForStrength(ex)) return;
+      const validSets = (ex.sets || []).filter(s => {
+        const w = parseFloat(s.weight);
+        const r = parseInt(s.reps);
+        return w > 0 && r > 0;
+      });
+      if (!validSets.length) return;
+
+      let best1RM = 0, bestSet = null;
+      validSets.forEach(s => {
+        const w = parseFloat(s.weight);
+        const r = parseInt(s.reps);
+        const rm = calcEpley1RM(w, r);
+        if (rm && rm > best1RM) { best1RM = rm; bestSet = s; }
+      });
+      if (!best1RM || !bestSet) return;
+
+      if (!map[ex.name]) map[ex.name] = [];
+      map[ex.name].push({ date, best1RM, bestSet, equipment: ex.equipment });
+    });
+  });
+
+  // 운동별 정리
+  const result = [];
+  Object.entries(map).forEach(([name, entries]) => {
+    if (entries.length < 1) return;
+    const sorted = [...entries].sort((a,b) => a.date.localeCompare(b.date));
+    const allTime = Math.max(...sorted.map(e => e.best1RM));
+    const allTimeBest = sorted.find(e => e.best1RM === allTime);
+
+    // 최근 4주 vs 이전
+    const today = new Date().toISOString().split("T")[0];
+    const fourWkAgo = new Date(Date.now() - 28*86400000).toISOString().split("T")[0];
+    const recent = sorted.filter(e => e.date >= fourWkAgo);
+    const older  = sorted.filter(e => e.date < fourWkAgo);
+
+    const recentBest = recent.length ? Math.max(...recent.map(e=>e.best1RM)) : null;
+    const olderBest  = older.length  ? Math.max(...older.map(e=>e.best1RM))  : null;
+
+    let trend = "데이터 부족";
+    if (recentBest && olderBest) {
+      const diff = recentBest - olderBest;
+      if (diff > allTime * 0.02)       trend = "상승";
+      else if (diff < -allTime * 0.02) trend = "하락";
+      else                             trend = "유지";
+    } else if (recent.length > 0) {
+      trend = "신규";
+    }
+
+    const e1RM = Math.round(allTime);
+    const e5RM = Math.round(allTime * 0.87);
+    const e10RM= Math.round(allTime * 0.75);
+
+    // 다음 수업 추천 중량 (현재 최고 세트 기준 +2.5~5%)
+    const curW = parseFloat(allTimeBest?.bestSet?.weight) || 0;
+    const curR = parseInt(allTimeBest?.bestSet?.reps) || 0;
+    const nextW = curW > 0 ? Math.round((curW * 1.025) / 2.5) * 2.5 : null;
+
+    // 최근 3개월 트렌드 포인트 (그래프용)
+    const threeMonthsAgo = new Date(Date.now() - 90*86400000).toISOString().split("T")[0];
+    const trendPoints = sorted.filter(e => e.date >= threeMonthsAgo)
+      .map(e => ({ date: e.date, rm: Math.round(e.best1RM) }));
+
+    result.push({
+      name, e1RM, e5RM, e10RM, trend,
+      bestDate: allTimeBest?.date || "",
+      bestSet:  allTimeBest?.bestSet,
+      recentBest: recentBest ? Math.round(recentBest) : null,
+      olderBest:  olderBest  ? Math.round(olderBest)  : null,
+      nextW, curW, curR,
+      trendPoints,
+      equipment: entries[0]?.equipment || "",
+      count: entries.length,
+    });
+  });
+
+  return result.sort((a,b) => b.e1RM - a.e1RM);
+}
+
+function StrengthScreen({ member, sessions, onBack }) {
+  const [period, setPeriod] = useState("3m"); // 3m | all
+  const [expandedIdx, setExpandedIdx] = useState(null);
+
+  const data = useMemo(() => buildStrengthData(sessions), [sessions]);
+
+  const TREND_STYLE = {
+    "상승":    { color:"#22c55e", bg:"rgba(34,197,94,.12)",  icon:"📈" },
+    "유지":    { color:"#5EEAD4", bg:"rgba(94,234,212,.10)", icon:"➡️" },
+    "하락":    { color:"#ef4444", bg:"rgba(239,68,68,.12)",  icon:"📉" },
+    "신규":    { color:"#818cf8", bg:"rgba(129,140,248,.12)",icon:"🆕" },
+    "데이터 부족":{ color:"#64748b",bg:"rgba(100,116,139,.10)",icon:"❓" },
+  };
+
+  // 요약 통계
+  const rising  = data.filter(d=>d.trend==="상승").length;
+  const stall   = data.filter(d=>d.trend==="유지").length;
+  const drop    = data.filter(d=>d.trend==="하락").length;
+  const upgrade = data.filter(d=>d.trend==="상승"||d.trend==="유지").slice(0,3);
+
+  return (
+    <div>
+      <SH title="💪 근력 분석" sub={`${member.name} · 트레이너 전용`}
+        right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+      {/* 트레이너 전용 안내 */}
+      <div style={{marginBottom:10,padding:"7px 12px",borderRadius:8,
+        background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.2)",
+        display:"flex",alignItems:"center",gap:7}}>
+        <span style={{fontSize:12}}>🔒</span>
+        <Mo c="#fca5a5" s={9}>트레이너 전용 화면입니다. 회원 공유 카드에는 이 데이터가 포함되지 않습니다.</Mo>
+      </div>
+
+      {/* 요약 카드 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:12}}>
+        {[["📈 상승", rising, "#22c55e"],["➡️ 유지", stall, "#5EEAD4"],["📉 하락", drop, "#ef4444"]].map(([l,n,c])=>(
+          <div key={l} style={{padding:"10px 8px",borderRadius:9,background:"#111827",border:`1px solid ${c}22`,textAlign:"center"}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:c}}>{n}</div>
+            <Mo c="#64748b" s={9}>{l}</Mo>
+          </div>
+        ))}
+      </div>
+
+      {data.length === 0 ? (
+        <div style={{padding:"28px",textAlign:"center",borderRadius:12,background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
+          <Mo c="#64748b" s={12} style={{lineHeight:1.8}}>
+            유효한 근력 기록이 없습니다<br/>
+            중량·횟수가 모두 입력된 수업 기록이 필요합니다
+          </Mo>
+        </div>
+      ) : data.map((d, i) => {
+        const ts = TREND_STYLE[d.trend] || TREND_STYLE["데이터 부족"];
+        const isOpen = expandedIdx === i;
+
+        // 미니 트렌드 바 (trendPoints 기반)
+        const pts = d.trendPoints;
+        const maxRM = pts.length ? Math.max(...pts.map(p=>p.rm)) : d.e1RM;
+        const minRM = pts.length ? Math.min(...pts.map(p=>p.rm)) : 0;
+
+        return (
+          <div key={d.name} style={{marginBottom:9,borderRadius:12,background:"#111827",
+            border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden"}}>
+
+            {/* 카드 헤더 */}
+            <div style={{padding:"11px 13px",cursor:"pointer",
+              display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}
+              onClick={()=>setExpandedIdx(isOpen?null:i)}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                  <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#e2e8f0",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</span>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                    background:ts.bg,color:ts.color,fontWeight:700}}>{ts.icon} {d.trend}</span>
+                  {d.equipment && <Mo c="#3a3a5a" s={8}>{d.equipment}</Mo>}
+                </div>
+                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                  <div>
+                    <Mo c="#64748b" s={8} style={{display:"block"}}>예상 1RM</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:16,color:"#ef4444"}}>{d.e1RM}<Mo c="#64748b" s={9}>kg</Mo></span>
+                  </div>
+                  <div>
+                    <Mo c="#64748b" s={8} style={{display:"block"}}>예상 5RM</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,color:"#fca5a5"}}>{d.e5RM}<Mo c="#64748b" s={9}>kg</Mo></span>
+                  </div>
+                  <div>
+                    <Mo c="#64748b" s={8} style={{display:"block"}}>예상 10RM</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,color:"#fca5a5"}}>{d.e10RM}<Mo c="#64748b" s={9}>kg</Mo></span>
+                  </div>
+                </div>
+              </div>
+              <Mo c="#3a3a5a" s={10}>{isOpen?"▲":"▼"}</Mo>
+            </div>
+
+            {/* 상세 펼침 */}
+            {isOpen && (
+              <div style={{padding:"0 13px 13px",borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+
+                {/* 최고 기록 */}
+                <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  <div style={{padding:"9px 11px",borderRadius:8,background:"#0F172A",border:"1px solid rgba(255,255,255,0.06)"}}>
+                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:3}}>최고 기록 세트</Mo>
+                    <Mo c="#e2e8f0" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>
+                      {d.curW}kg × {d.curR}회
+                    </Mo>
+                    <Mo c="#64748b" s={9} style={{display:"block",marginTop:2}}>{d.bestDate}</Mo>
+                  </div>
+                  <div style={{padding:"9px 11px",borderRadius:8,background:"#0F172A",border:"1px solid rgba(255,255,255,0.06)"}}>
+                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:3}}>다음 수업 추천</Mo>
+                    {d.nextW ? (
+                      <Mo c="#5EEAD4" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>
+                        {d.nextW}kg 시도 권장
+                      </Mo>
+                    ) : <Mo c="#3a3a5a" s={10}>중량 데이터 부족</Mo>}
+                    <Mo c="#64748b" s={9} style={{display:"block",marginTop:2}}>현재 +2.5% 기준</Mo>
+                  </div>
+                </div>
+
+                {/* 4주 변화 */}
+                {(d.recentBest || d.olderBest) && (
+                  <div style={{marginTop:8,padding:"9px 11px",borderRadius:8,background:"#0F172A",border:"1px solid rgba(255,255,255,0.06)"}}>
+                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:5}}>최근 4주 변화 (예상 1RM 기준)</Mo>
+                    <div style={{display:"flex",gap:14,alignItems:"center"}}>
+                      <div>
+                        <Mo c="#64748b" s={8}>이전</Mo>
+                        <Mo c="#94a3b8" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:700,display:"block"}}>
+                          {d.olderBest ? `${d.olderBest}kg` : "—"}
+                        </Mo>
+                      </div>
+                      <Mo c={ts.color} s={14}>→</Mo>
+                      <div>
+                        <Mo c="#64748b" s={8}>최근 4주</Mo>
+                        <Mo c={ts.color} s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:800,display:"block"}}>
+                          {d.recentBest ? `${d.recentBest}kg` : "—"}
+                        </Mo>
+                      </div>
+                      {d.recentBest && d.olderBest && (
+                        <div>
+                          <Mo c="#64748b" s={8}>차이</Mo>
+                          <Mo c={d.recentBest>d.olderBest?"#22c55e":"#ef4444"} s={11}
+                            style={{fontFamily:"'DM Mono',monospace",fontWeight:700,display:"block"}}>
+                            {d.recentBest>d.olderBest?"+":""}{d.recentBest-d.olderBest}kg
+                          </Mo>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 미니 트렌드 그래프 */}
+                {pts.length >= 2 && (
+                  <div style={{marginTop:8}}>
+                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:5}}>최근 3개월 예상 1RM 추이</Mo>
+                    <div style={{display:"flex",alignItems:"flex-end",gap:2,height:36,padding:"0 2px"}}>
+                      {pts.map((p, pi) => {
+                        const h = maxRM===minRM ? 20 : Math.max(4, Math.round(((p.rm-minRM)/(maxRM-minRM))*30)+4);
+                        return (
+                          <div key={pi} title={`${p.date}: ${p.rm}kg`}
+                            style={{flex:1,height:h,borderRadius:"2px 2px 0 0",
+                              background:pi===pts.length-1?"#ef4444":"rgba(239,68,68,0.35)",
+                              transition:"height .2s",cursor:"default"}} />
+                        );
+                      })}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+                      <Mo c="#3a3a5a" s={7}>{pts[0]?.date?.slice(5)}</Mo>
+                      <Mo c="#3a3a5a" s={7}>{pts[pts.length-1]?.date?.slice(5)}</Mo>
+                    </div>
+                  </div>
+                )}
+
+                {/* 덤벨 안내 */}
+                {d.equipment === "덤벨" && (
+                  <div style={{marginTop:8,padding:"6px 10px",borderRadius:7,
+                    background:"rgba(251,191,36,.07)",border:"1px solid rgba(251,191,36,.2)"}}>
+                    <Mo c="#fbbf24" s={9}>⚠️ 덤벨 운동: 기록된 중량이 한쪽 기준인 경우 총 중량은 2배입니다. 표시값은 기록된 중량 그대로 계산됩니다.</Mo>
+                  </div>
+                )}
+
+                <Mo c="#3a3a5a" s={8} style={{display:"block",marginTop:8}}>
+                  ※ 예상 값은 Epley 공식 기반 추정치입니다. 실제 수행 능력과 차이가 있을 수 있습니다.
+                </Mo>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
 // AI 루틴 추천 화면
+// ════════════════════════════════════════════
 // ════════════════════════════════════════════
 // ════════════════════════════════════════════
 // 목표 관리 + AI 분석 리포트

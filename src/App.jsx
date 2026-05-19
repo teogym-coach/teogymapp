@@ -2401,12 +2401,6 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
           u.sets = ex.sets.map(s => ({weight:s.weight||"",reps:s.reps||"",volume:(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),recordType:"weightReps"}));
         }
       }
-        if (!wasBodyFunc && isBodyFunc) {
-          u.sets = ex.sets.map(s => ({weight:s.weight||"",reps:s.reps||"",durationSec:"",volume:0,recordType:"function"}));
-        } else if (wasBodyFunc && !isBodyFunc) {
-          u.sets = ex.sets.map(s => ({weight:s.weight||"",reps:s.reps||"",volume:(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),recordType:"weightReps"}));
-        }
-      }
       if (key === "muscleTop") {
         u.muscleSub = mSubs(val)[0] || "";
         // 기능 ↔ 일반 전환 시 세트 형식 변환

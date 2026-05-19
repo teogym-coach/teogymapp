@@ -2423,6 +2423,77 @@ const EX_MUSCLE_SUGGEST = [
 ];
 
 // 운동명 기반 부위/세부부위 추천 (키워드 포함 여부로 매칭)
+// ════════════════════════════════════════════
+// 운동명 → 기구 자동 추천 + 학습 시스템
+// ════════════════════════════════════════════
+
+// 운동명 정규화 (비교 정확도 향상)
+function normalizeExName(name) {
+  return (name||"").toLowerCase()
+    .replace(/[\s\-_()（）]/g,"").replace(/[.,!?]/g,"");
+}
+
+// 키워드 기반 기구 자동 추천
+function getAutoEquipmentByName(name) {
+  if (!name || name.trim().length < 2) return null;
+  const n = name.toLowerCase();
+  // 명시적 키워드 우선
+  if (n.includes("케이블"))         return "케이블";
+  if (n.includes("바벨"))           return "바벨";
+  if (n.includes("덤벨") || n.includes("db ") || n.startsWith("db") && n.length < 20) return "덤벨";
+  if (n.includes("스미스"))         return "머신";
+  if (n.includes("머신"))           return "머신";
+  if (n.includes("밴드"))           return "밴드";
+  if (n.includes("맨몸") || n.includes("푸쉬업") || n.includes("푸시업")) return "맨몸";
+  if (n.includes("플랭크") || n.includes("크런치") || n.includes("버드독") || n.includes("데드버그") || n.includes("레그레이즈")) return "맨몸";
+  // 예외 규칙 (키워드 없을 때)
+  if (n.includes("랫풀다운") || n.includes("레그프레스") || n.includes("레그컬") || n.includes("레그익스텐션") || n.includes("체스트프레스") || n.includes("숄더프레스머신")) return "머신";
+  if (n.includes("벤치프레스") && !n.includes("덤벨") && !n.includes("스미스")) return "바벨";
+  return null;
+}
+
+// 기구 학습 데이터 — localStorage 기반 (Firestore 비용 없음)
+const EQUIP_LEARN_KEY = "tg_equip_learn_v1";
+function loadEquipLearn() {
+  try { return JSON.parse(localStorage.getItem(EQUIP_LEARN_KEY) || "{}"); } catch { return {}; }
+}
+function saveEquipLearn(data) {
+  try { localStorage.setItem(EQUIP_LEARN_KEY, JSON.stringify(data)); } catch {}
+}
+// 학습값 조회: 운동명 정규화 후 가장 많이 선택된 기구 반환
+function getLearnedEquipment(name) {
+  const key = normalizeExName(name);
+  if (!key || key.length < 2) return null;
+  const data = loadEquipLearn();
+  const rec  = data[key];
+  if (!rec || !rec.counts) return null;
+  const sorted = Object.entries(rec.counts).sort((a,b)=>b[1]-a[1]);
+  return sorted.length ? sorted[0][0] : null;
+}
+// 학습값 기록: 사용자가 직접 기구를 선택했을 때 호출
+function recordEquipLearn(name, equipment) {
+  if (!name || !equipment) return;
+  const key  = normalizeExName(name);
+  if (!key || key.length < 2) return;
+  const data = loadEquipLearn();
+  if (!data[key]) data[key] = { counts: {} };
+  data[key].counts[equipment] = (data[key].counts[equipment] || 0) + 1;
+  data[key].updatedAt = new Date().toISOString();
+  saveEquipLearn(data);
+}
+// 학습 데이터 초기화
+function clearEquipLearn(name) {
+  const data = loadEquipLearn();
+  if (name) { delete data[normalizeExName(name)]; }
+  else { Object.keys(data).forEach(k => delete data[k]); }
+  saveEquipLearn(data);
+}
+
+// 통합 추천: 학습값 > 키워드 자동 매핑 순
+function suggestEquipment(name) {
+  return getLearnedEquipment(name) || getAutoEquipmentByName(name);
+}
+
 function suggestMuscle(name) {
   if (!name || name.trim().length < 2) return null;
   const lower = name.toLowerCase().replace(/[_\-]/g, " ");
@@ -2439,19 +2510,40 @@ function updateEx(ei, key, val) {
       if (i !== ei) return ex;
       const u = {...ex, [key]:val};
 
-      // ── 운동 이름 변경 시 부위/세부부위 자동 추천 ──────────────────────
+      // ── 운동 이름 변경 시 부위/세부부위 + 기구 자동 추천 ──────────────
       if (key === "name") {
+        // 기구 자동 추천 (사용자가 직접 기구를 수정한 적 없을 때만)
+        if (!ex._equipManual) {
+          const sugEq = suggestEquipment(val);
+          if (sugEq) {
+            u.equipment    = sugEq;
+            u._autoEquip   = true;
+            // 맨몸 → 기능 부위 자동 설정
+            if (sugEq === "맨몸" && !ex._muscleManual) {
+              const isCore = ["플랭크","크런치","버드독","데드버그","레그레이즈"].some(k=>val.includes(k));
+              if (isCore) { u.muscleTop = "코어"; u.muscleSub = "코어"; }
+              else         { u.muscleTop = "기능"; u.muscleSub = "기능"; }
+              u.sets = ex.sets.map(s=>({weight:s.weight||"",reps:s.reps||"",durationSec:"",volume:0,recordType:"function"}));
+            }
+          } else { u._autoEquip = false; }
+        }
         // 사용자가 수동으로 부위를 바꾼 적 없을 때만 자동 적용
         if (!ex._muscleManual) {
           const sug = suggestMuscle(val);
           if (sug && mSubs(sug.top).length > 0) {
             u.muscleTop = sug.top;
             u.muscleSub = mSubs(sug.top).includes(sug.sub) ? sug.sub : (mSubs(sug.top)[0] || sug.sub);
-            u._autoSuggest = true; // 자동 추천됨 표시
-          } else {
-            u._autoSuggest = false;
-          }
+            u._autoSuggest = true;
+          } else { u._autoSuggest = false; }
         }
+      }
+
+      // ── equipment 직접 변경 시: 학습 기록 + 수동 플래그 ───────────────
+      if (key === "equipment") {
+        u._equipManual = true;
+        u._autoEquip   = false;
+        // 비동기 학습 기록 (저장 지연 없음)
+        if (ex.name) recordEquipLearn(ex.name, val);
       }
 
       // equipment 변경 시 맨몸+코어 ↔ 일반 전환 처리

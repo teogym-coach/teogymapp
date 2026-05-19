@@ -2729,23 +2729,22 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
             onPointerUp={e => { ptrSort.onPointerUp(ei); setDraggingIdx(null); }}
             onPointerCancel={() => { ptrSort.drag.current.active=false; ptrSort.drag.current.fromIdx=null; setDraggingIdx(null); }}
             style={{
-              background: isDrag?"#0B1120"
-                : activeCardIdx===ei ? "#141e30"    // 활성 카드: 조금 더 밝음
-                : "#0d1625",                          // 비활성: 더 어둡게
+              background: isDrag ? "#0B1120"
+                : activeCardIdx===ei ? "#14213d"
+                : "#0c1828",
               border:"1px solid "+(
                 isDrag ? "#7c6fff"
-                : activeCardIdx===ei ? "rgba(94,234,212,.35)"  // 활성: 민트 테두리
-                : "rgba(255,255,255,0.05)"             // 비활성: 더 약하게
+                : activeCardIdx===ei ? "rgba(94,234,212,.4)"
+                : "rgba(255,255,255,0.06)"
               ),
-              borderRadius:10,padding:"9px 8px",marginBottom:14,  // 간격 늘림
+              borderRadius:10,padding:"9px 8px",marginBottom:14,
               opacity: isDrag ? 0.85
-                : activeCardIdx===null || activeCardIdx===ei ? 1
-                : 0.72,   // 비활성 카드 살짝 어둡게
+                : (activeCardIdx===null||activeCardIdx===ei) ? 1 : 0.7,
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
               boxShadow: isDrag ? "0 8px 28px rgba(124,111,255,.30)"
-                : activeCardIdx===ei ? "0 0 0 1px rgba(94,234,212,.15), 0 4px 16px rgba(94,234,212,.08)"
+                : activeCardIdx===ei ? "0 0 0 1px rgba(94,234,212,.12),0 4px 20px rgba(94,234,212,.07)"
                 : "none",
-              transition:"transform .12s, box-shadow .18s, border-color .18s, opacity .18s, background .18s",
+              transition:"transform .12s,box-shadow .2s,border-color .2s,opacity .2s,background .2s",
               position:"relative",zIndex:isDrag?20:1,
               touchAction:"pan-y",
               width:"100%",maxWidth:"100%",minWidth:0,
@@ -2766,7 +2765,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 }}>
                 ⠿
               </div>
-              <Mo c={activeCardIdx===ei?"#5EEAD4":"#1e2a3a"} s={8} style={{flexShrink:0,fontWeight:activeCardIdx===ei?800:400,transition:"color .15s"}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
+              <Mo c={activeCardIdx===ei?"#5EEAD4":"#2a3a50"} s={8} style={{flexShrink:0,fontWeight:activeCardIdx===ei?800:400,transition:"color .15s"}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
               <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}

@@ -575,9 +575,7 @@ export default function App() {
       setEditSess(null);
       const newSessions = await getSessions(member.id);
       setSessions(newSessions);
-      // sessionsMap 즉시 업데이트 → 회원목록 반영
       setSessionsMap(prev => ({...prev, [member.id]: newSessions}));
-      // members 문서에 마지막 수업 요약 저장 (회원목록 표시용)
       const sorted = [...newSessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
       const last   = sorted[0];
       if (last && member.id) {
@@ -590,13 +588,40 @@ export default function App() {
             lastSessionParts: lastParts,
             lastSessionNo:    last.sessionNo || "",
           });
-          // members 배열도 즉시 업데이트
           setMembers(prev => prev.map(m => m.id === member.id
             ? {...m, lastSessionDate: last.date||"", lastSessionParts: lastParts, lastSessionNo: last.sessionNo||""}
             : m
           ));
         } catch(e) { console.warn("[TEO GYM] lastSession 업데이트 실패:", e.message); }
       }
+
+      // ── 체중 양방향 동기화: 수업 체중 → 바디체크 records ───────────────
+      const sessWeight = d.bodyWeight ? String(d.bodyWeight).trim() : "";
+      const sessDate   = d.date || "";
+      if (sessWeight && sessDate && parseFloat(sessWeight) > 0) {
+        try {
+          const currentBD = bodyData || {};
+          const existingRecords = currentBD.records || [];
+          const sameDateRec = existingRecords.find(r => r.date === sessDate);
+          let updatedRecords;
+          if (sameDateRec) {
+            // 같은 날짜 기록이 있으면 체중만 업데이트
+            updatedRecords = existingRecords.map(r =>
+              r.date === sessDate ? {...r, weight: sessWeight, updatedAt: new Date().toISOString()} : r
+            );
+          } else {
+            // 없으면 새 레코드 추가
+            updatedRecords = [
+              ...existingRecords,
+              { id:"r"+Date.now(), date:sessDate, weight:sessWeight, updatedAt: new Date().toISOString() }
+            ];
+          }
+          const newBD = { ...currentBD, records: updatedRecords };
+          const saved = await saveBodyCheck(member.id, newBD);
+          setBodyData(saved || newBD);
+        } catch(e) { console.warn("[TEO GYM] 체중 바디체크 동기화 실패:", e.message); }
+      }
+
       setScreen("hub");
     } catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
@@ -2307,7 +2332,14 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
   const [refVideo,       setRefVideo]       = useState(editData?.referenceVideo || "");
-  const [bodyWeight,     setBodyWeight]     = useState(editData?.bodyWeight     || "");
+  // 수업 날짜 기준으로 바디체크 체중 자동 불러오기
+  const sessionDate  = editData?.date || new Date().toISOString().split("T")[0];
+  const bcWeightForDate = useMemo(() => {
+    const rec = (bodyData?.records||[]).find(r => r.date === sessionDate);
+    return rec?.weight ? String(rec.weight) : "";
+  }, [bodyData, sessionDate]);
+
+  const [bodyWeight,     setBodyWeight]     = useState(editData?.bodyWeight || bcWeightForDate || "");
   const [calories,       setCalories]       = useState(editData?.calories       || "");
   const [dietNote,       setDietNote]       = useState(editData?.dietNote       || "");
   const [romData,        setRomData]        = useState(editData?.romData  || CPARTS.reduce((o,k) => ({...o,[k]:"정상"}), {}));
@@ -4352,7 +4384,13 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   const [gAct,setGAct]= useState(goal.activityLevel || sv0.actLv   || sv0.activityLevel || "보통 활동 (주 3-5회)");
 
   const [rDate, setRDate] = useState(new Date().toISOString().split("T")[0]);
-  const [rW,    setRW]    = useState("");
+  // 같은 날짜 수업 기록 체중 자동 불러오기 (초기값)
+  const sessWeightForDate = useMemo(() => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const rec = [...(sessions||[])].find(s => s.date === todayStr && s.bodyWeight && parseFloat(s.bodyWeight) > 0);
+    return rec?.bodyWeight ? String(rec.bodyWeight) : "";
+  }, [sessions]);
+  const [rW,    setRW]    = useState(sessWeightForDate || "");
   const [rBF,   setRBF]   = useState("");
   const [rMM,   setRMM]   = useState("");
   const [rFast, setRFast] = useState(true);
@@ -4415,8 +4453,21 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   async function saveRecord() {
     if (!rW) { showToast("체중을 입력해주세요","err"); return; }
     setSaving(true);
-    const rec = { id:"r"+Date.now(), date:rDate, weight:rW, bodyFat:rBF, muscleMass:rMM, fasting:rFast, water:rH2O, memo:rMemo };
-    await onSaveBodyData({ ...bodyData, records:[...(bodyData?.records||[]), rec] });
+    const existingRecs = bodyData?.records || [];
+    const sameDateIdx  = existingRecs.findIndex(r => r.date === rDate);
+    let updatedRecords;
+    if (sameDateIdx >= 0) {
+      // 같은 날짜 기록이 있으면 업데이트
+      updatedRecords = existingRecs.map((r, i) =>
+        i === sameDateIdx
+          ? { ...r, weight:rW, bodyFat:rBF, muscleMass:rMM, fasting:rFast, water:rH2O, memo:rMemo, updatedAt:new Date().toISOString() }
+          : r
+      );
+    } else {
+      // 없으면 새 레코드 추가
+      updatedRecords = [...existingRecs, { id:"r"+Date.now(), date:rDate, weight:rW, bodyFat:rBF, muscleMass:rMM, fasting:rFast, water:rH2O, memo:rMemo, updatedAt:new Date().toISOString() }];
+    }
+    await onSaveBodyData({ ...bodyData, records: updatedRecords });
     showToast("기록 저장 완료 ✓");
     setRW(""); setRBF(""); setRMM(""); setRMemo(""); setRH2O("");
     setSaving(false);

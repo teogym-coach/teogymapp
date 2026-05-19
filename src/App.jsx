@@ -2366,10 +2366,94 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     });
   }
 
-  function updateEx(ei, key, val) {
+  // ════════════════════════════════════════════
+// 운동 이름 → 부위/세부부위 자동 추천 매핑
+// ════════════════════════════════════════════
+const EX_MUSCLE_SUGGEST = [
+  // ── 가슴 ──────────────────────────────────
+  { keys:["벤치프레스","bench press","바벨 벤치"],      top:"가슴", sub:"대흉근 전체" },
+  { keys:["인클라인 벤치","incline bench","윗가슴"],    top:"가슴", sub:"윗가슴"     },
+  { keys:["디클라인 벤치","decline bench","아랫가슴"],  top:"가슴", sub:"아랫가슴"   },
+  { keys:["덤벨 플라이","dumbbell fly","케이블 플라이","플라이"],top:"가슴", sub:"대흉근 전체"},
+  { keys:["딥스","dips"],                               top:"가슴", sub:"아랫가슴"   },
+  { keys:["덤벨 벤치","db 벤치","db벤치"],              top:"가슴", sub:"대흉근 전체"},
+  // ── 등 ────────────────────────────────────
+  { keys:["랫풀다운","lat pulldown","풀다운"],           top:"등",   sub:"광배근"     },
+  { keys:["시티드 로우","seated row","케이블 로우","로우"],top:"등",  sub:"광배근"    },
+  { keys:["바벨 로우","barbell row","펜들레이"],         top:"등",   sub:"광배근"     },
+  { keys:["덤벨 로우","db 로우","원암 로우"],            top:"등",   sub:"광배근"     },
+  { keys:["풀업","pull up","친업","chin up","턱걸이"],   top:"등",   sub:"광배근"     },
+  { keys:["루마니안 데드","rdl","루마니안"],             top:"등",   sub:"광배근"     },
+  { keys:["데드리프트","deadlift"],                      top:"등",   sub:"광배근"     },
+  { keys:["페이스 풀","face pull"],                      top:"등",   sub:"후면삼각근" },
+  // ── 어깨 ──────────────────────────────────
+  { keys:["숄더프레스","shoulder press","오버헤드 프레스","ohp","밀리터리"],top:"어깨",sub:"전면삼각근"},
+  { keys:["사이드 레터럴","사이드 레이즈","lateral raise"],top:"어깨",sub:"측면삼각근"},
+  { keys:["프론트 레이즈","front raise"],                 top:"어깨",sub:"전면삼각근" },
+  { keys:["리어 델트","rear delt","리어레이즈"],          top:"어깨",sub:"후면삼각근" },
+  { keys:["업라이트 로우","upright row"],                 top:"어깨",sub:"측면삼각근" },
+  // ── 하체 ──────────────────────────────────
+  { keys:["스쿼트","squat"],                             top:"하체", sub:"대퇴사두근" },
+  { keys:["레그프레스","leg press"],                     top:"하체", sub:"대퇴사두근" },
+  { keys:["레그 익스텐션","leg extension"],              top:"하체", sub:"대퇴사두근" },
+  { keys:["레그컬","leg curl","누운 레그컬","앉아서 레그컬"],top:"하체",sub:"햄스트링"},
+  { keys:["런지","lunge","불가리안 스플릿","스플릿 스쿼트"],top:"하체",sub:"대퇴사두근"},
+  { keys:["힙쓰러스트","hip thrust","힙 브릿지"],         top:"하체", sub:"둔근"      },
+  { keys:["카프레이즈","calf raise","종아리"],            top:"하체", sub:"종아리"    },
+  { keys:["스모 데드","sumo dead"],                      top:"하체", sub:"내전근"     },
+  // ── 이두 ──────────────────────────────────
+  { keys:["바벨 컬","barbell curl","이지바 컬","ez 컬"],  top:"이두", sub:"전체"      },
+  { keys:["덤벨 컬","dumbbell curl","db 컬","해머 컬"],   top:"이두", sub:"전체"      },
+  { keys:["케이블 컬","cable curl"],                     top:"이두", sub:"전체"      },
+  { keys:["프리처 컬","preacher curl"],                  top:"이두", sub:"전체"      },
+  // ── 삼두 ──────────────────────────────────
+  { keys:["트라이셉스 푸쉬다운","케이블 푸쉬다운","pushdown","푸시다운"],top:"삼두",sub:"전체"},
+  { keys:["오버헤드 익스텐션","overhead extension"],     top:"삼두", sub:"장두"      },
+  { keys:["스컬 크러셔","skull crusher","라잉 익스텐션"], top:"삼두", sub:"전체"     },
+  { keys:["클로즈 그립","narrow grip","좁은 그립"],       top:"삼두", sub:"전체"     },
+  { keys:["킥백","kickback"],                            top:"삼두", sub:"외측두"    },
+  // ── 코어/기능 ─────────────────────────────
+  { keys:["플랭크","plank"],                             top:"코어", sub:"코어"      },
+  { keys:["크런치","crunch"],                            top:"코어", sub:"복직근"    },
+  { keys:["레그레이즈","leg raise"],                     top:"코어", sub:"복직근"    },
+  { keys:["데드버그","dead bug"],                        top:"코어", sub:"코어"      },
+  { keys:["버드독","bird dog"],                          top:"코어", sub:"코어"      },
+  { keys:["케이블 크런치","cable crunch"],               top:"코어", sub:"복직근"    },
+  { keys:["복부","ab ","ab_","core"],                    top:"코어", sub:"복직근"    },
+];
+
+// 운동명 기반 부위/세부부위 추천 (키워드 포함 여부로 매칭)
+function suggestMuscle(name) {
+  if (!name || name.trim().length < 2) return null;
+  const lower = name.toLowerCase().replace(/[_\-]/g, " ");
+  for (const rule of EX_MUSCLE_SUGGEST) {
+    if (rule.keys.some(k => lower.includes(k.toLowerCase()))) {
+      return { top: rule.top, sub: rule.sub };
+    }
+  }
+  return null;
+}
+
+function updateEx(ei, key, val) {
     setExercises(prev => prev.map((ex,i) => {
       if (i !== ei) return ex;
       const u = {...ex, [key]:val};
+
+      // ── 운동 이름 변경 시 부위/세부부위 자동 추천 ──────────────────────
+      if (key === "name") {
+        // 사용자가 수동으로 부위를 바꾼 적 없을 때만 자동 적용
+        if (!ex._muscleManual) {
+          const sug = suggestMuscle(val);
+          if (sug && mSubs(sug.top).length > 0) {
+            u.muscleTop = sug.top;
+            u.muscleSub = mSubs(sug.top).includes(sug.sub) ? sug.sub : (mSubs(sug.top)[0] || sug.sub);
+            u._autoSuggest = true; // 자동 추천됨 표시
+          } else {
+            u._autoSuggest = false;
+          }
+        }
+      }
+
       // equipment 변경 시 맨몸+코어 ↔ 일반 전환 처리
       if (key === "equipment") {
         const newEquip = val;
@@ -2403,6 +2487,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       }
       if (key === "muscleTop") {
         u.muscleSub = mSubs(val)[0] || "";
+        u._muscleManual = true; // 수동 수정됨
+        u._autoSuggest  = false;
+      }
+      // muscleSub 수동 변경 감지
+      if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
         // 기능 ↔ 일반 전환 시 세트 형식 변환
         const wasFunc = ex.muscleTop === "기능" || (ex.equipment === "맨몸" && ex.muscleTop === "코어");
         const isFunc  = val === "기능" || (ex.equipment === "맨몸" && val === "코어");
@@ -2786,6 +2875,19 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                   color:"#e2e8f0",
                   transition:"border-color .18s,background .18s,box-shadow .18s",
                 }} />
+                {/* 자동 추천 / 수동 수정 배지 */}
+                {ex._autoSuggest && (
+                  <div style={{display:"flex",alignItems:"center",gap:4,marginTop:3}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",
+                      borderRadius:3,background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontWeight:700}}>
+                      ✦ 자동 추천됨
+                    </span>
+                    <Mo c="#3a3a5a" s={7}>부위 수정 가능</Mo>
+                  </div>
+                )}
+                {ex._muscleManual && !ex._autoSuggest && (
+                  <Mo c="#3a3a5a" s={7} style={{marginTop:2,display:"block"}}>✎ 수동 설정됨</Mo>
+                )}
               </div>
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (

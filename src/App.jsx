@@ -2772,12 +2772,19 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 placeholder="운동 이름" style={{
                   width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",
                   fontWeight:700,fontSize:16,display:"block",
-                  height:44, padding:"10px 12px",
-                  background: activeCardIdx===ei ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
-                  border: activeCardIdx===ei ? "1px solid rgba(94,234,212,.3)" : "1px solid rgba(255,255,255,0.08)",
+                  height:46, padding:"11px 13px",
+                  background: activeCardIdx===ei
+                    ? "linear-gradient(135deg,rgba(139,92,246,0.14),rgba(45,212,191,0.08))"
+                    : "linear-gradient(135deg,rgba(139,92,246,0.08),rgba(45,212,191,0.04))",
+                  border: activeCardIdx===ei
+                    ? "1px solid rgba(45,212,191,0.65)"
+                    : "1px solid rgba(139,92,246,0.55)",
                   borderRadius:8,
+                  boxShadow: activeCardIdx===ei
+                    ? "0 0 0 3px rgba(45,212,191,0.10),inset 0 1px 0 rgba(255,255,255,0.04)"
+                    : "inset 0 1px 0 rgba(255,255,255,0.03)",
                   color:"#e2e8f0",
-                  transition:"border-color .18s, background .18s",
+                  transition:"border-color .18s,background .18s,box-shadow .18s",
                 }} />
               </div>
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}

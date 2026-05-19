@@ -2489,20 +2489,15 @@ function updateEx(ei, key, val) {
         u.muscleSub = mSubs(val)[0] || "";
         u._muscleManual = true; // 수동 수정됨
         u._autoSuggest  = false;
-      }
-      // muscleSub 수동 변경 감지
-      if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
         // 기능 ↔ 일반 전환 시 세트 형식 변환
         const wasFunc = ex.muscleTop === "기능" || (ex.equipment === "맨몸" && ex.muscleTop === "코어");
         const isFunc  = val === "기능" || (ex.equipment === "맨몸" && val === "코어");
         if (!wasFunc && isFunc) {
-          // 일반 → 기능: 기존 세트를 funcSet 형식으로 변환
           u.sets = ex.sets.map(s => ({
             weight: s.weight || "", reps: s.reps || "", durationSec: "",
             volume: 0, recordType: "function"
           }));
         } else if (wasFunc && !isFunc) {
-          // 기능 → 일반: 기능 세트를 일반 세트 형식으로 변환
           u.sets = ex.sets.map(s => ({
             weight: s.weight || "", reps: s.reps || "",
             volume: (parseFloat(s.weight)||0)*(parseInt(s.reps)||0),
@@ -2510,6 +2505,8 @@ function updateEx(ei, key, val) {
           }));
         }
       }
+      // muscleSub 수동 변경 감지
+      if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
       return u;
     }));
   }

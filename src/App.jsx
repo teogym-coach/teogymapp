@@ -2838,7 +2838,7 @@ function updateEx(ei, key, val) {
               boxSizing:"border-box",overflow:"hidden",
             }}>
             {/* 드래그 핸들 + 헤더 */}
-            <div onFocus={()=>setActiveC      <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>verflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               {/* 드래그 핸들 — pointer 이벤트만 처리 */}
               <div
                 title="잡고 위아래로 이동"

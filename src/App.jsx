@@ -2393,7 +2393,7 @@ const EX_MUSCLE_SUGGEST = [
   { keys:["리어 델트","rear delt","리어레이즈"],          top:"어깨",sub:"후면삼각근" },
   { keys:["업라이트 로우","upright row"],                 top:"어깨",sub:"측면삼각근" },
   // ── 하체 ──────────────────────────────────
-  { keys:["스쿼트","squat"],                             top:"하체", sub:"대퇴사두근" },
+  { keys:["스쿼트","squat"],                             top:"하체", sub:"전체"      },
   { keys:["레그프레스","leg press"],                     top:"하체", sub:"대퇴사두근" },
   { keys:["레그 익스텐션","leg extension"],              top:"하체", sub:"대퇴사두근" },
   { keys:["레그컬","leg curl","누운 레그컬","앉아서 레그컬"],top:"하체",sub:"햄스트링"},

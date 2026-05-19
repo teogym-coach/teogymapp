@@ -815,6 +815,10 @@ function matchSearch(name, query) {
   return false;
 }
 
+// 대표님 전용 운동 기록 회원명
+const OWNER_NAME = "김태오";
+const isOwner = (m) => (m?.name || "") === OWNER_NAME;
+
 function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange }) {
   const today = new Date().toISOString().split("T")[0];
   const [search,     setSearch]     = useState("");
@@ -909,11 +913,16 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
 
   // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용
   const filtered = sortMembers(
-    members.filter(m => matchSearch(m.name, search) && (search.trim() ? true : passFilter(m)) && (search.trim() ? true : true))
+    members.filter(m => {
+      if (isOwner(m)) return false; // 대표님은 일반 목록 제외
+      return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m));
+    })
   ).filter(m => {
-    if (search.trim()) return matchSearch(m.name, search); // 검색 시 전체 상태 포함
+    if (search.trim()) return matchSearch(m.name, search) && !isOwner(m);
     return passFilter(m);
   });
+
+  const ownerMember = members.find(m => isOwner(m));
 
   return (
     <div>
@@ -926,6 +935,26 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
           </div>
         }
       />
+
+      {/* 대표님 전용 운동 기록 버튼 */}
+      {ownerMember && (
+        <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
+          background:"linear-gradient(135deg,rgba(94,234,212,.1),rgba(129,140,248,.08))",
+          border:"1px solid rgba(94,234,212,.25)",
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          cursor:"pointer"}}
+          onClick={()=>onSelect(ownerMember)}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:36,height:36,borderRadius:9,background:"rgba(94,234,212,.2)",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏋️</div>
+            <div>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#5EEAD4"}}>대표님 운동 기록</div>
+              <Mo c="#64748b" s={10}>김태오 · 개인 운동 전용</Mo>
+            </div>
+          </div>
+          <Mo c="#5EEAD4" s={13}>→</Mo>
+        </div>
+      )}
 
       {/* 검색창 */}
       <div style={{position:"relative",marginBottom:8}}>
@@ -2356,6 +2385,9 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
+  // 대표님 전용: 운동 시작/종료 시간
+  const [workoutStartTime, setWorkoutStartTime] = useState(editData?.workoutStartTime || "");
+  const [workoutEndTime,   setWorkoutEndTime]   = useState(editData?.workoutEndTime   || "");
   const [refVideo,       setRefVideo]       = useState(editData?.referenceVideo || "");
   // 수업 날짜 기준으로 바디체크 체중 자동 불러오기
   const sessionDate  = editData?.date || new Date().toISOString().split("T")[0];
@@ -2687,6 +2719,7 @@ function updateEx(ei, key, val) {
       intensity, condition,
       exercises: cleanExercises,
       stretchingNotes:stretchNotes, nextPlan, trainerComment,
+      workoutStartTime, workoutEndTime,
       referenceVideo:refVideo, bodyWeight, calories, dietNote,
       romData, painData, painRecord, totalVolume:totalVol,
     };
@@ -2922,6 +2955,63 @@ function updateEx(ei, key, val) {
           </div>
         )}
       </Card>
+
+      {/* 대표님 전용: 운동 시간 기록 */}
+      {isOwner(member) && (
+        <Card style={{marginBottom:11,border:"1px solid rgba(94,234,212,.2)",background:"rgba(94,234,212,.04)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:8}}>
+            <Mo c="#5EEAD4" s={11} style={{fontWeight:800}}>🏋️ 대표님 운동 시간</Mo>
+            <Mo c="#3a3a5a" s={8}>(개인 운동 전용)</Mo>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <div>
+              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>운동 시작</Mo>
+              <div style={{display:"flex",gap:5}}>
+                <input type="time" value={workoutStartTime}
+                  onChange={e=>setWorkoutStartTime(e.target.value)}
+                  style={{flex:1,fontSize:14,padding:"7px 9px",borderRadius:7,
+                    border:"1px solid rgba(94,234,212,.3)",background:"rgba(94,234,212,.06)",color:"#e2e8f0"}} />
+                <button onClick={()=>setWorkoutStartTime(new Date().toTimeString().slice(0,5))}
+                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(94,234,212,.25)",
+                    background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:10,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+                  지금
+                </button>
+              </div>
+            </div>
+            <div>
+              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>운동 종료</Mo>
+              <div style={{display:"flex",gap:5}}>
+                <input type="time" value={workoutEndTime}
+                  onChange={e=>setWorkoutEndTime(e.target.value)}
+                  style={{flex:1,fontSize:14,padding:"7px 9px",borderRadius:7,
+                    border:"1px solid rgba(129,140,248,.3)",background:"rgba(129,140,248,.06)",color:"#e2e8f0"}} />
+                <button onClick={()=>setWorkoutEndTime(new Date().toTimeString().slice(0,5))}
+                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(129,140,248,.25)",
+                    background:"rgba(129,140,248,.12)",color:"#a5b4fc",fontSize:10,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+                  지금
+                </button>
+              </div>
+            </div>
+          </div>
+          {workoutStartTime && workoutEndTime && (() => {
+            const [sh,sm] = workoutStartTime.split(":").map(Number);
+            const [eh,em] = workoutEndTime.split(":").map(Number);
+            const totalMin = (eh*60+em) - (sh*60+sm);
+            if (totalMin <= 0) return null;
+            const h = Math.floor(totalMin/60), m = totalMin%60;
+            return (
+              <div style={{padding:"7px 12px",borderRadius:7,
+                background:"rgba(94,234,212,.1)",border:"1px solid rgba(94,234,212,.2)",
+                display:"flex",alignItems:"center",gap:8}}>
+                <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>⏱ 총 운동 시간</Mo>
+                <Mo c="#e2e8f0" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:800}}>
+                  {h>0?`${h}시간 `:""}{m}분
+                </Mo>
+              </div>
+            );
+          })()}
+        </Card>
+      )}
 
       <Card title="운동 목록" style={{marginTop:11}}>
         {exercises.map((ex, ei) => {
@@ -3767,6 +3857,21 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#fff",marginBottom:4}}>
                       {typeLbl || "웨이트"}
                     </div>
+                    {/* 대표님 운동 시간 표시 */}
+                    {isOwner(member) && (s.workoutStartTime || s.workoutEndTime) && (
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
+                        {s.workoutStartTime && <Mo c="#5EEAD4" s={8}>▶ {s.workoutStartTime}</Mo>}
+                        {s.workoutEndTime   && <Mo c="#a5b4fc" s={8}>■ {s.workoutEndTime}</Mo>}
+                        {s.workoutStartTime && s.workoutEndTime && (() => {
+                          const [sh,sm] = s.workoutStartTime.split(":").map(Number);
+                          const [eh,em] = s.workoutEndTime.split(":").map(Number);
+                          const totalMin = (eh*60+em) - (sh*60+sm);
+                          if (totalMin <= 0) return null;
+                          const h = Math.floor(totalMin/60), m = totalMin%60;
+                          return <Mo c="#ffd166" s={8} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>⏱ {h>0?`${h}h `:""}{m}m</Mo>;
+                        })()}
+                      </div>
+                    )}
                     {s.exercises && s.exercises.length > 0 && (
                       <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                         {s.exercises.slice(0,4).map((ex,j) => (

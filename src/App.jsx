@@ -225,10 +225,22 @@ function findPastExRecords(sessions, exName, limit=3, excludeSessionId=null) {
 // ── 어시스트 머신 판별 ──────────────────────────────
 // assistType: "assist" = 체중-보조중량, "bodyweight" = 체중만 (향후 확장)
 const ASSIST_MACHINE_KEYWORDS = ["어시스트 풀업", "어시스트 딥스", "어시스트 풀-업", "어시스트 딥 스"];
+
+// 맨몸 운동 키워드 (어시스트·밴드 변형 제외)
+const BODYWEIGHT_KEYWORDS = ["풀업", "친업", "딥스", "푸쉬업", "푸시업", "인버티드 로우", "행잉 레그레이즈"];
+const BODYWEIGHT_EXCLUDE  = ["어시스트", "밴드", "band", "assist"];
+function isBodyweightEx(name) {
+  if (!name) return false;
+  const n = name.toLowerCase();
+  if (BODYWEIGHT_EXCLUDE.some(k => n.includes(k.toLowerCase()))) return false;
+  return BODYWEIGHT_KEYWORDS.some(k => n.includes(k.toLowerCase()));
+}
+
 function getExerciseType(name) {
   if (!name) return null;
   const n = name.toLowerCase();
   if (ASSIST_MACHINE_KEYWORDS.some(k => n.includes(k.toLowerCase()))) return "assist";
+  if (isBodyweightEx(name)) return "bodyweight";
   return null;
 }
 
@@ -241,6 +253,13 @@ function calcVol(w, r, exType, memberBodyWeight) {
   if (exType === "assist") {
     const bw      = parseFloat(memberBodyWeight) || 0;
     const realW   = Math.max(0, bw - weight);
+    return Math.round(realW * reps);
+  }
+  // 맨몸 운동: 사용자가 중량 입력 시 (체중+중량), 미입력 시 체중만
+  if (exType === "bodyweight") {
+    const bw = parseFloat(memberBodyWeight) || 0;
+    if (!bw) return weight * reps; // 체중 데이터 없으면 입력값 그대로
+    const realW = bw + weight;     // 체중 + 추가 중량(벨트 등)
     return Math.round(realW * reps);
   }
   return weight * reps;
@@ -264,6 +283,12 @@ function exVol(ex, memberBodyWeight) {
       const assist= parseFloat(r.weight) || 0;
       const reps  = parseInt(r.reps) || 0;
       return s + Math.max(0, bw - assist) * reps;
+    }
+    if (exType === "bodyweight" && memberBodyWeight) {
+      const bw   = parseFloat(memberBodyWeight) || 0;
+      const addW = parseFloat(r.weight) || 0; // 가중 벨트 등 추가 중량
+      const reps = parseInt(r.reps) || 0;
+      return s + Math.round((bw + addW) * reps);
     }
     return s + (r.volume || 0);
   }, 0);
@@ -3296,7 +3321,7 @@ function updateEx(ei, key, val) {
               <div>
                 {(() => {
                   const exType2 = getExerciseType(ex.name);
-                  const h1 = exType2==="assist" ? "보조kg" : "무게kg";
+                  const h1 = exType2==="assist" ? "보조kg" : exType2==="bodyweight" ? "추가kg" : "무게kg";
                   return (
                     <div className="set-grid-header" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3,width:"100%"}}>
                       {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#1e2a3a" s={8} className={i===3?"vol-col":""} style={{textAlign:"center"}}>{h}</Mo>)}
@@ -3348,6 +3373,14 @@ function updateEx(ei, key, val) {
                         {exType3==="assist" && !mbw3 && (
                           <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
                             background:"rgba(255,107,107,.18)",color:"#ff6b6b"}}>⚠ 체중 입력 필요</span>
+                        )}
+                        {exType3==="bodyweight" && mbw3 && (
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
+                            background:"rgba(34,197,94,.15)",color:"#22c55e"}}>체중 {mbw3}kg 기반</span>
+                        )}
+                        {exType3==="bodyweight" && !mbw3 && (
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
+                            background:"rgba(245,158,11,.15)",color:"#f59e0b"}}>⚠ 체중 입력 시 자동 계산</span>
                         )}
                       </div>
                     </div>

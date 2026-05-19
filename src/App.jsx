@@ -2814,30 +2814,31 @@ function updateEx(ei, key, val) {
             onPointerMove={e => { ptrSort.onPointerMove(ei, e, exercises.length); if (ptrSort.drag.current.active && ptrSort.drag.current.fromIdx===ei) setDraggingIdx(ei); }}
             onPointerUp={e => { ptrSort.onPointerUp(ei); setDraggingIdx(null); }}
             onPointerCancel={() => { ptrSort.drag.current.active=false; ptrSort.drag.current.fromIdx=null; setDraggingIdx(null); }}
+            onFocus={()=>setActiveCardIdx(ei)}
             style={{
               background: isDrag ? "#0B1120"
-                : activeCardIdx===ei ? "#14213d"
-                : "#0c1828",
+                : activeCardIdx===ei ? "#111d2e"
+                : "#0c1726",
               border:"1px solid "+(
                 isDrag ? "#7c6fff"
-                : activeCardIdx===ei ? "rgba(94,234,212,.4)"
+                : activeCardIdx===ei ? "rgba(255,255,255,0.13)"
                 : "rgba(255,255,255,0.06)"
               ),
               borderRadius:10,padding:"9px 8px",marginBottom:14,
               opacity: isDrag ? 0.85
-                : (activeCardIdx===null||activeCardIdx===ei) ? 1 : 0.7,
+                : (activeCardIdx===null||activeCardIdx===ei) ? 1 : 0.75,
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
               boxShadow: isDrag ? "0 8px 28px rgba(124,111,255,.30)"
-                : activeCardIdx===ei ? "0 0 0 1px rgba(94,234,212,.12),0 4px 20px rgba(94,234,212,.07)"
+                : activeCardIdx===ei ? "0 2px 12px rgba(0,0,0,0.25)"
                 : "none",
-              transition:"transform .12s,box-shadow .2s,border-color .2s,opacity .2s,background .2s",
+              transition:"transform .12s,box-shadow .25s,border-color .25s,opacity .25s,background .25s",
               position:"relative",zIndex:isDrag?20:1,
               touchAction:"pan-y",
               width:"100%",maxWidth:"100%",minWidth:0,
               boxSizing:"border-box",overflow:"hidden",
             }}>
             {/* 드래그 핸들 + 헤더 */}
-            <div onFocus={()=>setActiveCardIdx(ei)} onTouchStart={()=>setActiveCardIdx(ei)} style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
+            <div onFocus={()=>setActiveC      <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>verflow:"hidden"}}>
               {/* 드래그 핸들 — pointer 이벤트만 처리 */}
               <div
                 title="잡고 위아래로 이동"
@@ -2851,26 +2852,19 @@ function updateEx(ei, key, val) {
                 }}>
                 ⠿
               </div>
-              <Mo c={activeCardIdx===ei?"#5EEAD4":"#2a3a50"} s={8} style={{flexShrink:0,fontWeight:activeCardIdx===ei?800:400,transition:"color .15s"}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
+              <Mo c="#2a3a50" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
               <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
                 placeholder="운동 이름" style={{
                   width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",
                   fontWeight:700,fontSize:16,display:"block",
-                  height:46, padding:"11px 13px",
-                  background: activeCardIdx===ei
-                    ? "linear-gradient(135deg,rgba(139,92,246,0.14),rgba(45,212,191,0.08))"
-                    : "linear-gradient(135deg,rgba(139,92,246,0.08),rgba(45,212,191,0.04))",
-                  border: activeCardIdx===ei
-                    ? "1px solid rgba(45,212,191,0.65)"
-                    : "1px solid rgba(139,92,246,0.55)",
+                  height:44,padding:"10px 12px",
+                  background:"rgba(255,255,255,0.05)",
+                  border:"1px solid rgba(255,255,255,0.10)",
                   borderRadius:8,
-                  boxShadow: activeCardIdx===ei
-                    ? "0 0 0 3px rgba(45,212,191,0.10),inset 0 1px 0 rgba(255,255,255,0.04)"
-                    : "inset 0 1px 0 rgba(255,255,255,0.03)",
                   color:"#e2e8f0",
-                  transition:"border-color .18s,background .18s,box-shadow .18s",
+                  transition:"border-color .2s",
                 }} />
                 {/* 자동 추천 / 수동 수정 배지 */}
                 {ex._autoSuggest && (

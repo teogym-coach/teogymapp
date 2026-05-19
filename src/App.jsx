@@ -2349,6 +2349,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [showPainBefore, setShowPainBefore] = useState(!!(editData?.painRecord?.before?.vas > 0 || editData?.painRecord?.before?.part));
   const [showPainAfter,  setShowPainAfter]  = useState(!!(editData?.painRecord?.after?.vas > 0 || editData?.painRecord?.after?.memo));
   const [showCard,       setShowCard]       = useState(false);
+  const [activeCardIdx, setActiveCardIdx]   = useState(null); // 현재 입력 중인 카드
 
   const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
 
@@ -2372,8 +2373,34 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       // equipment 변경 시 맨몸+코어 ↔ 일반 전환 처리
       if (key === "equipment") {
         const newEquip = val;
+
+        // 맨몸 선택 시 부위·세부부위를 "기능"으로 자동 설정
+        if (newEquip === "맨몸" && ex.equipment !== "맨몸") {
+          u.muscleTop = "기능";
+          u.muscleSub = "기능";
+          // 세트도 기능 운동 형태로 전환
+          u.sets = ex.sets.map(s => ({
+            weight: s.weight||"", reps: s.reps||"", durationSec: s.durationSec||"",
+            volume: 0, recordType: "function"
+          }));
+        }
+        // 맨몸 → 다른 기구로 변경 시 세트 일반 형태로 복원
+        if (ex.equipment === "맨몸" && newEquip !== "맨몸") {
+          u.muscleTop = "가슴"; u.muscleSub = "윗가슴";
+          u.sets = ex.sets.map(s => ({
+            weight: s.weight||"", reps: s.reps||"",
+            volume: (parseFloat(s.weight)||0)*(parseInt(s.reps)||0), recordType: "weightReps"
+          }));
+        }
+
         const wasBodyFunc = ex.equipment === "맨몸" && ex.muscleTop === "코어";
-        const isBodyFunc  = newEquip === "맨몸" && ex.muscleTop === "코어";
+        const isBodyFunc  = newEquip === "맨몸" && (u.muscleTop||ex.muscleTop) === "코어";
+        if (!wasBodyFunc && isBodyFunc) {
+          u.sets = ex.sets.map(s => ({weight:s.weight||"",reps:s.reps||"",durationSec:"",volume:0,recordType:"function"}));
+        } else if (wasBodyFunc && !isBodyFunc && newEquip !== "맨몸") {
+          u.sets = ex.sets.map(s => ({weight:s.weight||"",reps:s.reps||"",volume:(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),recordType:"weightReps"}));
+        }
+      }
         if (!wasBodyFunc && isBodyFunc) {
           u.sets = ex.sets.map(s => ({weight:s.weight||"",reps:s.reps||"",durationSec:"",volume:0,recordType:"function"}));
         } else if (wasBodyFunc && !isBodyFunc) {
@@ -2708,20 +2735,30 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
             onPointerUp={e => { ptrSort.onPointerUp(ei); setDraggingIdx(null); }}
             onPointerCancel={() => { ptrSort.drag.current.active=false; ptrSort.drag.current.fromIdx=null; setDraggingIdx(null); }}
             style={{
-              background:"#0B1120",
-              border:"1px solid "+(isDrag?"#7c6fff":"rgba(255,255,255,0.08)"),
-              borderRadius:10,padding:"9px 8px",marginBottom:9,
-              opacity:isDrag?0.85:1,
+              background: isDrag?"#0B1120"
+                : activeCardIdx===ei ? "#141e30"    // 활성 카드: 조금 더 밝음
+                : "#0d1625",                          // 비활성: 더 어둡게
+              border:"1px solid "+(
+                isDrag ? "#7c6fff"
+                : activeCardIdx===ei ? "rgba(94,234,212,.35)"  // 활성: 민트 테두리
+                : "rgba(255,255,255,0.05)"             // 비활성: 더 약하게
+              ),
+              borderRadius:10,padding:"9px 8px",marginBottom:14,  // 간격 늘림
+              opacity: isDrag ? 0.85
+                : activeCardIdx===null || activeCardIdx===ei ? 1
+                : 0.72,   // 비활성 카드 살짝 어둡게
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
-              boxShadow:isDrag?"0 8px 28px rgba(124,111,255,.30)":"none",
-              transition:"transform .12s, box-shadow .12s, border-color .12s, opacity .12s",
+              boxShadow: isDrag ? "0 8px 28px rgba(124,111,255,.30)"
+                : activeCardIdx===ei ? "0 0 0 1px rgba(94,234,212,.15), 0 4px 16px rgba(94,234,212,.08)"
+                : "none",
+              transition:"transform .12s, box-shadow .18s, border-color .18s, opacity .18s, background .18s",
               position:"relative",zIndex:isDrag?20:1,
               touchAction:"pan-y",
               width:"100%",maxWidth:"100%",minWidth:0,
               boxSizing:"border-box",overflow:"hidden",
             }}>
             {/* 드래그 핸들 + 헤더 */}
-            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
+            <div onFocus={()=>setActiveCardIdx(ei)} onTouchStart={()=>setActiveCardIdx(ei)} style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               {/* 드래그 핸들 — pointer 이벤트만 처리 */}
               <div
                 title="잡고 위아래로 이동"
@@ -2735,11 +2772,20 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
                 }}>
                 ⠿
               </div>
-              <Mo c="#1e2a3a" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
+              <Mo c={activeCardIdx===ei?"#5EEAD4":"#1e2a3a"} s={8} style={{flexShrink:0,fontWeight:activeCardIdx===ei?800:400,transition:"color .15s"}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
               <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
-                placeholder="운동 이름" style={{width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",fontWeight:700,fontSize:16,display:"block"}} />
+                placeholder="운동 이름" style={{
+                  width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",
+                  fontWeight:700,fontSize:16,display:"block",
+                  height:44, padding:"10px 12px",
+                  background: activeCardIdx===ei ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+                  border: activeCardIdx===ei ? "1px solid rgba(94,234,212,.3)" : "1px solid rgba(255,255,255,0.08)",
+                  borderRadius:8,
+                  color:"#e2e8f0",
+                  transition:"border-color .18s, background .18s",
+                }} />
               </div>
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
@@ -3147,12 +3193,12 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
               </div>
             </div>
             <div style={{marginTop:5}}>
-              <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" style={{fontSize:12,color:"#8080a0"}} />
+              <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" onFocus={()=>setActiveCardIdx(ei)} style={{fontSize:16,color:"#8080a0",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:6,padding:"6px 10px",width:"100%",boxSizing:"border-box"}} />
             </div>
 
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
             <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
-              background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.12)"}}>
+              background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.12)"}} onFocus={()=>setActiveCardIdx(ei)}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
                 <Mo c="#818cf8" s={8} style={{fontWeight:700,flexShrink:0}}>🎯 자극도</Mo>
                 {ex.stimRating && (

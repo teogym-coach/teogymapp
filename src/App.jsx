@@ -2245,14 +2245,17 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
   const last     = sessions.length > 0 ? sessions[sessions.length-1] : null;
   const wData    = sessions.filter(s => s.bodyWeight && parseFloat(s.bodyWeight) > 0)
                            .map(s => ({name:s.sessionNo+"회", w:parseFloat(s.bodyWeight)}));
+  const isMyself = isOwner(member);
+  const t = (수업, 운동) => isMyself ? 운동 : 수업; // 대표님 전용 텍스트 헬퍼
+
   const menus = [
     // ── 핵심: 수업 중 가장 자주 사용 ───────────────────
-    {icon:"✏️",label:"수업 기록",      desc:"오늘 수업 입력",              sc:"session",    c:"#5EEAD4"},
-    {icon:"📅",label:"히스토리",       desc:"전체 수업 · 수정 · 삭제",    sc:"history",    c:"#7c6fff"},
+    {icon:"✏️",label:t("수업 기록","운동 기록"),  desc:t("오늘 수업 입력","오늘 운동 입력"),    sc:"session",    c:"#5EEAD4"},
+    {icon:"📅",label:t("히스토리","운동일지"),    desc:t("전체 수업 · 수정 · 삭제","전체 운동 · 수정 · 삭제"), sc:"history", c:"#7c6fff"},
     {icon:"⚖️",label:"바디 체크",      desc:"체중·칼로리·인바디 분석",    sc:"bodycheck",  c:"#00cec9"},
     // ── 분석·설계 ──────────────────────────────────────
     {icon:"💪",label:"근력 분석",      desc:"1RM·5RM·10RM 예측 분석",     sc:"strength",   c:"#ef4444"},
-    {icon:"🤖",label:"AI 루틴 추천",   desc:"수업기록 기반 다음 루틴",     sc:"ai_routine", c:"#a29bfe"},
+    {icon:"🤖",label:"AI 루틴 추천",   desc:t("수업기록 기반 다음 루틴","운동기록 기반 다음 루틴"), sc:"ai_routine", c:"#a29bfe"},
     {icon:"🎯",label:"목표 관리",      desc:"목표 설정 + AI 분석 리포트",  sc:"goal_manage",c:"#818cf8"},
     // ── 기록·분석 보조 ────────────────────────────────
     {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",            sc:"library",    c:"#00bfff"},
@@ -2293,9 +2296,9 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
 
       {!loading && (
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:14}}>
-          <StatTile label="총 수업" value={sessions.length+"회"} />
+          <StatTile label={t("총 수업","총 운동")} value={sessions.length+"회"} />
           <StatTile label="누적 볼륨" value={(totalVol/1000).toFixed(1)+"t"} />
-          <StatTile label="최근 회차" value={last ? last.sessionNo+"회" : "—"} sub={last?.date||""} />
+          <StatTile label={t("최근 회차","최근 운동")} value={last ? last.sessionNo+"회" : "—"} sub={last?.date||""} />
         </div>
       )}
 
@@ -2742,7 +2745,7 @@ function updateEx(ei, key, val) {
 
   return (
     <div>
-      <SH title={isEdit?"🔧 수업 수정":"✏️ 수업 기록"} sub={member.name}
+      <SH title={isOwner(member) ? (isEdit?"🔧 운동 수정":"✏️ 운동 기록") : (isEdit?"🔧 수업 수정":"✏️ 수업 기록")} sub={member.name}
         right={
           <div style={{display:"flex",gap:4,flexWrap:"nowrap",flexShrink:0,minWidth:0}}>
             <Btn ghost sm onClick={() => setShowCard(true)} style={{color:"#00bfff",borderColor:"#00bfff33",padding:"5px 9px",fontSize:10}}>📸 카드</Btn>
@@ -2750,7 +2753,7 @@ function updateEx(ei, key, val) {
               style={{padding:"5px 9px",borderRadius:8,border:"1px solid #5EEAD4",cursor:"pointer",
                 background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:10,fontWeight:700,
                 whiteSpace:"nowrap"}}>
-              💾 저장
+              {isOwner(member) ? "💾 운동 저장" : "💾 저장"}
             </button>
             <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
           </div>
@@ -3584,7 +3587,7 @@ function updateEx(ei, key, val) {
       </Card>
 
       <div style={{marginTop:14,paddingBottom:32}}>
-        <Btn full onClick={handleSave}>{isEdit ? "수정 저장 →" : "저장하기 →"}</Btn>
+        <Btn full onClick={handleSave}>{isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "수정 저장 →" : "저장하기 →")}</Btn>
       </div>
 
       <div ref={pRef} style={{display:"none"}}>
@@ -3838,7 +3841,7 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
 
   return (
     <div>
-      <SH title="📅 히스토리" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+      <SH title={isOwner(member)?"📅 운동일지":"📅 히스토리"} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
       <Mo c="#54546a" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 수업 리포트가 열립니다</Mo>
       {loading ? <Skel n={5} /> : sessions.length===0 ? <Emp msg="수업 기록이 없습니다." /> : (
         <div style={{display:"flex",flexDirection:"column",gap:7}}>

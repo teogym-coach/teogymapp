@@ -5318,7 +5318,7 @@ function ChangeCalendar({ sessions=[], records=[] }) {
           {selSessions.map((s,i)=>(
             <div key={i} style={{marginBottom:6,padding:"8px 10px",background:"#0F172A",borderRadius:7}}>
               <Mo c="#5EEAD4" s={10} style={{fontWeight:700,display:"block",marginBottom:3}}>
-                {s.sessionNo}회차 {isOwner(member)?"운동":"PT"} · 볼륨 {(s.totalVolume||0).toLocaleString()}kg
+                {s.sessionNo}회차 PT · 볼륨 {(s.totalVolume||0).toLocaleString()}kg
               </Mo>
               {(s.exercises||[]).slice(0,3).map((e,j)=>(
                 <Mo key={j} c="#64748b" s={9} style={{display:"block"}}>· {e.name}</Mo>

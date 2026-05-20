@@ -2326,7 +2326,7 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
             <span style={{fontSize:16}}>🤖</span>
             <div style={{textAlign:"left"}}>
               <Mo c="#5EEAD4" s={11} style={{fontWeight:700,display:"block"}}>AI 초기 분석 리포트</Mo>
-              <Mo c="#64748b" s={9}>상담 설문 기반 · 수업 방향 가이드</Mo>
+              <Mo c="#64748b" s={9}>상담 설문 기반 · {t("수업 방향 가이드","운동 방향 가이드")}</Mo>
             </div>
           </div>
           <Mo c="#5EEAD4" s={12}>→</Mo>
@@ -2355,7 +2355,7 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
 
       {last && (
         <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"11px 13px",marginBottom:14}}>
-          <Mo c="#54546a" s={9} style={{marginBottom:4}}>최근 수업 — {last.date} · {last.sessionNo}회차</Mo>
+          <Mo c="#54546a" s={9} style={{marginBottom:4}}>{t("최근 수업","최근 운동")} — {last.date} · {last.sessionNo}{t("회차","회차")}</Mo>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13}}>{formatTypes(last.selectedTypes || last.type) || "웨이트"}</span>
             <Mo c="#5EEAD4" s={12}>{(last.totalVolume||0).toLocaleString()} kg</Mo>
@@ -3856,8 +3856,8 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
   return (
     <div>
       <SH title={isOwner(member)?"📅 운동일지":"📅 히스토리"} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
-      <Mo c="#54546a" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 수업 리포트가 열립니다</Mo>
-      {loading ? <Skel n={5} /> : sessions.length===0 ? <Emp msg="수업 기록이 없습니다." /> : (
+      <Mo c="#54546a" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</Mo>
+      {loading ? <Skel n={5} /> : sessions.length===0 ? <Emp msg={isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."} /> : (
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {[...sessions].reverse().map((s,i) => {
             const typeLbl = formatTypes(s.selectedTypes || s.type);
@@ -4104,7 +4104,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
         const w = window.open();
         if (w) {
           w.document.write('<img src="'+dataUrl+'" style="max-width:100%"/>');
-          w.document.title = (member?.name||"") + " 수업 리포트";
+          w.document.title = (member?.name||"") + (isOwner(member) ? " 운동 리포트" : " 수업 리포트");
         }
       }
     } catch(e) { console.error(e); }
@@ -4386,7 +4386,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                   <div style={{marginBottom:10,background:"rgba(0,229,160,.06)",borderRadius:10,
                     padding:"11px 14px",border:"1px solid rgba(0,229,160,.18)"}}>
                     <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",
-                      letterSpacing:".1em",marginBottom:7}}>💬 오늘 수업 총평</div>
+                      letterSpacing:".1em",marginBottom:7}}>{isOwner(member)?'💬 오늘 운동 총평':'💬 오늘 수업 총평'}</div>
                     <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.75,whiteSpace:"pre-wrap"}}>{trainerComment}</div>
                   </div>
                 )}
@@ -4395,7 +4395,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                   <div style={{marginBottom:10,background:"rgba(255,209,102,.06)",borderRadius:10,
                     padding:"11px 14px",border:"1px solid rgba(255,209,102,.18)"}}>
                     <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#ffd166",
-                      letterSpacing:".1em",marginBottom:7}}>📌 다음 수업 포인트</div>
+                      letterSpacing:".1em",marginBottom:7}}>{isOwner(member)?'📌 다음 운동 포인트':'📌 다음 수업 포인트'}</div>
                     <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.75,whiteSpace:"pre-wrap"}}>{nextPlan}</div>
                   </div>
                 )}
@@ -5318,7 +5318,7 @@ function ChangeCalendar({ sessions=[], records=[] }) {
           {selSessions.map((s,i)=>(
             <div key={i} style={{marginBottom:6,padding:"8px 10px",background:"#0F172A",borderRadius:7}}>
               <Mo c="#5EEAD4" s={10} style={{fontWeight:700,display:"block",marginBottom:3}}>
-                {s.sessionNo}회차 PT · 볼륨 {(s.totalVolume||0).toLocaleString()}kg
+                {s.sessionNo}회차 {isOwner(member)?"운동":"PT"} · 볼륨 {(s.totalVolume||0).toLocaleString()}kg
               </Mo>
               {(s.exercises||[]).slice(0,3).map((e,j)=>(
                 <Mo key={j} c="#64748b" s={9} style={{display:"block"}}>· {e.name}</Mo>

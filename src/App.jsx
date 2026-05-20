@@ -419,6 +419,15 @@ export default function App() {
     setLoading(true);
     try {
       const mbs = await getMembers();
+      // ── 레거시 마이그레이션: 이름 기반 대표님 → isOwner 필드로 자동 전환 ──
+      // 기존에 "김태오"로 저장된 대표님 데이터에 isOwner:true 를 1회 자동 추가
+      const needMigrate = mbs.filter(m =>
+        m.name === OWNER_LEGACY_NAME && m.isOwner !== true && m.role !== "owner"
+      );
+      if (needMigrate.length > 0) {
+        await Promise.all(needMigrate.map(m => updateMember(m.id, { isOwner: true }).catch(()=>{})));
+        needMigrate.forEach(m => { m.isOwner = true; });
+      }
       setMembers(mbs);
       // 각 회원의 세션 요약을 병렬 로드
       const entries = await Promise.all(
@@ -815,9 +824,14 @@ function matchSearch(name, query) {
   return false;
 }
 
-// 대표님 전용 운동 기록 회원명
-const OWNER_NAME = "김태오";
-const isOwner = (m) => (m?.name || "") === OWNER_NAME;
+// 대표님 판별: isOwner 필드 또는 role 필드 기준 (이름 기반 판별 제거)
+// OWNER_LEGACY_NAME: 최초 1회 마이그레이션용으로만 사용, 이후 삭제 가능
+const OWNER_LEGACY_NAME = "김태오";
+const isOwner = (m) => {
+  if (!m) return false;
+  if (m.isOwner === true || m.role === "owner") return true;
+  return false; // 이름 기반 판별 제거 — 마이그레이션 후에는 isOwner/role 필드만 사용
+};
 
 function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange }) {
   const today = new Date().toISOString().split("T")[0];
@@ -949,7 +963,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏋️</div>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#5EEAD4"}}>대표님 운동 기록</div>
-              <Mo c="#64748b" s={10}>김태오 · 개인 운동 전용</Mo>
+              <Mo c="#64748b" s={10}>{ownerMember.name} · 개인 운동 전용</Mo>
             </div>
           </div>
           <Mo c="#5EEAD4" s={13}>→</Mo>

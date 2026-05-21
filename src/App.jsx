@@ -2359,6 +2359,7 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13}}>{formatTypes(last.selectedTypes || last.type) || "웨이트"}</span>
             <Mo c="#5EEAD4" s={12}>{(last.totalVolume||0).toLocaleString()} kg</Mo>
+            <PartVolBadges exercises={last.exercises} style={{marginTop:4}} />
           </div>
           {last.trainerComment && <div style={{marginTop:4,fontSize:11,color:"#54546a",fontStyle:"italic"}}>{last.trainerComment}</div>}
         </div>
@@ -3579,6 +3580,7 @@ function updateEx(ei, key, val) {
           <Mo c="#54546a" s={9}>TOTAL VOLUME</Mo>
           <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#54546a"}}>kg</span></span>
         </div>
+        <PartVolBadges exercises={exercises} style={{marginTop:6}} />
       </Card>
 
       <Card title="추가 기록" style={{marginTop:11}}>
@@ -3902,6 +3904,7 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
                     <Mo c="#5EEAD4" s={12} style={{fontWeight:700}}>{(s.totalVolume||0).toLocaleString()} kg</Mo>
+                    <PartVolBadges exercises={s.exercises} style={{marginTop:4,justifyContent:"flex-end"}} />
                     <div style={{display:"flex",gap:3,marginTop:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
                       {s.intensity && <Bdg color={ic}>{s.intensity}</Bdg>}
                       {s.condition && <Bdg color={cc.color}>{cc.emoji} {s.condition}</Bdg>}
@@ -4044,6 +4047,41 @@ function detectPositiveChanges(todaySess, prevSessions) {
 
   // 중복 제거
   return [...new Set(messages)].slice(0, 4);
+}
+
+// 부위별 볼륨 계산 헬퍼 (재사용)
+function calcPartVolumes(exercises) {
+  const map = {};
+  (exercises||[]).forEach(ex => {
+    if (!ex.name) return;
+    const part = ex.muscleTop || "";
+    if (!part || part === "기능") return; // 기능 운동 제외
+    const vol = (ex.sets||[]).reduce((s,r)=>{
+      if (r.volume != null) return s + (r.volume||0);
+      const w = parseFloat(r.weight)||0, reps = parseInt(r.reps)||0;
+      return s + w * reps;
+    }, 0);
+    if (vol > 0) map[part] = (map[part]||0) + vol;
+  });
+  return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+}
+
+// 부위별 볼륨 배지 컴포넌트 (인라인)
+function PartVolBadges({ exercises, style={} }) {
+  const parts = calcPartVolumes(exercises);
+  if (!parts.length) return null;
+  return (
+    <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4,...style}}>
+      {parts.map(([g,v])=>(
+        <span key={g} style={{fontFamily:"'DM Mono',monospace",fontSize:9,
+          padding:"2px 7px",borderRadius:4,
+          background:`${mColor(g)}18`,color:mColor(g),
+          fontWeight:600,whiteSpace:"nowrap"}}>
+          {g} {v.toLocaleString()}kg
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onClose, onEdit }) {
@@ -4285,6 +4323,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                 <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#5EEAD4"}}>
                   {totalVol.toLocaleString()} <span style={{fontSize:12,color:"#54546a",fontWeight:400}}>kg</span>
                 </div>
+                <PartVolBadges exercises={exercises} style={{marginTop:5}} />
               </div>
               {bodyWeight && (
                 <div style={{textAlign:"right"}}>

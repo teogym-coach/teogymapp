@@ -3845,6 +3845,44 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
 // ════════════════════════════════════════════
 // HISTORY
 // ════════════════════════════════════════════
+// 운동 종목 목록 — 8개까지 기본 표시, 초과 시 펼치기
+function ExNameList({ exercises }) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!exercises || !exercises.length) return null;
+  const LIMIT = 8;
+  const show  = expanded ? exercises : exercises.slice(0, LIMIT);
+  const more  = exercises.length - LIMIT;
+  return (
+    <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:3}}>
+      {show.map((ex, j) => (
+        <span key={j} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
+          padding:"2px 7px",borderRadius:3,
+          background:(EQUIP_COLOR[ex.equipment]||"#888")+"22",
+          color: EQUIP_COLOR[ex.equipment]||"#888",
+          whiteSpace:"nowrap"}}>
+          {ex.name||"?"}
+        </span>
+      ))}
+      {!expanded && more > 0 && (
+        <button onClick={e=>{e.stopPropagation();setExpanded(true);}}
+          style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",
+            borderRadius:3,border:"1px solid rgba(255,255,255,0.08)",
+            background:"transparent",color:"#54546a",cursor:"pointer"}}>
+          +{more} 더보기
+        </button>
+      )}
+      {expanded && more > 0 && (
+        <button onClick={e=>{e.stopPropagation();setExpanded(false);}}
+          style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",
+            borderRadius:3,border:"1px solid rgba(255,255,255,0.08)",
+            background:"transparent",color:"#54546a",cursor:"pointer"}}>
+          접기
+        </button>
+      )}
+    </div>
+  );
+}
+
 function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) {
   const [reportSession, setReportSession] = useState(null); // 리포트 모달용
   const [cardMode, setCardMode] = useState("simple"); // simple | detail
@@ -3900,14 +3938,7 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
                       </div>
                     )}
                     {s.exercises && s.exercises.length > 0 && (
-                      <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                        {s.exercises.slice(0,4).map((ex,j) => (
-                          <span key={j} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",
-                            borderRadius:3,background:(EQUIP_COLOR[ex.equipment]||"#888")+"22",
-                            color:EQUIP_COLOR[ex.equipment]||"#888"}}>{ex.name||"?"}</span>
-                        ))}
-                        {s.exercises.length > 4 && <Mo c="#3a3a4a" s={8}>+{s.exercises.length-4}</Mo>}
-                      </div>
+                      <ExNameList exercises={s.exercises} />
                     )}
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>

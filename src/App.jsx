@@ -3847,7 +3847,7 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
 // ════════════════════════════════════════════
 // 운동 종목 목록 — 8개까지 기본 표시, 초과 시 펼치기
 function ExNameList({ exercises }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = useState(false);
   if (!exercises || !exercises.length) return null;
   const LIMIT = 8;
   const show  = expanded ? exercises : exercises.slice(0, LIMIT);

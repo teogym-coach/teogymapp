@@ -3520,11 +3520,6 @@ function updateEx(ei, key, val) {
                   </div>
                 </>
               )}
-            </div>     <label>세부 부위</label>
-                <select value={ex.muscleSub} onChange={e => updateEx(ei,"muscleSub",e.target.value)} style={{fontSize:12,padding:"6px"}}>
-                  {mSubs(ex.muscleTop).map(s => <option key={s}>{s}</option>)}
-                </select>
-              </div>
             </div>
             <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
               <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:EQUIP_COLOR[ex.equipment]+"22",color:EQUIP_COLOR[ex.equipment]}}>{ex.equipment}</span>

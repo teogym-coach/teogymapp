@@ -2848,42 +2848,57 @@ function updateEx(ei, key, val) {
 
       // ── 운동 이름 변경 시 부위/세부부위 + 기구 자동 추천 ──────────────
       if (key === "name") {
-        // 기능 운동 자동 추천 (equipment=기능 또는 funcCategory 있을 때)
-        if (ex.equipment === "기능" || ex.funcCategory) {
+        // ── 기능 운동 자동 추천 (이름 입력 시 무조건 시도) ───────────────
+        if (!ex._equipManual && !ex._funcManual) {
           const preset = suggestFuncExPreset(val);
-          if (preset && !ex._funcManual) {
-            if (preset.category)             u.funcCategory = preset.category;
+          if (preset) {
+            // 기구를 "기능"으로 자동 전환
+            u.equipment  = "기능";
+            u._autoEquip = true;
+            u.muscleTop  = "기능";
+            u.muscleSub  = "기능";
+            // 세트 형식도 기능 운동으로 전환
+            u.sets = ex.sets.map(s=>({
+              weight:"", reps:s.reps||"", durationSec:s.durationSec||"",
+              volume:0, recordType:"function"
+            }));
+            // 카테고리 / 부위 / 도구
+            if (preset.category)              u.funcCategory = preset.category;
             if (preset.bodyParts?.length > 0) u.funcBodyPart = preset.bodyParts;
-            if (preset.tool)                 u.funcTool     = preset.tool;
+            if (preset.tool)                  u.funcTool     = preset.tool;
             // 목적 자동 생성
             if (!ex._purposeManual) {
               const partStr = (preset.bodyParts||[]).join("+");
               u.movementPurpose = buildPurposeLabel(preset.category, partStr);
             }
           }
+        } else if (ex.equipment === "기능" && !ex._funcManual) {
+          // 이미 기능 운동이고 이름만 변경하는 경우
+          const preset = suggestFuncExPreset(val);
+          if (preset) {
+            if (preset.category)              u.funcCategory = preset.category;
+            if (preset.bodyParts?.length > 0) u.funcBodyPart = preset.bodyParts;
+            if (preset.tool)                  u.funcTool     = preset.tool;
+            if (!ex._purposeManual) {
+              const partStr = (preset.bodyParts||[]).join("+");
+              u.movementPurpose = buildPurposeLabel(preset.category, partStr);
+            }
+          }
         }
-        // 기구 자동 추천 (사용자가 직접 기구를 수정한 적 없을 때만)
-        if (!ex._equipManual) {
+        // ── 기구 자동 추천 (기능 추천 없을 때만) ─────────────────────────
+        if (!ex._equipManual && !(u.equipment === "기능")) {
           const sugEq = suggestEquipment(val);
           if (sugEq) {
             u.equipment    = sugEq;
             u._autoEquip   = true;
-            // 맨몸 → 기능 부위 자동 설정
             if (sugEq === "맨몸" && !ex._muscleManual) {
               const isCore = ["플랭크","크런치","버드독","데드버그","레그레이즈"].some(k=>val.includes(k));
               if (isCore) { u.muscleTop = "코어"; u.muscleSub = "코어"; }
-              else         { u.muscleTop = "기능"; u.muscleSub = "기능"; }
-              u.sets = ex.sets.map(s=>({weight:s.weight||"",reps:s.reps||"",durationSec:"",volume:0,recordType:"function"}));
             }
           } else { u._autoEquip = false; }
         }
-        // 움직임 목적 자동 추천 (기능 운동일 때)
-        if (!ex._purposeManual) {
-          const sug = suggestMovementPurpose(val);
-          if (sug) u.movementPurpose = sug;
-        }
-        // 사용자가 수동으로 부위를 바꾼 적 없을 때만 자동 적용
-        if (!ex._muscleManual) {
+        // ── 부위 자동 추천 (웨이트 운동용) ───────────────────────────────
+        if (!ex._muscleManual && u.equipment !== "기능" && ex.equipment !== "기능") {
           const sug = suggestMuscle(val);
           if (sug && mSubs(sug.top).length > 0) {
             u.muscleTop = sug.top;
@@ -2992,6 +3007,10 @@ function updateEx(ei, key, val) {
       }
       // muscleSub 수동 변경 감지
       if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
+      // funcCategory / funcBodyPart / funcTool 수동 변경 → _funcManual 플래그
+      if (key === "funcCategory" || key === "funcBodyPart" || key === "funcTool") {
+        u._funcManual = true;
+      }
       // funcCategory / funcBodyPart 변경 → movementPurpose 자동 생성
       if (key === "funcCategory" || key === "funcBodyPart") {
         const cat  = key === "funcCategory"  ? val : (ex.funcCategory||"");

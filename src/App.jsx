@@ -17,8 +17,8 @@ import {
 } from "./db";
 
 // ─── 운동 분류 상수 ───
-const EQUIP_LIST   = ["바벨","덤벨","케이블","머신","맨몸"];
-const EQUIP_COLOR  = {바벨:"#7c6fff",덤벨:"#5EEAD4",케이블:"#ffd166",머신:"#ff9f43",맨몸:"#ff6b6b"};
+const EQUIP_LIST   = ["바벨","덤벨","케이블","머신","맨몸","기능"];
+const EQUIP_COLOR  = {바벨:"#7c6fff",덤벨:"#5EEAD4",케이블:"#f97316",머신:"#ffd166",맨몸:"#94a3b8",기능:"#22c55e"};블:"#ffd166",머신:"#ff9f43",맨몸:"#ff6b6b"};
 const MUSCLE_MAP   = {
   "가슴":      ["윗가슴","가운데가슴","아랫가슴","전체"],
   "등":        ["등상부","광배근","전체"],
@@ -94,14 +94,16 @@ const FUNC_TOOLS = [
 function buildPurposeLabel(category, bodyPart) {
   if (!category && !bodyPart) return "";
   const cat = FUNC_CATEGORIES.find(c=>c.key===category);
-  if (!cat) return bodyPart || "";
-  if (!bodyPart) return cat.label;
+  // bodyPart가 배열이면 join
+  const partStr = Array.isArray(bodyPart) ? bodyPart.join("+") : bodyPart;
+  if (!cat) return partStr || "";
+  if (!partStr) return cat.label;
   const labelMap = {
     "조직이완":"조직 이완", "가동성":"가동성 개선",
     "안정화":"안정화 훈련", "활성화":"활성화",
     "움직임교정":"움직임 교정", "호흡":"호흡 패턴 훈련", "밸런스":"밸런스 훈련",
   };
-  return `${bodyPart} ${labelMap[category]||cat.label}`;
+  return `${partStr} ${labelMap[category]||cat.label}`;
 }
 
 // 기능운동 여부 판별
@@ -142,11 +144,13 @@ function suggestMovementPurpose(name) {
 
 // 기능운동 여부 판별
 function isFuncEx(ex) {
-  // 기능이거나, 맨몸+코어, 또는 sets에 recordType:"function" 있으면 기능운동
+  // 기능 기구로 선택된 경우 (신규 방식, 최우선)
+  if (ex.equipment === "기능") return true;
+  // 기존 호환: muscleTop이 기능이거나 recordType:function 세트
   if (ex.muscleTop === "기능") return true;
-  if (ex.equipment === "맨몸" && ex.muscleTop === "코어") return true;
   if ((ex.sets||[]).some(s => s.recordType === "function")) return true;
   return false;
+  // 맨몸+코어는 더 이상 기능운동으로 분류하지 않음 (맨몸 복원)
 }
 
 // 기능운동 세트 표시 문자열 (입력된 값만)
@@ -2692,8 +2696,33 @@ function updateEx(ei, key, val) {
       if (key === "equipment") {
         u._equipManual = true;
         u._autoEquip   = false;
-        // 비동기 학습 기록 (저장 지연 없음)
         if (ex.name) recordEquipLearn(ex.name, val);
+
+        // "기능" 선택 시 → 기능운동 세트 형식으로 전환, 부위 기능으로
+        if (val === "기능") {
+          if (!ex._muscleManual) { u.muscleTop = "기능"; u.muscleSub = "기능"; }
+          u.sets = ex.sets.map(s=>({weight:"",reps:s.reps||"",durationSec:s.durationSec||"",volume:0,recordType:"function"}));
+        }
+        // "맨몸" 선택 시 → 일반 맨몸 (기능 UI 없음, 부위는 기존 유지)
+        if (val === "맨몸" && ex.equipment === "기능") {
+          u.muscleTop = "코어"; u.muscleSub = "코어";
+          u.sets = ex.sets.map(s=>({weight:"",reps:s.reps||"",durationSec:s.durationSec||"",volume:0,recordType:"function"}));
+        }
+        if (val !== "맨몸" && val !== "기능" && ex.equipment === "맨몸") {
+          u.muscleTop = "가슴"; u.muscleSub = "윗가슴";
+          u.sets = ex.sets.map(s=>({weight:s.weight||"",reps:s.reps||"",volume:(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),recordType:"weightReps"}));
+        }
+        if (val !== "맨몸" && val !== "기능" && ex.equipment === "기능") {
+          u.muscleTop = "가슴"; u.muscleSub = "윗가슴";
+          u.sets = ex.sets.map(s=>({weight:s.weight||"",reps:s.reps||"",volume:(parseFloat(s.weight)||0)*(parseInt(s.reps)||0)}));
+        }
+        const wasBodyFunc = ex.equipment === "맨몸" && ex.muscleTop === "코어";
+        const isBodyFunc  = val === "맨몸" && (u.muscleTop||ex.muscleTop) === "코어";
+        if (!wasBodyFunc && isBodyFunc) {
+          u.sets = ex.sets.map(s=>({weight:s.weight||"",reps:s.reps||"",durationSec:"",volume:0,recordType:"function"}));
+        } else if (wasBodyFunc && !isBodyFunc && val !== "맨몸" && val !== "기능") {
+          u.sets = ex.sets.map(s=>({weight:s.weight||"",reps:s.reps||"",volume:(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),recordType:"weightReps"}));
+        }
       }
 
       // equipment 변경 시 맨몸+코어 ↔ 일반 전환 처리
@@ -3445,14 +3474,53 @@ function updateEx(ei, key, val) {
                   })}
                 </div>
               </div>
-              <div>
-                <label>부위</label>
-                <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)} style={{fontSize:12,padding:"6px"}}>
-                  {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label>세부 부위</label>
+              {/* 기능 선택 시: 부위/세부부위 대신 카테고리·도구 표시 */}
+              {ex.equipment === "기능" ? (
+                <>
+                  <div>
+                    <label>카테고리</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
+                      {FUNC_CATEGORIES.map(c=>{
+                        const active=ex.funcCategory===c.key;
+                        return <button key={c.key} onClick={()=>updateEx(ei,"funcCategory",active?"":c.key)}
+                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid",
+                            borderColor:active?c.color:"rgba(255,255,255,0.08)",
+                            background:active?c.color+"22":"transparent",
+                            color:active?c.color:"#64748b",fontSize:9,fontWeight:active?700:400}}>{c.label}</button>;
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <label>도구</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
+                      {FUNC_TOOLS.map(t=>{
+                        const active=ex.funcTool===t;
+                        return <button key={t} onClick={()=>updateEx(ei,"funcTool",active?"":t)}
+                          style={{padding:"3px 8px",borderRadius:4,border:"1px solid",
+                            borderColor:active?"#ffd166":"rgba(255,255,255,0.08)",
+                            background:active?"rgba(255,209,102,.15)":"transparent",
+                            color:active?"#ffd166":"#64748b",fontSize:9}}>{t}</button>;
+                      })}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label>부위</label>
+                    <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)} style={{fontSize:12,padding:"6px"}}>
+                      {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label>세부부위</label>
+                    <select value={ex.muscleSub} onChange={e => updateEx(ei,"muscleSub",e.target.value)} style={{fontSize:12,padding:"6px"}}>
+                      {mSubs(ex.muscleTop).map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>     <label>세부 부위</label>
                 <select value={ex.muscleSub} onChange={e => updateEx(ei,"muscleSub",e.target.value)} style={{fontSize:12,padding:"6px"}}>
                   {mSubs(ex.muscleTop).map(s => <option key={s}>{s}</option>)}
                 </select>
@@ -3606,35 +3674,27 @@ function updateEx(ei, key, val) {
             </div>
 
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
-            {isFuncEx(ex) && (
+            {ex.equipment === "기능" && (
               <div style={{marginBottom:8,borderRadius:9,
-                background:"rgba(94,234,212,.04)",border:"1px solid rgba(94,234,212,.15)",padding:"9px 10px"}}>
-                {/* 1차: 카테고리 */}
+                background:"rgba(34,197,94,.04)",border:"1px solid rgba(34,197,94,.15)",padding:"9px 10px"}}>
+                {/* 부위 다중 선택 */}
                 <div style={{marginBottom:6}}>
-                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>✦ 운동 카테고리</Mo>
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {FUNC_CATEGORIES.map(c=>{
-                      const active = ex.funcCategory===c.key;
-                      return (
-                        <button key={c.key} onClick={()=>updateEx(ei,"funcCategory",active?"":c.key)}
-                          style={{fontSize:10,padding:"3px 9px",borderRadius:5,border:"1px solid",cursor:"pointer",
-                            borderColor:active?c.color:"rgba(255,255,255,0.08)",
-                            background:active?c.color+"22":"transparent",
-                            color:active?c.color:"#64748b",fontWeight:active?700:400}}>
-                          {c.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* 2차: 부위 */}
-                <div style={{marginBottom:6}}>
-                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>부위</Mo>
+                  <Mo c="#22c55e" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>부위 (다중 선택)</Mo>
                   <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                     {FUNC_BODY_PARTS.map(p=>{
-                      const active = ex.funcBodyPart===p;
+                      const parts = Array.isArray(ex.funcBodyPart) ? ex.funcBodyPart : (ex.funcBodyPart ? [ex.funcBodyPart] : []);
+                      const active = parts.includes(p);
                       return (
-                        <button key={p} onClick={()=>updateEx(ei,"funcBodyPart",active?"":p)}
+                        <button key={p} onClick={()=>{
+                          const cur = Array.isArray(ex.funcBodyPart) ? ex.funcBodyPart : (ex.funcBodyPart ? [ex.funcBodyPart] : []);
+                          const next = active ? cur.filter(x=>x!==p) : [...cur, p];
+                          if (!ex._purposeManual) {
+                            const cat  = ex.funcCategory||"";
+                            const part = next.length > 0 ? next.join("+") : "";
+                            // updateEx는 두 필드 연속 갱신 불가므로 직접 처리
+                          }
+                          updateEx(ei,"funcBodyPart",next);
+                        }}
                           style={{fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid",cursor:"pointer",
                             borderColor:active?"#818cf8":"rgba(255,255,255,0.07)",
                             background:active?"rgba(129,140,248,.15)":"transparent",
@@ -3645,34 +3705,16 @@ function updateEx(ei, key, val) {
                     })}
                   </div>
                 </div>
-                {/* 3차: 도구 */}
-                <div style={{marginBottom:6}}>
-                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>도구</Mo>
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {FUNC_TOOLS.map(t=>{
-                      const active = ex.funcTool===t;
-                      return (
-                        <button key={t} onClick={()=>updateEx(ei,"funcTool",active?"":t)}
-                          style={{fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid",cursor:"pointer",
-                            borderColor:active?"#ffd166":"rgba(255,255,255,0.07)",
-                            background:active?"rgba(255,209,102,.12)":"transparent",
-                            color:active?"#ffd166":"#64748b"}}>
-                          {t}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* 자동 생성된 목적 (수정 가능) */}
+                {/* 운동 목적 */}
                 <div>
-                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>
-                    운동 목적 {ex._purposeManual?"✎":"(자동)"}
+                  <Mo c="#22c55e" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>
+                    운동 목적 {ex._purposeManual?"✎ 수동":"(카테고리+부위 기반 자동)"}
                   </Mo>
                   <input value={ex.movementPurpose||""} onFocus={()=>setActiveCardIdx(ei)}
                     onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
                     placeholder="예: 햄스트링 조직 이완, 고관절 가동성 개선..."
                     style={{fontSize:16,padding:"6px 10px",borderRadius:6,width:"100%",boxSizing:"border-box",
-                      background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.2)",color:"#a7f3d0"}} />
+                      background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.2)",color:"#bbf7d0"}} />
                 </div>
               </div>
             )}

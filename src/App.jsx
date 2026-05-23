@@ -187,8 +187,6 @@ function getFuncExDisplayName(ex) {
   // 카테고리 없으면 운동 이름 사용
   if (ex.name && ex.name.trim()) return ex.name.trim();
   return partStr || "기능 운동";
-} cat.label;
-  return "기능 운동";
 }
 
 function isFuncEx(ex) {

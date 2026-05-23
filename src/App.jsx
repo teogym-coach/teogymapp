@@ -68,7 +68,43 @@ function formatTypes(raw) {
 
 function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightReps"}; }
 function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
-function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimPrimary:"",stimSecondary:"",stimNote:""}; }
+function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimPrimary:"",stimSecondary:"",stimNote:"",movementPurpose:""}; }
+
+// ── 운동 목적 자동 추천 매핑 ────────────────────────────────────────────────
+const PURPOSE_MAP = [
+  { keys:["그로인","groin","고관절"],          purpose:"고관절 가동성 개선" },
+  { keys:["힙 플렉서","hip flexor","장요근"],   purpose:"장요근 이완 및 고관절 신전 개선" },
+  { keys:["제트업","get up","터키시"],          purpose:"코어 안정화 및 복합 움직임" },
+  { keys:["원레그 레이즈","원다리","싱글레그"], purpose:"골반 안정화 훈련" },
+  { keys:["글루트 브릿지","힙 브릿지","둔근 활성"], purpose:"둔근 활성화 및 골반 안정화" },
+  { keys:["흉추","토라식","thoracic"],          purpose:"흉추 가동성 개선" },
+  { keys:["근막","폼롤러","foam roll"],          purpose:"근막 이완 및 조직 유연성 회복" },
+  { keys:["버드독","bird dog","사지"],           purpose:"코어 안정화 및 척추 중립 훈련" },
+  { keys:["데드버그","dead bug"],               purpose:"코어 안정화 (복횡근 활성)" },
+  { keys:["플랭크","plank"],                    purpose:"코어 내구성 및 척추 안정화" },
+  { keys:["브릿지","bridge"],                   purpose:"둔근 강화 및 골반 안정화" },
+  { keys:["클램쉘","clamshell"],                purpose:"중둔근 활성화 및 외회전 강화" },
+  { keys:["밴드 워크","밴드워크","side walk"],  purpose:"고관절 외전근 강화" },
+  { keys:["월 슬라이드","wall slide"],          purpose:"견갑 안정화 및 상부 승모근 억제" },
+  { keys:["face pull","페이스 풀"],             purpose:"후면 삼각근 및 외회전근 강화" },
+  { keys:["와이티","y-t-w","yt"],              purpose:"견갑 주변 안정화 훈련" },
+  { keys:["캣카우","cat cow","척추 웨이브"],   purpose:"척추 분절 가동성 개선" },
+  { keys:["롤아웃","ab wheel","에브휠"],        purpose:"코어 전방 안정화 훈련" },
+  { keys:["스쿼트","split squat","런지"],       purpose:"하체 복합 움직임 패턴 개선" },
+  { keys:["힙 힌지","hip hinge","rbdl"],        purpose:"힙 힌지 패턴 교정" },
+  { keys:["무브먼트","movement","mobility"],    purpose:"전신 가동성 향상" },
+  { keys:["스트레칭","stretching","stretch"],   purpose:"근육 이완 및 유연성 향상" },
+  { keys:["활성화","activation","activate"],    purpose:"목표 근육 사전 활성화" },
+];
+
+function suggestMovementPurpose(name) {
+  if (!name || name.length < 2) return "";
+  const n = name.toLowerCase();
+  for (const rule of PURPOSE_MAP) {
+    if (rule.keys.some(k => n.includes(k.toLowerCase()))) return rule.purpose;
+  }
+  return "";
+}
 
 // 기능운동 여부 판별
 function isFuncEx(ex) {
@@ -2602,6 +2638,11 @@ function updateEx(ei, key, val) {
             }
           } else { u._autoEquip = false; }
         }
+        // 움직임 목적 자동 추천 (기능 운동일 때)
+        if (!ex._purposeManual) {
+          const sug = suggestMovementPurpose(val);
+          if (sug) u.movementPurpose = sug;
+        }
         // 사용자가 수동으로 부위를 바꾼 적 없을 때만 자동 적용
         if (!ex._muscleManual) {
           const sug = suggestMuscle(val);
@@ -2674,6 +2715,8 @@ function updateEx(ei, key, val) {
       }
       // muscleSub 수동 변경 감지
       if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
+      // movementPurpose 수동 변경 감지
+      if (key === "movementPurpose") u._purposeManual = true;
       return u;
     }));
   }
@@ -3523,6 +3566,26 @@ function updateEx(ei, key, val) {
             </div>
 
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
+            {isFuncEx(ex) && (
+              <div style={{marginBottom:8,padding:"8px 10px",borderRadius:7,
+                background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.15)"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700}}>✦ 운동 목적</Mo>
+                  {ex.movementPurpose && !ex._purposeManual && (
+                    <Mo c="#3a3a5a" s={7}>자동 추천됨</Mo>
+                  )}
+                  {ex._purposeManual && (
+                    <Mo c="#3a3a5a" s={7}>✎ 수동 설정</Mo>
+                  )}
+                </div>
+                <input value={ex.movementPurpose||""} onFocus={()=>setActiveCardIdx(ei)}
+                  onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
+                  placeholder="예: 고관절 가동성 개선, 코어 안정화..."
+                  style={{fontSize:16,padding:"6px 10px",borderRadius:6,width:"100%",boxSizing:"border-box",
+                    background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.2)",color:"#a7f3d0"}} />
+              </div>
+            )}
+            {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
             <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
               background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.12)"}} onFocus={()=>setActiveCardIdx(ei)}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
@@ -3940,6 +4003,24 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
                     {s.exercises && s.exercises.length > 0 && (
                       <ExNameList exercises={s.exercises} />
                     )}
+                    {/* 기능/교정 운동 목적 태그 */}
+                    {(() => {
+                      const goals = [...new Set(
+                        (s.exercises||[]).filter(e=>isFuncEx(e)&&e.movementPurpose).map(e=>e.movementPurpose)
+                      )].slice(0,3);
+                      if (!goals.length) return null;
+                      return (
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:4}}>
+                          {goals.map((g,i)=>(
+                            <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
+                              padding:"2px 7px",borderRadius:3,
+                              background:"rgba(94,234,212,.1)",color:"#5EEAD4",fontWeight:600}}>
+                              ✦ {g}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
                     <Mo c="#5EEAD4" s={12} style={{fontWeight:700}}>{(s.totalVolume||0).toLocaleString()} kg</Mo>
@@ -4449,6 +4530,44 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                 </div>
               )}
             </div>
+
+            {/* ─ 기능/교정 운동 목적 섹션 (트레이너 전용, cardMode 비공유) ─ */}
+            {!cardMode && (() => {
+              const funcGoals = [...new Set(
+                exercises.filter(e=>isFuncEx(e)&&e.movementPurpose).map(e=>e.movementPurpose)
+              )].slice(0,5);
+              if (!funcGoals.length) return null;
+              return (
+                <div style={{marginBottom:10,padding:"11px 14px",borderRadius:10,
+                  background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.2)"}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",letterSpacing:".1em",marginBottom:8,fontWeight:700}}>✦ 오늘 운동 목표</div>
+                  {funcGoals.map((g,i)=>(
+                    <div key={i} style={{display:"flex",gap:7,alignItems:"flex-start",marginBottom:5}}>
+                      <span style={{color:"#5EEAD4",fontSize:10,flexShrink:0}}>·</span>
+                      <span style={{fontSize:11,color:"#a7f3d0",lineHeight:1.7}}>{g}</span>
+                    </div>
+                  ))}
+                  <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid rgba(94,234,212,.1)"}}>
+                    {exercises.filter(e=>isFuncEx(e)).map((ex,j)=>(
+                      <div key={j} style={{marginBottom:5}}>
+                        {ex.movementPurpose && (
+                          <Mo c="#5EEAD4" s={9} style={{fontWeight:700,display:"block",marginBottom:1}}>{ex.movementPurpose}</Mo>
+                        )}
+                        <div style={{display:"flex",gap:6,alignItems:"center",paddingLeft:8}}>
+                          <Mo c="#64748b" s={9}>└ {ex.name}</Mo>
+                          {(ex.sets||[]).reduce((a,s)=>a+parseInt(s.durationSec||0),0)>0 && (
+                            <Mo c="#3a3a5a" s={8}>{(ex.sets||[]).reduce((a,s)=>a+parseInt(s.durationSec||0),0)}초</Mo>
+                          )}
+                          {(ex.sets||[]).reduce((a,s)=>a+parseInt(s.reps||0),0)>0 && (
+                            <Mo c="#3a3a5a" s={8}>{(ex.sets||[]).reduce((a,s)=>a+parseInt(s.reps||0),0)}회</Mo>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ─ 상세 모드: 통증 기록 + 자세 피드백 + 총평 + 다음 계획 ─ */}
             {cardMode === "detail" && (

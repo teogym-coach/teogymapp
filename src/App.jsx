@@ -3903,58 +3903,91 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         </div>
       </div>
       <div style={{padding:"14px 18px"}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",letterSpacing:".1em",marginBottom:10}}>TODAY'S WORKOUT</div>
-        {exList.map((ex, ei) => {
-          const isFunc = isFuncEx(ex);
-          const vol=exVol(ex); const ec=EQUIP_COLOR[ex.equipment]||"#888"; const gc=mColor(ex.muscleTop);
-          const maxW=Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
-          const totalSec  = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.durationSec)||0),0) : 0;
-          const totalReps = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.reps)||0),0) : 0;
-          return (
-            <div key={ei} style={{marginBottom:10,background:"#111827",borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
-              <div style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff"}}>{ex.name}</div>
-                  <div style={{display:"flex",gap:4,marginTop:3}}>
-                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,background:ec+"22",color:ec}}>{ex.equipment}</span>
-                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,background:gc+"22",color:gc}}>{ex.muscleTop}</span>
-                  </div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  {isFunc ? (
-                    <div>
-                      {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:500}}>총 {totalSec}초</div>}
-                      {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
-                      {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()} kg</div>}
+        {/* ── 1. 기능 회복 섹션 (최상단) ── */}
+        {exList.some(e=>isFuncEx(e)) && (
+          <div style={{marginBottom:12,borderRadius:10,overflow:"hidden",
+            border:"1px solid rgba(94,234,212,.22)",background:"rgba(94,234,212,.03)"}}>
+            {/* 섹션 헤더 */}
+            <div style={{padding:"7px 13px",background:"rgba(94,234,212,.08)",
+              display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a5a4a"}}>{exList.filter(e=>isFuncEx(e)).length}종목</span>
+            </div>
+            {/* 기능운동 리스트 */}
+            <div style={{padding:"8px 13px"}}>
+              {exList.filter(e=>isFuncEx(e)).map((ex,j)=>{
+                const cat = FUNC_CATEGORIES.find(c=>c.key===ex.funcCategory);
+                const totalSec  = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.durationSec)||0),0);
+                const totalReps = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.reps)||0),0);
+                const sets = (ex.sets||[]).filter(s=>isValidSet(s)).length;
+                const funcExs = exList.filter(e=>isFuncEx(e));
+                return (
+                  <div key={j} style={{
+                    marginBottom:j<funcExs.length-1?7:0,
+                    paddingBottom:j<funcExs.length-1?7:0,
+                    borderBottom:j<funcExs.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
+                    {/* 목적 라인 */}
+                    <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
+                      {cat && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,
+                          background:cat.color+"22",color:cat.color,fontWeight:700}}>{cat.label}</span>
+                      )}
+                      {ex.funcBodyPart && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,
+                          background:"rgba(129,140,248,.15)",color:"#818cf8"}}>{ex.funcBodyPart}</span>
+                      )}
+                      {ex.movementPurpose ? (
+                        <span style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:11,color:"#a7f3d0",fontWeight:700}}>
+                          {ex.movementPurpose}
+                        </span>
+                      ) : (
+                        <span style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:11,color:"#a7f3d0",fontWeight:700}}>
+                          {ex.name}
+                        </span>
+                      )}
                     </div>
-                  ) : (
+                    {/* 운동명 + 수행량 */}
+                    <div style={{display:"flex",alignItems:"center",gap:5,paddingLeft:8,flexWrap:"wrap"}}>
+                      <span style={{color:"#475569",fontSize:9,flexShrink:0}}>└</span>
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#64748b"}}>
+                        {ex.funcTool?`${ex.funcTool} · `:""}{ex.movementPurpose?ex.name:""}
+                      </span>
+                      {totalSec>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalSec}초</span>}
+                      {totalReps>0 && !totalSec && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalReps}회</span>}
+                      {sets>1 && totalReps>0 && !totalSec && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>× {sets}세트</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── 2. 웨이트 트레이닝 (기능운동 제외) ── */}
+        {exList.some(e=>!isFuncEx(e)) && (
+          <>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",letterSpacing:".1em",marginBottom:10}}>
+              {exList.some(e=>isFuncEx(e)) ? "웨이트 트레이닝" : "TODAY'S WORKOUT"}
+            </div>
+            {exList.filter(e=>!isFuncEx(e)).map((ex, ei) => {
+              const vol=exVol(ex); const ec=EQUIP_COLOR[ex.equipment]||"#888"; const gc=mColor(ex.muscleTop);
+              const maxW=Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
+              return (
+                <div key={ei} style={{marginBottom:10,background:"#111827",borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
+                  <div style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
+                      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff"}}>{ex.name}</div>
+                      <div style={{display:"flex",gap:4,marginTop:3}}>
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,background:ec+"22",color:ec}}>{ex.equipment}</span>
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,background:gc+"22",color:gc}}>{ex.muscleTop}</span>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
                       <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>{vol.toLocaleString()} kg</div>
                       <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a"}}>최고 {maxW}kg</div>
                     </div>
-                  )}
-                </div>
-              </div>
-              <div style={{padding:"6px 12px"}}>
-                {isFuncEx(ex) ? (
-                  /* 기능운동 — 입력된 값만 표시 */
-                  <div>
-                    {(ex.sets||[]).map((row,si) => {
-                      const lbl = funcSetLabel(row);
-                      return (
-                        <div key={si} style={{display:"flex",gap:6,alignItems:"center",
-                          marginBottom:4,padding:"4px 6px",borderRadius:5,
-                          background:"rgba(84,160,255,.07)"}}>
-                          <Mo c="#3a3a4a" s={9} style={{background:"#0F172A",borderRadius:3,
-                            padding:"2px 7px",minWidth:28,textAlign:"center",flexShrink:0}}>{si+1}</Mo>
-                          <Mo c="#54a0ff" s={11} style={{fontWeight:700}}>{lbl !== "—" ? lbl : "값 없음"}</Mo>
-                        </div>
-                      );
-                    })}
                   </div>
-                ) : (
-                  /* 일반 웨이트 */
-                  <div>
+                  <div style={{padding:"6px 12px"}}>
                     <div style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
                       {["SET","무게","횟수","볼륨"].map((h,i) => <Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                     </div>
@@ -3967,11 +4000,11 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                </div>
+              );
+            })}
+          </>
+        )}
         <div style={{background:"linear-gradient(135deg,#0d2018,#0F172A)",borderRadius:10,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}>
           <div>
             <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",marginBottom:2}}>TOTAL VOLUME</div>

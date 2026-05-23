@@ -96,7 +96,7 @@ const FUNC_BODY_PARTS = [
   // 상체 후면
   "광배","능형근","대원근","견갑 주변",
   // 상체 전면
-  "대흉근",
+  "소흉근","대흉근",
   // 팔
   "전완","이두","삼두",
   // 경부
@@ -163,6 +163,144 @@ function suggestMovementPurpose(name) {
 
 // 기능운동 여부 판별
 // 기능운동 표시 제목 — 카테고리별 단순 규칙으로 생성
+// ── 기능 운동 자동 추천 시스템 ──────────────────────────────────────────────
+
+// 내장 운동 매핑 테이블
+const FUNC_EX_MAP = [
+  // 조직 이완
+  { keys:["폼롤러"],      category:"조직이완", tool:"폼롤러" },
+  { keys:["라크로스볼"],  category:"조직이완", tool:"라크로스볼" },
+  { keys:["땅콩볼"],      category:"조직이완", tool:"땅콩볼" },
+  { keys:["마사지 스틱","마사지스틱"], category:"조직이완", tool:"마사지 스틱" },
+  // 가동성
+  { keys:["오픈북"],      category:"가동성",   bodyParts:["흉추"], tool:"맨몸" },
+  { keys:["그로인","groin","하프닐링"], category:"가동성", bodyParts:["고관절"], tool:"맨몸" },
+  { keys:["힙 플렉서","장요근 스트레칭"], category:"가동성", bodyParts:["장요근"], tool:"맨몸" },
+  { keys:["90/90","90 90"], category:"가동성", bodyParts:["고관절"], tool:"맨몸" },
+  { keys:["월 슬라이드","wall slide"], category:"가동성", bodyParts:["견갑 주변"], tool:"맨몸" },
+  { keys:["캣카우","cat cow","고양이"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
+  { keys:["흉추 회전","토라식"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
+  // 안정화
+  { keys:["버드독","bird dog"], category:"안정화", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["데드버그","dead bug"], category:"안정화", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["플랭크"],      category:"안정화",   bodyParts:["요추"], tool:"맨몸" },
+  { keys:["브릿지","힙 브릿지","글루트 브릿지"], category:"안정화", bodyParts:["골반"], tool:"맨몸" },
+  { keys:["원레그 레이즈","원다리"], category:"안정화", bodyParts:["골반"], tool:"맨몸" },
+  { keys:["클램쉘"],      category:"안정화",   bodyParts:["고관절"], tool:"밴드" },
+  // 활성화
+  { keys:["밴드 워크","band walk","사이드 워크"], category:"활성화", bodyParts:["둔근"], tool:"밴드" },
+  { keys:["힙 어브덕션"], category:"활성화",   bodyParts:["둔근"], tool:"밴드" },
+  { keys:["페이스 풀","face pull"], category:"활성화", bodyParts:["견갑 주변"], tool:"케이블" },
+  { keys:["와이티","yt ","y-t-w"], category:"활성화", bodyParts:["견갑 주변"], tool:"밴드" },
+  // 호흡
+  { keys:["브리딩","호흡","breathing","복압"], category:"호흡", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["크로커다일","crocodile"], category:"호흡", bodyParts:["요추"], tool:"맨몸" },
+  // 밸런스
+  { keys:["단하지","싱글레그 스탠드","외발"], category:"밸런스", bodyParts:["고관절"], tool:"맨몸" },
+];
+
+// 부위 키워드 매핑 (운동명에 부위 키워드가 있으면 자동 설정)
+const FUNC_BODY_KEYWORD_MAP = [
+  { keys:["종아리","카프"],    body:"종아리" },
+  { keys:["슬와근"],           body:"슬와근" },
+  { keys:["햄스트링","대퇴이두"], body:"햄스트링" },
+  { keys:["대퇴사두","사두"],  body:"대퇴사두" },
+  { keys:["장요근","iliopsoas"], body:"장요근" },
+  { keys:["둔근","글루트","臀"], body:"둔근" },
+  { keys:["고관절","hip"],     body:"고관절" },
+  { keys:["골반","pelvic"],    body:"골반" },
+  { keys:["요추","허리","lumbar"], body:"요추" },
+  { keys:["흉추","흉추","thoracic"], body:"흉추" },
+  { keys:["광배","latissimus","랫"], body:"광배" },
+  { keys:["능형근","rhomboid"], body:"능형근" },
+  { keys:["대원근"],           body:"대원근" },
+  { keys:["견갑","어깨뼈","scapula"], body:"견갑 주변" },
+  { keys:["소흉근","pectoralis minor"], body:"소흉근" },
+  { keys:["대흉근","가슴"],    body:"대흉근" },
+  { keys:["전완","forearm"],   body:"전완" },
+  { keys:["이두","bicep"],     body:"이두" },
+  { keys:["삼두","tricep"],    body:"삼두" },
+  { keys:["사각근","scalene"], body:"사각근" },
+  { keys:["흉쇄유돌근","scm"], body:"흉쇄유돌근" },
+  { keys:["목","경추","cervical"], body:"목·경추" },
+  { keys:["족저근막","plantar"], body:"족저근막" },
+];
+
+// 학습 데이터 (localStorage)
+const FUNC_LEARN_KEY = "tg_func_ex_learn_v1";
+function loadFuncLearn() {
+  try { return JSON.parse(localStorage.getItem(FUNC_LEARN_KEY)||"{}"); } catch { return {}; }
+}
+function saveFuncLearn(data) {
+  try { localStorage.setItem(FUNC_LEARN_KEY, JSON.stringify(data)); } catch {} 
+}
+function recordFuncLearn(name, preset) {
+  if (!name || !name.trim()) return;
+  const key = name.trim().toLowerCase();
+  const data = loadFuncLearn();
+  if (!data[key]) data[key] = { count:0, presets:[] };
+  data[key].count += 1;
+  data[key].lastPreset = preset;
+  data[key].lastUsedAt = new Date().toISOString();
+  saveFuncLearn(data);
+}
+function getLearnedFuncPreset(name) {
+  if (!name || !name.trim()) return null;
+  const key = name.trim().toLowerCase();
+  const data = loadFuncLearn();
+  return data[key]?.lastPreset || null;
+}
+
+// 통합 기능 운동 자동 추천
+function suggestFuncExPreset(name) {
+  if (!name || name.trim().length < 2) return null;
+  const n = name.toLowerCase();
+
+  // 1순위: 개인 학습 데이터
+  const learned = getLearnedFuncPreset(name);
+  if (learned) return learned;
+
+  // 2순위: 내장 매핑
+  for (const rule of FUNC_EX_MAP) {
+    if (rule.keys.some(k => n.includes(k.toLowerCase()))) {
+      // 도구 키워드도 운동명에서 추출
+      let tool = rule.tool || null;
+      if (!tool) {
+        const toolKw = [["폼롤러","폼롤러"],["라크로스볼","라크로스볼"],["땅콩볼","땅콩볼"],["밴드","밴드"]];
+        for (const [kw, val] of toolKw) { if (n.includes(kw)) { tool=val; break; } }
+      }
+      // 부위: 명시된 부위 + 운동명 키워드에서 추가 추출
+      const bodyParts = [...(rule.bodyParts||[])];
+      for (const bm of FUNC_BODY_KEYWORD_MAP) {
+        if (bm.keys.some(k=>n.includes(k.toLowerCase())) && !bodyParts.includes(bm.body)) {
+          bodyParts.push(bm.body);
+        }
+      }
+      return { category: rule.category, bodyParts, tool };
+    }
+  }
+
+  // 3순위: 키워드 추론
+  let category = null, tool = null, bodyParts = [];
+  // 도구 키워드 → 조직 이완
+  if (n.includes("폼롤러")) { category="조직이완"; tool="폼롤러"; }
+  else if (n.includes("라크로스볼")) { category="조직이완"; tool="라크로스볼"; }
+  else if (n.includes("땅콩볼"))     { category="조직이완"; tool="땅콩볼"; }
+  else if (n.includes("마사지 스틱")||n.includes("마사지스틱")) { category="조직이완"; tool="마사지 스틱"; }
+  else if (n.includes("밴드 워크")||n.includes("밴드워크")) { category="활성화"; tool="밴드"; }
+  else if (n.includes("밴드"))       { tool="밴드"; }
+  else if (n.includes("호흡")||n.includes("브리딩")) { category="호흡"; }
+  // 부위 키워드 추출
+  for (const bm of FUNC_BODY_KEYWORD_MAP) {
+    if (bm.keys.some(k=>n.includes(k.toLowerCase()))) bodyParts.push(bm.body);
+  }
+  // 카테고리 추론
+  if (!category && bodyParts.length > 0 && !tool) category="가동성";
+  if (!category && tool && ["폼롤러","라크로스볼","땅콩볼","마사지 스틱"].includes(tool)) category="조직이완";
+  if (!category) return null;
+  return { category, bodyParts, tool };
+}
+
 function getFuncExDisplayName(ex) {
   const partArr = Array.isArray(ex.funcBodyPart)
     ? ex.funcBodyPart
@@ -2692,144 +2830,6 @@ function suggestEquipment(name) {
   return getLearnedEquipment(name) || getAutoEquipmentByName(name);
 }
 
-
-// ════════════════════════════════════════════
-// 기능 운동 자동 추천 + 사용 패턴 학습 시스템
-// - 운동명 입력 시 기구/카테고리/부위/도구/목적 자동 추천
-// - 사용자가 수정한 조합은 localStorage에 누적 저장
-// ════════════════════════════════════════════
-const FUNC_PRESET_LEARN_KEY = "tg_functional_exercise_presets_v1";
-const FUNC_CATEGORY_KEYS = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스"];
-
-function loadFuncPresetLearn() {
-  try { return JSON.parse(localStorage.getItem(FUNC_PRESET_LEARN_KEY) || "{}"); } catch { return {}; }
-}
-function saveFuncPresetLearn(data) {
-  try { localStorage.setItem(FUNC_PRESET_LEARN_KEY, JSON.stringify(data)); } catch {}
-}
-function normalizeFuncBodyParts(parts) {
-  if (Array.isArray(parts)) return parts.filter(Boolean);
-  if (!parts) return [];
-  return String(parts).split(/[,+·/]/).map(v=>v.trim()).filter(Boolean);
-}
-function funcComboKey(preset) {
-  const bodyParts = normalizeFuncBodyParts(preset.bodyParts || preset.funcBodyPart).join("+");
-  return [preset.category||preset.funcCategory||"", bodyParts, preset.tool||preset.funcTool||""].join("|");
-}
-function normalizeFuncPreset(raw) {
-  if (!raw) return null;
-  const bodyParts = normalizeFuncBodyParts(raw.bodyParts || raw.funcBodyPart);
-  return {
-    category: raw.category || raw.funcCategory || "",
-    bodyParts,
-    tool: raw.tool || raw.funcTool || "",
-    purpose: raw.purpose || raw.movementPurpose || buildPurposeLabel(raw.category || raw.funcCategory || "", bodyParts),
-  };
-}
-function getLearnedFunctionalPreset(name) {
-  const key = normalizeExName(name);
-  if (!key || key.length < 2) return null;
-  const data = loadFuncPresetLearn();
-  const rec = data[key];
-  if (!rec || !rec.combos) return null;
-  const sorted = Object.entries(rec.combos).sort((a,b)=>(b[1]?.count||0)-(a[1]?.count||0));
-  return sorted.length ? normalizeFuncPreset(sorted[0][1]) : null;
-}
-function recordFunctionalPreset(name, preset) {
-  const key = normalizeExName(name);
-  const normalized = normalizeFuncPreset(preset);
-  if (!key || key.length < 2 || !normalized) return;
-  if (!normalized.category && normalized.bodyParts.length === 0 && !normalized.tool) return;
-  const data = loadFuncPresetLearn();
-  if (!data[key]) data[key] = { combos: {}, updatedAt: "" };
-  const combo = funcComboKey(normalized);
-  if (!data[key].combos[combo]) data[key].combos[combo] = {...normalized, count:0};
-  data[key].combos[combo] = {
-    ...data[key].combos[combo],
-    ...normalized,
-    count: (data[key].combos[combo].count || 0) + 1,
-    lastUsedAt: new Date().toISOString(),
-  };
-  data[key].updatedAt = new Date().toISOString();
-  saveFuncPresetLearn(data);
-}
-function inferFunctionalPresetByName(name) {
-  if (!name || name.trim().length < 2) return null;
-  const raw = name.trim();
-  const n = raw.toLowerCase().replace(/[_\-]/g," ");
-  let category = "";
-  let tool = "";
-  const bodyParts = [];
-
-  const addPart = (part) => { if (part && !bodyParts.includes(part)) bodyParts.push(part); };
-  const hasAny = (arr) => arr.some(k => n.includes(k.toLowerCase()));
-
-  // 도구 추론: 명확할 때만 자동 선택
-  if (hasAny(["폼롤러","foam roller","foamroll","폼 롤러"])) tool = "폼롤러";
-  else if (hasAny(["라크로스볼","라크로스 볼","lacrosse"])) tool = "라크로스볼";
-  else if (hasAny(["땅콩볼","땅콩 볼","peanut"])) tool = "땅콩볼";
-  else if (hasAny(["마사지 스틱","마사지스틱","스틱"])) tool = "마사지 스틱";
-  else if (hasAny(["밴드","band"])) tool = "밴드";
-  else if (hasAny(["짐볼","스위스볼","swiss ball","gym ball"])) tool = "짐볼";
-  else if (hasAny(["trx"])) tool = "TRX";
-
-  // 카테고리 추론
-  if (tool || hasAny(["이완","릴리즈","release","근막","마사지"])) category = "조직이완";
-  if (hasAny(["오픈북","open book","그로인","groin","모빌리티","mobility","가동성","스트레칭","stretch"])) category = "가동성";
-  if (hasAny(["안정화","stability","스테빌","플랭크","데드버그","버드독","제트업","get up","터키시"])) category = "안정화";
-  if (hasAny(["활성화","activation","activate","밴드 워크","클램쉘","브릿지"])) category = "활성화";
-  if (hasAny(["패턴","교정","움직임 교정","movement correction","힌지","스쿼트 패턴"])) category = "움직임교정";
-  if (hasAny(["호흡","브리딩","breathing","90 90","90/90"])) category = "호흡";
-  if (hasAny(["밸런스","balance","싱글레그 밸런스"])) category = "밸런스";
-
-  // 대표 기능 운동명 기반 추론
-  if (hasAny(["오픈북","open book"])) { category = "가동성"; addPart("흉추"); }
-  if (hasAny(["하프닐링 그로인","그로인 오프너","groin opener"])) { category = "가동성"; addPart("고관절"); }
-  if (hasAny(["쓰레드 더 니들","thread the needle"])) { category = "가동성"; addPart("흉추"); }
-  if (hasAny(["월슬라이드","wall slide"])) { category = "안정화"; addPart("견갑 주변"); }
-  if (hasAny(["데드버그","dead bug"])) { category = "안정화"; addPart("전신"); }
-  if (hasAny(["버드독","bird dog"])) { category = "안정화"; addPart("전신"); }
-  if (hasAny(["클램쉘","clamshell"])) { category = "활성화"; addPart("둔근"); addPart("고관절"); }
-  if (hasAny(["밴드 워크","밴드워크","side walk","몬스터 워크"])) { category = "활성화"; tool = tool || "밴드"; addPart("둔근"); addPart("고관절"); }
-
-  // 부위 키워드 추론
-  const partRules = [
-    ["족저근막", ["족저","발바닥","plantar"]],
-    ["종아리", ["종아리","비복근","가자미근","calf"]],
-    ["슬와근", ["슬와근","popliteus"]],
-    ["햄스트링", ["햄스트링","hamstring"]],
-    ["대퇴사두", ["대퇴사두","전면 허벅지","quadriceps","quad"]],
-    ["장요근", ["장요근","요근","iliopsoas","psoas","힙 플렉서","hip flexor"]],
-    ["둔근", ["둔근","엉덩이","glute"]],
-    ["고관절", ["고관절","hip","groin","그로인"]],
-    ["골반", ["골반","pelvis"]],
-    ["요추", ["요추","허리","lumbar"]],
-    ["흉추", ["흉추","thoracic","등 회전","오픈북"]],
-    ["광배", ["광배","lat ","latissimus"]],
-    ["능형근", ["능형근","rhomboid"]],
-    ["대원근", ["대원근","teres major"]],
-    ["견갑 주변", ["견갑","scapula","날개뼈"]],
-    ["대흉근", ["대흉근","가슴","pec ","pectoralis"]],
-    ["전완", ["전완","팔뚝","forearm"]],
-    ["이두", ["이두","biceps"]],
-    ["삼두", ["삼두","triceps"]],
-    ["사각근", ["사각근","scalene"]],
-    ["흉쇄유돌근", ["흉쇄유돌근","sternocleidomastoid","scm"]],
-    ["목·경추", ["경추","목","cervical","neck"]],
-  ];
-  partRules.forEach(([part, keys]) => { if (hasAny(keys)) addPart(part); });
-
-  if (!category && bodyParts.length === 0 && !tool) return null;
-  return normalizeFuncPreset({
-    category: category || (tool ? "조직이완" : ""),
-    bodyParts,
-    tool,
-  });
-}
-function suggestFunctionalPreset(name) {
-  return getLearnedFunctionalPreset(name) || inferFunctionalPresetByName(name);
-}
-
 function suggestMuscle(name) {
   if (!name || name.trim().length < 2) return null;
   const lower = name.toLowerCase().replace(/[_\-]/g, " ");
@@ -2848,6 +2848,20 @@ function updateEx(ei, key, val) {
 
       // ── 운동 이름 변경 시 부위/세부부위 + 기구 자동 추천 ──────────────
       if (key === "name") {
+        // 기능 운동 자동 추천 (equipment=기능 또는 funcCategory 있을 때)
+        if (ex.equipment === "기능" || ex.funcCategory) {
+          const preset = suggestFuncExPreset(val);
+          if (preset && !ex._funcManual) {
+            if (preset.category)             u.funcCategory = preset.category;
+            if (preset.bodyParts?.length > 0) u.funcBodyPart = preset.bodyParts;
+            if (preset.tool)                 u.funcTool     = preset.tool;
+            // 목적 자동 생성
+            if (!ex._purposeManual) {
+              const partStr = (preset.bodyParts||[]).join("+");
+              u.movementPurpose = buildPurposeLabel(preset.category, partStr);
+            }
+          }
+        }
         // 기구 자동 추천 (사용자가 직접 기구를 수정한 적 없을 때만)
         if (!ex._equipManual) {
           const sugEq = suggestEquipment(val);
@@ -2863,31 +2877,13 @@ function updateEx(ei, key, val) {
             }
           } else { u._autoEquip = false; }
         }
-        // 기능 운동 자동 추천: 운동명 입력만으로 기능/카테고리/부위/도구 자동 선택
-        // 우선순위: 사용자 반복 학습값 > 기본 키워드 매칭
-        const funcPreset = suggestFunctionalPreset(val);
-        if (funcPreset) {
-          u.equipment = "기능";
-          u.muscleTop = "기능";
-          u.muscleSub = "기능";
-          u._autoEquip = true;
-          u.funcCategory = funcPreset.category || u.funcCategory || "";
-          u.funcBodyPart = funcPreset.bodyParts && funcPreset.bodyParts.length ? funcPreset.bodyParts : (u.funcBodyPart || []);
-          // 도구가 명확히 추론/학습된 경우에만 자동 선택, 없으면 기존값 유지
-          if (funcPreset.tool) u.funcTool = funcPreset.tool;
-          if (!ex._purposeManual) u.movementPurpose = funcPreset.purpose || buildPurposeLabel(u.funcCategory, u.funcBodyPart);
-          u.sets = (ex.sets || [mkFuncSet()]).map(s=>({
-            weight:"", reps:s.reps||"", durationSec:s.durationSec||"", volume:0, recordType:"function"
-          }));
-        }
         // 움직임 목적 자동 추천 (기능 운동일 때)
-        if (!ex._purposeManual && !u.movementPurpose) {
+        if (!ex._purposeManual) {
           const sug = suggestMovementPurpose(val);
           if (sug) u.movementPurpose = sug;
         }
         // 사용자가 수동으로 부위를 바꾼 적 없을 때만 자동 적용
-        // 기능 운동 자동 추천이 적용된 경우에는 일반 웨이트 부위 추천이 덮어쓰지 않게 차단
-        if (!ex._muscleManual && !funcPreset) {
+        if (!ex._muscleManual) {
           const sug = suggestMuscle(val);
           if (sug && mSubs(sug.top).length > 0) {
             u.muscleTop = sug.top;
@@ -2907,6 +2903,19 @@ function updateEx(ei, key, val) {
         if (val === "기능") {
           if (!ex._muscleManual) { u.muscleTop = "기능"; u.muscleSub = "기능"; }
           u.sets = ex.sets.map(s=>({weight:"",reps:s.reps||"",durationSec:s.durationSec||"",volume:0,recordType:"function"}));
+          // 이름이 이미 있으면 자동 추천 적용
+          if (ex.name && !ex._funcManual) {
+            const preset = suggestFuncExPreset(ex.name);
+            if (preset) {
+              if (preset.category)              u.funcCategory = preset.category;
+              if (preset.bodyParts?.length > 0) u.funcBodyPart = preset.bodyParts;
+              if (preset.tool)                  u.funcTool     = preset.tool;
+              if (!ex._purposeManual) {
+                const ps = (preset.bodyParts||[]).join("+");
+                u.movementPurpose = buildPurposeLabel(preset.category, ps);
+              }
+            }
+          }
         }
         // "맨몸" 선택 시 → 일반 맨몸 (기능 UI 없음, 부위는 기존 유지)
         if (val === "맨몸" && ex.equipment === "기능") {
@@ -2991,19 +3000,6 @@ function updateEx(ei, key, val) {
       }
       // movementPurpose 수동 변경 감지
       if (key === "movementPurpose") u._purposeManual = true;
-
-      // 기능 운동 사용 패턴 학습: 사용자가 카테고리/부위/도구를 반복 수정하면 다음 입력부터 자동 추천
-      if (["funcCategory","funcBodyPart","funcTool","movementPurpose","equipment"].includes(key)) {
-        const nextPreset = {
-          category: u.funcCategory,
-          bodyParts: u.funcBodyPart,
-          tool: u.funcTool,
-          purpose: u.movementPurpose,
-        };
-        if ((u.equipment === "기능" || u.funcCategory) && u.name && u.name.trim().length >= 2) {
-          recordFunctionalPreset(u.name, nextPreset);
-        }
-      }
       return u;
     }));
   }
@@ -3072,6 +3068,17 @@ function updateEx(ei, key, val) {
       romData, painData, painRecord, totalVolume:totalVol,
     };
     console.log("[저장 직전] exercises:", JSON.stringify(cleanExercises.map(e=>({name:e.name,sets:e.sets?.length}))));
+    // 기능 운동 학습 데이터 저장 (localStorage)
+    cleanExercises.forEach(ex => {
+      if (isFuncEx(ex) && ex.name && ex.name.trim()) {
+        recordFuncLearn(ex.name, {
+          category:   ex.funcCategory  || null,
+          bodyParts:  ex.funcBodyPart  || [],
+          tool:       ex.funcTool      || null,
+          purpose:    ex.movementPurpose || null,
+        });
+      }
+    });
     onSave(payload);
   }
 

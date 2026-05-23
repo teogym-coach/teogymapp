@@ -144,13 +144,16 @@ function suggestMovementPurpose(name) {
 
 // 기능운동 여부 판별
 function isFuncEx(ex) {
-  // 기능 기구로 선택된 경우 (신규 방식, 최우선)
+  // 1. 기능 기구로 선택된 경우 (최우선)
   if (ex.equipment === "기능") return true;
-  // 기존 호환: muscleTop이 기능이거나 recordType:function 세트
+  // 2. funcCategory가 있는 경우 (카테고리 선택으로 기록된 기능 운동)
+  const FUNC_KEYS = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스"];
+  if (ex.funcCategory && FUNC_KEYS.includes(ex.funcCategory)) return true;
+  // 3. 기존 호환: muscleTop이 기능이거나 recordType:function 세트
   if (ex.muscleTop === "기능") return true;
   if ((ex.sets||[]).some(s => s.recordType === "function")) return true;
   return false;
-  // 맨몸+코어는 더 이상 기능운동으로 분류하지 않음 (맨몸 복원)
+  // 맨몸+코어는 기능운동으로 분류하지 않음
 }
 
 // 기능운동 세트 표시 문자열 (입력된 값만)
@@ -4164,24 +4167,6 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
                     {s.exercises && s.exercises.length > 0 && (
                       <ExNameList exercises={s.exercises} />
                     )}
-                    {/* 기능/교정 운동 목적 태그 */}
-                    {(() => {
-                      const goals = [...new Set(
-                        (s.exercises||[]).filter(e=>isFuncEx(e)&&e.movementPurpose).map(e=>e.movementPurpose)
-                      )].slice(0,3);
-                      if (!goals.length) return null;
-                      return (
-                        <div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:4}}>
-                          {goals.map((g,i)=>(
-                            <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
-                              padding:"2px 7px",borderRadius:3,
-                              background:"rgba(94,234,212,.1)",color:"#5EEAD4",fontWeight:600}}>
-                              ✦ {g}
-                            </span>
-                          ))}
-                        </div>
-                      );
-                    })()}
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
                     <Mo c="#5EEAD4" s={12} style={{fontWeight:700}}>{(s.totalVolume||0).toLocaleString()} kg</Mo>

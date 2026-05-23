@@ -73,7 +73,7 @@ function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",
 
 // ── 기능성 운동 카테고리/부위/도구 상수 ─────────────────────────────────────
 const FUNC_CATEGORIES = [
-  {key:"조직이완",    label:"조직 이완",    color:"#5EEAD4", desc:"연부조직 컨디셔닝"},
+  {key:"조직이완",    label:"릴리즈",       color:"#5EEAD4", desc:"근막·연부조직 릴리즈"},
   {key:"가동성",      label:"가동성",       color:"#818cf8", desc:"관절·근육 가동범위"},
   {key:"안정화",      label:"안정화",       color:"#ffd166", desc:"코어·골반 안정화"},
   {key:"활성화",      label:"활성화",       color:"#22c55e", desc:"목표 근육 사전 활성"},
@@ -118,7 +118,7 @@ function buildPurposeLabel(category, bodyPart) {
   if (!cat) return partStr || "";
   if (!partStr) return cat.label;
   const labelMap = {
-    "조직이완":"조직 이완", "가동성":"가동성 개선",
+    "조직이완":"릴리즈", "가동성":"가동성 개선",
     "안정화":"안정화 훈련", "활성화":"활성화",
     "움직임교정":"움직임 교정", "호흡":"호흡 패턴 훈련", "밸런스":"밸런스 훈련",
   };
@@ -128,12 +128,12 @@ function buildPurposeLabel(category, bodyPart) {
 // 기능운동 여부 판별
 const PURPOSE_MAP = [
   { keys:["그로인","groin","고관절"],          purpose:"고관절 가동성 개선" },
-  { keys:["힙 플렉서","hip flexor","장요근"],   purpose:"장요근 이완 및 고관절 신전 개선" },
+  { keys:["힙 플렉서","hip flexor","장요근"],   purpose:"장요근 릴리즈 및 고관절 신전 개선" },
   { keys:["제트업","get up","터키시"],          purpose:"코어 안정화 및 복합 움직임" },
   { keys:["원레그 레이즈","원다리","싱글레그"], purpose:"골반 안정화 훈련" },
   { keys:["글루트 브릿지","힙 브릿지","둔근 활성"], purpose:"둔근 활성화 및 골반 안정화" },
   { keys:["흉추","토라식","thoracic"],          purpose:"흉추 가동성 개선" },
-  { keys:["근막","폼롤러","foam roll"],          purpose:"근막 이완 및 조직 유연성 회복" },
+  { keys:["근막","폼롤러","foam roll"],          purpose:"근막 릴리즈 및 조직 유연성 회복" },
   { keys:["버드독","bird dog","사지"],           purpose:"코어 안정화 및 척추 중립 훈련" },
   { keys:["데드버그","dead bug"],               purpose:"코어 안정화 (복횡근 활성)" },
   { keys:["플랭크","plank"],                    purpose:"코어 내구성 및 척추 안정화" },
@@ -148,7 +148,7 @@ const PURPOSE_MAP = [
   { keys:["스쿼트","split squat","런지"],       purpose:"하체 복합 움직임 패턴 개선" },
   { keys:["힙 힌지","hip hinge","rbdl"],        purpose:"힙 힌지 패턴 교정" },
   { keys:["무브먼트","movement","mobility"],    purpose:"전신 가동성 향상" },
-  { keys:["스트레칭","stretching","stretch"],   purpose:"근육 이완 및 유연성 향상" },
+  { keys:["스트레칭","stretching","stretch"],   purpose:"근육 릴리즈 및 유연성 향상" },
   { keys:["활성화","activation","activate"],    purpose:"목표 근육 사전 활성화" },
 ];
 
@@ -167,7 +167,7 @@ function suggestMovementPurpose(name) {
 
 // 내장 운동 매핑 테이블
 const FUNC_EX_MAP = [
-  // 조직 이완
+  // 릴리즈
   { keys:["폼롤러"],      category:"조직이완", tool:"폼롤러" },
   { keys:["라크로스볼"],  category:"조직이완", tool:"라크로스볼" },
   { keys:["땅콩볼"],      category:"조직이완", tool:"땅콩볼" },
@@ -282,7 +282,7 @@ function suggestFuncExPreset(name) {
 
   // 3순위: 키워드 추론
   let category = null, tool = null, bodyParts = [];
-  // 도구 키워드 → 조직 이완
+  // 도구 키워드 → 릴리즈
   if (n.includes("폼롤러")) { category="조직이완"; tool="폼롤러"; }
   else if (n.includes("라크로스볼")) { category="조직이완"; tool="라크로스볼"; }
   else if (n.includes("땅콩볼"))     { category="조직이완"; tool="땅콩볼"; }
@@ -313,7 +313,7 @@ function getFuncExDisplayName(ex) {
   // 카테고리별 제목 규칙
   const cat = ex.funcCategory;
   if (cat === "조직이완") {
-    return partStr ? `${partStr} 이완` : (ex.name && ex.name.trim() ? ex.name.trim() : "조직 이완");
+    return partStr ? `${partStr} 릴리즈` : (ex.name && ex.name.trim() ? ex.name.trim() : "릴리즈");
   }
   if (cat === "가동성")     return partStr ? `${partStr} 가동성 개선`  : (ex.name||"가동성 운동");
   if (cat === "안정화")     return partStr ? `${partStr} 안정화`       : (ex.name||"안정화 운동");
@@ -1539,7 +1539,7 @@ function buildConsultReport(sv, goal = {}) {
   else if(slp==="5~6시간")st.push({level:"warn",text:"수면 부족 — 근합성 및 회복에 영향 가능"});
   else if(slp)st.push({level:"ok",text:"수면 양호 — 회복 정상 범위"});
   if(str>=4)st.push({level:"danger",text:"스트레스 고조 — 코르티솔 상승으로 체지방 분해·근합성 저해 가능"});
-  else if(str>=3)st.push({level:"warn",text:"스트레스 보통 — 회복 운동 및 이완 전략 병행 권장"});
+  else if(str>=3)st.push({level:"warn",text:"스트레스 보통 — 회복 운동 및 릴리즈 전략 병행 권장"});
   if(pb.length)st.push({level:"warn",text:`통증 부위: ${pb.join(", ")} — 교정·기능 운동 우선 배치 권장`});
   if(lvl==="초급")st.push({level:"info",text:"초급 단계 — 기초 패턴 습득과 안전한 중량 설정이 최우선"});
   else if(lvl==="중급")st.push({level:"ok",text:"중급 단계 — 점진적 과부하 적용 가능한 수준"});
@@ -3984,7 +3984,7 @@ function updateEx(ei, key, val) {
                   </Mo>
                   <input value={ex.movementPurpose||""} onFocus={()=>setActiveCardIdx(ei)}
                     onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
-                    placeholder="예: 햄스트링 조직 이완, 고관절 가동성 개선..."
+                    placeholder="예: 햄스트링 릴리즈, 고관절 가동성 개선..."
                     style={{fontSize:16,padding:"6px 10px",borderRadius:6,width:"100%",boxSizing:"border-box",
                       background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.2)",color:"#bbf7d0"}} />
                 </div>
@@ -8680,7 +8680,7 @@ function generateAutoSummary(bodyMap, posture, mobility) {
   if (mobIssues.length) issues.push("기능 제한: "+mobIssues.join(", "));
   if (!issues.length) return "";
   const recs = [];
-  if (tightList.some(l=>l.includes("흉근")||l.includes("전면삼각"))) recs.push("흉근 이완 + 후면 어깨 활성화");
+  if (tightList.some(l=>l.includes("흉근")||l.includes("전면삼각"))) recs.push("흉근 릴리즈 + 후면 어깨 활성화");
   if (weakList.some(l=>l.includes("둔근"))) recs.push("둔근 활성화 운동");
   if (weakList.some(l=>l.includes("척추기립근")||l.includes("승모근"))) recs.push("코어 안정화 + 중부 승모근 강화");
   if (mobility["df"]==="제한 있음") recs.push("발목 가동성 개선");
@@ -8766,7 +8766,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
     lines.push(`VAS 통증 점수: ${vasScore}/10`);
     lines.push(`기타 평가: ${summary||"없음"}\n`);
     lines.push("아래 흐름으로 교정 중심 루틴을 구성해주세요:");
-    lines.push("1. 교정/이완 단계 (타이트 부위 위주)");
+    lines.push("1. 교정/릴리즈 단계 (타이트 부위 위주)");
     lines.push("2. 활성화 단계 (기능저하 부위 위주)");
     lines.push("3. 기능 강화 단계");
     lines.push("4. 주의사항\n");

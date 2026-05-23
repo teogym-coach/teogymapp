@@ -68,9 +68,43 @@ function formatTypes(raw) {
 
 function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightReps"}; }
 function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
-function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimPrimary:"",stimSecondary:"",stimNote:"",movementPurpose:""}; }
+function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimPrimary:"",stimSecondary:"",stimNote:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
 
-// ── 운동 목적 자동 추천 매핑 ────────────────────────────────────────────────
+// ── 기능성 운동 카테고리/부위/도구 상수 ─────────────────────────────────────
+const FUNC_CATEGORIES = [
+  {key:"조직이완",    label:"조직 이완",    color:"#5EEAD4", desc:"연부조직 컨디셔닝"},
+  {key:"가동성",      label:"가동성",       color:"#818cf8", desc:"관절·근육 가동범위"},
+  {key:"안정화",      label:"안정화",       color:"#ffd166", desc:"코어·골반 안정화"},
+  {key:"활성화",      label:"활성화",       color:"#22c55e", desc:"목표 근육 사전 활성"},
+  {key:"움직임교정",  label:"움직임 교정",  color:"#f97316", desc:"패턴 개선"},
+  {key:"호흡",        label:"호흡 패턴",    color:"#a5b4fc", desc:"횡격막·복압 조절"},
+  {key:"밸런스",      label:"밸런스",       color:"#fb923c", desc:"고유수용감각 훈련"},
+];
+
+const FUNC_BODY_PARTS = [
+  "종아리","햄스트링","둔근","대퇴사두","고관절","골반","요추","흉추",
+  "견갑 주변","대흉근","광배","목·경추","전신",
+];
+
+const FUNC_TOOLS = [
+  "맨몸","폼롤러","라크로스볼","땅콩볼","마사지 스틱","밴드","짐볼","TRX",
+];
+
+// 카테고리 + 부위로 자동 movementPurpose 생성
+function buildPurposeLabel(category, bodyPart) {
+  if (!category && !bodyPart) return "";
+  const cat = FUNC_CATEGORIES.find(c=>c.key===category);
+  if (!cat) return bodyPart || "";
+  if (!bodyPart) return cat.label;
+  const labelMap = {
+    "조직이완":"조직 이완", "가동성":"가동성 개선",
+    "안정화":"안정화 훈련", "활성화":"활성화",
+    "움직임교정":"움직임 교정", "호흡":"호흡 패턴 훈련", "밸런스":"밸런스 훈련",
+  };
+  return `${bodyPart} ${labelMap[category]||cat.label}`;
+}
+
+// 기능운동 여부 판별
 const PURPOSE_MAP = [
   { keys:["그로인","groin","고관절"],          purpose:"고관절 가동성 개선" },
   { keys:["힙 플렉서","hip flexor","장요근"],   purpose:"장요근 이완 및 고관절 신전 개선" },
@@ -2715,6 +2749,12 @@ function updateEx(ei, key, val) {
       }
       // muscleSub 수동 변경 감지
       if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
+      // funcCategory / funcBodyPart 변경 → movementPurpose 자동 생성
+      if (key === "funcCategory" || key === "funcBodyPart") {
+        const cat  = key === "funcCategory"  ? val : (ex.funcCategory||"");
+        const part = key === "funcBodyPart"  ? val : (ex.funcBodyPart||"");
+        if (!ex._purposeManual) u.movementPurpose = buildPurposeLabel(cat, part);
+      }
       // movementPurpose 수동 변경 감지
       if (key === "movementPurpose") u._purposeManual = true;
       return u;
@@ -3567,22 +3607,73 @@ function updateEx(ei, key, val) {
 
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
             {isFuncEx(ex) && (
-              <div style={{marginBottom:8,padding:"8px 10px",borderRadius:7,
-                background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.15)"}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700}}>✦ 운동 목적</Mo>
-                  {ex.movementPurpose && !ex._purposeManual && (
-                    <Mo c="#3a3a5a" s={7}>자동 추천됨</Mo>
-                  )}
-                  {ex._purposeManual && (
-                    <Mo c="#3a3a5a" s={7}>✎ 수동 설정</Mo>
-                  )}
+              <div style={{marginBottom:8,borderRadius:9,
+                background:"rgba(94,234,212,.04)",border:"1px solid rgba(94,234,212,.15)",padding:"9px 10px"}}>
+                {/* 1차: 카테고리 */}
+                <div style={{marginBottom:6}}>
+                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>✦ 운동 카테고리</Mo>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {FUNC_CATEGORIES.map(c=>{
+                      const active = ex.funcCategory===c.key;
+                      return (
+                        <button key={c.key} onClick={()=>updateEx(ei,"funcCategory",active?"":c.key)}
+                          style={{fontSize:10,padding:"3px 9px",borderRadius:5,border:"1px solid",cursor:"pointer",
+                            borderColor:active?c.color:"rgba(255,255,255,0.08)",
+                            background:active?c.color+"22":"transparent",
+                            color:active?c.color:"#64748b",fontWeight:active?700:400}}>
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <input value={ex.movementPurpose||""} onFocus={()=>setActiveCardIdx(ei)}
-                  onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
-                  placeholder="예: 고관절 가동성 개선, 코어 안정화..."
-                  style={{fontSize:16,padding:"6px 10px",borderRadius:6,width:"100%",boxSizing:"border-box",
-                    background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.2)",color:"#a7f3d0"}} />
+                {/* 2차: 부위 */}
+                <div style={{marginBottom:6}}>
+                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>부위</Mo>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {FUNC_BODY_PARTS.map(p=>{
+                      const active = ex.funcBodyPart===p;
+                      return (
+                        <button key={p} onClick={()=>updateEx(ei,"funcBodyPart",active?"":p)}
+                          style={{fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid",cursor:"pointer",
+                            borderColor:active?"#818cf8":"rgba(255,255,255,0.07)",
+                            background:active?"rgba(129,140,248,.15)":"transparent",
+                            color:active?"#818cf8":"#64748b"}}>
+                          {p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 3차: 도구 */}
+                <div style={{marginBottom:6}}>
+                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>도구</Mo>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {FUNC_TOOLS.map(t=>{
+                      const active = ex.funcTool===t;
+                      return (
+                        <button key={t} onClick={()=>updateEx(ei,"funcTool",active?"":t)}
+                          style={{fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid",cursor:"pointer",
+                            borderColor:active?"#ffd166":"rgba(255,255,255,0.07)",
+                            background:active?"rgba(255,209,102,.12)":"transparent",
+                            color:active?"#ffd166":"#64748b"}}>
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 자동 생성된 목적 (수정 가능) */}
+                <div>
+                  <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>
+                    운동 목적 {ex._purposeManual?"✎":"(자동)"}
+                  </Mo>
+                  <input value={ex.movementPurpose||""} onFocus={()=>setActiveCardIdx(ei)}
+                    onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
+                    placeholder="예: 햄스트링 조직 이완, 고관절 가동성 개선..."
+                    style={{fontSize:16,padding:"6px 10px",borderRadius:6,width:"100%",boxSizing:"border-box",
+                      background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.2)",color:"#a7f3d0"}} />
+                </div>
               </div>
             )}
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
@@ -4530,6 +4621,59 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                 </div>
               )}
             </div>
+
+            {/* ─ 기능 회복 섹션 (기능운동이 있을 때만, 트레이너+cardMode 공통) ─ */}
+            {exercises.some(e=>isFuncEx(e)) && (
+              <div style={{marginBottom:10,borderRadius:10,overflow:"hidden",
+                border:"1px solid rgba(94,234,212,.2)"}}>
+                {/* 섹션 헤더 */}
+                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.07)",
+                  display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
+                </div>
+                {/* 기능운동 리스트 */}
+                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.03)"}}>
+                  {exercises.filter(e=>isFuncEx(e)).map((ex,j)=>{
+                    const cat = FUNC_CATEGORIES.find(c=>c.key===ex.funcCategory);
+                    const totalSec  = (ex.sets||[]).reduce((a,s)=>a+parseInt(s.durationSec||0),0);
+                    const totalReps = (ex.sets||[]).reduce((a,s)=>a+parseInt(s.reps||0),0);
+                    const sets = (ex.sets||[]).filter(s=>isValidSet(s)).length;
+                    return (
+                      <div key={j} style={{marginBottom:j<exercises.filter(e=>isFuncEx(e)).length-1?8:0,
+                        paddingBottom:j<exercises.filter(e=>isFuncEx(e)).length-1?8:0,
+                        borderBottom:j<exercises.filter(e=>isFuncEx(e)).length-1?"1px solid rgba(255,255,255,0.05)":"none"}}>
+                        {/* 목적 라인 */}
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                          {cat && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,
+                              background:cat.color+"22",color:cat.color,fontWeight:700}}>{cat.label}</span>
+                          )}
+                          {ex.funcBodyPart && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,
+                              background:"rgba(129,140,248,.15)",color:"#818cf8"}}>{ex.funcBodyPart}</span>
+                          )}
+                          {ex.movementPurpose && (
+                            <span style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:11,color:"#a7f3d0",fontWeight:700}}>
+                              {ex.movementPurpose}
+                            </span>
+                          )}
+                        </div>
+                        {/* 운동명 + 수행량 */}
+                        <div style={{display:"flex",alignItems:"center",gap:6,paddingLeft:8}}>
+                          <span style={{color:"#475569",fontSize:9,flexShrink:0}}>└</span>
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#64748b"}}>
+                            {ex.funcTool ? `${ex.funcTool} · ` : ""}{ex.name}
+                          </span>
+                          {totalSec>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalSec}초</span>}
+                          {totalReps>0 && !totalSec && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalReps}회</span>}
+                          {sets>0 && totalReps>0 && totalSec===0 && sets>1 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>× {sets}세트</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* ─ 기능/교정 운동 목적 섹션 (트레이너 전용, cardMode 비공유) ─ */}
             {!cardMode && (() => {

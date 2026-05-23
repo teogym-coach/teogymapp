@@ -1,3 +1,4 @@
+// TEO GYM PT Journal — v2026.05.23
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,

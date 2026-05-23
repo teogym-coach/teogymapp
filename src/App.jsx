@@ -4573,19 +4573,61 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
 
           {/* ─ 운동 목록 ─ */}
           <div style={{padding:"14px 18px"}}>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a5a",
-              letterSpacing:".1em",marginBottom:10}}>TODAY'S WORKOUT</div>
+            {/* ── 1. 기능 회복 섹션 (최상단) ── */}
+            {exercises.filter(e=>e.name&&isFuncEx(e)).length > 0 && (
+              <div style={{marginBottom:10,borderRadius:10,overflow:"hidden",
+                border:"1px solid rgba(94,234,212,.2)"}}>
+                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.07)",
+                  display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
+                </div>
+                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.03)"}}>
+                  {exercises.filter(e=>e.name&&isFuncEx(e)).map((ex,j)=>{
+                    const cat = FUNC_CATEGORIES.find(c=>c.key===ex.funcCategory);
+                    const totalSec  = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.durationSec)||0),0);
+                    const totalReps = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.reps)||0),0);
+                    const funcExs = exercises.filter(e=>e.name&&isFuncEx(e));
+                    return (
+                      <div key={j} style={{
+                        marginBottom:j<funcExs.length-1?7:0,
+                        paddingBottom:j<funcExs.length-1?7:0,
+                        borderBottom:j<funcExs.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
+                          {cat && <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,background:cat.color+"22",color:cat.color,fontWeight:700}}>{cat.label}</span>}
+                          {ex.funcBodyPart && <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(129,140,248,.15)",color:"#818cf8"}}>{Array.isArray(ex.funcBodyPart)?ex.funcBodyPart.join("+"):ex.funcBodyPart}</span>}
+                          {ex.movementPurpose
+                            ? <span style={{fontSize:11,color:"#a7f3d0",fontWeight:700}}>{ex.movementPurpose}</span>
+                            : <span style={{fontSize:11,color:"#a7f3d0",fontWeight:700}}>{ex.name}</span>
+                          }
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:5,paddingLeft:8,flexWrap:"wrap"}}>
+                          <span style={{color:"#475569",fontSize:9}}>└</span>
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#64748b"}}>
+                            {ex.funcTool?`${ex.funcTool} · `:""}{ex.movementPurpose?ex.name:""}
+                          </span>
+                          {totalSec>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalSec}초</span>}
+                          {!totalSec && totalReps>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalReps}회</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-            {exercises.filter(e=>e.name).map((ex, ei) => {
-              const isFunc = isFuncEx(ex);
+            {/* ── 2. TODAY'S WORKOUT (기능운동 제외) ── */}
+            {exercises.filter(e=>e.name&&!isFuncEx(e)).length > 0 && (
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a5a",
+                letterSpacing:".1em",marginBottom:10}}>TODAY'S WORKOUT</div>
+            )}
+
+            {exercises.filter(e=>e.name&&!isFuncEx(e)).map((ex, ei) => {
+              const isFunc = false; // 기능운동 이미 제외됨
               const vol   = exVol(ex);
               const ec    = EQUIP_COLOR[ex.equipment]||"#888";
               const gc    = mColor(ex.muscleTop);
               const maxW  = Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
               const avgRPE = ex.rpe ? ex.rpe : null;
-              // 기능운동 통계
-              const totalSec  = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.durationSec)||0),0) : 0;
-              const totalReps = isFunc ? (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.reps)||0),0) : 0;
               return (
                 <div key={ei} style={{marginBottom:8,background:"#111827",borderRadius:10,
                   overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
@@ -4603,54 +4645,24 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                       </div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                      {isFunc ? (
-                        <div>
-                          {totalSec>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54a0ff",fontWeight:700}}>총 {totalSec}초</div>}
-                          {totalReps>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#ffd166"}}>총 {totalReps}회</div>}
-                          {vol>0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4"}}>{vol.toLocaleString()}kg</div>}
-                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>{(ex.sets||[]).length}세트</div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
-                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
-                        </div>
-                      )}
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
                     </div>
                   </div>
                   <div style={{padding:"6px 12px"}}>
-                    {isFunc ? (
-                      /* 기능운동: 입력된 값만 표시 */
-                      <div>
-                        {(ex.sets||[]).map((row,si) => {
-                          const lbl = funcSetLabel(row);
-                          return (
-                            <div key={si} style={{display:"flex",gap:6,alignItems:"center",
-                              marginBottom:4,padding:"4px 6px",borderRadius:5,
-                              background:"rgba(84,160,255,.07)"}}>
-                              <Mo c="#3a3a5a" s={9} style={{background:"#0F172A",borderRadius:3,
-                                padding:"2px 7px",minWidth:28,textAlign:"center",flexShrink:0}}>{si+1}</Mo>
-                              <Mo c="#54a0ff" s={11} style={{fontWeight:700}}>{lbl !== "—" ? lbl : "값 없음"}</Mo>
-                            </div>
-                          );
-                        })}
+                    <div>
+                      <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
+                        {["SET","무게","횟수","볼륨"].map((h,i)=><Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                       </div>
-                    ) : (
-                      /* 일반 웨이트: 무게·횟수·볼륨 테이블 */
-                      <div>
-                        <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:3,marginBottom:3}}>
-                          {["SET","무게","횟수","볼륨"].map((h,i)=><Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                      {(ex.sets||[]).map((row,si)=>(
+                        <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
+                          <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
+                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
+                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
+                          <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
                         </div>
-                        {(ex.sets||[]).map((row,si)=>(
-                          <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:3,marginBottom:2}}>
-                            <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"1px 0"}}>{si+1}</Mo>
-                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
-                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                            <Mo c="#5EEAD4" s={10} style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      ))}
+                    </div>
                   </div>
                 </div>
               );

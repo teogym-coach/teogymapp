@@ -83,8 +83,26 @@ const FUNC_CATEGORIES = [
 ];
 
 const FUNC_BODY_PARTS = [
-  "종아리","햄스트링","둔근","대퇴사두","고관절","골반","요추","흉추",
-  "견갑 주변","대흉근","광배","목·경추","전신",
+  // 발~발목
+  "족저근막",
+  // 하퇴
+  "종아리","슬와근",
+  // 대퇴
+  "햄스트링","대퇴사두",
+  // 골반~고관절
+  "장요근","둔근","고관절","골반",
+  // 척추
+  "요추","흉추",
+  // 상체 후면
+  "광배","능형근","대원근","견갑 주변",
+  // 상체 전면
+  "대흉근",
+  // 팔
+  "전완","이두","삼두",
+  // 경부
+  "사각근","흉쇄유돌근","목·경추",
+  // 전신
+  "전신",
 ];
 
 const FUNC_TOOLS = [
@@ -144,10 +162,24 @@ function suggestMovementPurpose(name) {
 }
 
 // 기능운동 여부 판별
+// 기능운동 표시 이름 — 운동 이름이 없으면 부위+카테고리로 자동 생성
+function getFuncExDisplayName(ex) {
+  if (ex.name && ex.name.trim()) return ex.name.trim();
+  // 이름 없을 때: 부위 + 카테고리 label
+  const cat = FUNC_CATEGORIES.find(c=>c.key===ex.funcCategory);
+  const partStr = Array.isArray(ex.funcBodyPart)
+    ? ex.funcBodyPart.join("+")
+    : (ex.funcBodyPart||"");
+  if (partStr && cat) return `${partStr} ${cat.label}`;
+  if (partStr) return partStr;
+  if (cat) return cat.label;
+  return "기능 운동";
+}
+
 function isFuncEx(ex) {
-  // 1. 기능 기구로 선택된 경우 (최우선)
+  // 1. 기능 기구로 선택된 경우 (최우선, 이름 없어도 OK)
   if (ex.equipment === "기능") return true;
-  // 2. funcCategory가 있는 경우 (카테고리 선택으로 기록된 기능 운동)
+  // 2. funcCategory가 있는 경우 (이름 없어도 OK)
   const FUNC_KEYS = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스"];
   if (ex.funcCategory && FUNC_KEYS.includes(ex.funcCategory)) return true;
   // 3. 기존 호환: muscleTop이 기능이거나 recordType:function 세트
@@ -3676,38 +3708,71 @@ function updateEx(ei, key, val) {
             {ex.equipment === "기능" && (
               <div style={{marginBottom:8,borderRadius:9,
                 background:"rgba(34,197,94,.04)",border:"1px solid rgba(34,197,94,.15)",padding:"9px 10px"}}>
-                {/* 부위 다중 선택 */}
+                {/* 부위 선택 — 모달 방식 */}
                 <div style={{marginBottom:6}}>
                   <Mo c="#22c55e" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>부위 (다중 선택)</Mo>
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {FUNC_BODY_PARTS.map(p=>{
-                      const parts = Array.isArray(ex.funcBodyPart) ? ex.funcBodyPart : (ex.funcBodyPart ? [ex.funcBodyPart] : []);
-                      const active = parts.includes(p);
-                      return (
-                        <button key={p} onClick={()=>{
-                          const cur = Array.isArray(ex.funcBodyPart) ? ex.funcBodyPart : (ex.funcBodyPart ? [ex.funcBodyPart] : []);
-                          const next = active ? cur.filter(x=>x!==p) : [...cur, p];
-                          if (!ex._purposeManual) {
-                            const cat  = ex.funcCategory||"";
-                            const part = next.length > 0 ? next.join("+") : "";
-                            // updateEx는 두 필드 연속 갱신 불가므로 직접 처리
-                          }
-                          updateEx(ei,"funcBodyPart",next);
-                        }}
-                          style={{fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid",cursor:"pointer",
-                            borderColor:active?"#818cf8":"rgba(255,255,255,0.07)",
-                            background:active?"rgba(129,140,248,.15)":"transparent",
-                            color:active?"#818cf8":"#64748b"}}>
-                          {p}
-                        </button>
-                      );
-                    })}
+                  {/* 현재 선택된 부위 표시 + 선택 버튼 */}
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+                    {(Array.isArray(ex.funcBodyPart)?ex.funcBodyPart:(ex.funcBodyPart?[ex.funcBodyPart]:[])).map(p=>(
+                      <span key={p} style={{fontFamily:"'DM Mono',monospace",fontSize:9,
+                        padding:"2px 8px",borderRadius:4,
+                        background:"rgba(129,140,248,.2)",color:"#818cf8",
+                        display:"inline-flex",alignItems:"center",gap:4}}>
+                        {p}
+                        <button onClick={()=>{
+                          const cur = Array.isArray(ex.funcBodyPart)?ex.funcBodyPart:(ex.funcBodyPart?[ex.funcBodyPart]:[]);
+                          updateEx(ei,"funcBodyPart",cur.filter(x=>x!==p));
+                        }} style={{background:"none",border:"none",color:"#818cf8",cursor:"pointer",padding:0,fontSize:10,lineHeight:1}}>×</button>
+                      </span>
+                    ))}
+                    <button onClick={()=>setActiveCardIdx(ei==="bodyPartModal"?null:`bodyPartModal_${ei}`)}
+                      style={{fontSize:9,padding:"2px 10px",borderRadius:4,border:"1px solid rgba(34,197,94,.3)",
+                        background:"rgba(34,197,94,.08)",color:"#22c55e",cursor:"pointer"}}>
+                      + 부위 추가
+                    </button>
                   </div>
+                  {/* 부위 선택 팝업 */}
+                  {activeCardIdx===`bodyPartModal_${ei}` && (
+                    <div style={{marginTop:6,padding:"10px",borderRadius:8,
+                      background:"#1e293b",border:"1px solid rgba(34,197,94,.25)",
+                      boxShadow:"0 8px 24px rgba(0,0,0,.5)",zIndex:50,position:"relative"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <Mo c="#22c55e" s={8} style={{fontWeight:700}}>부위 선택 (복수 선택 가능)</Mo>
+                        <button onClick={()=>setActiveCardIdx(ei)}
+                          style={{fontSize:9,padding:"2px 8px",borderRadius:4,
+                            background:"rgba(34,197,94,.15)",color:"#22c55e",border:"1px solid rgba(34,197,94,.3)",cursor:"pointer"}}>
+                          완료
+                        </button>
+                      </div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap",maxHeight:160,overflowY:"auto"}}>
+                        {FUNC_BODY_PARTS.map(p=>{
+                          const cur = Array.isArray(ex.funcBodyPart)?ex.funcBodyPart:(ex.funcBodyPart?[ex.funcBodyPart]:[]);
+                          const active = cur.includes(p);
+                          return (
+                            <button key={p} onClick={()=>{
+                              const next = active?cur.filter(x=>x!==p):[...cur,p];
+                              updateEx(ei,"funcBodyPart",next);
+                              if(!ex._purposeManual){
+                                const partStr=next.join("+");
+                                updateEx(ei,"movementPurpose",buildPurposeLabel(ex.funcCategory,partStr));
+                              }
+                            }}
+                              style={{fontSize:9,padding:"3px 9px",borderRadius:4,border:"1px solid",cursor:"pointer",
+                                borderColor:active?"#818cf8":"rgba(255,255,255,0.07)",
+                                background:active?"rgba(129,140,248,.2)":"rgba(255,255,255,0.03)",
+                                color:active?"#818cf8":"#94a3b8",fontWeight:active?700:400}}>
+                              {active?"✓ ":""}{p}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {/* 운동 목적 */}
                 <div>
                   <Mo c="#22c55e" s={8} style={{fontWeight:700,display:"block",marginBottom:4}}>
-                    운동 목적 {ex._purposeManual?"✎ 수동":"(카테고리+부위 기반 자동)"}
+                    운동 목적 {ex._purposeManual?"✎ 수동":"(자동)"}
                   </Mo>
                   <input value={ex.movementPurpose||""} onFocus={()=>setActiveCardIdx(ei)}
                     onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
@@ -3991,7 +4056,7 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                     <div style={{display:"flex",alignItems:"center",gap:5,paddingLeft:8,flexWrap:"wrap"}}>
                       <span style={{color:"#475569",fontSize:9,flexShrink:0}}>└</span>
                       <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#64748b"}}>
-                        {ex.funcTool?`${ex.funcTool} · `:""}{ex.movementPurpose?ex.name:""}
+                        {ex.funcTool?`${ex.funcTool} · `:""}{ex.name||""}
                       </span>
                       {totalSec>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalSec}초</span>}
                       {totalReps>0 && !totalSec && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalReps}회</span>}
@@ -4088,7 +4153,7 @@ function ExNameList({ exercises }) {
           background:(EQUIP_COLOR[ex.equipment]||"#888")+"22",
           color: EQUIP_COLOR[ex.equipment]||"#888",
           whiteSpace:"nowrap"}}>
-          {ex.name||"?"}
+          {isFuncEx(ex) ? getFuncExDisplayName(ex) : (ex.name||"?")}
         </span>
       ))}
       {!expanded && more > 0 && (
@@ -4560,7 +4625,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
           {/* ─ 운동 목록 ─ */}
           <div style={{padding:"14px 18px"}}>
             {/* ── 1. 기능 회복 섹션 (최상단) ── */}
-            {exercises.filter(e=>e.name&&isFuncEx(e)).length > 0 && (
+            {exercises.filter(e=>isFuncEx(e)).length > 0 && (
               <div style={{marginBottom:10,borderRadius:10,overflow:"hidden",
                 border:"1px solid rgba(94,234,212,.2)"}}>
                 <div style={{padding:"8px 13px",background:"rgba(94,234,212,.07)",
@@ -4568,7 +4633,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                   <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
                 </div>
                 <div style={{padding:"8px 13px",background:"rgba(94,234,212,.03)"}}>
-                  {exercises.filter(e=>e.name&&isFuncEx(e)).map((ex,j)=>{
+                  {exercises.filter(e=>isFuncEx(e)).map((ex,j)=>{
                     const cat = FUNC_CATEGORIES.find(c=>c.key===ex.funcCategory);
                     const totalSec  = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.durationSec)||0),0);
                     const totalReps = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.reps)||0),0);
@@ -4581,15 +4646,14 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
                         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
                           {cat && <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,background:cat.color+"22",color:cat.color,fontWeight:700}}>{cat.label}</span>}
                           {ex.funcBodyPart && <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(129,140,248,.15)",color:"#818cf8"}}>{Array.isArray(ex.funcBodyPart)?ex.funcBodyPart.join("+"):ex.funcBodyPart}</span>}
-                          {ex.movementPurpose
-                            ? <span style={{fontSize:11,color:"#a7f3d0",fontWeight:700}}>{ex.movementPurpose}</span>
-                            : <span style={{fontSize:11,color:"#a7f3d0",fontWeight:700}}>{ex.name}</span>
-                          }
+                          <span style={{fontSize:11,color:"#a7f3d0",fontWeight:700}}>
+                            {ex.movementPurpose || getFuncExDisplayName(ex)}
+                          </span>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:5,paddingLeft:8,flexWrap:"wrap"}}>
                           <span style={{color:"#475569",fontSize:9}}>└</span>
                           <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#64748b"}}>
-                            {ex.funcTool?`${ex.funcTool} · `:""}{ex.movementPurpose?ex.name:""}
+                            {ex.funcTool?`${ex.funcTool} · `:""}{ex.name||""}
                           </span>
                           {totalSec>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalSec}초</span>}
                           {!totalSec && totalReps>0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>· {totalReps}회</span>}

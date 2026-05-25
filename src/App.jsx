@@ -2617,13 +2617,113 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
         {member.memo && <div style={{marginTop:6,padding:"7px 10px",background:"#0B1120",borderRadius:6,fontSize:11,color:"#54546a",borderLeft:"2px solid rgba(255,255,255,0.10)"}}>{member.memo}</div>}
       </div>
 
-      {!loading && (
-        <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:14}}>
-          <StatTile label={t("총 수업","총 운동")} value={sessions.length+"회"} />
-          <StatTile label="누적 볼륨" value={(totalVol/1000).toFixed(1)+"t"} />
-          <StatTile label={t("최근 회차","최근 운동")} value={last ? last.sessionNo+"회" : "—"} sub={last?.date||""} />
-        </div>
-      )}
+      {!loading && (() => {
+        // ── 수업 진행 계산 ─────────────────────────────────
+        const currentNo  = sessions.length > 0 ? sessions[sessions.length-1].sessionNo : sessions.length;
+        const totalReg   = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
+        const remaining  = totalReg > 0 ? Math.max(0, totalReg - sessions.length) : null;
+
+        // ── 체중 변화 계산 (세션 bodyWeight 기준) ──────────
+        const weightArr = sessions
+          .filter(s => parseFloat(s.bodyWeight) > 0)
+          .map(s => parseFloat(s.bodyWeight));
+        const firstW = weightArr.length > 0 ? weightArr[0] : null;
+        const lastW  = weightArr.length > 0 ? weightArr[weightArr.length-1] : null;
+        const wDiff  = (firstW && lastW && firstW !== lastW) ? (lastW - firstW) : null;
+
+        // ── 다음 체크 포인트 ────────────────────────────────
+        const checkKeywords = ["통증","불편","아프","뻐근","부상","정체","식단","다이어트","체중","힘들"];
+        let checkpoint = "운동 반응 확인";
+        if (last) {
+          const note = ((last.trainerComment||"")+(last.nextPlan||"")+(last.stretchingNotes||"")).toLowerCase();
+          const hit = checkKeywords.find(k => note.includes(k));
+          if (hit === "통증" || hit === "불편" || hit === "아프" || hit === "뻐근" || hit === "부상") {
+            const muscle = (last.exercises||[]).map(e=>e.muscleTop).filter(Boolean)[0] || "";
+            checkpoint = `${muscle ? muscle+" " : ""}통증 확인`;
+          } else if (hit === "정체" || hit === "체중") {
+            checkpoint = "체중 정체 체크";
+          } else if (hit === "식단" || hit === "다이어트") {
+            checkpoint = "식단 유지 체크";
+          }
+        }
+
+        // ── 카드 공통 스타일 ────────────────────────────────
+        const cardStyle = {
+          background:"#111827",borderRadius:10,padding:"12px 14px",
+          border:"1px solid rgba(255,255,255,0.06)"
+        };
+        const bigNum = { fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,color:"#5EEAD4",display:"block",lineHeight:1.2 };
+        const sub    = { fontSize:9,color:"#3a3a5a",display:"block",marginTop:2,lineHeight:1.5 };
+        const label  = { fontFamily:"'DM Mono',monospace",fontSize:8,color:"#54546a",display:"block",marginBottom:4,letterSpacing:".06em" };
+
+        return (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:14}}>
+            {/* 1. 수업 진행 */}
+            <div style={cardStyle}>
+              <span style={label}>{t("수업 진행","운동 진행")}</span>
+              <span style={bigNum}>
+                {sessions.length}
+                <span style={{fontSize:12,fontWeight:400,color:"#54546a"}}>
+                  {totalReg > 0 ? ` / ${totalReg}회` : "회"}
+                </span>
+              </span>
+              <span style={sub}>
+                {remaining !== null
+                  ? `이번 등록 ${totalReg}회 중 ${remaining}회 남음`
+                  : totalReg > 0 ? `총 ${totalReg}회 등록` : "총 등록 —회"}
+              </span>
+            </div>
+
+            {/* 2. 체중 변화 */}
+            <div style={cardStyle}>
+              <span style={label}>체중 변화</span>
+              {wDiff !== null ? (
+                <>
+                  <span style={{...bigNum, color: wDiff < 0 ? "#5EEAD4" : "#f97316"}}>
+                    {wDiff > 0 ? "+" : ""}{wDiff.toFixed(1)}kg
+                  </span>
+                  <span style={sub}>{firstW}kg → {lastW}kg</span>
+                </>
+              ) : weightArr.length > 0 ? (
+                <>
+                  <span style={bigNum}>{lastW}kg</span>
+                  <span style={sub}>변화 기록 부족</span>
+                </>
+              ) : (
+                <>
+                  <span style={{...bigNum, fontSize:14, color:"#3a3a5a"}}>—</span>
+                  <span style={sub}>체중 기록 없음</span>
+                </>
+              )}
+            </div>
+
+            {/* 3. 최근 수업 */}
+            <div style={cardStyle}>
+              <span style={label}>{t("최근 수업","최근 운동")}</span>
+              {last ? (
+                <>
+                  <span style={{...bigNum, fontSize:15, color:"#fff"}}>
+                    {(last.exercises||[]).map(e=>e.muscleTop).filter((v,i,a)=>a.indexOf(v)===i&&v).slice(0,2).join(" · ") || (last.type||"웨이트")}
+                  </span>
+                  <span style={sub}>{last.date} · {last.sessionNo}회차</span>
+                </>
+              ) : (
+                <>
+                  <span style={{...bigNum, fontSize:14, color:"#3a3a5a"}}>—</span>
+                  <span style={sub}>기록 없음</span>
+                </>
+              )}
+            </div>
+
+            {/* 4. 다음 체크 포인트 */}
+            <div style={{...cardStyle, border:"1px solid rgba(255,209,102,.12)", background:"rgba(255,209,102,.04)"}}>
+              <span style={{...label, color:"#ffd166"}}>다음 체크 포인트</span>
+              <span style={{...bigNum, fontSize:14, color:"#ffd166"}}>{checkpoint}</span>
+              <span style={sub}>{last ? last.date : "기록 없음"}</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* AI 초기 분석 리포트 버튼 */}
       {member.survey?.surveyDone && (

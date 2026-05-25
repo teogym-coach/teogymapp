@@ -302,6 +302,56 @@ function suggestFuncExPreset(name) {
   return { category, bodyParts, tool };
 }
 
+// 기능 운동을 카테고리별로 그룹핑
+// 반환: [{categoryKey, displayTitle, exercises:[]}]
+function groupFuncExercises(funcExList) {
+  const ORDER = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스",""];
+  const map = {};
+  funcExList.forEach(ex => {
+    const key = ex.funcCategory || "";
+    if (!map[key]) map[key] = [];
+    map[key].push(ex);
+  });
+  return ORDER.filter(k => map[k]).map(k => ({
+    categoryKey: k,
+    displayTitle: (() => {
+      // 같은 카테고리 내 부위들을 모아서 제목 생성
+      const exs = map[k];
+      const allParts = [...new Set(
+        exs.flatMap(ex => Array.isArray(ex.funcBodyPart)
+          ? ex.funcBodyPart
+          : (ex.funcBodyPart ? [ex.funcBodyPart] : []))
+      )];
+      const partStr = allParts.join(" + ");
+      // getFuncExDisplayName 규칙 적용
+      if (k === "조직이완") return partStr ? `${partStr} 릴리즈` : "릴리즈";
+      if (k === "가동성")     return partStr ? `${partStr} 가동성 개선`  : "가동성 운동";
+      if (k === "안정화")     return partStr ? `${partStr} 안정화`       : "안정화 운동";
+      if (k === "활성화")     return partStr ? `${partStr} 활성화`       : "활성화 운동";
+      if (k === "움직임교정") return partStr ? `${partStr} 움직임 교정` : "움직임 교정";
+      if (k === "호흡")       return partStr ? `${partStr} 호흡 패턴`    : "호흡 패턴";
+      if (k === "밸런스")     return partStr ? `${partStr} 밸런스`       : "밸런스 훈련";
+      // 카테고리 없음 — 운동별 개별 목적 사용
+      return exs[0]?.movementPurpose || exs[0]?.name || "기능 운동";
+    })(),
+    exercises: map[k],
+  }));
+}
+
+// 기능운동 세트 수행량 한 줄 요약 (도구 · 이름 · 횟수/시간)
+function funcExSubLine(ex) {
+  const totalSec  = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.durationSec)||0),0);
+  const totalReps = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.reps)||0),0);
+  const sets      = (ex.sets||[]).filter(s=>isValidSet(s)).length;
+  const namePart  = (ex.name && ex.name.trim()) ? ex.name.trim() : null;
+  const timePart  = totalSec > 0
+    ? (sets > 1 ? `${sets}세트 × ${totalSec/sets|0}초` : `${totalSec}초`)
+    : (totalReps > 0
+      ? (sets > 1 ? `${sets}세트 × ${totalReps/sets|0}회` : `${totalReps}회`)
+      : null);
+  return [ex.funcTool||null, namePart, timePart].filter(Boolean).join(" · ");
+}
+
 function getFuncExDisplayName(ex) {
   const partArr = Array.isArray(ex.funcBodyPart)
     ? ex.funcBodyPart
@@ -4218,46 +4268,38 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         </div>
       </div>
       <div style={{padding:"14px 18px"}}>
-        {/* ── 1. 기능 회복 섹션 (최상단) ── */}
+        {/* ── 1. 기능 회복 섹션 (최상단, 카테고리별 그룹핑) ── */}
         {exList.some(e=>isFuncEx(e)) && (
           <div style={{marginBottom:12,borderRadius:10,overflow:"hidden",
             border:"1px solid rgba(94,234,212,.18)",background:"rgba(94,234,212,.02)"}}>
-            <div style={{padding:"7px 13px",background:"rgba(94,234,212,.07)",
-              display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{padding:"7px 13px",background:"rgba(94,234,212,.07)"}}>
               <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
             </div>
             <div style={{padding:"9px 13px"}}>
-              {exList.filter(e=>isFuncEx(e)).map((ex,j)=>{
-                const funcExs = exList.filter(e=>isFuncEx(e));
-                const isLast  = j === funcExs.length - 1;
-                const totalSec  = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.durationSec)||0),0);
-                const totalReps = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.reps)||0),0);
-                const displayName = getFuncExDisplayName(ex);
-                // 도구 + 운동이름(있을 때만) + 시간/횟수
-                const subParts = [
-                  ex.funcTool || null,
-                  (ex.name && ex.name.trim()) ? ex.name.trim() : null,
-                ].filter(Boolean).join(" · ");
-                const timePart = totalSec>0 ? `${totalSec}초` : (totalReps>0 ? `${totalReps}회` : null);
-                const subLine = [subParts, timePart].filter(Boolean).join(" · ");
+              {groupFuncExercises(exList.filter(e=>isFuncEx(e))).map((group, gi, arr)=>{
+                const isLastGroup = gi === arr.length - 1;
                 return (
-                  <div key={j} style={{
-                    marginBottom:isLast?0:8, paddingBottom:isLast?0:8,
-                    borderBottom:isLast?"none":"1px solid rgba(255,255,255,0.04)"}}>
-                    {/* 제목 — 단순하고 직관적 */}
+                  <div key={gi} style={{
+                    marginBottom:isLastGroup?0:10,
+                    paddingBottom:isLastGroup?0:10,
+                    borderBottom:isLastGroup?"none":"1px solid rgba(255,255,255,0.05)"}}>
+                    {/* 카테고리 제목 */}
                     <div style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:12,
-                      color:"#d1fae5",fontWeight:700,marginBottom:3,lineHeight:1.4}}>
-                      {displayName}
+                      color:"#d1fae5",fontWeight:700,marginBottom:4,lineHeight:1.4}}>
+                      {group.displayTitle}
                     </div>
-                    {/* 보조 정보 — 도구 · 운동이름 · 시간 */}
-                    {subLine && (
-                      <div style={{display:"flex",alignItems:"center",gap:5,paddingLeft:8}}>
-                        <span style={{color:"#3a5a4a",fontSize:10,flexShrink:0}}>└</span>
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#52687a",lineHeight:1.5}}>
-                          {subLine}
-                        </span>
-                      </div>
-                    )}
+                    {/* 해당 카테고리 운동 목록 */}
+                    {group.exercises.map((ex, xi)=>{
+                      const sub = funcExSubLine(ex);
+                      return sub ? (
+                        <div key={xi} style={{display:"flex",alignItems:"baseline",gap:5,paddingLeft:8,marginBottom:2}}>
+                          <span style={{color:"#3a5a4a",fontSize:10,flexShrink:0}}>└</span>
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#52687a",lineHeight:1.5}}>
+                            {sub}
+                          </span>
+                        </div>
+                      ) : null;
+                    })}
                   </div>
                 );
               })}
@@ -4820,43 +4862,36 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
 
           {/* ─ 운동 목록 ─ */}
           <div style={{padding:"14px 18px"}}>
-            {/* ── 1. 기능 회복 섹션 (최상단) ── */}
+            {/* ── 1. 기능 회복 섹션 (최상단, 카테고리별 그룹핑) ── */}
             {exercises.filter(e=>isFuncEx(e)).length > 0 && (
               <div style={{marginBottom:10,borderRadius:10,overflow:"hidden",
                 border:"1px solid rgba(94,234,212,.18)",background:"rgba(94,234,212,.02)"}}>
-                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.07)",
-                  display:"flex",alignItems:"center",gap:8}}>
+                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.07)"}}>
                   <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
                 </div>
                 <div style={{padding:"9px 13px",background:"rgba(94,234,212,.01)"}}>
-                  {exercises.filter(e=>isFuncEx(e)).map((ex,j)=>{
-                    const funcExs = exercises.filter(e=>isFuncEx(e));
-                    const isLast  = j === funcExs.length - 1;
-                    const totalSec  = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.durationSec)||0),0);
-                    const totalReps = (ex.sets||[]).reduce((a,s)=>a+(parseInt(s.reps)||0),0);
-                    const displayName = getFuncExDisplayName(ex);
-                    const subParts = [
-                      ex.funcTool || null,
-                      (ex.name && ex.name.trim()) ? ex.name.trim() : null,
-                    ].filter(Boolean).join(" · ");
-                    const timePart = totalSec>0 ? `${totalSec}초` : (totalReps>0 ? `${totalReps}회` : null);
-                    const subLine = [subParts, timePart].filter(Boolean).join(" · ");
+                  {groupFuncExercises(exercises.filter(e=>isFuncEx(e))).map((group,gi,arr)=>{
+                    const isLastGroup = gi === arr.length - 1;
                     return (
-                      <div key={j} style={{
-                        marginBottom:isLast?0:8, paddingBottom:isLast?0:8,
-                        borderBottom:isLast?"none":"1px solid rgba(255,255,255,0.04)"}}>
+                      <div key={gi} style={{
+                        marginBottom:isLastGroup?0:10,
+                        paddingBottom:isLastGroup?0:10,
+                        borderBottom:isLastGroup?"none":"1px solid rgba(255,255,255,0.05)"}}>
                         <div style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:12,
-                          color:"#d1fae5",fontWeight:700,marginBottom:3,lineHeight:1.4}}>
-                          {displayName}
+                          color:"#d1fae5",fontWeight:700,marginBottom:4,lineHeight:1.4}}>
+                          {group.displayTitle}
                         </div>
-                        {subLine && (
-                          <div style={{display:"flex",alignItems:"center",gap:5,paddingLeft:8}}>
-                            <span style={{color:"#3a5a4a",fontSize:10,flexShrink:0}}>└</span>
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#52687a",lineHeight:1.5}}>
-                              {subLine}
-                            </span>
-                          </div>
-                        )}
+                        {group.exercises.map((ex,xi)=>{
+                          const sub = funcExSubLine(ex);
+                          return sub ? (
+                            <div key={xi} style={{display:"flex",alignItems:"baseline",gap:5,paddingLeft:8,marginBottom:2}}>
+                              <span style={{color:"#3a5a4a",fontSize:10,flexShrink:0}}>└</span>
+                              <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#52687a",lineHeight:1.5}}>
+                                {sub}
+                              </span>
+                            </div>
+                          ) : null;
+                        })}
                       </div>
                     );
                   })}

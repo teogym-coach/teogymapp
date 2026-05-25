@@ -80,11 +80,12 @@ const FUNC_CATEGORIES = [
   {key:"움직임교정",  label:"움직임 교정",  color:"#f97316", desc:"패턴 개선"},
   {key:"호흡",        label:"호흡 패턴",    color:"#a5b4fc", desc:"횡격막·복압 조절"},
   {key:"밸런스",      label:"밸런스",       color:"#fb923c", desc:"고유수용감각 훈련"},
+  {key:"코어",        label:"코어",         color:"#38bdf8", desc:"코어 안정화·강화"},
 ];
 
 const FUNC_BODY_PARTS = [
   // 발~발목
-  "족저근막",
+  "족저근막","발등",
   // 하퇴
   "종아리","슬와근",
   // 대퇴
@@ -96,7 +97,7 @@ const FUNC_BODY_PARTS = [
   // 상체 후면
   "광배","능형근","대원근","견갑 주변",
   // 상체 전면
-  "소흉근","대흉근",
+  "전거근","소흉근","대흉근",
   // 팔
   "전완","이두","삼두",
   // 경부
@@ -120,7 +121,7 @@ function buildPurposeLabel(category, bodyPart) {
   const labelMap = {
     "조직이완":"릴리즈", "가동성":"가동성 개선",
     "안정화":"안정화 훈련", "활성화":"활성화",
-    "움직임교정":"움직임 교정", "호흡":"호흡 패턴 훈련", "밸런스":"밸런스 훈련",
+    "움직임교정":"움직임 교정", "호흡":"호흡 패턴 훈련", "밸런스":"밸런스 훈련", "코어":"코어",
   };
   return `${partStr} ${labelMap[category]||cat.label}`;
 }
@@ -180,6 +181,12 @@ const FUNC_EX_MAP = [
   { keys:["월 슬라이드","wall slide"], category:"가동성", bodyParts:["견갑 주변"], tool:"맨몸" },
   { keys:["캣카우","cat cow","고양이"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
   { keys:["흉추 회전","토라식"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
+  // 코어
+  { keys:["데드버그","dead bug"],        category:"코어", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["플랭크","plank"],             category:"코어", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["사이드 플랭크","side plank"], category:"코어", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["버드독","bird dog"],          category:"코어", bodyParts:["요추"], tool:"맨몸" },
+  { keys:["베어 크롤","bear crawl","베어"], category:"코어", bodyParts:["요추"], tool:"맨몸" },
   // 안정화
   { keys:["버드독","bird dog"], category:"안정화", bodyParts:["요추"], tool:"맨몸" },
   { keys:["데드버그","dead bug"], category:"안정화", bodyParts:["요추"], tool:"맨몸" },
@@ -328,6 +335,8 @@ function groupFuncExercises(funcExList) {
       if (k === "움직임교정") return partStr ? `${partStr} 움직임 교정` : "움직임 교정";
       if (k === "호흡")       return partStr ? `${partStr} 호흡 패턴`    : "호흡 패턴";
       if (k === "밸런스")     return partStr ? `${partStr} 밸런스`       : "밸런스 훈련";
+      if (k === "코어")   return partStr ? `${partStr} 코어`         : "코어 운동";
+  if (k === "코어")       return partStr ? `${partStr} 코어`         : "코어 운동";
       return exs[0]?.movementPurpose || exs[0]?.name || "기능 운동";
     })();
 

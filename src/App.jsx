@@ -203,10 +203,7 @@ const FUNC_EX_MAP = [
 const FUNC_BODY_KEYWORD_MAP = [
   { keys:["종아리","카프"],    body:"종아리" },
   { keys:["슬와근"],           body:"슬와근" },
-<<<<<<< HEAD
   { keys:["대퇴근막장근","tfl","tensor fasciae latae","it밴드","it band","장경인대"], body:"대퇴근막장근" },
-=======
->>>>>>> 136d02547a6bc92285b7656221886e7b48bedb79
   { keys:["햄스트링","대퇴이두"], body:"햄스트링" },
   { keys:["대퇴사두","사두"],  body:"대퇴사두" },
   { keys:["장요근","iliopsoas"], body:"장요근" },

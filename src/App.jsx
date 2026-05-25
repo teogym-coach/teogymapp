@@ -302,28 +302,25 @@ function suggestFuncExPreset(name) {
   return { category, bodyParts, tool };
 }
 
-// 기능 운동을 카테고리별로 그룹핑
-// 반환: [{categoryKey, displayTitle, exercises:[]}]
+// 기능 운동을 카테고리별로 그룹핑 — 입력 순서 기준 유지
 function groupFuncExercises(funcExList) {
-  const ORDER = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스",""];
-  const map = {};
+  // 첫 등장 순서대로 카테고리 키 수집 (중복 제거)
+  const seenKeys = [];
   funcExList.forEach(ex => {
     const key = ex.funcCategory || "";
-    if (!map[key]) map[key] = [];
-    map[key].push(ex);
+    if (!seenKeys.includes(key)) seenKeys.push(key);
   });
-  return ORDER.filter(k => map[k]).map(k => ({
-    categoryKey: k,
-    displayTitle: (() => {
-      // 같은 카테고리 내 부위들을 모아서 제목 생성
-      const exs = map[k];
-      const allParts = [...new Set(
-        exs.flatMap(ex => Array.isArray(ex.funcBodyPart)
-          ? ex.funcBodyPart
-          : (ex.funcBodyPart ? [ex.funcBodyPart] : []))
-      )];
-      const partStr = allParts.join(" + ");
-      // getFuncExDisplayName 규칙 적용
+
+  return seenKeys.map(k => {
+    const exs = funcExList.filter(ex => (ex.funcCategory || "") === k);
+    const allParts = [...new Set(
+      exs.flatMap(ex => Array.isArray(ex.funcBodyPart)
+        ? ex.funcBodyPart
+        : (ex.funcBodyPart ? [ex.funcBodyPart] : []))
+    )];
+    const partStr = allParts.join(" + ");
+
+    const displayTitle = (() => {
       if (k === "조직이완") return partStr ? `${partStr} 릴리즈` : "릴리즈";
       if (k === "가동성")     return partStr ? `${partStr} 가동성 개선`  : "가동성 운동";
       if (k === "안정화")     return partStr ? `${partStr} 안정화`       : "안정화 운동";
@@ -331,11 +328,11 @@ function groupFuncExercises(funcExList) {
       if (k === "움직임교정") return partStr ? `${partStr} 움직임 교정` : "움직임 교정";
       if (k === "호흡")       return partStr ? `${partStr} 호흡 패턴`    : "호흡 패턴";
       if (k === "밸런스")     return partStr ? `${partStr} 밸런스`       : "밸런스 훈련";
-      // 카테고리 없음 — 운동별 개별 목적 사용
       return exs[0]?.movementPurpose || exs[0]?.name || "기능 운동";
-    })(),
-    exercises: map[k],
-  }));
+    })();
+
+    return { categoryKey: k, displayTitle, exercises: exs };
+  });
 }
 
 // 기능운동 세트 수행량 한 줄 요약 (도구 · 이름 · 횟수/시간)

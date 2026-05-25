@@ -2618,95 +2618,124 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
       </div>
 
       {!loading && (() => {
-        // ── 수업 진행 계산 ─────────────────────────────────
-        const currentNo  = sessions.length;
-        const totalReg   = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
-        const remaining  = totalReg > 0 ? Math.max(0, totalReg - currentNo) : null;
+        // ── 데이터 추출 ───────────────────────────────────────
+        // 1. 수업 진행
+        const totalReg  = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
+        const usedCount = sessions.length;
+        const remaining = totalReg > 0 ? Math.max(0, totalReg - usedCount) : null;
 
-        // ── 체중 변화 계산 (세션 bodyWeight 기준) ──────────
-        const weightArr = sessions
-          .filter(s => parseFloat(s.bodyWeight) > 0)
-          .map(s => parseFloat(s.bodyWeight));
-        const firstW = weightArr.length > 0 ? weightArr[0] : null;
-        const lastW  = weightArr.length > 0 ? weightArr[weightArr.length-1] : null;
-        const wDiff  = (firstW && lastW && firstW !== lastW) ? (lastW - firstW) : null;
+        // 2. 체중 변화
+        const wArr  = sessions.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>parseFloat(s.bodyWeight));
+        const wFirst = wArr[0] || null;
+        const wLast  = wArr[wArr.length-1] || null;
+        const wDiff  = (wFirst && wLast && wFirst!==wLast) ? (wLast-wFirst) : null;
 
-        // ── 최근 기능 포인트 ────────────────────────────────
-        // 가장 최근 세션에서 기능 운동의 movementPurpose 또는 getFuncExDisplayName 추출
-        let funcPoint = null;
-        let funcDate  = null;
-        for (let i = sessions.length - 1; i >= 0; i--) {
-          const s = sessions[i];
-          const fe = (s.exercises||[]).find(e => isFuncEx(e));
-          if (fe) {
-            funcPoint = fe.movementPurpose || getFuncExDisplayName(fe);
-            funcDate  = s.date;
-            break;
+        // 3. 최근 통증 부위 (가장 최근 세션의 painRecord)
+        const recentPain = (() => {
+          for (let i=sessions.length-1;i>=0;i--) {
+            const pr = sessions[i].painRecord;
+            if (pr?.before?.part) return pr.before.part;
+            if (pr?.after?.part)  return pr.after.part;
+            const pa = sessions[i].painArea || member.painArea;
+            if (pa) return pa;
           }
-        }
+          return null;
+        })();
 
-        const cardStyle = {
-          background:"#111827",borderRadius:10,padding:"10px 13px",
-          border:"1px solid rgba(255,255,255,0.06)",flex:"1 1 0",minWidth:0,
-        };
-        const bigNum = { fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,color:"#5EEAD4",display:"block",lineHeight:1.2,marginBottom:2 };
-        const sub    = { fontSize:9,color:"#3a3a5a",display:"block",marginTop:2,lineHeight:1.5,wordBreak:"keep-all" };
-        const label  = { fontFamily:"'DM Mono',monospace",fontSize:8,color:"#54546a",display:"block",marginBottom:4,letterSpacing:".06em" };
+        // 4. 컨디션 변화 (최근 3세션 condition 필드)
+        const condSlice = sessions.slice(-3).map(s=>s.condition).filter(Boolean);
+        const condMap = {"매우 좋음":5,"좋음":4,"보통":3,"나쁨":2,"매우 나쁨":1};
+        const condAvg = condSlice.length
+          ? condSlice.reduce((a,c)=>a+(condMap[c]||3),0)/condSlice.length : null;
+        const condLabel = condAvg === null ? null
+          : condAvg >= 4.2 ? "컨디션 양호"
+          : condAvg >= 3.2 ? "회복 중"
+          : condAvg >= 2.2 ? "피로도 높음"
+          : "컨디션 저조";
+        const condColor = condAvg === null ? "#54546a"
+          : condAvg >= 4.2 ? "#22c55e" : condAvg >= 3.2 ? "#5EEAD4" : condAvg >= 2.2 ? "#f59e0b" : "#ef4444";
+
+        // 5. 최근 운동 강도
+        const lastSess = sessions.length > 0 ? sessions[sessions.length-1] : null;
+        const intLabel = lastSess?.intensity || null;
+        const intColor = {
+          "최고 강도":"#ef4444","높음":"#f97316","중강도":"#ffd166","낮음":"#22c55e","매우 낮음":"#5EEAD4"
+        }[intLabel] || "#54546a";
+        const recentVols = sessions.slice(-3).map(s=>s.totalVolume||0).filter(v=>v>0);
+        const volTrend = recentVols.length >= 2
+          ? (recentVols[recentVols.length-1] > recentVols[recentVols.length-2] ? "볼륨 증가" : "볼륨 감소")
+          : null;
+
+        // ── 공통 스타일 ───────────────────────────────────────
+        const card = (extra={}) => ({
+          background:"#0c1523",borderRadius:10,padding:"10px 13px",
+          border:"1px solid rgba(255,255,255,0.07)",
+          display:"flex",flexDirection:"column",justifyContent:"space-between",
+          minHeight:72, ...extra
+        });
+        const lbl = {fontFamily:"'DM Mono',monospace",fontSize:7,color:"#3a4a5a",
+          letterSpacing:".08em",marginBottom:3,display:"block"};
+        const big = (color="#5EEAD4",size=18) => ({
+          fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:size,
+          color,display:"block",lineHeight:1.2,marginBottom:2
+        });
+        const sm = {fontSize:8,color:"#3a4a60",display:"block",lineHeight:1.5};
 
         return (
           <>
-            {/* 태블릿: flex 가로 / 모바일: 2열 wrap */}
             <style>{`
-              @media (min-width:600px){ .hub-stat-grid{ display:flex!important; } }
-              @media (max-width:599px){ .hub-stat-grid{ display:grid!important; grid-template-columns:1fr 1fr; } }
+              .hub-dash { display:flex; gap:8px; margin-bottom:14px; flex-wrap:nowrap; }
+              @media(max-width:540px){ .hub-dash { flex-wrap:wrap; } .hub-dash > * { flex:1 1 calc(50% - 4px)!important; min-width:0!important; } }
             `}</style>
-            <div className="hub-stat-grid" style={{display:"flex",gap:9,marginBottom:14,flexWrap:"wrap"}}>
-              {/* 1. 수업 진행 */}
-              <div style={cardStyle}>
-                <span style={label}>{t("수업 진행","운동 진행")}</span>
-                <span style={bigNum}>
-                  {currentNo}
-                  <span style={{fontSize:11,fontWeight:400,color:"#54546a"}}>
-                    {totalReg > 0 ? ` / ${totalReg}회` : "회"}
+            <div className="hub-dash">
+              {/* 1. 수업 진행 — narrow */}
+              <div style={card({flex:"0 0 auto",minWidth:70})}>
+                <span style={lbl}>{t("수업진행","운동진행")}</span>
+                <span style={big("#5EEAD4",22)}>
+                  {usedCount}
+                  <span style={{fontSize:10,fontWeight:500,color:"#3a4a5a"}}>{totalReg>0?` / ${totalReg}`:""}</span>
+                </span>
+                <span style={sm}>{remaining!==null ? `${remaining}회 남음` : "—회"}</span>
+              </div>
+
+              {/* 2. 체중 변화 — medium */}
+              <div style={card({flex:"1 1 90px"})}>
+                <span style={lbl}>체중 변화</span>
+                {wDiff!==null ? <>
+                  <span style={big(wDiff<0?"#5EEAD4":"#f97316",18)}>
+                    {wDiff>0?"+":""}{wDiff.toFixed(1)}<span style={{fontSize:10,fontWeight:400}}>kg</span>
                   </span>
-                </span>
-                <span style={sub}>
-                  {remaining !== null
-                    ? `${remaining}회 남음`
-                    : totalReg > 0 ? `총 ${totalReg}회 등록` : "총 등록 —회"}
-                </span>
+                  <span style={sm}>{wFirst}→{wLast}kg</span>
+                </> : wLast ? <>
+                  <span style={big("#fff",18)}>{wLast}<span style={{fontSize:10,fontWeight:400}}>kg</span></span>
+                  <span style={sm}>변화 기록 부족</span>
+                </> : <>
+                  <span style={big("#3a4a5a",16)}>—</span>
+                  <span style={sm}>기록 없음</span>
+                </>}
               </div>
 
-              {/* 2. 체중 변화 */}
-              <div style={cardStyle}>
-                <span style={label}>체중 변화</span>
-                {wDiff !== null ? (
-                  <>
-                    <span style={{...bigNum, color: wDiff < 0 ? "#5EEAD4" : "#f97316"}}>
-                      {wDiff > 0 ? "+" : ""}{wDiff.toFixed(1)}kg
-                    </span>
-                    <span style={sub}>{firstW} → {lastW}kg</span>
-                  </>
-                ) : lastW ? (
-                  <>
-                    <span style={{...bigNum, fontSize:16}}>{lastW}kg</span>
-                    <span style={sub}>변화 기록 부족</span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{...bigNum, fontSize:14, color:"#3a3a5a"}}>—</span>
-                    <span style={sub}>체중 기록 없음</span>
-                  </>
-                )}
+              {/* 3. 최근 통증 부위 — wide */}
+              <div style={card({flex:"1.5 1 110px",borderColor:recentPain?"rgba(239,68,68,.2)":"rgba(255,255,255,0.07)",background:recentPain?"rgba(239,68,68,.04)":"#0c1523"})}>
+                <span style={{...lbl,color:recentPain?"#f87171":"#3a4a5a"}}>통증 부위</span>
+                <span style={big(recentPain?"#f87171":"#3a4a5a",13)}>
+                  {recentPain || "기록 없음"}
+                </span>
+                <span style={sm}>{recentPain?"최근 기록 기준":""}</span>
               </div>
 
-              {/* 3. 최근 기능 포인트 */}
-              <div style={{...cardStyle, border:"1px solid rgba(94,234,212,.12)", background:"rgba(94,234,212,.02)"}}>
-                <span style={{...label, color:"#2DD4BF"}}>최근 기능 포인트</span>
-                <span style={{...bigNum, fontSize:13, color:"#a7f3d0", lineHeight:1.4}}>
-                  {funcPoint || "기능 기록 없음"}
-                </span>
-                <span style={sub}>{funcDate || ""}</span>
+              {/* 4. 컨디션 변화 — medium */}
+              <div style={card({flex:"1 1 90px"})}>
+                <span style={lbl}>컨디션</span>
+                <span style={big(condColor,13)}>{condLabel||"—"}</span>
+                <span style={sm}>{condSlice.length>0?`최근 ${condSlice.length}회 기준`:""}</span>
+              </div>
+
+              {/* 5. 최근 운동 강도 — medium */}
+              <div style={card({flex:"1 1 90px"})}>
+                <span style={lbl}>최근 강도</span>
+                <span style={big(intColor,13)}>{intLabel||"—"}</span>
+                <span style={{...sm,color:volTrend?"#5EEAD4":"#3a4a5a"}}>{volTrend||lastSess?.date||""}</span>
               </div>
             </div>
           </>

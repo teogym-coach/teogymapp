@@ -219,7 +219,7 @@ const FUNC_BODY_KEYWORD_MAP = [
   { keys:["골반","pelvic"],    body:"골반" },
   { keys:["요추","허리","lumbar"], body:"요추" },
   { keys:["흉추","흉추","thoracic"], body:"흉추" },
-  { keys:["광배","latissimus","랫"], body:"광배" },
+  { keys:["광배","latissimus","latissimus dorsi"], body:"광배" },
   { keys:["능형근","rhomboid"], body:"능형근" },
   { keys:["대원근"],           body:"대원근" },
   { keys:["견갑","어깨뼈","scapula"], body:"견갑 주변" },
@@ -264,6 +264,20 @@ function suggestFuncExPreset(name) {
   if (!name || name.trim().length < 2) return null;
   const n = name.toLowerCase();
 
+  // ── 웨이트 운동 차단 목록 (기능 운동으로 절대 분류하지 않음) ──────────
+  const WEIGHT_BLOCKLIST = [
+    "랫풀다운","랫 풀다운","lat pulldown","lat pull","풀다운","pulldown",
+    "벤치프레스","bench press","스쿼트","squat","데드리프트","deadlift",
+    "오버헤드","overhead","숄더프레스","shoulder press",
+    "레그프레스","leg press","레그컬","leg curl","레그익스텐션",
+    "바벨","barbell","덤벨 컬","dumbbell curl","트라이셉","tricep",
+    "케이블 로우","cable row","시티드 로우","seated row",
+    "인클라인","incline","딥스","dips","체스트플라이","chest fly",
+    "풀업","친업","chin up","pull up","pullup",
+    "로우","row","컬","curl","프레스","press",
+  ];
+  if (WEIGHT_BLOCKLIST.some(w => n.includes(w.toLowerCase()))) return null;
+
   // 1순위: 개인 학습 데이터
   const learned = getLearnedFuncPreset(name);
   if (learned) return learned;
@@ -288,7 +302,7 @@ function suggestFuncExPreset(name) {
     }
   }
 
-  // 3순위: 키워드 추론
+  // 3순위: 키워드 추론 (카테고리가 명확할 때만 적용)
   let category = null, tool = null, bodyParts = [];
   // 도구 키워드 → 릴리즈
   if (n.includes("폼롤러")) { category="조직이완"; tool="폼롤러"; }
@@ -296,16 +310,19 @@ function suggestFuncExPreset(name) {
   else if (n.includes("땅콩볼"))     { category="조직이완"; tool="땅콩볼"; }
   else if (n.includes("마사지 스틱")||n.includes("마사지스틱")) { category="조직이완"; tool="마사지 스틱"; }
   else if (n.includes("밴드 워크")||n.includes("밴드워크")) { category="활성화"; tool="밴드"; }
-  else if (n.includes("밴드"))       { tool="밴드"; }
+  // 명확한 기능 운동 키워드만 카테고리 추론
   else if (n.includes("호흡")||n.includes("브리딩")) { category="호흡"; }
-  // 부위 키워드 추출
+  else if (n.includes("가동성")||n.includes("mobility")) { category="가동성"; }
+  else if (n.includes("안정화")||n.includes("stabilize")) { category="안정화"; }
+  else if (n.includes("활성화")||n.includes("activation")) { category="활성화"; }
+  else if (n.includes("밸런스")||n.includes("balance")) { category="밸런스"; }
+  else if (n.includes("코어")||n.includes("core")) { category="코어"; }
+  // 카테고리 없으면 기능 운동이 아닌 것으로 판단 → null 반환
+  if (!category) return null;
+  // 부위 키워드 추출 (카테고리가 확정된 경우에만)
   for (const bm of FUNC_BODY_KEYWORD_MAP) {
     if (bm.keys.some(k=>n.includes(k.toLowerCase()))) bodyParts.push(bm.body);
   }
-  // 카테고리 추론
-  if (!category && bodyParts.length > 0 && !tool) category="가동성";
-  if (!category && tool && ["폼롤러","라크로스볼","땅콩볼","마사지 스틱"].includes(tool)) category="조직이완";
-  if (!category) return null;
   return { category, bodyParts, tool };
 }
 

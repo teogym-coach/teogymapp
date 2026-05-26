@@ -2911,8 +2911,19 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [intensity,      setIntensity]      = useState(editData?.intensity      || "중강도");
   const [condition,      setCondition]      = useState(editData?.condition      || "상");
   const [exercises,      setExercises]      = useState(() => {
-    const raw = editData?.exercises || [mkEx()];
-    return raw.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+    if (editData?.exercises) {
+      // 기존 저장 기록 열기: 저장된 내용 그대로
+      return editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+    }
+    // 새 기록: 기능 카드 2개로 시작
+    const mkFuncEx = () => ({
+      ...mkEx(),
+      equipment: "기능",
+      muscleTop: "기능",
+      muscleSub: "기능",
+      sets: [{ weight:"", reps:"", durationSec:"", volume:0, recordType:"function" }],
+    });
+    return [mkFuncEx(), mkFuncEx()];
   });
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
@@ -3277,7 +3288,7 @@ function updateEx(ei, key, val) {
       return u;
     }));
   }
-  function addEx() { setExercises(prev => [...prev, mkEx()]); }
+  function addEx() { setExercises(prev => [...prev, mkEx()]); } // 3번째~: 웨이트 기본값(바벨/가슴)
   function removeEx(ei) { setExercises(prev => prev.filter((_,i) => i!==ei)); }
   function updateSet(ei, si, key, val) {
     setExercises(prev => prev.map((ex,i) => {

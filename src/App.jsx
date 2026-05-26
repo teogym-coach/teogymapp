@@ -2693,16 +2693,42 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
           ? (recentVols[recentVols.length-1] > recentVols[recentVols.length-2] ? "볼륨 증가" : "볼륨 감소")
           : null;
 
-        // 6. RPE 평균 (최근 5세션)
+        // 6. RPE 평균 — RPE 7 이상 세트(실제 훈련 세트)만 계산
         const rpeArr = sessions.slice(-5).flatMap(s =>
-          (s.exercises||[]).flatMap(e => (e.sets||[]).map(r => parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>0))
+          (s.exercises||[]).flatMap(e =>
+            (e.sets||[])
+              .map(r => parseFloat(r.rpe))
+              .filter(v => !isNaN(v) && v >= 7) // 워밍업(RPE<7) 제외
+          )
         );
-        const rpeAvg = rpeArr.length > 0 ? (rpeArr.reduce((a,b)=>a+b,0)/rpeArr.length).toFixed(1) : null;
+        const rpeAvg = rpeArr.length > 0
+          ? (rpeArr.reduce((a,b)=>a+b,0) / rpeArr.length).toFixed(1)
+          : null;
         const rpeColor = rpeAvg === null ? "#54546a"
-          : parseFloat(rpeAvg) >= 8.5 ? "#ef4444"
-          : parseFloat(rpeAvg) >= 7 ? "#f97316"
-          : parseFloat(rpeAvg) >= 5 ? "#5EEAD4"
-          : "#22c55e";
+          : parseFloat(rpeAvg) >= 9   ? "#ef4444"
+          : parseFloat(rpeAvg) >= 8   ? "#f97316"
+          : parseFloat(rpeAvg) >= 7   ? "#ffd166"
+          : "#5EEAD4";
+
+        // 7. 피로 누적 자동 해석
+        const fatigueSignal = (() => {
+          if (sessions.length < 3) return null;
+          const recent = sessions.slice(-3);
+          // 컨디션 하 2회 이상
+          const lowCond = recent.filter(s => s.condition === "하").length;
+          if (lowCond >= 2) return { text:"피로 누적 가능성", color:"#ef4444" };
+          // 최근 볼륨 2회 연속 감소
+          const vols = recent.map(s=>s.totalVolume||0);
+          if (vols[2] < vols[1] && vols[1] < vols[0]) return { text:"회복 우선 권장", color:"#f97316" };
+          // RPE 상승 추세 (최근 2세션)
+          const rpeRecent = sessions.slice(-2).flatMap(s =>
+            (s.exercises||[]).flatMap(e => (e.sets||[]).map(r=>parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>=7))
+          );
+          if (rpeRecent.length >= 2 && rpeRecent[rpeRecent.length-1] > 8.5) return { text:"강도 조절 필요", color:"#ffd166" };
+          // 볼륨 증가 추세
+          if (vols[2] > vols[1] && vols[1] > vols[0]) return { text:"적응도 향상 가능성", color:"#22c55e" };
+          return null;
+        })();
 
         // ── 공통 스타일 ───────────────────────────────────────
         const card = (extra={}) => ({
@@ -2780,7 +2806,9 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
               <div style={card({flex:"0 0 auto",minWidth:72})}>
                 <span style={lbl}>평균 RPE</span>
                 <span style={big(rpeColor,20)}>{rpeAvg||"—"}</span>
-                <span style={sm}>최근 5회</span>
+                <span style={{...(sm), color: fatigueSignal?.color||"#3a4a5a"}}>
+                  {fatigueSignal?.text || "최근 5회 (RPE7↑)"}
+                </span>
               </div>
             </div>
           </>
@@ -2874,6 +2902,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
+  // 대표님 전용 내부 메모 (회원 카드에 절대 미노출)
+  const [trainerOnlyNote, setTrainerOnlyNote] = useState(editData?.trainerOnlyNote || "");
   // 대표님 전용: 운동 시작/종료 시간
   const [workoutStartTime, setWorkoutStartTime] = useState(editData?.workoutStartTime || "");
   const [workoutEndTime,   setWorkoutEndTime]   = useState(editData?.workoutEndTime   || "");
@@ -3291,7 +3321,7 @@ function updateEx(ei, key, val) {
       selectedTypes: selectedTypes.length ? selectedTypes : ["기타"],
       intensity, condition,
       exercises: cleanExercises,
-      stretchingNotes:stretchNotes, nextPlan, trainerComment,
+      stretchingNotes:stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
       workoutStartTime, workoutEndTime,
       referenceVideo:refVideo, bodyWeight, calories, dietNote,
       romData, painData, painRecord, totalVolume:totalVol,
@@ -4269,6 +4299,28 @@ function updateEx(ei, key, val) {
         </div>
       </Card>
 
+      {/* 대표님 전용 내부 메모 (회원 카드 미노출) */}
+      <Card style={{marginTop:9,border:"1px solid rgba(129,140,248,.15)",background:"rgba(129,140,248,.03)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7}}>
+          <Mo c="#818cf8" s={10} style={{fontWeight:700}}>🔒 내부 메모</Mo>
+          <Mo c="#3a3a5a" s={8}>(대표님 전용 · 회원 카드 미노출)</Mo>
+        </div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:7}}>
+          {["수면 부족","어깨 긴장↑","집중도 저하","호흡 빠름","회복 지연","자세 불안정","긴장도 높음","평소보다 좋음"].map(tag=>(
+            <button key={tag} onClick={()=>setTrainerOnlyNote(n=>(n?n+", ":"")+tag)}
+              style={{fontSize:9,padding:"2px 8px",borderRadius:4,cursor:"pointer",
+                border:"1px solid rgba(129,140,248,.2)",background:"rgba(129,140,248,.06)",color:"#a5b4fc"}}>
+              + {tag}
+            </button>
+          ))}
+        </div>
+        <textarea value={trainerOnlyNote} onChange={e=>setTrainerOnlyNote(e.target.value)}
+          placeholder="대표님만 보이는 내부 메모..."
+          style={{fontSize:14,padding:"8px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",
+            background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.2)",
+            color:"#c7d2fe",minHeight:60,resize:"vertical"}} />
+      </Card>
+
       <Card title="추가 기록" style={{marginTop:11}}>
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
           <TextArea label="스트레칭 / 마무리" value={stretchNotes}   onChange={setStretchNotes}   placeholder="마무리 스트레칭" />
@@ -4523,6 +4575,14 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         </div>
         {bodyWeight && <div style={{background:"#111827",borderRadius:8,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><Mo c="#54546a" s={10}>체중</Mo><Mo c="#ffd166" s={14}>{bodyWeight} kg</Mo></div>}
         {trainerComment && <div style={{background:"rgba(0,229,160,.05)",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}><Mo c="#5EEAD4" s={8} style={{marginBottom:5,display:"block"}}>TRAINER COMMENT</Mo><div style={{fontSize:12,color:"#ddddf0",lineHeight:1.65}}>{trainerComment}</div></div>}
+        {/* 내부 메모 — 트레이너 전용, 회원 공유 카드 미노출 */}
+        {!cardMode && s.trainerOnlyNote && (
+          <div style={{background:"rgba(129,140,248,.06)",borderRadius:8,padding:"9px 12px",
+            border:"1px solid rgba(129,140,248,.2)",marginBottom:10}}>
+            <Mo c="#818cf8" s={8} style={{marginBottom:4,display:"block"}}>🔒 내부 메모</Mo>
+            <div style={{fontSize:11,color:"#a5b4fc",lineHeight:1.65}}>{s.trainerOnlyNote}</div>
+          </div>
+        )}
         <div style={{marginTop:8,borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <Mo c="#1e2a3a" s={8}>TEO GYM</Mo>
           <Mo c="#5EEAD4" s={9}>{trainerName}{gymName?" · "+gymName:""}</Mo>

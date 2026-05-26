@@ -2681,16 +2681,28 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
         const condColor = condAvg === null ? "#54546a"
           : condAvg >= 4.2 ? "#22c55e" : condAvg >= 3.2 ? "#5EEAD4" : condAvg >= 2.2 ? "#f59e0b" : "#ef4444";
 
-        // 5. 최근 운동 강도
+        // 5. 최근 운동 강도 + RPE
         const lastSess = sessions.length > 0 ? sessions[sessions.length-1] : null;
         const intLabel = lastSess?.intensity || null;
         const intColor = {
-          "최고 강도":"#ef4444","높음":"#f97316","중강도":"#ffd166","낮음":"#22c55e","매우 낮음":"#5EEAD4"
+          "최고 강도":"#ef4444","높음":"#f97316","고강도":"#ef4444",
+          "중강도":"#ffd166","낮음":"#22c55e","저강도":"#22c55e","매우 낮음":"#5EEAD4"
         }[intLabel] || "#54546a";
         const recentVols = sessions.slice(-3).map(s=>s.totalVolume||0).filter(v=>v>0);
         const volTrend = recentVols.length >= 2
           ? (recentVols[recentVols.length-1] > recentVols[recentVols.length-2] ? "볼륨 증가" : "볼륨 감소")
           : null;
+
+        // 6. RPE 평균 (최근 5세션)
+        const rpeArr = sessions.slice(-5).flatMap(s =>
+          (s.exercises||[]).flatMap(e => (e.sets||[]).map(r => parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>0))
+        );
+        const rpeAvg = rpeArr.length > 0 ? (rpeArr.reduce((a,b)=>a+b,0)/rpeArr.length).toFixed(1) : null;
+        const rpeColor = rpeAvg === null ? "#54546a"
+          : parseFloat(rpeAvg) >= 8.5 ? "#ef4444"
+          : parseFloat(rpeAvg) >= 7 ? "#f97316"
+          : parseFloat(rpeAvg) >= 5 ? "#5EEAD4"
+          : "#22c55e";
 
         // ── 공통 스타일 ───────────────────────────────────────
         const card = (extra={}) => ({
@@ -2762,6 +2774,13 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
                 <span style={lbl}>최근 강도</span>
                 <span style={big(intColor,13)}>{intLabel||"—"}</span>
                 <span style={{...sm,color:volTrend?"#5EEAD4":"#3a4a5a"}}>{volTrend||lastSess?.date||""}</span>
+              </div>
+
+              {/* 6. RPE 평균 — narrow */}
+              <div style={card({flex:"0 0 auto",minWidth:72})}>
+                <span style={lbl}>평균 RPE</span>
+                <span style={big(rpeColor,20)}>{rpeAvg||"—"}</span>
+                <span style={sm}>최근 5회</span>
               </div>
             </div>
           </>
@@ -4555,8 +4574,38 @@ function ExNameList({ exercises }) {
 }
 
 function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) {
-  const [reportSession, setReportSession] = useState(null); // 리포트 모달용
-  const [cardMode, setCardMode] = useState("simple"); // simple | detail
+  const [reportSession, setReportSession] = useState(null);
+  const [cardMode, setCardMode] = useState("simple");
+  const [sortMode, setSortMode] = useState("recent");   // recent | part | no
+  const [filterPart, setFilterPart] = useState(null);   // 부위별 선택값
+
+  // 정렬/필터 처리
+  const sortedSessions = (() => {
+    let list = [...sessions];
+    if (sortMode === "recent") {
+      // 최근 수정순: updatedAt 있으면 우선, 없으면 date 기준 역순
+      list.sort((a,b)=>{
+        const ta = a.updatedAt || a.date || "";
+        const tb = b.updatedAt || b.date || "";
+        return tb.localeCompare(ta);
+      });
+    } else if (sortMode === "part") {
+      // 부위별: filterPart 선택 시 해당 부위 포함 세션만, 날짜순 역순
+      if (filterPart) {
+        list = list.filter(s => (s.exercises||[]).some(e => e.muscleTop === filterPart));
+      }
+      list.sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    } else if (sortMode === "no") {
+      // 회차별: sessionNo 오름차순
+      list.sort((a,b)=>(a.sessionNo||0)-(b.sessionNo||0));
+    }
+    return list;
+  })();
+
+  // 부위별 모드에서 등장한 부위 목록
+  const availableParts = sortMode === "part"
+    ? [...new Set(sessions.flatMap(s=>(s.exercises||[]).map(e=>e.muscleTop).filter(Boolean)))]
+    : [];
 
   if (reportSession) {
     return (
@@ -4575,10 +4624,44 @@ function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) 
   return (
     <div>
       <SH title={isOwner(member)?"📅 운동일지":"📅 히스토리"} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+      {/* 정렬 탭 */}
+      <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
+        {[["recent","최근수정"],["part","부위별"],["no","회차별"]].map(([m,l])=>(
+          <button key={m} onClick={()=>{setSortMode(m);setFilterPart(null);}}
+            style={{padding:"5px 11px",borderRadius:6,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
+              borderColor:sortMode===m?"#5EEAD4":"rgba(255,255,255,0.08)",
+              background:sortMode===m?"rgba(94,234,212,.12)":"transparent",
+              color:sortMode===m?"#5EEAD4":"#54546a"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* 부위별 필터 */}
+      {sortMode === "part" && availableParts.length > 0 && (
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+          <button onClick={()=>setFilterPart(null)}
+            style={{padding:"3px 9px",borderRadius:5,border:"1px solid",fontSize:9,cursor:"pointer",
+              borderColor:!filterPart?"#5EEAD4":"rgba(255,255,255,0.07)",
+              background:!filterPart?"rgba(94,234,212,.12)":"transparent",
+              color:!filterPart?"#5EEAD4":"#64748b"}}>전체</button>
+          {availableParts.map(p=>(
+            <button key={p} onClick={()=>setFilterPart(p===filterPart?null:p)}
+              style={{padding:"3px 9px",borderRadius:5,border:"1px solid",fontSize:9,cursor:"pointer",
+                borderColor:filterPart===p?mColor(p):"rgba(255,255,255,0.07)",
+                background:filterPart===p?mColor(p)+"22":"transparent",
+                color:filterPart===p?mColor(p):"#64748b"}}>
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+
       <Mo c="#54546a" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</Mo>
-      {loading ? <Skel n={5} /> : sessions.length===0 ? <Emp msg={isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."} /> : (
+      {loading ? <Skel n={5} /> : sortedSessions.length===0 ? <Emp msg={isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."} /> : (
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
-          {[...sessions].reverse().map((s,i) => {
+          {sortedSessions.map((s,i) => {
             const typeLbl = formatTypes(s.selectedTypes || s.type);
             const ic = IC[s.intensity] || "#ffd166";
             const cc = CC[s.condition] || CC["상"];

@@ -4575,14 +4575,6 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         </div>
         {bodyWeight && <div style={{background:"#111827",borderRadius:8,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><Mo c="#54546a" s={10}>체중</Mo><Mo c="#ffd166" s={14}>{bodyWeight} kg</Mo></div>}
         {trainerComment && <div style={{background:"rgba(0,229,160,.05)",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}><Mo c="#5EEAD4" s={8} style={{marginBottom:5,display:"block"}}>TRAINER COMMENT</Mo><div style={{fontSize:12,color:"#ddddf0",lineHeight:1.65}}>{trainerComment}</div></div>}
-        {/* 내부 메모 — 트레이너 전용, 회원 공유 카드 미노출 */}
-        {!cardMode && s.trainerOnlyNote && (
-          <div style={{background:"rgba(129,140,248,.06)",borderRadius:8,padding:"9px 12px",
-            border:"1px solid rgba(129,140,248,.2)",marginBottom:10}}>
-            <Mo c="#818cf8" s={8} style={{marginBottom:4,display:"block"}}>🔒 내부 메모</Mo>
-            <div style={{fontSize:11,color:"#a5b4fc",lineHeight:1.65}}>{s.trainerOnlyNote}</div>
-          </div>
-        )}
         <div style={{marginTop:8,borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <Mo c="#1e2a3a" s={8}>TEO GYM</Mo>
           <Mo c="#5EEAD4" s={9}>{trainerName}{gymName?" · "+gymName:""}</Mo>
@@ -4787,6 +4779,14 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
                     paddingTop:6,fontStyle:"italic",overflow:"hidden",
                     display:"-webkit-box",WebkitLineClamp:1,WebkitBoxOrient:"vertical"}}>
                     {s.trainerComment}
+                  </div>
+                )}
+                {/* 내부 메모 — 트레이너 전용 */}
+                {!cardMode && s.trainerOnlyNote && (
+                  <div style={{marginTop:6,padding:"6px 9px",borderRadius:6,
+                    background:"rgba(129,140,248,.07)",border:"1px solid rgba(129,140,248,.2)"}}>
+                    <Mo c="#818cf8" s={7} style={{display:"block",marginBottom:2,fontWeight:700}}>🔒 내부 메모</Mo>
+                    <Mo c="#a5b4fc" s={9}>{s.trainerOnlyNote}</Mo>
                   </div>
                 )}
                 {/* 통증 기록 요약 — 기록 있을 때만 표시 */}

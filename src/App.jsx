@@ -4573,38 +4573,40 @@ function ExNameList({ exercises }) {
   );
 }
 
-function HistoryScreen({ sessions, loading, onBack, onEdit, onDelete, member }) {
+function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelete, member }) {
+  const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   const [reportSession, setReportSession] = useState(null);
   const [cardMode, setCardMode] = useState("simple");
-  const [sortMode, setSortMode] = useState("recent");   // recent | part | no
-  const [filterPart, setFilterPart] = useState(null);   // 부위별 선택값
+  const [sortMode, setSortMode] = useState("recent");
+  const [filterPart, setFilterPart] = useState(null);
 
-  // 정렬/필터 처리
+  // 정렬/필터 — sessions 안전 처리
   const sortedSessions = (() => {
-    let list = [...sessions];
-    if (sortMode === "recent") {
-      // 최근 수정순: updatedAt 있으면 우선, 없으면 date 기준 역순
-      list.sort((a,b)=>{
-        const ta = a.updatedAt || a.date || "";
-        const tb = b.updatedAt || b.date || "";
-        return tb.localeCompare(ta);
-      });
-    } else if (sortMode === "part") {
-      // 부위별: filterPart 선택 시 해당 부위 포함 세션만, 날짜순 역순
-      if (filterPart) {
-        list = list.filter(s => (s.exercises||[]).some(e => e.muscleTop === filterPart));
+    try {
+      let list = [...sessions];
+      if (sortMode === "recent") {
+        list.sort((a,b)=>{
+          const ta = (a&&(a.updatedAt||a.date)) || "";
+          const tb = (b&&(b.updatedAt||b.date)) || "";
+          return String(tb).localeCompare(String(ta));
+        });
+      } else if (sortMode === "part") {
+        if (filterPart) {
+          list = list.filter(s => Array.isArray(s.exercises) && s.exercises.some(e => e&&e.muscleTop === filterPart));
+        }
+        list.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+      } else if (sortMode === "no") {
+        list.sort((a,b)=>(Number(a.sessionNo)||0)-(Number(b.sessionNo)||0));
       }
-      list.sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-    } else if (sortMode === "no") {
-      // 회차별: sessionNo 오름차순
-      list.sort((a,b)=>(a.sessionNo||0)-(b.sessionNo||0));
+      return list;
+    } catch(e) {
+      console.error("[HistoryScreen] sort error:", e);
+      return [...sessions];
     }
-    return list;
   })();
 
-  // 부위별 모드에서 등장한 부위 목록
   const availableParts = sortMode === "part"
-    ? [...new Set(sessions.flatMap(s=>(s.exercises||[]).map(e=>e.muscleTop).filter(Boolean)))]
+    ? [...new Set(sessions.flatMap(s=>Array.isArray(s.exercises)?s.exercises.map(e=>e&&e.muscleTop).filter(Boolean):[]))]
     : [];
 
   if (reportSession) {

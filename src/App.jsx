@@ -4638,8 +4638,8 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
       let list = [...sessions];
       if (sortMode === "recent") {
         list.sort((a,b)=>{
-          const ta = (a&&(a.updatedAt||a.date)) || "";
-          const tb = (b&&(b.updatedAt||b.date)) || "";
+          const ta = (a&&(a.updatedAt||a.createdAt||a.date)) || "";
+          const tb = (b&&(b.updatedAt||b.createdAt||b.date)) || "";
           return String(tb).localeCompare(String(ta));
         });
       } else if (sortMode === "part") {
@@ -4648,7 +4648,7 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
         }
         list.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
       } else if (sortMode === "no") {
-        list.sort((a,b)=>(Number(a.sessionNo)||0)-(Number(b.sessionNo)||0));
+        list.sort((a,b)=>(Number(b.sessionNo)||0)-(Number(a.sessionNo)||0));
       }
       return list;
     } catch(e) {

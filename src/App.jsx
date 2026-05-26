@@ -1182,8 +1182,14 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     const ss = (sessionsMap[m.id] || []);
     const sorted = [...ss].sort((a,b) => (b.date||"").localeCompare(a.date||""));
     const last   = sorted[0];
-    // members 문서의 lastSession 우선, 없으면 sessionsMap에서 계산
-    const lastDate = m.lastSessionDate || last?.date || null;
+    // 오늘 날짜 세션 직접 탐색 (Firestore 메타 캐시보다 우선)
+    const todaySession = ss.find(s => {
+      const d = s.date || s.sessionDate || s.createdAt?.split?.("T")?.[0] || "";
+      return d === today;
+    });
+    // lastDate: 오늘 세션이 있으면 today, 없으면 기존 메타 or 최신 세션 날짜
+    const lastDate = todaySession ? today
+      : (m.lastSessionDate || last?.date || null);
     const lastMuscle = m.lastSessionParts?.length
       ? m.lastSessionParts.join("·")
       : last
@@ -1230,7 +1236,16 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     if (filter === "all")     return true;
     // 아래 필터는 active/paused만 (종료 회원 제외, 검색 시 포함)
     if (!isSearching && status === "ended") return false;
-    if (filter === "today")   return meta.lastDate === today;
+    if (filter === "today") {
+      // 1. meta.lastDate === today (getMemberMeta에서 이미 오늘 세션 반영됨)
+      if (meta.lastDate === today) return true;
+      // 2. sessionsMap에서 직접 오늘 날짜 세션 탐색 (방어적 이중 체크)
+      const ss = sessionsMap[m.id] || [];
+      return ss.some(s => {
+        const d = s.date || s.sessionDate || s.createdAt?.split?.("T")?.[0] || "";
+        return d === today;
+      });
+    }
     if (filter === "7days")   return meta.daysSince !== null && meta.daysSince > 7;
     if (filter === "14days")  return meta.daysSince !== null && meta.daysSince > 14;
     if (filter === "diet")    return (m.goal||"").includes("다이어트") || (m.goal||"").includes("감량");

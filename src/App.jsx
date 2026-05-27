@@ -9509,7 +9509,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
     lines.push(`회원명: ${member.name}`);
     lines.push(`과긴장/타이트 부위: ${tightMuscles.join(", ")||"없음"}`);
     lines.push(`약화/기능저하 부위: ${weakMuscles.join(", ")||"없음"}`);
-    lines.push(`VAS 통증 점수: ${vasScore}/10`);
+    lines.push(`통증 기록: ${(painList&&painList.length>0)?painList.map(p=>p.part+(p.side&&p.side!=="중앙"?" "+p.side:"")+" VAS"+p.vas).join(", "):"없음"}`);
     lines.push(`기타 평가: ${summary||"없음"}\n`);
     lines.push("아래 흐름으로 교정 중심 루틴을 구성해주세요:");
     lines.push("1. 교정/릴리즈 단계 (타이트 부위 위주)");
@@ -9824,7 +9824,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
               <Mo c="#ddddf0" s={11} style={{display:"block",marginBottom:5,fontWeight:700}}>{item.label}</Mo>
               <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
                 {item.opts.map(opt=>{const active=(posture[item.key]||[]).includes(opt);return(
-                  <button key={opt} onClick={()=>togglePosture(item.key,opt)}
+                  <button key={opt} onClick={()=>togglePostureLR(item.key,"B",opt)}
                     style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                       borderColor:active?"#ffd166":"rgba(255,255,255,0.08)",background:active?"rgba(255,209,102,.15)":"transparent",
                       color:active?"#ffd166":"#54546a",fontSize:11,fontWeight:700}}>{opt}</button>
@@ -9844,7 +9844,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 <Mo c="#ddddf0" s={10} style={{display:"block",marginBottom:4,fontWeight:600}}>{item.label}</Mo>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   {item.opts.map(opt=>{const active=mobility[item.key]===opt;const col=opt==="제한"||opt==="제한 있음"||opt==="약함"?"#ff9f43":opt==="강함"||opt==="양호"?"#5EEAD4":"#ffd166";return(
-                    <button key={opt} onClick={()=>setMobilityVal(item.key,opt)}
+                    <button key={opt} onClick={()=>setMobilityLR(item.key,"B",opt)}
                       style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                         borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
                         color:active?col:"#54546a",fontSize:11,fontWeight:700}}>{opt}</button>
@@ -9860,7 +9860,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 <Mo c="#ddddf0" s={10} style={{display:"block",marginBottom:4,fontWeight:600}}>{item.label}</Mo>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   {item.opts.map(opt=>{const active=mobility[item.key]===opt;const col=opt==="있음"||opt.includes("측")||opt.includes("전반")?"#ff9f43":"#5EEAD4";return(
-                    <button key={opt} onClick={()=>setMobilityVal(item.key,opt)}
+                    <button key={opt} onClick={()=>setMobilityLR(item.key,"B",opt)}
                       style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                         borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
                         color:active?col:"#54546a",fontSize:11,fontWeight:700}}>{opt}</button>
@@ -9876,7 +9876,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 <Mo c="#ddddf0" s={10} style={{display:"block",marginBottom:4,fontWeight:600}}>{item.label}</Mo>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   {item.opts.map(opt=>{const active=mobility[item.key]===opt;const col=opt==="제한"||opt==="있음"||opt.includes("측")?"#ff9f43":"#5EEAD4";return(
-                    <button key={opt} onClick={()=>setMobilityVal(item.key,opt)}
+                    <button key={opt} onClick={()=>setMobilityLR(item.key,"B",opt)}
                       style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                         borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
                         color:active?col:"#54546a",fontSize:11,fontWeight:700}}>{opt}</button>

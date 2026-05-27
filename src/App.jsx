@@ -9841,17 +9841,6 @@ function AssessmentScreen({ member, onBack, showToast }) {
             </div>
           ))}
         </Card>
-      )} style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                {item.opts.map(opt=>{const active=(posture[item.key]||[]).includes(opt);return(
-                  <button key={opt} onClick={()=>togglePostureLR(item.key,"B",opt)}
-                    style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
-                      borderColor:active?"#ffd166":"rgba(255,255,255,0.08)",background:active?"rgba(255,209,102,.15)":"transparent",
-                      color:active?"#ffd166":"#54546a",fontSize:11,fontWeight:700}}>{opt}</button>
-                );})}
-              </div>
-            </div>
-          ))}
-        </Card>
       )}
 
       {/* ─── 기능 탭 ─── */}
@@ -9878,11 +9867,11 @@ function AssessmentScreen({ member, onBack, showToast }) {
           </Card>
 
           <Card title="💪 팔꿈치 평가" style={{marginBottom:11}}>
-            {MOBILITY_ITEMS.filter(item=>item.key.includes("elbow")).map(item=>(
+            {(Array.isArray(MOBILITY_ITEMS)?MOBILITY_ITEMS:[]).filter(item=>item.key.includes("elbow")).map(item=>(
               <div key={item.key} style={{marginBottom:10}}>
                 <Mo c="#ddddf0" s={10} style={{display:"block",marginBottom:4,fontWeight:600}}>{item.label}</Mo>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {item.opts.map(opt=>{const active=mobility[item.key]===opt;const col=opt==="있음"||opt.includes("측")||opt.includes("전반")?"#ff9f43":"#5EEAD4";return(
+                  {(Array.isArray(item.opts)?item.opts:[]).map(opt=>{const mv=mobility[item.key];const active=typeof mv==="string"?mv===opt:mv?.B===opt;const col=opt==="있음"||opt.includes("측")||opt.includes("전반")?"#ff9f43":"#5EEAD4";return(
                     <button key={opt} onClick={()=>setMobilityLR(item.key,"B",opt)}
                       style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                         borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
@@ -9894,11 +9883,11 @@ function AssessmentScreen({ member, onBack, showToast }) {
           </Card>
 
           <Card title="🤝 손목 평가" style={{marginBottom:11}}>
-            {MOBILITY_ITEMS.filter(item=>item.key.includes("wrist")||item.key.includes("push")).map(item=>(
+            {(Array.isArray(MOBILITY_ITEMS)?MOBILITY_ITEMS:[]).filter(item=>item.key.includes("wrist")||item.key.includes("push")).map(item=>(
               <div key={item.key} style={{marginBottom:10}}>
                 <Mo c="#ddddf0" s={10} style={{display:"block",marginBottom:4,fontWeight:600}}>{item.label}</Mo>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {item.opts.map(opt=>{const active=mobility[item.key]===opt;const col=opt==="제한"||opt==="있음"||opt.includes("측")?"#ff9f43":"#5EEAD4";return(
+                  {(Array.isArray(item.opts)?item.opts:[]).map(opt=>{const mv=mobility[item.key];const active=typeof mv==="string"?mv===opt:mv?.B===opt;const col=opt==="제한"||opt==="있음"||opt.includes("측")?"#ff9f43":"#5EEAD4";return(
                     <button key={opt} onClick={()=>setMobilityLR(item.key,"B",opt)}
                       style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                         borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",

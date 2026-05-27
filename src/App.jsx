@@ -2930,6 +2930,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
   // 대표님 전용 내부 메모 (회원 카드에 절대 미노출)
   const [trainerOnlyNote, setTrainerOnlyNote] = useState(editData?.trainerOnlyNote || "");
+  // 유산소 기록
+  const [cardioType,      setCardioType]      = useState(editData?.cardio?.type      || "");
+  const [cardioMinutes,   setCardioMinutes]   = useState(editData?.cardio?.minutes   || "");
+  const [cardioCalories,  setCardioCalories]  = useState(editData?.cardio?.calories  || "");
+  const [cardioIntensity, setCardioIntensity] = useState(editData?.cardio?.intensity || "");
   // 대표님 전용: 운동 시작/종료 시간
   const [workoutStartTime, setWorkoutStartTime] = useState(editData?.workoutStartTime || "");
   const [workoutEndTime,   setWorkoutEndTime]   = useState(editData?.workoutEndTime   || "");
@@ -3348,6 +3353,21 @@ function updateEx(ei, key, val) {
       intensity, condition,
       exercises: cleanExercises,
       stretchingNotes:stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
+      cardio: (cardioType || cardioMinutes) ? (() => {
+        // 자동 계산 칼로리 (직접 입력값 없을 때)
+        const MET_MAP = {"트레드밀":7,"싸이클":6,"천국의 계단":9,"일립티컬":6.5,"로잉머신":7,"야외 걷기":3.5,"야외 러닝":9,"기타":5};
+        const met = MET_MAP[cardioType] || 5;
+        const bw  = parseFloat(sessions?.slice(-1)[0]?.bodyWeight || member?.bodyWeight || 70);
+        const autoKcal = (cardioType && cardioMinutes)
+          ? Math.round(met * bw * (parseFloat(cardioMinutes)/60))
+          : null;
+        return {
+          type:      cardioType     || null,
+          minutes:   parseInt(cardioMinutes)  || null,
+          calories:  parseInt(cardioCalories) || autoKcal || null,
+          intensity: cardioIntensity|| null,
+        };
+      })() : null,
       workoutStartTime, workoutEndTime,
       referenceVideo:refVideo, bodyWeight, calories, dietNote,
       romData, painData, painRecord, totalVolume:totalVol,
@@ -3402,6 +3422,76 @@ function updateEx(ei, key, val) {
           <Field label="헬스장"   value={gymName}     onChange={setGymName}     placeholder="피트니스 센터" />
           <Field label="날짜"     value={date}        onChange={setDate}         type="date" />
           <Field label="회차 *"   value={String(sessionNo)} onChange={v => setSessionNo(parseInt(v)||v)} placeholder="1" />
+          {/* ── 유산소 기록 — 회차 오른쪽 빈공간 ── */}
+          <div style={{gridColumn:"span 2",minWidth:0}}>
+            <label style={{color:"#f97316",display:"flex",alignItems:"center",gap:6}}>
+              🔥 유산소 기록
+              {/* 자동 계산 칼로리 표시 */}
+              {cardioType && cardioMinutes && (() => {
+                // MET 기반 추정 칼로리 (체중 70kg 기준, 실제 개인차 있음)
+                const MET_MAP = {
+                  "트레드밀":7,"싸이클":6,"천국의 계단":9,"일립티컬":6.5,
+                  "로잉머신":7,"야외 걷기":3.5,"야외 러닝":9,"기타":5,
+                };
+                const met = MET_MAP[cardioType] || 5;
+                const bodyW = parseFloat(sessions?.slice(-1)[0]?.bodyWeight || member?.bodyWeight || 70);
+                const auto = Math.round(met * bodyW * (parseFloat(cardioMinutes)/60));
+                return <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
+                  color:"#fdba74",background:"rgba(249,115,22,.12)",borderRadius:4,padding:"1px 6px"}}>
+                  ≈ {auto} kcal
+                </span>;
+              })()}
+            </label>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:4,alignItems:"center"}}>
+              {/* 종류 선택 */}
+              <select value={cardioType} onChange={e=>setCardioType(e.target.value)}
+                style={{fontSize:13,padding:"5px 7px",borderRadius:6,flex:"1 1 90px",minWidth:0,
+                  background:"#111827",border:"1px solid rgba(249,115,22,.25)",color:cardioType?"#fdba74":"#54546a"}}>
+                <option value="">종류 선택</option>
+                {["트레드밀","싸이클","천국의 계단","일립티컬","로잉머신","야외 걷기","야외 러닝","기타"].map(t=>(
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              {/* 시간(분) */}
+              <div style={{position:"relative",flex:"1 1 60px",minWidth:0}}>
+                <input type="number" value={cardioMinutes} onChange={e=>setCardioMinutes(e.target.value)}
+                  placeholder="분" min="0"
+                  style={{fontSize:13,padding:"5px 7px",borderRadius:6,width:"100%",boxSizing:"border-box",
+                    background:"#111827",border:"1px solid rgba(249,115,22,.2)",color:"#fdba74",textAlign:"center"}} />
+                {cardioMinutes && <span style={{position:"absolute",right:5,top:"50%",transform:"translateY(-50%)",
+                  fontSize:8,color:"#f97316",pointerEvents:"none"}}>분</span>}
+              </div>
+              {/* kcal 직접 입력 (선택사항 — 기기 표시값 직접 입력 시) */}
+              <div style={{position:"relative",flex:"1 1 55px",minWidth:0}}>
+                <input type="number" value={cardioCalories} onChange={e=>setCardioCalories(e.target.value)}
+                  placeholder="kcal" min="0"
+                  style={{fontSize:13,padding:"5px 7px",borderRadius:6,width:"100%",boxSizing:"border-box",
+                    background:cardioCalories?"rgba(249,115,22,.06)":"#111827",
+                    border:`1px solid ${cardioCalories?"rgba(249,115,22,.4)":"rgba(249,115,22,.15)"}`,
+                    color:"#fdba74",textAlign:"center"}} />
+                {!cardioCalories && cardioMinutes && (
+                  <span style={{position:"absolute",right:3,top:"50%",transform:"translateY(-50%)",
+                    fontSize:7,color:"#54546a",pointerEvents:"none"}}>직접</span>
+                )}
+              </div>
+              {/* 강도 버튼 */}
+              {["저","중","고"].map(lv=>(
+                <button key={lv} onClick={()=>setCardioIntensity(cardioIntensity===lv+"강도"?"":lv+"강도")}
+                  style={{padding:"4px 8px",borderRadius:5,border:"1px solid",fontSize:9,fontWeight:700,cursor:"pointer",
+                    borderColor:cardioIntensity===lv+"강도"?"#f97316":"rgba(255,255,255,0.08)",
+                    background:cardioIntensity===lv+"강도"?"rgba(249,115,22,.15)":"transparent",
+                    color:cardioIntensity===lv+"강도"?"#f97316":"#54546a"}}>
+                  {lv}
+                </button>
+              ))}
+            </div>
+            {!cardioType && !cardioMinutes
+              ? <Mo c="#3a3a5a" s={8} style={{marginTop:3}}>유산소 기록 없음</Mo>
+              : !cardioCalories && cardioType && cardioMinutes
+              ? <Mo c="#3a3a5a" s={7} style={{marginTop:2}}>kcal는 기기 표시값 직접 입력 가능</Mo>
+              : null
+            }
+          </div>
         </div>
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginTop:9}}>
           <div style={{gridColumn:"1 / -1",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
@@ -4432,7 +4522,8 @@ function CardSaveView({ member, trainerName, gymName, date, sessionNo, intensity
         <div id="summary-card-capture">
           <SummaryCard member={member} trainerName={trainerName} gymName={gymName}
             date={date} sessionNo={sessionNo} intensity={intensity} condition={condition}
-            exercises={exercises} totalVol={totalVol} trainerComment={trainerComment} bodyWeight={bodyWeight} />
+            exercises={exercises} totalVol={totalVol} trainerComment={trainerComment} bodyWeight={bodyWeight}
+            cardio={(cardioType||cardioMinutes)?{type:cardioType,minutes:parseInt(cardioMinutes)||null,calories:parseInt(cardioCalories)||null,intensity:cardioIntensity}:null} />
         </div>
       )}
 
@@ -4474,7 +4565,7 @@ function CardSaveView({ member, trainerName, gymName, date, sessionNo, intensity
 // ════════════════════════════════════════════
 // SUMMARY CARD
 // ════════════════════════════════════════════
-function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity, condition, exercises, totalVol, trainerComment, bodyWeight }) {
+function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity, condition, exercises, totalVol, trainerComment, bodyWeight, cardio }) {
   const ic  = IC[intensity] || "#ffd166";
   const cc  = CC[condition] || CC["상"];
   const ds  = date ? new Date(date+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"}) : "";
@@ -4600,6 +4691,18 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
           </div>
         </div>
         {bodyWeight && <div style={{background:"#111827",borderRadius:8,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><Mo c="#54546a" s={10}>체중</Mo><Mo c="#ffd166" s={14}>{bodyWeight} kg</Mo></div>}
+        {/* 유산소 기록 — 회원 카드에 표시 가능 */}
+        {cardio && (cardio.type || cardio.minutes) && (
+          <div style={{background:"rgba(249,115,22,.05)",borderRadius:8,padding:"8px 12px",
+            border:"1px solid rgba(249,115,22,.2)",marginBottom:7,
+            display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <Mo c="#f97316" s={9} style={{fontWeight:700}}>🔥 유산소</Mo>
+            {cardio.type  && <Mo c="#fdba74" s={10}>{cardio.type}</Mo>}
+            {cardio.minutes && <Mo c="#fdba74" s={10}>{cardio.minutes}분</Mo>}
+            {cardio.calories && <Mo c="#fdba74" s={10}>{cardio.calories}kcal</Mo>}
+            {cardio.intensity && <Mo c="#94a3b8" s={9}>{cardio.intensity}</Mo>}
+          </div>
+        )}
         {trainerComment && <div style={{background:"rgba(0,229,160,.05)",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}><Mo c="#5EEAD4" s={8} style={{marginBottom:5,display:"block"}}>TRAINER COMMENT</Mo><div style={{fontSize:12,color:"#ddddf0",lineHeight:1.65}}>{trainerComment}</div></div>}
         <div style={{marginTop:8,borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <Mo c="#1e2a3a" s={8}>TEO GYM</Mo>
@@ -4773,6 +4876,15 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
                     )}
                     {s.exercises && s.exercises.length > 0 && (
                       <ExNameList exercises={s.exercises} />
+                    )}
+                    {/* 유산소 요약 배지 */}
+                    {s.cardio && (s.cardio.type || s.cardio.minutes) && (
+                      <div style={{display:"flex",gap:4,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{fontSize:9,color:"#f97316"}}>🔥</span>
+                        {s.cardio.type    && <Mo c="#fdba74" s={8}>{s.cardio.type}</Mo>}
+                        {s.cardio.minutes && <Mo c="#fdba74" s={8}>{s.cardio.minutes}분</Mo>}
+                        {s.cardio.calories && <Mo c="#94a3b8" s={8}>{s.cardio.calories}kcal</Mo>}
+                      </div>
                     )}
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
@@ -5302,6 +5414,20 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
             {/* ─ 상세 모드: 통증 기록 + 자세 피드백 + 총평 + 다음 계획 ─ */}
             {cardMode === "detail" && (
               <div>
+                {/* 유산소 기록 */}
+                {s.cardio && (s.cardio.type || s.cardio.minutes) && (
+                  <div style={{marginBottom:10,background:"rgba(249,115,22,.06)",borderRadius:10,
+                    padding:"11px 14px",border:"1px solid rgba(249,115,22,.2)"}}>
+                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#f97316",
+                      letterSpacing:".1em",marginBottom:8}}>🔥 유산소 기록</div>
+                    <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                      {s.cardio.type     && <div><Mo c="#94a3b8" s={8}>종류</Mo><Mo c="#fdba74" s={11}> {s.cardio.type}</Mo></div>}
+                      {s.cardio.minutes  && <div><Mo c="#94a3b8" s={8}>시간</Mo><Mo c="#fdba74" s={11}> {s.cardio.minutes}분</Mo></div>}
+                      {s.cardio.calories && <div><Mo c="#94a3b8" s={8}>칼로리</Mo><Mo c="#fdba74" s={11}> {s.cardio.calories}kcal</Mo></div>}
+                      {s.cardio.intensity && <div><Mo c="#94a3b8" s={8}>강도</Mo><Mo c="#fdba74" s={11}> {s.cardio.intensity}</Mo></div>}
+                    </div>
+                  </div>
+                )}
                 {/* 통증 기록 */}
                 {painRecord && (painRecord.before?.vas > 0 || painRecord.after?.vas > 0 || painRecord.before?.part) && (() => {
                   const b = painRecord.before || {};

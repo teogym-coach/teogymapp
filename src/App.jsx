@@ -9819,10 +9819,29 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {tab==="자세" && (
         <Card title="📐 체형 자세 평가" style={{marginBottom:12}}>
           <Mo c="#54546a" s={9} style={{display:"block",marginBottom:12}}>해당 항목 모두 선택 (복수 가능)</Mo>
-          {POSTURE_ITEMS.map(item=>(
+          {(Array.isArray(POSTURE_ITEMS) ? POSTURE_ITEMS : []).map(item=>(
             <div key={item.key} style={{marginBottom:12}}>
               <Mo c="#ddddf0" s={11} style={{display:"block",marginBottom:5,fontWeight:700}}>{item.label}</Mo>
               <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {(Array.isArray(item.opts) ? item.opts : []).map(opt=>{
+                  // posture[item.key]는 {B:[], L:[], R:[]} 또는 구버전 배열 모두 처리
+                  const val = posture[item.key];
+                  const active = Array.isArray(val)
+                    ? val.includes(opt)
+                    : Array.isArray(val?.B) ? val.B.includes(opt) : false;
+                  return (
+                    <button key={opt} onClick={()=>togglePostureLR(item.key,"B",opt)}
+                      style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
+                        borderColor:active?"#ffd166":"rgba(255,255,255,0.08)",
+                        background:active?"rgba(255,209,102,.15)":"transparent",
+                        color:active?"#ffd166":"#54546a",fontSize:11,fontWeight:700}}>{opt}</button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )} style={{display:"flex",flexWrap:"wrap",gap:5}}>
                 {item.opts.map(opt=>{const active=(posture[item.key]||[]).includes(opt);return(
                   <button key={opt} onClick={()=>togglePostureLR(item.key,"B",opt)}
                     style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
@@ -9839,11 +9858,15 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {tab==="기능" && (
         <div>
           <Card title="⚡ 가동성 · 기능 검사" style={{marginBottom:11}}>
-            {MOBILITY_ITEMS.filter(item=>!item.key.includes("elbow")&&!item.key.includes("wrist")&&!item.key.includes("push")).map(item=>(
+            {(Array.isArray(MOBILITY_ITEMS)?MOBILITY_ITEMS:[]).filter(item=>!item.key.includes("elbow")&&!item.key.includes("wrist")&&!item.key.includes("push")).map(item=>(
               <div key={item.key} style={{marginBottom:10}}>
                 <Mo c="#ddddf0" s={10} style={{display:"block",marginBottom:4,fontWeight:600}}>{item.label}</Mo>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {item.opts.map(opt=>{const active=mobility[item.key]===opt;const col=opt==="제한"||opt==="제한 있음"||opt==="약함"?"#ff9f43":opt==="강함"||opt==="양호"?"#5EEAD4":"#ffd166";return(
+                  {(Array.isArray(item.opts)?item.opts:[]).map(opt=>{
+                    const mv=mobility[item.key];
+                    const active=typeof mv==="string"?mv===opt:(mv?.B===opt||mv?.B===opt);
+                    const col=opt==="제한"||opt==="제한 있음"||opt==="약함"?"#ff9f43":opt==="강함"||opt==="양호"?"#5EEAD4":"#ffd166";
+                    return(
                     <button key={opt} onClick={()=>setMobilityLR(item.key,"B",opt)}
                       style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
                         borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
@@ -9933,27 +9956,49 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {tab==="기록" && (
         <div>
           {records.length===0 ? (
-            <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
+            <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.15)"}}>
               <div style={{fontSize:32,marginBottom:8}}>📋</div>
-              <Mo c="#1e2a3a" s={10}>저장된 평가 기록이 없습니다.</Mo>
+              <Mo c="#64748b" s={11}>아직 저장된 기록이 없습니다.</Mo>
+              <Mo c="#3a3a5a" s={9} style={{marginTop:4,display:"block"}}>각 탭에서 입력 후 저장 버튼을 눌러주세요.</Mo>
             </div>
           ) : (
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
               {records.map(r=>{
                 const tc=Object.values(r.bodyMap||{}).filter(v=>v==="tight").length;
                 const wc=Object.values(r.bodyMap||{}).filter(v=>v==="weak").length;
+                const pl=Array.isArray(r.painList)?r.painList:[];
+                const hasPosture=r.posture&&Object.keys(r.posture).length>0;
+                const hasMobility=r.mobility&&Object.keys(r.mobility).length>0;
                 return (
-                  <div key={r.id} style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"12px 14px",cursor:"pointer"}}
+                  <div key={r.id}
+                    style={{background:"#111827",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,
+                      padding:"13px 14px",cursor:"pointer"}}
                     onClick={()=>setViewRec(r)}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                      <Mo c="#54546a" s={9}>{r.date}</Mo>
-                      <div style={{display:"flex",gap:5}}>
-                        {tc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 6px",borderRadius:4,background:"#fee2e2",color:"#dc2626"}}>🔴 {tc}</span>}
-                        {wc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 6px",borderRadius:4,background:"#dbeafe",color:"#2563eb"}}>🔵 {wc}</span>}
-                        {r.vasScore>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 6px",borderRadius:4,background:"rgba(255,107,107,.1)",color:"#ff9f43"}}>VAS {r.vasScore}</span>}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <Mo c="#e2e8f0" s={11} style={{fontWeight:700}}>{r.date}</Mo>
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                        {tc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.15)",color:"#f87171"}}>🔴 긴장 {tc}</span>}
+                        {wc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(37,99,235,.15)",color:"#60a5fa"}}>🔵 약화 {wc}</span>}
+                        {pl.length>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(249,115,22,.15)",color:"#fb923c"}}>통증 {pl.length}건</span>}
+                        {hasPosture&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(255,209,102,.12)",color:"#fcd34d"}}>자세 ✓</span>}
+                        {hasMobility&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(94,234,212,.12)",color:"#5EEAD4"}}>기능 ✓</span>}
                       </div>
                     </div>
-                    {r.summary&&<div style={{fontSize:11,color:"#54546a",lineHeight:1.6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{r.summary}</div>}
+                    {/* 통증 목록 미리보기 */}
+                    {pl.length>0&&(
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:5}}>
+                        {pl.slice(0,3).map((p,i)=>(
+                          <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,
+                            background:p.vas>=7?"rgba(239,68,68,.12)":p.vas>=4?"rgba(249,115,22,.1)":"rgba(94,234,212,.1)",
+                            color:p.vas>=7?"#f87171":p.vas>=4?"#fdba74":"#5EEAD4"}}>
+                            {p.part}{p.side&&p.side!=="중앙"?" "+p.side:""} VAS{p.vas}
+                          </span>
+                        ))}
+                        {pl.length>3&&<Mo c="#3a3a5a" s={8}>+{pl.length-3}건</Mo>}
+                      </div>
+                    )}
+                    {r.summary&&<div style={{fontSize:10,color:"#64748b",lineHeight:1.6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{r.summary}</div>}
+                    <Mo c="#3a4a5a" s={8} style={{marginTop:5}}>탭하면 상세 보기 →</Mo>
                   </div>
                 );
               })}

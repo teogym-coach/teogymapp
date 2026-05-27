@@ -3390,12 +3390,18 @@ function updateEx(ei, key, val) {
   function handleSaveTop() { handleSave(); }
 
   if (showCard) {
+    const cardioData = (cardioType||cardioMinutes) ? {
+      type:cardioType,
+      minutes:parseInt(cardioMinutes)||null,
+      calories:parseInt(cardioCalories)||null,
+      intensity:cardioIntensity
+    } : null;
     return (
       <CardSaveView
         member={member} trainerName={trainerName} gymName={gymName}
         date={date} sessionNo={sessionNo} intensity={intensity} condition={condition}
         exercises={exercises} totalVol={totalVol} trainerComment={trainerComment}
-        bodyWeight={bodyWeight} onClose={() => setShowCard(false)} showToast={showToast}
+        bodyWeight={bodyWeight} cardio={cardioData} onClose={() => setShowCard(false)} showToast={showToast}
       />
     );
   }
@@ -4476,7 +4482,7 @@ function updateEx(ei, key, val) {
 // CARD SAVE VIEW — 이미지 저장 (iOS 대응)
 // ════════════════════════════════════════════
 function CardSaveView({ member, trainerName, gymName, date, sessionNo, intensity,
-  condition, exercises, totalVol, trainerComment, bodyWeight, onClose, showToast }) {
+  condition, exercises, totalVol, trainerComment, bodyWeight, cardio, onClose, showToast }) {
 
   const [imgDataUrl, setImgDataUrl] = useState(null);
   const [generating, setGenerating] = useState(false);
@@ -4523,7 +4529,7 @@ function CardSaveView({ member, trainerName, gymName, date, sessionNo, intensity
           <SummaryCard member={member} trainerName={trainerName} gymName={gymName}
             date={date} sessionNo={sessionNo} intensity={intensity} condition={condition}
             exercises={exercises} totalVol={totalVol} trainerComment={trainerComment} bodyWeight={bodyWeight}
-            cardio={(cardioType||cardioMinutes)?{type:cardioType,minutes:parseInt(cardioMinutes)||null,calories:parseInt(cardioCalories)||null,intensity:cardioIntensity}:null} />
+            cardio={cardio} />
         </div>
       )}
 

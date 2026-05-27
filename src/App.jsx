@@ -9363,7 +9363,7 @@ function generateAutoSummary(bodyMap, posture, mobility) {
 // ════════════════════════════════════════════
 function AssessmentScreen({ member, onBack, showToast }) {
   const today = new Date().toISOString().split("T")[0];
-  const [tab,       setTab]      = useState("바디맵");
+  const [tab,       setTab]      = useState("통증"); // 통증이 1순위
   const [records,   setRecords]  = useState(() => {
     try { return JSON.parse(localStorage.getItem("assess_"+member.id)||"[]"); } catch { return []; }
   });
@@ -9373,49 +9373,125 @@ function AssessmentScreen({ member, onBack, showToast }) {
   const [aiLoading, setAiLoading]= useState(false);
 
   const [assDate,   setAssDate]  = useState(today);
-  const [bodyMap,   setBodyMap]  = useState({});  // {muscleId: "tight"|"weak"}
+  const [bodyMap,   setBodyMap]  = useState({});
   const [bodyView,  setBodyView] = useState("front");
-  const [mode,      setMode]     = useState("tight"); // "tight" | "weak"
-  const [vasScore,  setVasScore] = useState(0);
-  const [vasTiming, setVasTiming]= useState([]);
-  const [vasMemo,   setVasMemo]  = useState("");
-  const [posture,   setPosture]  = useState({});
-  const [mobility,  setMobility] = useState({});
+  const [mode,      setMode]     = useState("tight");
+  const [posture,   setPosture]  = useState({});  // {key: {L:[], R:[], B:[]}}
+  const [mobility,  setMobility] = useState({});  // {key: {L:val, R:val}}
 
-  const summary      = generateAutoSummary(bodyMap, posture, mobility);
+  // ── 빠른 통증 추가 state ────────────────────────────────────────
+  const [painList,  setPainList] = useState([]); // [{part,side,situation,vas,memo}]
+  const [qPart,     setQPart]    = useState("");
+  const [qSide,     setQSide]    = useState("중앙");
+  const [qSituation,setQSituation]= useState("");
+  const [qVas,      setQVas]     = useState(5);
+  const [qMemo,     setQMemo]    = useState("");
+  const [qCustomSit,setQCustomSit]= useState("");
+
+  // 자동 임시저장 (localStorage)
+  useEffect(() => {
+    try { localStorage.setItem("assess_draft_"+member.id, JSON.stringify({painList, posture, mobility, bodyMap, assDate})); }
+    catch {}
+  }, [painList, posture, mobility, bodyMap, assDate]);
+
+  // 초안 복원
+  useEffect(() => {
+    try {
+      const draft = JSON.parse(localStorage.getItem("assess_draft_"+member.id)||"null");
+      if (draft && draft.assDate === today) {
+        if (draft.painList?.length) setPainList(draft.painList);
+        if (Object.keys(draft.posture||{}).length) setPosture(draft.posture);
+        if (Object.keys(draft.mobility||{}).length) setMobility(draft.mobility);
+        if (Object.keys(draft.bodyMap||{}).length) setBodyMap(draft.bodyMap);
+      }
+    } catch {}
+  }, []);
+
+  // 빠른 부위 목록
+  const QUICK_PARTS = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
+  const SIDES = ["왼쪽","오른쪽","양측","중앙"];
+  // 상황 카테고리
+  const SITUATIONS = {
+    "일상": ["오래 앉을때","오래 서있을때","걸을때","계단 올라갈때","계단 내려갈때","아침 기상 직후","오래 운전할때"],
+    "허리/고관절": ["구부릴때","펼때","숙일때","무거운거 들때","앉았다 일어날때"],
+    "어깨": ["팔 들때","뒤로 돌릴때","벤치프레스시","오버헤드시","턱걸이시"],
+    "무릎": ["스쿼트시","런지시","점프시"],
+    "목": ["고개 숙일때","고개 돌릴때"],
+    "운동": ["운동 전","운동 중","운동 후"],
+  };
+  const allSituations = Object.values(SITUATIONS).flat();
+
+  function addPainItem() {
+    if (!qPart) { showToast("부위를 선택해주세요","err"); return; }
+    const newItem = {
+      id: Date.now(), part:qPart, side:qSide,
+      situation: qSituation==="직접입력" ? qCustomSit : qSituation,
+      vas:qVas, memo:qMemo
+    };
+    setPainList(prev => [...prev, newItem]);
+    setQPart(""); setQSide("중앙"); setQSituation(""); setQVas(5); setQMemo(""); setQCustomSit("");
+  }
+
+  // 평가 프리셋
+  const PRESETS = [
+    { label:"거북목+라운드숄더", icon:"🔄",
+      posture:{ headForward:{B:["전방머리"]}, shoulder:{B:["라운드숄더"]}, thoracic:{B:["흉추제한"]} } },
+    { label:"골반 불균형", icon:"⚖️",
+      posture:{ pelvis:{B:["좌우틀어짐"]}, hip:{B:["고관절제한"]}, core:{B:["코어약화"]} } },
+    { label:"무릎 과신전", icon:"🦵",
+      posture:{ knee:{L:["과신전"],R:["과신전"]} } },
+    { label:"족부 회내", icon:"🦶",
+      posture:{ foot:{L:["회내"],R:["회내"]} } },
+  ];
+
+  function applyPreset(preset) {
+    setPosture(prev => ({...prev, ...preset.posture}));
+    showToast(`"${preset.label}" 프리셋 적용됨 ✓`);
+  }
+
+  const summary = generateAutoSummary(bodyMap, posture, mobility);
   const currentMuscles = bodyView==="front" ? FRONT_MUSCLES : BACK_MUSCLES;
-  const tightCount   = Object.values(bodyMap).filter(v=>v==="tight").length;
-  const weakCount    = Object.values(bodyMap).filter(v=>v==="weak").length;
+  const tightCount = Object.values(bodyMap).filter(v=>v==="tight").length;
+  const weakCount  = Object.values(bodyMap).filter(v=>v==="weak").length;
 
   function handleClickMuscle(id) {
     setBodyMap(prev => {
       const cur = prev[id];
-      if (cur === mode) { const n={...prev}; delete n[id]; return n; } // 토글 해제
+      if (cur === mode) { const n={...prev}; delete n[id]; return n; }
       return {...prev, [id]: mode};
     });
   }
-
-  function togglePosture(key, opt) {
+  function togglePostureLR(key, side, opt) {
     setPosture(prev => {
-      const cur=prev[key]||[];
-      return {...prev,[key]:cur.includes(opt)?cur.filter(x=>x!==opt):[...cur,opt]};
+      const cur = prev[key] || {};
+      const sideArr = cur[side] || [];
+      return {...prev, [key]: {...cur, [side]: sideArr.includes(opt) ? sideArr.filter(x=>x!==opt) : [...sideArr, opt]}};
     });
   }
-  function setMobilityVal(key, val) {
-    setMobility(prev => ({...prev,[key]:prev[key]===val?null:val}));
-  }
-  function toggleVasTiming(t) {
-    setVasTiming(prev => prev.includes(t)?prev.filter(x=>x!==t):[...prev,t]);
+  function setMobilityLR(key, side, val) {
+    setMobility(prev => {
+      const cur = prev[key] || {};
+      return {...prev, [key]: {...cur, [side]: cur[side]===val ? null : val}};
+    });
   }
 
   async function handleSave() {
     setSaving(true);
-    const rec = {id:"a"+Date.now(),date:assDate,vasScore,vasTiming,vasMemo,
-      bodyMap:{...bodyMap},posture:{...posture},mobility:{...mobility},summary};
-    const next = [...records.filter(r=>r.date!==assDate),rec].sort((a,b)=>b.date.localeCompare(a.date));
-    setRecords(next);
-    try { localStorage.setItem("assess_"+member.id,JSON.stringify(next)); showToast("평가 기록 저장 완료 ✓"); }
-    catch(e) { showToast("저장 실패","err"); }
+    try {
+      const rec = {
+        id:"a"+Date.now(), date:assDate,
+        painList: [...painList],
+        bodyMap:{...bodyMap}, posture:{...posture}, mobility:{...mobility}, summary
+      };
+      const next = [...records.filter(r=>r.date!==assDate),rec].sort((a,b)=>b.date.localeCompare(a.date));
+      setRecords(next);
+      localStorage.setItem("assess_"+member.id, JSON.stringify(next));
+      localStorage.removeItem("assess_draft_"+member.id); // 임시저장 삭제
+      showToast("평가 기록 저장 완료 ✓");
+    } catch(e) {
+      console.error("[AssessmentScreen] save error:", e);
+      showToast("저장 실패: "+e.message, "err");
+    }
     setSaving(false);
   }
 
@@ -9616,34 +9692,127 @@ function AssessmentScreen({ member, onBack, showToast }) {
         </div>
       )}
 
-      {/* ─── 통증 탭 ─── */}
+      {/* ─── 통증 탭 (빠른 추가형) ─── */}
       {tab==="통증" && (
-        <Card title="🩺 통증 기록" style={{marginBottom:12}}>
-          <div style={{marginBottom:14}}>
-            <Mo c="#54546a" s={9} style={{display:"block",marginBottom:6}}>VAS 통증 강도 (0=없음 · 10=극심함)</Mo>
-            <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:42,
-              color:vasScore===0?"#3a3a4a":vasScore<=3?"#5EEAD4":vasScore<=6?"#ffd166":"#ef4444"}}>
-              {vasScore}
-            </span>
-            <input type="range" min={0} max={10} value={vasScore} onChange={e=>setVasScore(parseInt(e.target.value))}
-              style={{width:"100%",accentColor:"#ef4444",border:"none",padding:0,background:"transparent"}}/>
-            <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#3a3a4a" s={8}>없음</Mo><Mo c="#ef4444" s={8}>극심함</Mo></div>
+        <div>
+          {/* 프리셋 */}
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+            {PRESETS.map(p=>(
+              <button key={p.label} onClick={()=>applyPreset(p)}
+                style={{padding:"4px 10px",borderRadius:16,border:"1px solid rgba(255,209,102,.25)",
+                  background:"rgba(255,209,102,.06)",color:"#ffd166",fontSize:9,cursor:"pointer"}}>
+                {p.icon} {p.label}
+              </button>
+            ))}
           </div>
-          <div style={{marginBottom:12}}>
-            <Mo c="#54546a" s={9} style={{display:"block",marginBottom:6}}>발생 시점</Mo>
-            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {VAS_TIMING.map(t=>(
-                <button key={t} onClick={()=>toggleVasTiming(t)}
-                  style={{padding:"5px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",
-                    borderColor:vasTiming.includes(t)?"#ff9f43":"rgba(255,255,255,0.08)",
-                    background:vasTiming.includes(t)?"rgba(255,159,67,.15)":"transparent",
-                    color:vasTiming.includes(t)?"#ff9f43":"#54546a",fontSize:11,fontWeight:700}}>{t}</button>
+
+          <Card title="⚡ 빠른 통증 추가" style={{marginBottom:10}}>
+            {/* 1. 부위 */}
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>부위</Mo>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+              {QUICK_PARTS.map(p=>(
+                <button key={p} onClick={()=>setQPart(p===qPart?"":p)}
+                  style={{padding:"5px 10px",borderRadius:16,border:"1px solid",cursor:"pointer",fontSize:10,
+                    borderColor:qPart===p?"#ef4444":"rgba(255,255,255,0.1)",
+                    background:qPart===p?"rgba(239,68,68,.15)":"transparent",
+                    color:qPart===p?"#f87171":"#64748b",fontWeight:qPart===p?700:400}}>
+                  {p}
+                </button>
               ))}
             </div>
-          </div>
-          <TextArea label="통증 부위 및 메모" value={vasMemo} onChange={setVasMemo}
-            placeholder="예: 우측 무릎 내측, 계단 오를 때 심함"/>
-        </Card>
+            {/* 2. 좌/우 */}
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>좌우</Mo>
+            <div style={{display:"flex",gap:5,marginBottom:8}}>
+              {SIDES.map(s=>(
+                <button key={s} onClick={()=>setQSide(s)}
+                  style={{flex:1,padding:"6px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:10,
+                    borderColor:qSide===s?"#818cf8":"rgba(255,255,255,0.1)",
+                    background:qSide===s?"rgba(129,140,248,.15)":"transparent",
+                    color:qSide===s?"#a5b4fc":"#64748b",fontWeight:qSide===s?700:400}}>
+                  {s}
+                </button>
+              ))}
+            </div>
+            {/* 3. 상황 */}
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>상황 (선택)</Mo>
+            <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
+              {allSituations.map(s=>(
+                <button key={s} onClick={()=>setQSituation(qSituation===s?"":s)}
+                  style={{padding:"3px 8px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
+                    borderColor:qSituation===s?"#f97316":"rgba(255,255,255,0.07)",
+                    background:qSituation===s?"rgba(249,115,22,.12)":"transparent",
+                    color:qSituation===s?"#fdba74":"#64748b"}}>
+                  {s}
+                </button>
+              ))}
+              <button onClick={()=>setQSituation(qSituation==="직접입력"?"":"직접입력")}
+                style={{padding:"3px 8px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
+                  borderColor:qSituation==="직접입력"?"#f97316":"rgba(255,255,255,0.07)",
+                  background:qSituation==="직접입력"?"rgba(249,115,22,.12)":"transparent",
+                  color:qSituation==="직접입력"?"#fdba74":"#64748b"}}>
+                직접 입력
+              </button>
+            </div>
+            {qSituation==="직접입력" && (
+              <input value={qCustomSit} onChange={e=>setQCustomSit(e.target.value)}
+                placeholder="직접 입력..."
+                style={{fontSize:14,padding:"5px 8px",borderRadius:6,width:"100%",boxSizing:"border-box",
+                  background:"#111827",border:"1px solid rgba(249,115,22,.2)",color:"#fdba74",marginBottom:8}} />
+            )}
+            {/* 4. VAS 버튼 */}
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>
+              VAS 통증 강도&nbsp;
+              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,
+                color:qVas===0?"#3a3a4a":qVas<=3?"#5EEAD4":qVas<=6?"#ffd166":"#ef4444"}}>
+                {qVas}
+              </span>
+            </Mo>
+            <div style={{display:"flex",gap:3,marginBottom:10}}>
+              {[0,1,2,3,4,5,6,7,8,9,10].map(n=>(
+                <button key={n} onClick={()=>setQVas(n)}
+                  style={{flex:1,padding:"7px 0",borderRadius:5,border:"1px solid",cursor:"pointer",
+                    fontSize:10,fontWeight:800,
+                    borderColor:qVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#ef4444"):"rgba(255,255,255,0.08)",
+                    background:qVas===n?(n<=3?"rgba(94,234,212,.15)":n<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
+                    color:qVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#f87171"):"#54546a"}}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            {/* 추가 버튼 */}
+            <Btn full onClick={addPainItem}
+              style={{background:"rgba(239,68,68,.15)",borderColor:"rgba(239,68,68,.3)",color:"#f87171"}}>
+              + 통증 추가
+            </Btn>
+          </Card>
+
+          {/* 통증 리스트 */}
+          {painList.length > 0 && (
+            <Card title={`📋 통증 기록 (${painList.length}건)`} style={{marginBottom:10}}>
+              {painList.map((item,i)=>(
+                <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7,
+                  padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.15)"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                      <Mo c="#f87171" s={11} style={{fontWeight:700}}>{item.part}</Mo>
+                      {item.side && item.side!=="중앙" && <Mo c="#a5b4fc" s={9}>{item.side}</Mo>}
+                      {item.situation && <Mo c="#fdba74" s={9}>{item.situation}</Mo>}
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+                        background:item.vas<=3?"rgba(94,234,212,.15)":item.vas<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.2)",
+                        color:item.vas<=3?"#5EEAD4":item.vas<=6?"#ffd166":"#f87171",fontWeight:700}}>
+                        VAS {item.vas}
+                      </span>
+                    </div>
+                  </div>
+                  <button onClick={()=>setPainList(prev=>prev.filter((_,idx)=>idx!==i))}
+                    style={{fontSize:12,color:"#3a3a5a",background:"none",border:"none",cursor:"pointer",padding:"2px 5px"}}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </Card>
+          )}
+        </div>
       )}
 
       {/* ─── 자세 탭 ─── */}

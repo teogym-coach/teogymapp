@@ -9679,8 +9679,18 @@ function AssessmentScreen({ member, onBack, showToast }) {
       const summary = generateAutoSummary(bodyMap, posture, mobility);
       const rec = {
         id:"a"+Date.now(), date:assDate, savedAt:new Date().toISOString(),
-        painList: [...painList],
-        bodyMap:{...bodyMap}, posture:{...posture}, mobility:{...mobility}, summary
+        painList:   [...painList],
+        bodyMap:    {...bodyMap},
+        posture:    {...posture},
+        mobility:   {...mobility},
+        summary,
+        // 빠른 평가 데이터
+        fParts:     fParts.length>0     ? [...fParts]     : undefined,
+        fSymptoms:  fSymptoms.length>0  ? [...fSymptoms]  : undefined,
+        fSituations:fSituations.length>0? [...fSituations]: undefined,
+        fastMemo:   fMemo || undefined,
+        // AI 루틴 결과 (있으면)
+        aiRoutine:  aiResult || undefined,
       };
       console.log("[TEO GYM] AssessmentScreen 저장 시작:", rec);
       const next = [...records.filter(r=>r.date!==assDate),rec].sort((a,b)=>b.date.localeCompare(a.date));
@@ -10286,56 +10296,168 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {tab==="기록" && (
         <div>
           {records.length===0 ? (
-            <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.15)"}}>
+            <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,
+              border:"1px dashed rgba(255,255,255,0.15)"}}>
               <div style={{fontSize:32,marginBottom:8}}>📋</div>
               <Mo c="#64748b" s={11}>아직 저장된 기록이 없습니다.</Mo>
-              <Mo c="#3a3a5a" s={9} style={{marginTop:4,display:"block"}}>각 탭에서 입력 후 저장 버튼을 눌러주세요.</Mo>
+              <Mo c="#3a3a5a" s={9} style={{marginTop:4,display:"block"}}>
+                각 탭에서 입력 후 하단 저장 버튼을 눌러주세요.
+              </Mo>
             </div>
           ) : (
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            <div style={{display:"flex",flexDirection:"column",gap:11}}>
               {records.map(r=>{
-                const tc=Object.values(r.bodyMap||{}).filter(v=>v==="tight").length;
-                const wc=Object.values(r.bodyMap||{}).filter(v=>v==="weak").length;
-                const pl=Array.isArray(r.painList)?r.painList:[];
-                const hasPosture=r.posture&&Object.keys(r.posture).length>0;
-                const hasMobility=r.mobility&&Object.keys(r.mobility).length>0;
+                const pl = Array.isArray(r.painList)?r.painList:[];
+                const tc = Object.values(r.bodyMap||{}).filter(v=>v==="tight").length;
+                const wc = Object.values(r.bodyMap||{}).filter(v=>v==="weak").length;
+
+                // 자세 데이터 파싱
+                const postureItems = (Array.isArray(POSTURE_ITEMS)?POSTURE_ITEMS:[]).flatMap(item=>{
+                  const val = (r.posture||{})[item.key];
+                  if (!val) return [];
+                  const opts = Array.isArray(val) ? val
+                    : [...(val.B||[]), ...(val.L||[]).map(v=>"(좌)"+v), ...(val.R||[]).map(v=>"(우)"+v)];
+                  return opts.length ? [{label:item.label, opts}] : [];
+                });
+
+                // 기능 데이터 파싱
+                const mobItems = (Array.isArray(MOBILITY_ITEMS)?MOBILITY_ITEMS:[]).filter(item=>{
+                  const mv=(r.mobility||{})[item.key];
+                  const v = typeof mv==="string"?mv:(mv?.B||"");
+                  return v==="제한"||v==="제한 있음"||v==="약함"||v==="있음";
+                });
+
+                // 빠른평가 메모
+                const hasFast = r.fastMemo || (r.fParts&&r.fParts.length>0);
+
+                const hasSomething = pl.length>0||tc>0||wc>0||postureItems.length>0||mobItems.length>0||r.summary||hasFast;
+                if (!hasSomething) return null;
+
                 return (
-                  <div key={r.id}
-                    style={{background:"#111827",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,
-                      padding:"13px 14px",cursor:"pointer"}}
-                    onClick={()=>setViewRec(r)}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <Mo c="#e2e8f0" s={11} style={{fontWeight:700}}>{r.date}</Mo>
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                        {tc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.15)",color:"#f87171"}}>🔴 긴장 {tc}</span>}
-                        {wc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(37,99,235,.15)",color:"#60a5fa"}}>🔵 약화 {wc}</span>}
-                        {pl.length>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(249,115,22,.15)",color:"#fb923c"}}>통증 {pl.length}건</span>}
-                        {hasPosture&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(255,209,102,.12)",color:"#fcd34d"}}>자세 ✓</span>}
-                        {hasMobility&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(94,234,212,.12)",color:"#5EEAD4"}}>기능 ✓</span>}
+                  <div key={r.id} style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",
+                    borderRadius:12,overflow:"hidden"}}>
+                    {/* 헤더 */}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"10px 14px",background:"rgba(255,255,255,0.03)",
+                      borderBottom:"1px solid rgba(255,255,255,0.06)",cursor:"pointer"}}
+                      onClick={()=>setViewRec(viewRec?.id===r.id?null:r)}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <Mo c="#e2e8f0" s={12} style={{fontWeight:800}}>{r.date}</Mo>
+                        {r.savedAt&&<Mo c="#3a4a5a" s={8}>{r.savedAt.slice(11,16)}</Mo>}
+                      </div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                        {pl.length>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.15)",color:"#f87171"}}>통증 {pl.length}</span>}
+                        {tc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>🔴{tc}</span>}
+                        {wc>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(37,99,235,.1)",color:"#60a5fa"}}>🔵{wc}</span>}
+                        {postureItems.length>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(255,209,102,.1)",color:"#fcd34d"}}>자세 ✓</span>}
+                        {mobItems.length>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(94,234,212,.1)",color:"#5EEAD4"}}>기능 ✓</span>}
+                        <Mo c="#3a4a5a" s={8}>{viewRec?.id===r.id?"▲":"▼"}</Mo>
                       </div>
                     </div>
-                    {/* 통증 목록 미리보기 */}
-                    {pl.length>0&&(
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:5}}>
-                        {pl.slice(0,3).map((p,i)=>(
-                          <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,
-                            background:p.vas>=7?"rgba(239,68,68,.12)":p.vas>=4?"rgba(249,115,22,.1)":"rgba(94,234,212,.1)",
-                            color:p.vas>=7?"#f87171":p.vas>=4?"#fdba74":"#5EEAD4"}}>
-                            {p.part}{p.side&&p.side!=="중앙"?" "+p.side:""} VAS{p.vas}
-                          </span>
-                        ))}
-                        {pl.length>3&&<Mo c="#3a3a5a" s={8}>+{pl.length-3}건</Mo>}
-                      </div>
-                    )}
-                    {r.summary&&<div style={{fontSize:10,color:"#64748b",lineHeight:1.6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{r.summary}</div>}
-                    <Mo c="#3a4a5a" s={8} style={{marginTop:5}}>탭하면 상세 보기 →</Mo>
+
+                    {/* 본문 — 접기/펼치기 */}
+                    <div style={{padding:"11px 14px"}}>
+
+                      {/* 빠른평가 요약 */}
+                      {(r.fastMemo||(r.fParts&&r.fParts.length>0)) && (
+                        <div style={{marginBottom:9}}>
+                          <Mo c="#a29bfe" s={9} style={{fontWeight:700,display:"block",marginBottom:4}}>⚡ 빠른 평가</Mo>
+                          {r.fParts&&r.fParts.length>0&&<Mo c="#94a3b8" s={9}>{r.fParts.join(" · ")}</Mo>}
+                          {r.fSymptoms&&r.fSymptoms.length>0&&<Mo c="#fdba74" s={9} style={{display:"block",marginTop:2}}>{r.fSymptoms.join(" · ")}</Mo>}
+                          {r.fastMemo&&<Mo c="#64748b" s={9} style={{display:"block",marginTop:2,fontStyle:"italic"}}>📝 {r.fastMemo}</Mo>}
+                        </div>
+                      )}
+
+                      {/* 바디맵 요약 */}
+                      {(tc>0||wc>0) && (
+                        <div style={{marginBottom:9,paddingBottom:9,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                          <Mo c="#818cf8" s={9} style={{fontWeight:700,display:"block",marginBottom:4}}>🗺️ 바디맵</Mo>
+                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                            {Object.entries(r.bodyMap||{}).filter(([,v])=>v==="tight").slice(0,5).map(([k])=>(
+                              <span key={k} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>🔴 {getMuscleLabel(k)}</span>
+                            ))}
+                            {Object.entries(r.bodyMap||{}).filter(([,v])=>v==="weak").slice(0,5).map(([k])=>(
+                              <span key={k} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(37,99,235,.1)",color:"#60a5fa"}}>🔵 {getMuscleLabel(k)}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 통증 요약 */}
+                      {pl.length>0 && (
+                        <div style={{marginBottom:9,paddingBottom:9,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                          <Mo c="#f87171" s={9} style={{fontWeight:700,display:"block",marginBottom:4}}>🩺 통증 기록</Mo>
+                          {pl.map((p,i)=>(
+                            <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
+                              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
+                                color:p.vas>=7?"#f87171":p.vas>=4?"#fdba74":"#5EEAD4",
+                                background:p.vas>=7?"rgba(239,68,68,.1)":p.vas>=4?"rgba(249,115,22,.1)":"rgba(94,234,212,.08)",
+                                padding:"1px 6px",borderRadius:4,fontWeight:700}}>
+                                VAS {p.vas}
+                              </span>
+                              <Mo c="#e2e8f0" s={10}>{p.part}{p.side&&p.side!=="중앙"?" "+p.side:""}</Mo>
+                              {p.situation&&<Mo c="#54546a" s={9}>{p.situation}</Mo>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 자세 요약 */}
+                      {postureItems.length>0 && (
+                        <div style={{marginBottom:9,paddingBottom:9,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                          <Mo c="#fcd34d" s={9} style={{fontWeight:700,display:"block",marginBottom:4}}>📐 자세 평가</Mo>
+                          {postureItems.map((item,i)=>(
+                            <div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                              <Mo c="#64748b" s={9}>{item.label}</Mo>
+                              <Mo c="#fcd34d" s={9}>{item.opts.join(", ")}</Mo>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 기능 요약 */}
+                      {mobItems.length>0 && (
+                        <div style={{marginBottom:9,paddingBottom:9,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                          <Mo c="#5EEAD4" s={9} style={{fontWeight:700,display:"block",marginBottom:4}}>⚡ 기능 평가</Mo>
+                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                            {mobItems.map((item,i)=>(
+                              <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
+                                padding:"2px 7px",borderRadius:4,
+                                background:"rgba(255,159,67,.1)",color:"#ff9f43"}}>
+                                {item.label}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AI 루틴 요약 */}
+                      {r.aiRoutine && (
+                        <div style={{marginBottom:9,paddingBottom:9,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                          <Mo c="#a29bfe" s={9} style={{fontWeight:700,display:"block",marginBottom:4}}>🤖 AI 추천 루틴</Mo>
+                          <Mo c="#64748b" s={9} style={{lineHeight:1.6,display:"block",
+                            overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>
+                            {r.aiRoutine}
+                          </Mo>
+                        </div>
+                      )}
+
+                      {/* 종합 요약 */}
+                      {r.summary && (
+                        <div>
+                          <Mo c="#94a3b8" s={9} style={{fontWeight:700,display:"block",marginBottom:3}}>📝 종합 메모</Mo>
+                          <Mo c="#64748b" s={9} style={{lineHeight:1.6,fontStyle:"italic"}}>{r.summary}</Mo>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
-              })}
+              }).filter(Boolean)}
             </div>
           )}
         </div>
       )}
+
 
       {/* 저장 버튼 */}
       {tab!=="기록" && tab!=="AI루틴" && tab!=="⚡빠른평가" && (

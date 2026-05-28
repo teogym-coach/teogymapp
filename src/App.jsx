@@ -9461,25 +9461,40 @@ function getMuscleLabel(id) {
 }
 
 function generateAutoSummary(bodyMap, posture, mobility) {
-  const tightList = Object.entries(bodyMap).filter(([,v])=>v==="tight").map(([k])=>getMuscleLabel(k));
-  const weakList  = Object.entries(bodyMap).filter(([,v])=>v==="weak").map(([k])=>getMuscleLabel(k));
-  const issues = [];
-  if (tightList.length) issues.push("과긴장/타이트: "+tightList.join(", "));
-  if (weakList.length)  issues.push("기능저하/약화: "+weakList.join(", "));
-  const postureIssues = POSTURE_ITEMS.flatMap(item=>(posture[item.key]||[]).map(v=>item.label+" "+v));
-  if (postureIssues.length) issues.push(...postureIssues);
-  const mobIssues = MOBILITY_ITEMS
-    .filter(item=>{const v=mobility[item.key];return v&&(v==="제한"||v==="제한 있음"||v==="약함"||v==="있음");})
-    .map(item=>item.label);
-  if (mobIssues.length) issues.push("기능 제한: "+mobIssues.join(", "));
-  if (!issues.length) return "";
-  const recs = [];
-  if (tightList.some(l=>l.includes("흉근")||l.includes("전면삼각"))) recs.push("흉근 릴리즈 + 후면 어깨 활성화");
-  if (weakList.some(l=>l.includes("둔근"))) recs.push("둔근 활성화 운동");
-  if (weakList.some(l=>l.includes("척추기립근")||l.includes("승모근"))) recs.push("코어 안정화 + 중부 승모근 강화");
-  if (mobility["df"]==="제한 있음") recs.push("발목 가동성 개선");
-  if (mobility["hip_flex"]==="제한") recs.push("고관절 가동성 개선");
-  return issues.join(". ")+"."+(recs.length?" 권장 루틴: "+recs.join(" → "):"");
+  try {
+    const tightList = Object.entries(bodyMap||{}).filter(([,v])=>v==="tight").map(([k])=>getMuscleLabel(k));
+    const weakList  = Object.entries(bodyMap||{}).filter(([,v])=>v==="weak").map(([k])=>getMuscleLabel(k));
+    const issues = [];
+    if (tightList.length) issues.push("과긴장/타이트: "+tightList.join(", "));
+    if (weakList.length)  issues.push("기능저하/약화: "+weakList.join(", "));
+    // posture 값이 배열이거나 {B,L,R} 객체 모두 처리
+    const postureIssues = (Array.isArray(POSTURE_ITEMS)?POSTURE_ITEMS:[]).flatMap(item=>{
+      const val = (posture||{})[item.key];
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map(v=>item.label+" "+v);
+      // {B:[], L:[], R:[]} 형태
+      const all = [...(val.B||[]), ...(val.L||[]).map(v=>"(좌)"+v), ...(val.R||[]).map(v=>"(우)"+v)];
+      return all.map(v=>item.label+" "+v);
+    });
+    if (postureIssues.length) issues.push(...postureIssues);
+    const mobIssues = (Array.isArray(MOBILITY_ITEMS)?MOBILITY_ITEMS:[])
+      .filter(item=>{
+        const v=(mobility||{})[item.key];
+        const val = typeof v==="string" ? v : (v?.B || "");
+        return val==="제한"||val==="제한 있음"||val==="약함"||val==="있음";
+      })
+      .map(item=>item.label);
+    if (mobIssues.length) issues.push("기능 제한: "+mobIssues.join(", "));
+    if (!issues.length) return "";
+    const recs = [];
+    if (tightList.some(l=>l.includes("흉근")||l.includes("전면삼각"))) recs.push("흉근 릴리즈 + 후면 어깨 활성화");
+    if (weakList.some(l=>l.includes("둔근"))) recs.push("둔근 활성화 운동");
+    if (weakList.some(l=>l.includes("척추기립근")||l.includes("승모근"))) recs.push("코어 안정화 + 중부 승모근 강화");
+    return issues.join(". ")+"."+(recs.length?" 권장 루틴: "+recs.join(" → "):"");
+  } catch(e) {
+    console.error("[generateAutoSummary] error:", e);
+    return "";
+  }
 }
 
 // ════════════════════════════════════════════
@@ -9602,18 +9617,21 @@ function AssessmentScreen({ member, onBack, showToast }) {
   async function handleSave() {
     setSaving(true);
     try {
+      const summary = generateAutoSummary(bodyMap, posture, mobility);
       const rec = {
-        id:"a"+Date.now(), date:assDate,
+        id:"a"+Date.now(), date:assDate, savedAt:new Date().toISOString(),
         painList: [...painList],
         bodyMap:{...bodyMap}, posture:{...posture}, mobility:{...mobility}, summary
       };
+      console.log("[TEO GYM] AssessmentScreen 저장 시작:", rec);
       const next = [...records.filter(r=>r.date!==assDate),rec].sort((a,b)=>b.date.localeCompare(a.date));
       setRecords(next);
       localStorage.setItem("assess_"+member.id, JSON.stringify(next));
-      localStorage.removeItem("assess_draft_"+member.id); // 임시저장 삭제
+      localStorage.removeItem("assess_draft_"+member.id);
+      console.log("[TEO GYM] AssessmentScreen 저장 완료:", next.length, "건");
       showToast("평가 기록 저장 완료 ✓");
     } catch(e) {
-      console.error("[AssessmentScreen] save error:", e);
+      console.error("[TEO GYM] AssessmentScreen save error:", e);
       showToast("저장 실패: "+e.message, "err");
     }
     setSaving(false);
@@ -9703,8 +9721,12 @@ function AssessmentScreen({ member, onBack, showToast }) {
         )}
         {POSTURE_ITEMS.some(item=>(viewRec.posture?.[item.key]||[]).length>0) && (
           <Card title="📐 자세" style={{marginBottom:11}}>
-            {POSTURE_ITEMS.map(item=>{const v=viewRec.posture?.[item.key]||[];if(!v.length)return null;return <div key={item.key} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.08)"}}><Mo c="#54546a" s={10}>{item.label}</Mo><Mo c="#ffd166" s={10}>{v.join(", ")}</Mo></div>;})}
-          </Card>
+            {POSTURE_ITEMS.map(item=>{
+              const val = viewRec.posture?.[item.key];
+              const opts = Array.isArray(val) ? val : [...(val?.B||[]), ...(val?.L||[]).map(v=>"(좌)"+v), ...(val?.R||[]).map(v=>"(우)"+v)];
+              if (!opts.length) return null;
+              return <div key={item.key} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.08)"}}><Mo c="#54546a" s={10}>{item.label}</Mo><Mo c="#ffd166" s={10}>{opts.join(", ")}</Mo></div>;
+            })}          </Card>
         )}
       </div>
     );

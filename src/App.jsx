@@ -9707,27 +9707,76 @@ function AssessmentScreen({ member, onBack, showToast }) {
   }
 
   async function generateAIRoutine() {
-    if (!summary && Object.keys(bodyMap).length === 0) {
-      showToast("먼저 바디맵 또는 평가를 기록해주세요","err"); return;
+    const hasData = Object.keys(bodyMap).length>0 || painList.length>0
+      || fParts.length>0 || Object.keys(posture).length>0 || Object.keys(mobility).length>0;
+    if (!hasData) {
+      showToast("빠른평가 또는 통증/자세/기능 평가를 먼저 기록해주세요","err"); return;
     }
     setAiLoading(true);
-    const tightMuscles = Object.entries(bodyMap).filter(([,v])=>v==="tight").map(([k])=>getMuscleLabel(k));
-    const weakMuscles  = Object.entries(bodyMap).filter(([,v])=>v==="weak").map(([k])=>getMuscleLabel(k));
 
-    // 외부 API 없이 요약 텍스트 생성
+    const tightMuscles = Object.entries(bodyMap||{}).filter(([,v])=>v==="tight").map(([k])=>getMuscleLabel(k));
+    const weakMuscles  = Object.entries(bodyMap||{}).filter(([,v])=>v==="weak").map(([k])=>getMuscleLabel(k));
+
     const lines = [];
     lines.push("===== TEO GYM 교정 루틴 추천 요청 =====\n");
     lines.push(`회원명: ${member.name}`);
-    lines.push(`과긴장/타이트 부위: ${tightMuscles.join(", ")||"없음"}`);
-    lines.push(`약화/기능저하 부위: ${weakMuscles.join(", ")||"없음"}`);
-    lines.push(`통증 기록: ${(painList&&painList.length>0)?painList.map(p=>p.part+(p.side&&p.side!=="중앙"?" "+p.side:"")+" VAS"+p.vas).join(", "):"없음"}`);
-    lines.push(`기타 평가: ${summary||"없음"}\n`);
-    lines.push("아래 흐름으로 교정 중심 루틴을 구성해주세요:");
-    lines.push("1. 교정/릴리즈 단계 (타이트 부위 위주)");
-    lines.push("2. 활성화 단계 (기능저하 부위 위주)");
-    lines.push("3. 기능 강화 단계");
-    lines.push("4. 주의사항\n");
-    lines.push("각 단계별로 운동 이름과 세트/횟수를 포함해 한국어로 답변해주세요.");
+
+    // 1순위: 통증 기록
+    if (painList.length>0) {
+      lines.push("\n[통증 기록 — 최우선 고려]");
+      painList.forEach(p => {
+        const side = p.side&&p.side!=="중앙" ? " "+p.side : "";
+        lines.push(`- ${p.part}${side} VAS ${p.vas}${p.situation?" ("+p.situation+")":""}`);
+      });
+    }
+
+    // 2순위: 빠른 평가
+    if (fParts.length>0||fSymptoms.length>0||fMemo) {
+      lines.push("\n[빠른 평가 요약]");
+      if (fParts.length>0)      lines.push(`불편 부위: ${fParts.join(", ")}`);
+      if (fSymptoms.length>0)   lines.push(`증상 유형: ${fSymptoms.join(", ")}`);
+      if (fSituations.length>0) lines.push(`발생 상황: ${fSituations.join(", ")}`);
+      if (fMemo)                lines.push(`트레이너 메모: ${fMemo}`);
+    }
+
+    // 3순위: 자세 불균형
+    const postureIssues = (Array.isArray(POSTURE_ITEMS)?POSTURE_ITEMS:[]).flatMap(item=>{
+      const val=(posture||{})[item.key];
+      if (!val) return [];
+      const opts = Array.isArray(val)?val:[...(val.B||[]),...(val.L||[]).map(v=>"(좌)"+v),...(val.R||[]).map(v=>"(우)"+v)];
+      return opts.length ? [`${item.label}: ${opts.join(", ")}`]:[];
+    });
+    if (postureIssues.length>0) {
+      lines.push("\n[자세 불균형]");
+      postureIssues.forEach(l=>lines.push("- "+l));
+    }
+
+    // 4순위: 기능 제한
+    const mobIssues = (Array.isArray(MOBILITY_ITEMS)?MOBILITY_ITEMS:[]).filter(item=>{
+      const mv=(mobility||{})[item.key];
+      const v=typeof mv==="string"?mv:(mv?.B||"");
+      return v==="제한"||v==="제한 있음"||v==="약함"||v==="있음";
+    }).map(i=>i.label);
+    if (mobIssues.length>0) {
+      lines.push("\n[기능 제한]");
+      mobIssues.forEach(l=>lines.push("- "+l));
+    }
+
+    // 5순위: 바디맵
+    if (tightMuscles.length>0||weakMuscles.length>0) {
+      lines.push("\n[바디맵 소견]");
+      if (tightMuscles.length>0) lines.push(`과긴장/타이트: ${tightMuscles.join(", ")}`);
+      if (weakMuscles.length>0)  lines.push(`약화/기능저하: ${weakMuscles.join(", ")}`);
+    }
+
+    lines.push("\n---");
+    lines.push("위 데이터를 기반으로 아래 교정 흐름으로 루틴을 구성해주세요:");
+    lines.push("1. 릴리즈 단계 (타이트·통증 부위 릴리즈)");
+    lines.push("2. 가동성 단계 (제한된 관절 가동성 개선)");
+    lines.push("3. 활성화 단계 (기능저하 부위 신경-근 활성화)");
+    lines.push("4. 안정화 단계 (코어·관절 안정성 훈련)");
+    lines.push("5. 기능 강화 단계 (보상 패턴 개선·동작 통합)");
+    lines.push("\n각 단계별로 운동명, 세트, 횟수/시간을 포함하고 한국어로 답변해주세요.");
 
     setAiResult(lines.join("\n"));
     setAiLoading(false);
@@ -10254,18 +10303,24 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {/* ─── AI 루틴 탭 ─── */}
       {tab==="AI루틴" && (
         <div>
-          {summary && (
-            <Card style={{marginBottom:11,border:"1px solid "+ac+"44",background:ac+"08"}}>
-              <Mo c={ac} s={9} style={{display:"block",marginBottom:5}}>📝 현재 평가 요약</Mo>
-              <div style={{fontSize:11,color:"#ddddf0",lineHeight:1.8}}>{summary}</div>
-            </Card>
+          {/* 현재 입력 데이터 요약 표시 */}
+          {(painList.length>0||fParts.length>0||summary||Object.keys(posture).length>0) && (
+            <div style={{marginBottom:11,padding:"10px 13px",borderRadius:10,
+              background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.2)"}}>
+              <Mo c={ac} s={9} style={{fontWeight:700,display:"block",marginBottom:6}}>📊 현재 분석 대상 데이터</Mo>
+              {fParts.length>0 && <Mo c="#f87171" s={9} style={{display:"block",marginBottom:2}}>⚡ 빠른평가: {fParts.join(" · ")}{fSymptoms.length>0?" / "+fSymptoms.join(" · "):""}</Mo>}
+              {painList.length>0 && <Mo c="#fdba74" s={9} style={{display:"block",marginBottom:2}}>🩺 통증: {painList.map(p=>p.part+" VAS"+p.vas).join(", ")}</Mo>}
+              {Object.keys(posture).length>0 && <Mo c="#fcd34d" s={9} style={{display:"block",marginBottom:2}}>📐 자세 평가 ✓</Mo>}
+              {Object.keys(mobility).length>0 && <Mo c="#5EEAD4" s={9} style={{display:"block",marginBottom:2}}>⚡ 기능 평가 ✓</Mo>}
+              {Object.keys(bodyMap).length>0 && <Mo c="#818cf8" s={9} style={{display:"block"}}>🗺️ 바디맵: {Object.values(bodyMap).filter(v=>v==="tight").length}긴장 {Object.values(bodyMap).filter(v=>v==="weak").length}약화</Mo>}
+            </div>
           )}
           <button onClick={generateAIRoutine} disabled={aiLoading}
             style={{width:"100%",padding:"14px",borderRadius:10,border:"none",marginBottom:12,
               background:aiLoading?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#7c6fff,#a29bfe)",
               color:aiLoading?"#54546a":"#fff",fontFamily:"'Syne',sans-serif",fontWeight:800,
               fontSize:15,cursor:aiLoading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            {aiLoading ? "⏳ 요약 생성 중..." : "📋 AI 루틴 요청 텍스트 생성"}
+            {aiLoading ? "⏳ 생성 중..." : "📋 AI 루틴 요청 텍스트 생성"}
           </button>
           {aiResult && (
             <Card title="📋 AI 루틴 요청 텍스트" style={{border:"1px solid #7c6fff44",background:"rgba(124,111,255,.05)"}}>
@@ -10283,10 +10338,11 @@ function AssessmentScreen({ member, onBack, showToast }) {
             </Card>
           )}
           {!aiResult && !aiLoading && (
-            <div style={{textAlign:"center",padding:"32px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
+            <div style={{textAlign:"center",padding:"32px",background:"#111827",borderRadius:12,
+              border:"1px dashed rgba(255,255,255,0.08)"}}>
               <div style={{fontSize:32,marginBottom:8}}>🤖</div>
-              <Mo c="#54546a" s={10}>바디맵 및 평가 기록 후 버튼을 누르면</Mo>
-              <Mo c="#54546a" s={10} style={{display:"block"}}>교정 → 활성화 → 강화 순서로 루틴이 생성됩니다.</Mo>
+              <Mo c="#54546a" s={10}>빠른평가 또는 통증·자세·기능 평가 후 버튼을 누르면</Mo>
+              <Mo c="#54546a" s={10} style={{display:"block"}}>릴리즈 → 가동성 → 활성화 → 안정화 → 기능 강화 루틴이 생성됩니다.</Mo>
             </div>
           )}
         </div>

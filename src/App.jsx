@@ -9602,7 +9602,11 @@ function AssessmentScreen({ member, onBack, showToast }) {
 
     showToast("빠른 평가 적용 완료 ✓ — 통증·자세·기능 탭 자동 연결됨");
     setFParts([]); setFSymptoms([]); setFSituations([]); setFSide("양측"); setFVas(4); setFMemo(""); setFPainItems([]);
-  } = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
+  }
+
+  // ── 기존 통증 탭 state ───────────────────────────────────────────────
+  // 빠른 부위 목록
+  const QUICK_PARTS = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
   const SIDES = ["왼쪽","오른쪽","양측","중앙"];
   // 상황 카테고리
   const SITUATIONS = {

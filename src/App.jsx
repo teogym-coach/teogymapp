@@ -5966,7 +5966,319 @@ function calcDaysLeft(d) {
 // 대사 추정 분석 화면
 // ════════════════════════════════════════════
 function MetabolismScreen({ member, sessions=[], onBack }) {
-  const [range, setRange] = useState(30); // 7 or 30
+  const [range, setRange]       = useState(42); // 6주 기본
+  const [showDetail, setShowDetail] = useState(false); // 대표님 근거 보기
+
+  // ── 성능: useMemo로 캐싱 ──────────────────────────────────────────────
+  const analysis = useMemo(() => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const cutStr   = (() => { const d=new Date(); d.setDate(d.getDate()-range); return d.toISOString().split("T")[0]; })();
+    const prevCut  = (() => { const d=new Date(); d.setDate(d.getDate()-range*2); return d.toISOString().split("T")[0]; })();
+
+    const recent = sessions.filter(s=>(s.date||"")>=cutStr);
+    const older  = sessions.filter(s=>(s.date||"")>=prevCut&&(s.date||"")<cutStr);
+    const last   = sessions.length>0 ? sessions[sessions.length-1] : null;
+
+    // ── 체중 ──────────────────────────────────────────────────────────
+    const wArr  = sessions.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>({d:s.date,w:parseFloat(s.bodyWeight)})).sort((a,b)=>a.d.localeCompare(b.d));
+    const wR    = recent.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>parseFloat(s.bodyWeight));
+    const wO    = older.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>parseFloat(s.bodyWeight));
+    const avgWR = wR.length ? wR.reduce((a,b)=>a+b,0)/wR.length : null;
+    const avgWO = wO.length ? wO.reduce((a,b)=>a+b,0)/wO.length : null;
+    const wDiff = (avgWR&&avgWO) ? (avgWR-avgWO) : null;
+    const wLast = wArr.length>0 ? wArr[wArr.length-1].w : null;
+    // 정체 여부: 최근 3개 체중 표준편차 < 0.4kg
+    const wLast3 = wArr.slice(-3).map(x=>x.w);
+    const wMean3 = wLast3.length>0 ? wLast3.reduce((a,b)=>a+b,0)/wLast3.length : null;
+    const wStd   = wMean3 ? Math.sqrt(wLast3.map(w=>(w-wMean3)**2).reduce((a,b)=>a+b,0)/wLast3.length) : null;
+    const isPlateaued = wStd!==null && wStd<0.4 && wLast3.length>=2;
+
+    // ── 볼륨/빈도 ──────────────────────────────────────────────────────
+    const volR    = recent.reduce((s,ss)=>s+(ss.totalVolume||0),0);
+    const volO    = older.reduce((s,ss)=>s+(ss.totalVolume||0),0);
+    const freqR   = recent.length;
+    const freqO   = older.length;
+    const weeks   = Math.max(1,range/7);
+    const weeklyFreq = (freqR/weeks).toFixed(1);
+    const weeklyVol  = freqR>0 ? (volR/1000/weeks).toFixed(1) : null;
+
+    // ── RPE ────────────────────────────────────────────────────────────
+    const getRPE = (arr) => {
+      const vals = arr.flatMap(s=>(s.exercises||[]).flatMap(e=>(e.sets||[]).map(r=>parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>=7)));
+      return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : null;
+    };
+    const rpeR = getRPE(recent); const rpeO = getRPE(older);
+
+    // ── 컨디션 ────────────────────────────────────────────────────────
+    const condMap = {"상":5,"좋음":4,"매우 좋음":5,"중":3,"보통":3,"하":1,"나쁨":2,"매우 나쁨":1};
+    const getCondAvg = (arr) => {
+      const v = arr.map(s=>condMap[s.condition]||null).filter(Boolean);
+      return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
+    };
+    const condR = getCondAvg(recent); const condO = getCondAvg(older);
+
+    // ── 유산소 ─────────────────────────────────────────────────────────
+    const cardioR = recent.reduce((s,ss)=>s+(ss.cardio?.minutes||0),0);
+    const cardioO = older.reduce((s,ss)=>s+(ss.cardio?.minutes||0),0);
+
+    // ── 성별/나이/키/목표 ─────────────────────────────────────────────
+    const sv = member.survey || {};
+    const gender = sv.gender || null;
+    const age    = sv.age    ? parseInt(sv.age)    : null;
+    const height = sv.height ? parseFloat(sv.height): null;
+    const goal   = sv.goal   || member.goal || null;
+    const isLoss = goal && (goal.includes("감량")||goal.includes("다이어트")||goal.includes("체지방"));
+    const isMuscle = goal && (goal.includes("근비대")||goal.includes("증량")||goal.includes("근육"));
+
+    // ── TDEE 추정 (Harris-Benedict 기반 + 활동계수) ────────────────────
+    let bmrEstimate = null, tdeeEstimate = null;
+    if (wLast && age && height) {
+      if (gender==="여성"||gender==="female") bmrEstimate = Math.round(655.1+9.563*wLast+1.85*height-4.676*age);
+      else bmrEstimate = Math.round(66.47+13.75*wLast+5.003*height-6.755*(age||30));
+      const actFactor = freqR/weeks >= 5 ? 1.725 : freqR/weeks >= 3 ? 1.55 : freqR/weeks >= 1 ? 1.375 : 1.2;
+      tdeeEstimate = Math.round(bmrEstimate * actFactor);
+    } else if (wLast) {
+      // 체중만으로 단순 추정 (활동량 보정)
+      const base = wLast * 28;
+      const actBonus = freqR/weeks >= 3 ? wLast*4 : freqR/weeks >= 1 ? wLast*2 : 0;
+      tdeeEstimate = Math.round(base + actBonus);
+    }
+
+    // ── 대사 상태 판단 ────────────────────────────────────────────────
+    const metaState = (() => {
+      const signs = [];
+      if (isPlateaued && freqR>0) signs.push("정체");
+      if (condR!==null && condR<2.5) signs.push("컨디션저조");
+      if (rpeR!==null && rpeO!==null && rpeR>rpeO+1.0) signs.push("RPE상승");
+      if (wDiff!==null && wDiff>1.0 && !isMuscle) signs.push("체중증가");
+      if (volR<volO*0.7) signs.push("볼륨감소");
+
+      if (signs.includes("정체")&&signs.includes("컨디션저조")) return {label:"회복 부족 가능성",color:"#f97316",desc:"운동 강도 대비 회복이 부족한 신호가 보입니다. 수면·식단 점검을 권장합니다."};
+      if (signs.includes("정체")&&signs.includes("RPE상승")) return {label:"대사 적응 가능성",color:"#ffd166",desc:"같은 운동이 더 힘들게 느껴지고 체중 변화가 없다면 대사 적응 가능성이 있습니다. 식단 사이클이나 주기화를 고려해보세요."};
+      if (volR>0 && wDiff!==null && Math.abs(wDiff)<0.5 && condR!==null && condR>=3.5) return {label:"안정적 유지 상태",color:"#22c55e",desc:"운동량과 체중이 안정적으로 유지되고 컨디션도 양호합니다."};
+      if (wDiff!==null && wDiff<-0.5 && volR>0 && condR!==null && condR>=3) return {label:"감량 진행 중",color:"#5EEAD4",desc:`${range}일간 약 ${Math.abs(wDiff).toFixed(1)}kg 감소 흐름입니다. 볼륨 유지로 근손실을 방지하세요.`};
+      if (freqR===0) return {label:"기록 부족",color:"#3a4a5a",desc:"이 기간에 수업 기록이 없어 분석이 어렵습니다."};
+      return {label:"분석 데이터 누적 중",color:"#5EEAD4",desc:"더 많은 기록이 쌓이면 정확도가 높아집니다."};
+    })();
+
+    // ── 근손실 위험도 ─────────────────────────────────────────────────
+    const muscleLossRisk = (() => {
+      let score = 0;
+      if (wDiff!==null && wDiff<-0.8) score+=2; // 빠른 감량
+      if (wDiff!==null && wDiff<-1.5) score+=2; // 매우 빠른 감량
+      if (volR<volO*0.6) score+=2;               // 볼륨 큰 폭 감소
+      if (rpeR!==null && rpeR<6.5) score+=1;     // 강도 낮음
+      if (condR!==null && condR<2.5) score+=1;   // 컨디션 저조
+      if (freqR/weeks < 2) score+=1;             // 빈도 낮음
+      if (score>=5) return {label:"높음",color:"#ef4444",desc:"빠른 체중 감소와 운동량 감소가 동시에 나타납니다. 단백질 섭취와 근력 운동 빈도를 점검하세요."};
+      if (score>=3) return {label:"보통",color:"#ffd166",desc:"체중 감소 속도 대비 운동량을 확인해보세요."};
+      return {label:"낮음",color:"#22c55e",desc:"현재 운동량 기준 근손실 위험 신호가 낮습니다."};
+    })();
+
+    // ── 회복 상태 ─────────────────────────────────────────────────────
+    const recovery = (() => {
+      const recentRpe = rpeR, recentCond = condR;
+      if (recentRpe===null&&recentCond===null) return {label:"데이터 없음",color:"#3a4a5a",desc:"RPE와 컨디션 기록이 쌓이면 분석됩니다."};
+      const rpeHigh = recentRpe!==null && recentRpe>8.5;
+      const condLow = recentCond!==null && recentCond<2.5;
+      if (rpeHigh&&condLow) return {label:"회복 부족 가능성",color:"#ef4444",desc:"높은 RPE + 낮은 컨디션이 겹칩니다. 디로드 또는 강도 조절을 고려하세요."};
+      if (rpeHigh) return {label:"강도 높음·주의",color:"#f97316",desc:"최근 훈련 강도가 높습니다. 다음 수업 볼륨을 약간 낮추는 것을 고려해보세요."};
+      if (condLow) return {label:"컨디션 저하",color:"#ffd166",desc:"컨디션이 지속 저조합니다. 수면·영양 상태를 점검하세요."};
+      return {label:"양호",color:"#22c55e",desc:"현재 회복 상태는 안정적으로 보입니다."};
+    })();
+
+    // ── 감량 정체 분석 ────────────────────────────────────────────────
+    const plateau = (() => {
+      if (!isPlateaued||!wLast) return null;
+      if (freqR<freqO-1) return {cause:"활동량 감소 가능성",desc:"운동 빈도가 줄었습니다. 활동량 증가로 정체를 돌파할 수 있습니다."};
+      if (condR!==null&&condR<2.5) return {cause:"수분 저류 가능성",desc:"컨디션이 낮고 체중 정체 시 수분 저류 영향 가능성이 있습니다."};
+      if (rpeR!==null&&rpeR>8) return {cause:"피로 누적 가능성",desc:"높은 RPE + 정체 = 피로 누적 또는 에너지 부족 상태 가능성입니다."};
+      return {cause:"실제 정체 또는 섭취량 정체",desc:"활동량과 컨디션 모두 양호한데 정체라면 칼로리 섭취를 점검해보세요."};
+    })();
+
+    // ── 추천 방향 ─────────────────────────────────────────────────────
+    const recommendations = [];
+    if (muscleLossRisk.label==="높음") recommendations.push({icon:"🥩",text:"단백질 섭취 강화: 체중 1kg당 1.6~2g 이상"});
+    if (recovery.label.includes("부족")) recommendations.push({icon:"😴",text:"회복 우선: 다음 1~2회 볼륨 10~20% 감소"});
+    if (isPlateaued&&isLoss) recommendations.push({icon:"🔄",text:"정체 돌파: 재피딩 데이(탄수화물 증가) 또는 활동량 증가"});
+    if (freqR/weeks<2&&goal) recommendations.push({icon:"📅",text:"운동 빈도 증가: 주 2회 → 주 3회 목표"});
+    if (wDiff!==null&&wDiff<-1.5) recommendations.push({icon:"⚖️",text:"감량 속도 조절: 주 0.5~0.8kg 이내 권장"});
+    if (condR!==null&&condR>=4&&volR>0) recommendations.push({icon:"📈",text:"컨디션 양호: 다음 사이클 볼륨 5~10% 증가 가능"});
+    if (recommendations.length===0) recommendations.push({icon:"✅",text:"현재 방향 유지: 운동·회복 흐름이 안정적입니다."});
+
+    // 그래프 데이터
+    const fmtDate = d => d ? d.slice(5) : "";
+    const wChartData = wArr.slice(-20).map(d=>({name:fmtDate(d.d),체중:d.w}));
+    const volChartData = sessions.filter(s=>(s.date||"")>=cutStr&&s.totalVolume>0).sort((a,b)=>(a.date||"").localeCompare(b.date||"")).slice(-15).map(s=>({name:fmtDate(s.date),볼륨:Math.round((s.totalVolume||0)/1000*10)/10}));
+
+    return {
+      wDiff,avgWR,avgWO,wLast,wChartData,volChartData,isPlateaued,wStd,
+      tdeeEstimate,bmrEstimate,
+      metaState,muscleLossRisk,recovery,plateau,
+      recommendations,
+      freqR,freqO,weeklyFreq,weeklyVol,
+      volR,volO,
+      rpeR,rpeO,condR,condO,
+      cardioR,cardioO,
+      // 근거 데이터
+      evidence:{wLast3,wStd,rpeR,rpeO,condR,condO,freqR,freqO,volR,volO,cardioR}
+    };
+  }, [sessions, range, member]);
+
+  const tt = { background:"#111827", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, fontSize:10, color:"#fff" };
+
+  const AnalysisCard = ({title, label, color, desc, children}) => (
+    <div style={{background:"#0c1523",borderRadius:10,padding:"12px 14px",marginBottom:10,
+      border:`1px solid ${color}33`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <Mo c="#94a3b8" s={9}>{title}</Mo>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:12,
+          background:color+"22",color,fontWeight:700}}>{label}</span>
+      </div>
+      <Mo c="#e2e8f0" s={11} style={{lineHeight:1.65,display:"block",marginBottom:children?5:0}}>{desc}</Mo>
+      {children}
+    </div>
+  );
+
+  return (
+    <div>
+      <SH title="🔬 대사 추정 분석" sub={member.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+      <Mo c="#3a4a5a" s={8} style={{display:"block",marginBottom:10}}>
+        ※ 기록 데이터 기반 추정 지표입니다. 의료적 진단이 아닙니다.
+      </Mo>
+
+      {/* 기간 선택 */}
+      <div style={{display:"flex",gap:5,marginBottom:12}}>
+        {[[14,"2주"],[28,"4주"],[42,"6주"]].map(([d,l])=>(
+          <button key={d} onClick={()=>setRange(d)}
+            style={{padding:"5px 12px",borderRadius:7,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
+              borderColor:range===d?"#f97316":"rgba(255,255,255,0.1)",
+              background:range===d?"rgba(249,115,22,.12)":"transparent",
+              color:range===d?"#f97316":"#54546a"}}>
+            최근 {l}
+          </button>
+        ))}
+      </div>
+
+      {/* 핵심 지표 4개 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        {[
+          {label:"현재 체중",val:analysis.wLast?`${analysis.wLast}kg`:"—",
+            sub:analysis.wDiff!==null?`${analysis.wDiff>0?"+":""}${analysis.wDiff.toFixed(1)}kg (${range}일)`:null,
+            color:analysis.wDiff===null?"#94a3b8":analysis.wDiff<0?"#5EEAD4":"#f97316"},
+          {label:"주간 운동 빈도",val:`${analysis.weeklyFreq}회`,
+            sub:`총 ${analysis.freqR}회 (${range}일)`,color:"#818cf8"},
+          {label:"TDEE 추정",
+            val:analysis.tdeeEstimate?`${analysis.tdeeEstimate.toLocaleString()}kcal`:"—",
+            sub:analysis.bmrEstimate?`기초대사 ~${analysis.bmrEstimate.toLocaleString()}kcal`:"체중/나이 입력 필요",
+            color:"#ffd166"},
+          {label:"평균 RPE",val:analysis.rpeR?analysis.rpeR.toFixed(1):"—",
+            sub:analysis.rpeO?`이전 ${analysis.rpeO.toFixed(1)}`:null,
+            color:analysis.rpeR>=9?"#ef4444":analysis.rpeR>=7.5?"#f97316":"#5EEAD4"},
+        ].map(({label,val,sub,color})=>(
+          <div key={label} style={{background:"#0c1523",borderRadius:10,padding:"10px 13px",
+            border:"1px solid rgba(255,255,255,0.07)"}}>
+            <Mo c="#3a4a5a" s={8} style={{display:"block",marginBottom:3}}>{label}</Mo>
+            <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color,display:"block",lineHeight:1.2,marginBottom:2}}>{val}</span>
+            {sub&&<Mo c="#3a3a5a" s={8}>{sub}</Mo>}
+          </div>
+        ))}
+      </div>
+
+      {/* 대사 상태 */}
+      <AnalysisCard title="대사 상태 추정" label={analysis.metaState.label} color={analysis.metaState.color} desc={analysis.metaState.desc} />
+
+      {/* 감량 정체 */}
+      {analysis.isPlateaued && analysis.plateau && (
+        <AnalysisCard title="체중 정체 분석" label={analysis.plateau.cause} color="#ffd166" desc={analysis.plateau.desc} />
+      )}
+
+      {/* 회복 상태 */}
+      <AnalysisCard title="회복 상태 추정" label={analysis.recovery.label} color={analysis.recovery.color} desc={analysis.recovery.desc} />
+
+      {/* 근손실 위험도 */}
+      <AnalysisCard title="근손실 위험도 추정" label={analysis.muscleLossRisk.label} color={analysis.muscleLossRisk.color} desc={analysis.muscleLossRisk.desc} />
+
+      {/* 추천 방향 */}
+      <Card title="💡 추천 방향" style={{marginBottom:10}}>
+        {analysis.recommendations.map((r,i)=>(
+          <div key={i} style={{display:"flex",gap:9,alignItems:"flex-start",marginBottom:i<analysis.recommendations.length-1?8:0}}>
+            <span style={{fontSize:14,flexShrink:0}}>{r.icon}</span>
+            <Mo c="#e2e8f0" s={11} style={{lineHeight:1.65}}>{r.text}</Mo>
+          </div>
+        ))}
+      </Card>
+
+      {/* 체중 그래프 */}
+      {analysis.wChartData.length > 1 && (
+        <Card title="📉 체중 변화 흐름" style={{marginBottom:10}}>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={analysis.wChartData} margin={{top:6,right:6,left:-28,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)"/>
+              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} domain={["auto","auto"]}/>
+              <Tooltip contentStyle={tt}/>
+              <Line type="monotone" dataKey="체중" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:2}} name="체중(kg)"/>
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {/* 운동 볼륨 그래프 */}
+      {analysis.volChartData.length > 1 && (
+        <Card title="💪 운동 볼륨 흐름" style={{marginBottom:10}}>
+          <ResponsiveContainer width="100%" height={130}>
+            <BarChart data={analysis.volChartData} margin={{top:6,right:6,left:-28,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)"/>
+              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+              <Tooltip contentStyle={tt}/>
+              <Bar dataKey="볼륨" fill="#818cf8" name="볼륨(t)" radius={[3,3,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {/* 대표님 근거 데이터 */}
+      <button onClick={()=>setShowDetail(v=>!v)}
+        style={{width:"100%",padding:"8px",borderRadius:8,border:"1px solid rgba(255,255,255,0.1)",
+          background:"transparent",color:"#54546a",fontSize:10,cursor:"pointer",marginBottom:10}}>
+        {showDetail?"▲ 분석 근거 숨기기":"▼ 분석 근거 보기 (대표님 전용)"}
+      </button>
+      {showDetail && (
+        <Card style={{marginBottom:10,border:"1px solid rgba(255,255,255,0.08)"}}>
+          <Mo c="#5EEAD4" s={9} style={{display:"block",marginBottom:8,fontWeight:700}}>📊 분석 근거 데이터</Mo>
+          {[
+            ["최근 체중 평균", analysis.avgWR ? `${analysis.avgWR.toFixed(1)}kg` : "—"],
+            ["이전 체중 평균", analysis.avgWO ? `${analysis.avgWO.toFixed(1)}kg` : "—"],
+            ["최근 3회 체중", analysis.evidence.wLast3.join("kg, ")+"kg"],
+            ["체중 변동폭(σ)", analysis.wStd ? `${analysis.wStd.toFixed(2)}kg` : "—"],
+            ["최근 RPE 평균", analysis.rpeR ? analysis.rpeR.toFixed(1) : "—"],
+            ["이전 RPE 평균", analysis.rpeO ? analysis.rpeO.toFixed(1) : "—"],
+            ["최근 컨디션 평균", analysis.condR ? analysis.condR.toFixed(1)+"/5" : "—"],
+            ["최근 볼륨 합계", analysis.volR > 0 ? `${(analysis.volR/1000).toFixed(1)}t` : "—"],
+            ["이전 볼륨 합계", analysis.volO > 0 ? `${(analysis.volO/1000).toFixed(1)}t` : "—"],
+            ["최근 유산소", analysis.cardioR > 0 ? `${analysis.cardioR}분` : "없음"],
+            ["운동 빈도", `${analysis.freqR}회 / ${range}일`],
+          ].map(([k,v])=>(
+            <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:4,
+              paddingBottom:4,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+              <Mo c="#54546a" s={9}>{k}</Mo>
+              <Mo c="#94a3b8" s={9} style={{fontFamily:"'DM Mono',monospace"}}>{v}</Mo>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* 데이터 없을 때 */}
+      {analysis.freqR===0 && analysis.wChartData.length<=1 && (
+        <Emp msg={`최근 ${range}일 기록이 없습니다. 수업 기록 시 체중과 컨디션을 입력하면 분석이 시작됩니다.`} />
+      )}
+    </div>
+  );
+}
+
+
 
   // ── 데이터 준비 ──────────────────────────────
   const today = new Date();

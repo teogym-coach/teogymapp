@@ -5971,13 +5971,11 @@ function MetabolismScreen({ member, sessions=[], onBack }) {
 
   // ── 성능: useMemo로 캐싱 ──────────────────────────────────────────────
   const analysis = useMemo(() => {
-    const todayStr = new Date().toISOString().split("T")[0];
     const cutStr   = (() => { const d=new Date(); d.setDate(d.getDate()-range); return d.toISOString().split("T")[0]; })();
     const prevCut  = (() => { const d=new Date(); d.setDate(d.getDate()-range*2); return d.toISOString().split("T")[0]; })();
 
     const recent = sessions.filter(s=>(s.date||"")>=cutStr);
     const older  = sessions.filter(s=>(s.date||"")>=prevCut&&(s.date||"")<cutStr);
-    const last   = sessions.length>0 ? sessions[sessions.length-1] : null;
 
     // ── 체중 ──────────────────────────────────────────────────────────
     const wArr  = sessions.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>({d:s.date,w:parseFloat(s.bodyWeight)})).sort((a,b)=>a.d.localeCompare(b.d));
@@ -9642,8 +9640,7 @@ const MOBILITY_ITEMS = [
   {key:"wrist_pain",   label:"손목 통증",         opts:["없음","좌측","우측","양측"]},
   {key:"push_discomf", label:"푸쉬 동작 불편",   opts:["없음","있음"]},
 ];
-const VAS_TIMING = ["아침","운동 중","오래 앉을 때","특정 동작 시","기타"];
-
+// VAS_TIMING 상수는 빠른 통증 입력 UI의 SITUATIONS 객체로 통합됨
 function getMuscleLabel(id) {
   return [...FRONT_MUSCLES, ...BACK_MUSCLES].find(m => m.id === id)?.label || id;
 }

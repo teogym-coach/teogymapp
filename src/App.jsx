@@ -9502,7 +9502,7 @@ function generateAutoSummary(bodyMap, posture, mobility) {
 // ════════════════════════════════════════════
 function AssessmentScreen({ member, onBack, showToast }) {
   const today = new Date().toISOString().split("T")[0];
-  const [tab,       setTab]      = useState("통증"); // 통증이 1순위
+  const [tab,       setTab]      = useState("⚡빠른평가"); // 빠른평가 1순위
   const [records,   setRecords]  = useState(() => {
     try { return JSON.parse(localStorage.getItem("assess_"+member.id)||"[]"); } catch { return []; }
   });
@@ -9546,8 +9546,63 @@ function AssessmentScreen({ member, onBack, showToast }) {
     } catch {}
   }, []);
 
-  // 빠른 부위 목록
-  const QUICK_PARTS = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
+  // ── 빠른 평가 모드 state ────────────────────────────────────────────
+  const [fParts,     setFParts]    = useState([]); // 선택 부위 (다중)
+  const [fSymptoms,  setFSymptoms] = useState([]); // 증상 유형
+  const [fSituations,setFSituations]=useState([]); // 발생 상황
+  const [fSide,      setFSide]     = useState("양측");
+  const [fVas,       setFVas]      = useState(4);
+  const [fMemo,      setFMemo]     = useState("");
+  const [fPainItems, setFPainItems]= useState([]); // 누적 통증 목록
+
+  const F_PARTS = ["목","상부승모","견갑","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
+  const F_SYMPTOMS = ["타이트","기능저하","저림","압박감","불안정","가동성 제한","힘 빠짐","뻐근함","통증","당김"];
+  const F_SITUATIONS = ["오래 앉을 때","오래 서있을 때","걷기","계단","스쿼트","런지","팔 들기","회전 시","운동 중","운동 후","아침 기상 시","오래 운전할 때"];
+  const F_SIDES = ["왼쪽","오른쪽","양측","중앙"];
+
+  // 빠른 평가 → 기존 탭 자동 구조화
+  function applyFastAssessment() {
+    const items = [...fPainItems];
+    if (fParts.length > 0) {
+      fParts.forEach(part => {
+        items.push({ id:Date.now()+Math.random(), part, side:fSide, situation:fSituations[0]||"", vas:fVas });
+      });
+    }
+    if (items.length > 0) setPainList(prev => [...prev, ...items]);
+
+    // 자세 자동 연결
+    const postureAuto = {};
+    if (fParts.includes("상부승모") || fParts.includes("견갑")) {
+      postureAuto.shoulder = { B: ["라운드숄더"] };
+    }
+    if (fParts.includes("허리")) {
+      postureAuto.spine = { B: ["전만"] };
+    }
+    if (fParts.includes("고관절") || fParts.includes("둔근")) {
+      postureAuto.pelvis = { B: ["전방경사"] };
+    }
+    if (fParts.includes("무릎")) {
+      postureAuto.knee = { B: ["과신전"] };
+    }
+    if (Object.keys(postureAuto).length > 0) {
+      setPosture(prev => ({...prev, ...postureAuto}));
+    }
+
+    // 기능 자동 연결
+    const mobAuto = {};
+    if (fSymptoms.includes("가동성 제한") && fParts.includes("흉추")) mobAuto.thoracic_rot = "제한";
+    if (fSymptoms.includes("가동성 제한") && fParts.includes("고관절")) mobAuto.hip_flex = "제한";
+    if (fSymptoms.includes("불안정") && fParts.includes("무릎")) mobAuto.knee_sq = "제한";
+    if (Object.keys(mobAuto).length > 0) {
+      setMobility(prev => ({...prev, ...mobAuto}));
+    }
+
+    // 메모 추가
+    if (fMemo) setFMemo(prev => prev);
+
+    showToast("빠른 평가 적용 완료 ✓ — 통증·자세·기능 탭 자동 연결됨");
+    setFParts([]); setFSymptoms([]); setFSituations([]); setFSide("양측"); setFVas(4); setFMemo(""); setFPainItems([]);
+  } = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
   const SIDES = ["왼쪽","오른쪽","양측","중앙"];
   // 상황 카테고리
   const SITUATIONS = {
@@ -9665,12 +9720,13 @@ function AssessmentScreen({ member, onBack, showToast }) {
   }
 
   const TABS = [
-    {key:"바디맵", icon:"🗺️"},
-    {key:"통증",   icon:"🩺"},
-    {key:"자세",   icon:"📐"},
-    {key:"기능",   icon:"⚡"},
-    {key:"AI루틴", icon:"🤖"},
-    {key:"기록",   icon:"📅"},
+    {key:"⚡빠른평가", icon:"⚡"},
+    {key:"바디맵",    icon:"🗺️"},
+    {key:"통증",      icon:"🩺"},
+    {key:"자세",      icon:"📐"},
+    {key:"기능",      icon:"⚡"},
+    {key:"AI루틴",    icon:"🤖"},
+    {key:"기록",      icon:"📅"},
   ];
   const ac = "#a29bfe";
 
@@ -9751,6 +9807,141 @@ function AssessmentScreen({ member, onBack, showToast }) {
 
       <Field label="평가 날짜" type="date" value={assDate} onChange={setAssDate}/>
       <div style={{marginBottom:12}}/>
+
+      {/* ─── ⚡ 빠른 평가 모드 ─── */}
+      {tab==="⚡빠른평가" && (
+        <div>
+          <div style={{padding:"8px 12px",borderRadius:8,background:"rgba(162,155,254,.08)",
+            border:"1px solid rgba(162,155,254,.2)",marginBottom:12}}>
+            <Mo c="#a29bfe" s={9} style={{fontWeight:700}}>⚡ 빠른 평가 모드</Mo>
+            <Mo c="#54546a" s={8} style={{display:"block",marginTop:2}}>불편 부위·증상·상황을 선택 후 저장하면 통증/자세/기능 탭에 자동 반영됩니다</Mo>
+          </div>
+
+          {/* 1. 불편 부위 */}
+          <div style={{marginBottom:12}}>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>① 불편 부위 (다중 선택)</Mo>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {F_PARTS.map(p=>{
+                const sel = fParts.includes(p);
+                return (
+                  <button key={p} onClick={()=>setFParts(prev=>sel?prev.filter(x=>x!==p):[...prev,p])}
+                    style={{padding:"7px 12px",borderRadius:20,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
+                      borderColor:sel?"#ef4444":"rgba(255,255,255,0.12)",
+                      background:sel?"rgba(239,68,68,.15)":"rgba(255,255,255,.02)",
+                      color:sel?"#f87171":"#64748b"}}>
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. 증상 유형 */}
+          <div style={{marginBottom:12}}>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>② 증상 유형</Mo>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {F_SYMPTOMS.map(s=>{
+                const sel = fSymptoms.includes(s);
+                return (
+                  <button key={s} onClick={()=>setFSymptoms(prev=>sel?prev.filter(x=>x!==s):[...prev,s])}
+                    style={{padding:"7px 12px",borderRadius:20,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
+                      borderColor:sel?"#f97316":"rgba(255,255,255,0.12)",
+                      background:sel?"rgba(249,115,22,.15)":"rgba(255,255,255,.02)",
+                      color:sel?"#fdba74":"#64748b"}}>
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. 발생 상황 */}
+          <div style={{marginBottom:12}}>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>③ 발생 상황</Mo>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {F_SITUATIONS.map(s=>{
+                const sel = fSituations.includes(s);
+                return (
+                  <button key={s} onClick={()=>setFSituations(prev=>sel?prev.filter(x=>x!==s):[...prev,s])}
+                    style={{padding:"6px 11px",borderRadius:16,border:"1px solid",cursor:"pointer",fontSize:10,
+                      borderColor:sel?"#5EEAD4":"rgba(255,255,255,0.1)",
+                      background:sel?"rgba(94,234,212,.12)":"rgba(255,255,255,.02)",
+                      color:sel?"#5EEAD4":"#64748b"}}>
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 4. 좌우 + VAS */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            <div>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>④ 좌우</Mo>
+              <div style={{display:"flex",gap:4}}>
+                {F_SIDES.map(s=>(
+                  <button key={s} onClick={()=>setFSide(s)}
+                    style={{flex:1,padding:"7px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:9,fontWeight:700,
+                      borderColor:fSide===s?"#818cf8":"rgba(255,255,255,0.1)",
+                      background:fSide===s?"rgba(129,140,248,.15)":"transparent",
+                      color:fSide===s?"#a5b4fc":"#64748b"}}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>
+                ⑤ VAS&nbsp;
+                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,
+                  color:fVas<=3?"#5EEAD4":fVas<=6?"#ffd166":"#ef4444"}}>{fVas}</span>
+              </Mo>
+              <div style={{display:"flex",gap:2}}>
+                {[0,1,2,3,4,5,6,7,8,9,10].map(n=>(
+                  <button key={n} onClick={()=>setFVas(n)}
+                    style={{flex:1,padding:"6px 0",borderRadius:4,border:"1px solid",cursor:"pointer",
+                      fontSize:9,fontWeight:800,
+                      borderColor:fVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#ef4444"):"rgba(255,255,255,0.07)",
+                      background:fVas===n?(n<=3?"rgba(94,234,212,.15)":n<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
+                      color:fVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#f87171"):"#3a3a5a"}}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 5. 빠른 메모 */}
+          <div style={{marginBottom:14}}>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>⑥ 빠른 메모</Mo>
+            <input value={fMemo} onChange={e=>setFMemo(e.target.value)}
+              placeholder="예: 좌측 견갑 들림 / 흉추 회전 제한 / 앉으면 상부승모 긴장 증가"
+              style={{width:"100%",boxSizing:"border-box",fontSize:13,padding:"8px 10px",borderRadius:7,
+                background:"#111827",border:"1px solid rgba(255,255,255,0.1)",color:"#ddddf0"}}/>
+          </div>
+
+          {/* 선택 미리보기 */}
+          {(fParts.length>0||fSymptoms.length>0) && (
+            <div style={{marginBottom:12,padding:"10px 12px",borderRadius:8,
+              background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.15)"}}>
+              <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:5,fontWeight:700}}>📋 입력 미리보기</Mo>
+              {fParts.length>0 && <Mo c="#f87171" s={9}>{fParts.join(" · ")}</Mo>}
+              {fSymptoms.length>0 && <Mo c="#fdba74" s={9} style={{display:"block",marginTop:2}}>{fSymptoms.join(" · ")}</Mo>}
+              {fSituations.length>0 && <Mo c="#5EEAD4" s={9} style={{display:"block",marginTop:2}}>{fSituations.join(" · ")}</Mo>}
+              {fMemo && <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>📝 {fMemo}</Mo>}
+            </div>
+          )}
+
+          {/* 적용 버튼 */}
+          <Btn full onClick={applyFastAssessment}
+            disabled={fParts.length===0&&fSymptoms.length===0&&!fMemo}>
+            ⚡ 빠른 평가 적용 → 각 탭 자동 연결
+          </Btn>
+          <Mo c="#3a4a5a" s={8} style={{display:"block",marginTop:6,textAlign:"center"}}>
+            적용 후 각 탭에서 세부 수정 가능 · 기록 저장은 하단 저장 버튼 사용
+          </Mo>
+        </div>
+      )}
 
       {/* ─── 바디맵 탭 ─── */}
       {tab==="바디맵" && (
@@ -10143,7 +10334,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
       )}
 
       {/* 저장 버튼 */}
-      {tab!=="기록" && tab!=="AI루틴" && (
+      {tab!=="기록" && tab!=="AI루틴" && tab!=="⚡빠른평가" && (
         <div style={{marginTop:8}}>
           {summary && tab==="바디맵" && (
             <Card style={{marginBottom:10,border:"1px solid "+ac+"44",background:ac+"08"}}>

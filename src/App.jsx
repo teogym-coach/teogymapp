@@ -267,6 +267,7 @@ function suggestFuncExPreset(name) {
   // ── 웨이트 운동 차단 목록 (기능 운동으로 절대 분류하지 않음) ──────────
   const WEIGHT_BLOCKLIST = [
     "랫풀다운","랫 풀다운","lat pulldown","lat pull","풀다운","pulldown",
+    "페이스풀","페이스 풀","face pull",  // 웨이트 운동 - 어깨 후면 케이블
     "벤치프레스","bench press","스쿼트","squat","데드리프트","deadlift",
     "오버헤드","overhead","숄더프레스","shoulder press",
     "레그프레스","leg press","레그컬","leg curl","레그익스텐션",
@@ -2996,11 +2997,12 @@ const EX_MUSCLE_SUGGEST = [
   { keys:["데드리프트","deadlift"],                      top:"등",   sub:"광배근"     },
   { keys:["페이스 풀","face pull"],                      top:"등",   sub:"후면삼각근" },
   // ── 어깨 ──────────────────────────────────
+  { keys:["업라이트 로우","upright row"],                 top:"어깨",sub:"측면삼각근" }, // 로우보다 우선
+  { keys:["페이스풀","페이스 풀","face pull"],            top:"어깨",sub:"후면삼각근" }, // 케이블 페이스풀
+  { keys:["리어델트","리어 델트","rear delt","리어레이즈"],top:"어깨",sub:"후면삼각근" },
+  { keys:["사이드 레터럴","사이드 레이즈","lateral raise"],top:"어깨",sub:"측면삼각근" },
   { keys:["숄더프레스","shoulder press","오버헤드 프레스","ohp","밀리터리"],top:"어깨",sub:"전면삼각근"},
-  { keys:["사이드 레터럴","사이드 레이즈","lateral raise"],top:"어깨",sub:"측면삼각근"},
   { keys:["프론트 레이즈","front raise"],                 top:"어깨",sub:"전면삼각근" },
-  { keys:["리어 델트","rear delt","리어레이즈"],          top:"어깨",sub:"후면삼각근" },
-  { keys:["업라이트 로우","upright row"],                 top:"어깨",sub:"측면삼각근" },
   // ── 하체 ──────────────────────────────────
   { keys:["스쿼트","squat"],                             top:"하체", sub:"전체"      },
   { keys:["레그프레스","leg press"],                     top:"하체", sub:"대퇴사두근" },
@@ -3011,15 +3013,20 @@ const EX_MUSCLE_SUGGEST = [
   { keys:["카프레이즈","calf raise","종아리"],            top:"하체", sub:"종아리"    },
   { keys:["스모 데드","sumo dead"],                      top:"하체", sub:"내전근"     },
   // ── 이두 ──────────────────────────────────
-  { keys:["바벨 컬","barbell curl","이지바 컬","ez 컬"],  top:"이두", sub:"전체"      },
-  { keys:["덤벨 컬","dumbbell curl","db 컬","해머 컬"],   top:"이두", sub:"전체"      },
-  { keys:["케이블 컬","cable curl"],                     top:"이두", sub:"전체"      },
-  { keys:["프리처 컬","preacher curl"],                  top:"이두", sub:"전체"      },
+  { keys:["21s컬","21s 컬","21S컬","21S 컬"],             top:"팔-이두근", sub:"전체"             }, // 21s컬 > 컬 우선
+  { keys:["해머컬","해머 컬","hammer curl"],               top:"팔-이두근", sub:"전완근+상완근"    }, // 해머컬 > 컬 우선
+  { keys:["바벨 컬","barbell curl","이지바 컬","ez 컬"],   top:"팔-이두근", sub:"전체"             },
+  { keys:["덤벨 컬","dumbbell curl","db 컬"],              top:"팔-이두근", sub:"전체"             },
+  { keys:["케이블 컬","cable curl"],                       top:"팔-이두근", sub:"전체"             },
+  { keys:["프리처 컬","preacher curl","프리처"],            top:"팔-이두근", sub:"전체"             },
+  { keys:["인클라인 컬","incline curl"],                   top:"팔-이두근", sub:"전체"             },
+  { keys:["컬"],                                           top:"팔-이두근", sub:"전체"             }, // 일반 컬 fallback
   // ── 삼두 ──────────────────────────────────
-  { keys:["트라이셉스 푸쉬다운","케이블 푸쉬다운","pushdown","푸시다운"],top:"삼두",sub:"전체"},
-  { keys:["오버헤드 익스텐션","overhead extension"],     top:"삼두", sub:"장두"      },
-  { keys:["스컬 크러셔","skull crusher","라잉 익스텐션"], top:"삼두", sub:"전체"     },
-  { keys:["클로즈 그립","narrow grip","좁은 그립"],       top:"삼두", sub:"전체"     },
+  { keys:["오버헤드 트라이셉스 익스텐션","오버헤드 트라이셉스","overhead tricep extension","overhead tricep"], top:"팔-삼두근", sub:"장두" }, // 오버헤드 트라이셉스 > 익스텐션 우선
+  { keys:["트라이셉스 푸쉬다운","케이블 푸쉬다운","pushdown","푸시다운","푸쉬다운"], top:"팔-삼두근", sub:"전체" },
+  { keys:["오버헤드 익스텐션","overhead extension"],       top:"팔-삼두근", sub:"장두"             },
+  { keys:["스컬 크러셔","skull crusher","라잉 익스텐션"],  top:"팔-삼두근", sub:"전체"             },
+  { keys:["클로즈 그립","narrow grip","좁은 그립"],        top:"팔-삼두근", sub:"전체"             },
   { keys:["킥백","kickback"],                            top:"삼두", sub:"외측두"    },
   // ── 코어/기능 ─────────────────────────────
   { keys:["플랭크","plank"],                             top:"코어", sub:"코어"      },
@@ -3046,7 +3053,9 @@ function normalizeExName(name) {
 function getAutoEquipmentByName(name) {
   if (!name || name.trim().length < 2) return null;
   const n = name.toLowerCase();
-  // 명시적 키워드 우선
+  // 세부 종목 우선 (일반 키워드보다 먼저)
+  if (n.includes("페이스풀") || n.includes("페이스 풀") || n.includes("face pull")) return "케이블";
+  if (n.includes("21s컬") || n.includes("21s 컬") || n.includes("21s")) return "케이블";
   if (n.includes("케이블"))         return "케이블";
   if (n.includes("바벨"))           return "바벨";
   if (n.includes("덤벨") || n.includes("db ") || n.startsWith("db") && n.length < 20) return "덤벨";

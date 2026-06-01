@@ -2900,10 +2900,38 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
 // ════════════════════════════════════════════
 // SESSION SCREEN — 수업 기록 입력
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+// 자동 임시저장 유틸리티
+// ════════════════════════════════════════════
+function getDraftKey(type, memberId, date) {
+  if (type === "lesson")     return `draft_lesson_${memberId}_${date}`;
+  if (type === "selfwork")   return `draft_selfwork_${date}`;
+  if (type === "assessment") return `draft_assessment_${memberId}_${date}`;
+  return `draft_${type}_${memberId||""}`;
+}
+function saveDraft(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify({...data, _savedAt: new Date().toISOString()}));
+    return true;
+  } catch(e) { console.warn("[Draft] save failed:", e); return false; }
+}
+function loadDraft(key) {
+  try { return JSON.parse(localStorage.getItem(key)||"null"); } catch { return null; }
+}
+function removeDraft(key) {
+  try { localStorage.removeItem(key); } catch {}
+}
+
 function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData }) {
-  const isCorr = false; // 교정 프로그램 구분 제거 - 평가 기록 탭 사용
+  const isCorr = false;
   const isEdit = !!(editData?.id);
-  const last   = sessions.length > 0 ? sessions[sessions.length-1] : null;
+  const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
+
+  // ── 임시저장 state ────────────────────────────────────────────────────
+  const draftType = isOwner(member) ? "selfwork" : "lesson";
+  const draftKey  = getDraftKey(draftType, member.id, new Date().toISOString().split("T")[0]);
+  const [draftStatus, setDraftStatus] = useState(""); // "저장됨 HH:MM" | "저장 중..." | ""
+  const [draftPopup,  setDraftPopup]  = useState(null); // draft 복원 팝업 데이터sessions.length > 0 ? sessions[sessions.length-1] : null;
   const pRef   = useRef(null);
 
   const [trainerName,    setTrainerName]    = useState(editData?.trainerName    || last?.trainerName    || "김태오");
@@ -2974,6 +3002,76 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       next.splice(to, 0, moved);
       return next;
     });
+  }
+
+  // ── 임시저장 복원 체크 (진입 시 1회) ────────────────────────────────
+  const draftTimerRef = useRef(null);
+  useEffect(() => {
+    if (isEdit) return;
+    const draft = loadDraft(draftKey);
+    if (draft && draft.exercises?.length > 0) {
+      setDraftPopup(draft);
+    }
+  }, []);
+
+  // ── 자동 임시저장 (state 변경 → 2초 후 저장) ────────────────────────
+  useEffect(() => {
+    if (isEdit) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      const data = {
+        trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
+        exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
+        cardioType, cardioMinutes, cardioCalories, cardioIntensity,
+        workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
+      };
+      const ok = saveDraft(draftKey, data);
+      const now = new Date();
+      setDraftStatus(ok
+        ? `임시 저장됨 ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`
+        : "임시저장 실패");
+    }, 2000);
+    return () => clearTimeout(draftTimerRef.current);
+  }, [trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
+      exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
+      cardioType, cardioMinutes, cardioCalories, cardioIntensity,
+      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo]);
+
+  // ── 이탈 경고 ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isEdit) return;
+    const handler = (e) => {
+      const draft = loadDraft(draftKey);
+      if (draft) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [draftKey]);
+
+  // 임시저장 복원 적용
+  function applyDraft(draft) {
+    if (draft.trainerName)     setTrainerName(draft.trainerName);
+    if (draft.gymName)         setGymName(draft.gymName);
+    if (draft.date)            setDate(draft.date);
+    if (draft.sessionNo)       setSessionNo(draft.sessionNo);
+    if (draft.selectedTypes)   setSelectedTypes(draft.selectedTypes);
+    if (draft.intensity)       setIntensity(draft.intensity);
+    if (draft.condition)       setCondition(draft.condition);
+    if (draft.exercises?.length>0) setExercises(draft.exercises);
+    if (draft.stretchNotes)    setStretchNotes(draft.stretchNotes);
+    if (draft.nextPlan)        setNextPlan(draft.nextPlan);
+    if (draft.trainerComment)  setTrainerComment(draft.trainerComment);
+    if (draft.trainerOnlyNote) setTrainerOnlyNote(draft.trainerOnlyNote);
+    if (draft.cardioType)      setCardioType(draft.cardioType);
+    if (draft.cardioMinutes)   setCardioMinutes(draft.cardioMinutes);
+    if (draft.cardioCalories)  setCardioCalories(draft.cardioCalories);
+    if (draft.cardioIntensity) setCardioIntensity(draft.cardioIntensity);
+    if (draft.bodyWeight)      setBodyWeight(draft.bodyWeight);
+    if (draft.calories)        setCalories(draft.calories);
+    if (draft.dietNote)        setDietNote(draft.dietNote);
+    if (draft.refVideo)        setRefVideo(draft.refVideo);
+    setDraftPopup(null);
+    showToast("이전 기록을 불러왔습니다 ✓");
   }
 
   // ════════════════════════════════════════════
@@ -3395,6 +3493,9 @@ function updateEx(ei, key, val) {
         });
       }
     });
+    // 정식 저장 완료 → 임시저장 삭제
+    removeDraft(draftKey);
+    setDraftStatus("");
     onSave(payload);
   }
 
@@ -3419,9 +3520,46 @@ function updateEx(ei, key, val) {
 
   return (
     <div>
+      {/* ── 임시저장 복원 팝업 ── */}
+      {draftPopup && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
+          background:"rgba(0,0,0,0.7)",padding:20}}>
+          <div style={{background:"#111827",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",
+            border:"1px solid rgba(94,234,212,.3)"}}>
+            <div style={{fontSize:18,marginBottom:8,textAlign:"center"}}>📝</div>
+            <Mo c="#e2e8f0" s={13} style={{display:"block",textAlign:"center",fontWeight:700,marginBottom:6}}>
+              이전에 작성 중이던 기록이 있습니다
+            </Mo>
+            {draftPopup._savedAt && (
+              <Mo c="#54546a" s={9} style={{display:"block",textAlign:"center",marginBottom:16}}>
+                저장 시각: {new Date(draftPopup._savedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}
+              </Mo>
+            )}
+            <div style={{display:"flex",gap:8,flexDirection:"column"}}>
+              <button onClick={()=>applyDraft(draftPopup)}
+                style={{padding:"11px",borderRadius:9,border:"none",cursor:"pointer",
+                  background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",
+                  color:"#0B1120",fontWeight:800,fontSize:13}}>
+                이어서 작성
+              </button>
+              <button onClick={()=>{removeDraft(draftKey);setDraftPopup(null);}}
+                style={{padding:"11px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",cursor:"pointer",
+                  background:"transparent",color:"#64748b",fontSize:13}}>
+                삭제 후 새로 작성
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <SH title={isOwner(member) ? (isEdit?"🔧 운동 수정":"✏️ 운동 기록") : (isEdit?"🔧 수업 수정":"✏️ 수업 기록")} sub={member.name}
         right={
           <div style={{display:"flex",gap:4,flexWrap:"nowrap",flexShrink:0,minWidth:0}}>
+            {/* 임시저장 상태 표시 */}
+            {draftStatus && !isEdit && (
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a4a5a",
+                alignSelf:"center",flexShrink:0,display:"none"}} id="draft-status">{draftStatus}</span>
+            )}
             <Btn ghost sm onClick={() => setShowCard(true)} style={{color:"#00bfff",borderColor:"#00bfff33",padding:"5px 9px",fontSize:10}}>📸 카드</Btn>
             <button onClick={handleSaveTop}
               style={{padding:"5px 9px",borderRadius:8,border:"1px solid #5EEAD4",cursor:"pointer",
@@ -3432,6 +3570,13 @@ function updateEx(ei, key, val) {
             <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
           </div>
         } />
+
+      {/* 임시저장 상태 - 헤더 아래 */}
+      {draftStatus && !isEdit && (
+        <div style={{textAlign:"right",marginTop:-6,marginBottom:6,paddingRight:4}}>
+          <Mo c="#3a4a5a" s={8}>{draftStatus}</Mo>
+        </div>
+      )}
 
       <Card title="기본 정보">
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>

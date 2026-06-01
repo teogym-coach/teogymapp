@@ -1108,6 +1108,7 @@ export default function App() {
             }
           }} showToast={showToast} />}
         {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} onBack={()=>setScreen("hub")} />}
+        {screen==="referral"  && <ReferralStatsScreen members={members} onBack={()=>setScreen("hub")} />}
       </div>
       <div id="pportal" style={{display:"none"}} />
     </div>
@@ -1912,6 +1913,15 @@ function MemberForm({ initial, onSave, onBack }) {
   // 2단계
   const [visitRoutes, setVisitRoutes] = useState(sv.visitRoutes || []);
   const [visitEtc,    setVisitEtc]    = useState(sv.visitEtc    || "");
+  // 방문 계기 상세 (신규)
+  const [visitDetail, setVisitDetail] = useState(sv.visitDetail || initial?.visitDetail || initial?.memo?.includes("방문") ? initial?.memo : sv.visitDetail || "");
+  const [visitAiTool, setVisitAiTool] = useState(sv.visitAiTool || "");
+  const [visitKeyword,setVisitKeyword]= useState(sv.visitKeyword|| "");
+  const [visitReferer,setVisitReferer]= useState(sv.visitReferer|| "");
+  const [visitRealMemo,setVisitRealMemo]= useState(sv.visitRealMemo||initial?.visitReason||initial?.referralSource||"");
+  // 헬스 외 운동 경험 (신규)
+  const [otherSports, setOtherSports] = useState(sv.otherSports || []);
+  const [gymRecent,   setGymRecent]   = useState(sv.gymRecent   || "");
   // 3단계
   const [purposes,     setPurposes]    = useState(sv.purposes    || []);
   const [primaryGoal,  setPrimaryGoal] = useState(sv.primaryGoal || "");
@@ -2007,7 +2017,8 @@ function MemberForm({ initial, onSave, onBack }) {
   function handleSave() {
     const survey = {
       gender, age, height, weight, job,
-      visitRoutes, visitEtc,
+      visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo,
+      gymRecent, otherSports,
       purposes, primaryGoal,
       exLevel, exDuration, prevPT, prevPTNote,
       mealsPerDay, lateSnack, alcohol, waterIntake, delivery, sleepHours, stressLevel,
@@ -2035,7 +2046,7 @@ function MemberForm({ initial, onSave, onBack }) {
   const [showAiReport, setShowAiReport] = useState(false);
 
   if (isEdit) {
-    const EDIT_TABS = ["기본","목표·목적","통증·건강","운동경험","생활습관","스케줄","메모"];
+    const EDIT_TABS = ["기본","목표·목적","통증·건강","운동경험","방문계기","생활습관","스케줄","메모"];
 
     if (showAiReport) {
       // handleSave로 저장된 최신 survey 데이터 기반 리포트
@@ -2181,8 +2192,10 @@ function MemberForm({ initial, onSave, onBack }) {
             <div>
               <StepLabel label="운동 경험 수준" />
               <ChipSelect options={["운동 경험 없음","초급 (1년 미만)","중급 (1~3년)","고급 (3년 이상)"]} value={exLevel} onChange={setExLevel} />
-              <StepLabel label="운동 지속 기간" />
+              <StepLabel label="헬스 운동 기간" />
               <ChipSelect options={["없음","1개월 미만","1~6개월","6개월~1년","1~3년","3년 이상"]} value={exDuration} onChange={setExDuration} />
+              <StepLabel label="헬스 최근 진행 여부" />
+              <ChipSelect options={["현재 진행 중","최근 3개월 이내","6개월 이내","1년 이상 전","오래됨","없음"]} value={gymRecent} onChange={setGymRecent} />
               <StepLabel label="이전 PT 경험" />
               <ChipSelect options={["없음","있음 (만족)","있음 (불만족)","있음 (중립)"]} value={prevPT} onChange={setPrevPT} />
               {prevPT && prevPT !== "없음" && (
@@ -2192,8 +2205,108 @@ function MemberForm({ initial, onSave, onBack }) {
                     border:"1px solid rgba(255,255,255,0.08)",background:"#111827",
                     color:"#e2e8f0",fontSize:12,resize:"none",boxSizing:"border-box"}} />
               )}
+              {/* 헬스 외 운동 경험 */}
+              <StepLabel label="헬스 외 운동 경험" />
+              <ChipSelect multi
+                options={["필라테스","요가","수영","골프","러닝","축구","테니스","크로스핏","등산","재활운동","클라이밍","복싱","기타"]}
+                value={otherSports.map(s=>typeof s==="string"?s:s.type)} onChange={v=>setOtherSports(v.map(t=>{const ex=otherSports.find(s=>(s.type||s)===t);return ex&&typeof ex==="object"?ex:{type:t}; }))} />
+              {otherSports.length>0 && (
+                <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
+                  {otherSports.map((sp,i)=>{
+                    const obj = typeof sp==="string" ? {type:sp} : sp;
+                    return (
+                      <div key={i} style={{padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",
+                        border:"1px solid rgba(255,255,255,0.08)"}}>
+                        <Mo c="#94a3b8" s={10} style={{display:"block",marginBottom:4,fontWeight:700}}>{obj.type}</Mo>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                          <input placeholder="기간 (예: 2년)" value={obj.duration||""} onChange={e=>{const n=[...otherSports];n[i]={...obj,duration:e.target.value};setOtherSports(n);}}
+                            style={{flex:"1 1 80px",minWidth:70,padding:"5px 7px",borderRadius:5,fontSize:11,
+                              border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}} />
+                          <input placeholder="주 몇 회" value={obj.freq||""} onChange={e=>{const n=[...otherSports];n[i]={...obj,freq:e.target.value};setOtherSports(n);}}
+                            style={{flex:"1 1 60px",minWidth:60,padding:"5px 7px",borderRadius:5,fontSize:11,
+                              border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}} />
+                          <select value={obj.status||""} onChange={e=>{const n=[...otherSports];n[i]={...obj,status:e.target.value};setOtherSports(n);}}
+                            style={{flex:"1 1 90px",minWidth:80,padding:"5px 7px",borderRadius:5,fontSize:11,
+                              border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}}>
+                            <option value="">현재 여부</option>
+                            <option value="현재">현재 진행 중</option>
+                            <option value="최근">최근까지</option>
+                            <option value="과거">과거에만</option>
+                          </select>
+                        </div>
+                        <input placeholder="특이사항 메모" value={obj.note||""} onChange={e=>{const n=[...otherSports];n[i]={...obj,note:e.target.value};setOtherSports(n);}}
+                          style={{width:"100%",boxSizing:"border-box",marginTop:5,padding:"5px 7px",borderRadius:5,fontSize:11,
+                            border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <StepLabel label="운동 강도 성향" />
               <ChipSelect options={["천천히","보통","강하게"]} value={intensity} onChange={setIntensity} />
+            </div>
+          )}
+
+          {/* ─ 방문계기 탭 ─ */}
+          {editTab==="방문계기" && (
+            <div>
+              <StepLabel label="방문 경로 (복수 선택)" />
+              <ChipSelect multi
+                options={["네이버 블로그","네이버 플레이스","인스타그램","유튜브","AI 검색","지인 소개","기존 회원 소개","지나가다 발견","카카오 지도","기타"]}
+                value={visitRoutes} onChange={setVisitRoutes} />
+              {/* AI 검색 상세 */}
+              {visitRoutes.includes("AI 검색") && (
+                <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,
+                  background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.2)"}}>
+                  <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>🤖 AI 검색 상세</Mo>
+                  <StepLabel label="사용한 AI" />
+                  <ChipSelect options={["ChatGPT","Perplexity","Gemini","Claude","네이버 Cue","기타"]} value={visitAiTool} onChange={setVisitAiTool} />
+                  <StepLabel label="검색 키워드" />
+                  <input value={visitKeyword} onChange={e=>setVisitKeyword(e.target.value)}
+                    placeholder="예: 청라 PT 추천, 청라 체형교정, 청라 다이어트 PT"
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                      border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0",marginBottom:6}} />
+                  <StepLabel label="AI가 추천한 내용 메모" />
+                  <textarea value={visitDetail} onChange={e=>setVisitDetail(e.target.value)}
+                    placeholder="AI가 어떤 내용을 추천했는지 메모" rows={2}
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                      border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0",resize:"none"}} />
+                </div>
+              )}
+              {/* 소개인 */}
+              {(visitRoutes.includes("지인 소개")||visitRoutes.includes("기존 회원 소개")) && (
+                <div style={{marginTop:8}}>
+                  <StepLabel label="소개자 이름 / 기존 회원명" />
+                  <input value={visitReferer} onChange={e=>setVisitReferer(e.target.value)}
+                    placeholder="소개해준 분 이름 또는 회원명"
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                      border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}} />
+                </div>
+              )}
+              <StepLabel label="방문 계기 상세 메모" />
+              <input value={visitDetail} onChange={e=>setVisitDetail(e.target.value)}
+                placeholder="어떤 콘텐츠/키워드/글을 보고 왔는지"
+                style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",marginBottom:6}} />
+              <StepLabel label="기타 방문 경로 메모" />
+              <input value={visitEtc} onChange={e=>setVisitEtc(e.target.value)}
+                placeholder="기타 방문 계기"
+                style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",marginBottom:6}} />
+              <StepLabel label="회원이 직접 말한 방문 이유" />
+              <textarea value={visitRealMemo} onChange={e=>setVisitRealMemo(e.target.value)}
+                placeholder="상담 시 들은 실제 표현 그대로 메모" rows={3}
+                style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",resize:"none"}} />
+              {/* 기존 저장값 복구 안내 */}
+              {(initial?.visitReason||initial?.referralSource) && (
+                <div style={{marginTop:8,padding:"8px 10px",borderRadius:6,background:"rgba(249,115,22,.06)",
+                  border:"1px solid rgba(249,115,22,.15)"}}>
+                  <Mo c="#f97316" s={9} style={{display:"block",marginBottom:2,fontWeight:700}}>📋 기존 저장값</Mo>
+                  {initial.visitReason && <Mo c="#94a3b8" s={9}>{initial.visitReason}</Mo>}
+                  {initial.referralSource && <Mo c="#94a3b8" s={9} style={{display:"block"}}>{initial.referralSource}</Mo>}
+                </div>
+              )}
             </div>
           )}
 
@@ -2625,7 +2738,8 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
     {icon:"🤖",label:"AI 루틴 추천",   desc:t("수업기록 기반 다음 루틴","운동기록 기반 다음 루틴"), sc:"ai_routine", c:"#a29bfe"},
     {icon:"🎯",label:"목표 관리",      desc:"목표 설정 + AI 분석 리포트",  sc:"goal_manage",c:"#818cf8"},
     // ── 기록·분석 보조 ────────────────────────────────
-    {icon:"📚",label:"운동 라이브러리",desc:"부위별 운동 기록",            sc:"library",    c:"#00bfff"},
+    {icon:"📊",label:"유입 분석",        desc:"방문 경로·AI 검색 통계",   sc:"referral",    c:"#a29bfe"},
+    {icon:"📚",label:"운동 라이브러리",  desc:"부위별 운동 기록",           sc:"library",     c:"#00bfff"},
     {icon:"📈",label:"루틴 분석",      desc:"RPE·근육통·볼륨 반응 분석",  sc:"analysis",   c:"#7c6fff"},
     {icon:"📊",label:"블록 피드백",    desc:"부위/기구별 볼륨 분석",      sc:"feedback",   c:"#ffd166"},
     {icon:"💢",label:"근육통 기록",    desc:"부위별 근육통 0~5 기록",     sc:"soreness",   c:"#ff9f43"},
@@ -6426,6 +6540,151 @@ function MetabolismScreen({ member, sessions=[], onBack }) {
       {analysis.freqR===0 && analysis.wChartData.length<=1 && (
         <Emp msg={`최근 ${range}일 기록이 없습니다. 수업 기록 시 체중과 컨디션을 입력하면 분석이 시작됩니다.`} />
       )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 유입 분석 화면
+// ════════════════════════════════════════════
+function ReferralStatsScreen({ members=[], onBack }) {
+  const [period, setPeriod] = useState("all"); // all | 90 | 30
+
+  const filtered = useMemo(()=>{
+    if (period === "all") return members;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - parseInt(period));
+    const cutStr = cutoff.toISOString().split("T")[0];
+    return members.filter(m => (m.startDate||"") >= cutStr);
+  }, [members, period]);
+
+  // 방문 경로 집계
+  const routeCount = useMemo(()=>{
+    const map = {};
+    filtered.forEach(m => {
+      const routes = m.survey?.visitRoutes || [];
+      if (routes.length === 0) { map["미기재"] = (map["미기재"]||0)+1; return; }
+      routes.forEach(r => { map[r] = (map[r]||0)+1; });
+    });
+    return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  }, [filtered]);
+
+  // AI 검색 상세
+  const aiMembers = filtered.filter(m => (m.survey?.visitRoutes||[]).includes("AI 검색"));
+  const aiToolCount = useMemo(()=>{
+    const map = {};
+    aiMembers.forEach(m => {
+      const t = m.survey?.visitAiTool || "미기재";
+      map[t] = (map[t]||0)+1;
+    });
+    return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  }, [aiMembers]);
+
+  const keywordList = aiMembers.flatMap(m =>
+    (m.survey?.visitKeyword||"").split(/[,，\s]+/).map(k=>k.trim()).filter(Boolean)
+  );
+  const kwCount = useMemo(()=>{
+    const map = {};
+    keywordList.forEach(k => { map[k] = (map[k]||0)+1; });
+    return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  }, [keywordList]);
+
+  const colors = ["#5EEAD4","#818cf8","#f97316","#ffd166","#22c55e","#f87171","#a29bfe","#fdba74","#60a5fa","#94a3b8"];
+
+  return (
+    <div>
+      <SH title="📊 유입 분석" sub="방문 경로 통계" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+      {/* 기간 필터 */}
+      <div style={{display:"flex",gap:5,marginBottom:12}}>
+        {[["all","전체"],["90","최근 90일"],["30","최근 30일"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setPeriod(v)}
+            style={{padding:"5px 12px",borderRadius:7,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
+              borderColor:period===v?"#a29bfe":"rgba(255,255,255,0.1)",
+              background:period===v?"rgba(162,155,254,.12)":"transparent",
+              color:period===v?"#a29bfe":"#54546a"}}>
+            {l}
+          </button>
+        ))}
+        <Mo c="#3a4a5a" s={9} style={{alignSelf:"center"}}>총 {filtered.length}명</Mo>
+      </div>
+
+      {/* 방문 경로 통계 */}
+      <Card title="📍 방문 경로별 회원 수" style={{marginBottom:10}}>
+        {routeCount.length===0 ? <Emp msg="방문 경로 기록 없음"/> : (
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {routeCount.map(([route,cnt],i)=>{
+              const pct = filtered.length > 0 ? Math.round(cnt/filtered.length*100) : 0;
+              return (
+                <div key={route}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <Mo c="#e2e8f0" s={11}>{route}</Mo>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <Mo c={colors[i%colors.length]} s={11} style={{fontWeight:700}}>{cnt}명</Mo>
+                      <Mo c="#3a4a5a" s={9}>{pct}%</Mo>
+                    </div>
+                  </div>
+                  <div style={{height:6,borderRadius:3,background:"rgba(255,255,255,0.06)",overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${pct}%`,background:colors[i%colors.length],borderRadius:3,transition:"width .4s"}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* AI 검색 상세 */}
+      {aiMembers.length > 0 && (
+        <Card title={`🤖 AI 검색 유입 — ${aiMembers.length}명`} style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.03)"}}>
+          <div style={{marginBottom:10}}>
+            <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>사용 AI별</Mo>
+            {aiToolCount.map(([tool,cnt],i)=>(
+              <div key={tool} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <Mo c="#94a3b8" s={10}>{tool}</Mo>
+                <Mo c="#a29bfe" s={10} style={{fontWeight:700}}>{cnt}명</Mo>
+              </div>
+            ))}
+          </div>
+          {kwCount.length>0 && (
+            <div>
+              <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>검색 키워드</Mo>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {kwCount.map(([kw,cnt])=>(
+                  <span key={kw} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
+                    background:"rgba(162,155,254,.12)",color:"#a29bfe"}}>
+                    {kw} ({cnt})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* AI 유입 회원 목록 */}
+          <div style={{marginTop:10}}>
+            <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:5,fontWeight:700}}>AI 유입 회원</Mo>
+            {aiMembers.map(m=>(
+              <div key={m.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
+                borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                <Mo c="#e2e8f0" s={10}>{m.name}</Mo>
+                <Mo c="#64748b" s={9}>{m.survey?.visitAiTool||""} {m.survey?.visitKeyword?`· ${m.survey.visitKeyword}`:""}</Mo>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* 회원별 유입 목록 */}
+      <Card title="👥 전체 회원 유입 목록" style={{marginBottom:10}}>
+        {filtered.filter(m=>(m.survey?.visitRoutes||[]).length>0 || m.survey?.visitRealMemo).map(m=>(
+          <div key={m.id} style={{padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <Mo c="#e2e8f0" s={10} style={{fontWeight:700}}>{m.name}</Mo>
+              <Mo c="#5EEAD4" s={9}>{(m.survey?.visitRoutes||[]).join(", ")||"미기재"}</Mo>
+            </div>
+            {m.survey?.visitRealMemo && <Mo c="#64748b" s={8} style={{marginTop:2}}>📝 {m.survey.visitRealMemo}</Mo>}
+          </div>
+        ))}
+      </Card>
     </div>
   );
 }

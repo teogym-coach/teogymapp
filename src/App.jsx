@@ -8055,6 +8055,13 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
 
       {tab === "기록" && (
         <div>
+          {/* 날짜 선택 */}
+          <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
+            <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)}
+              style={{flex:1,padding:"6px 8px",borderRadius:7,fontSize:12,
+                border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}}/>
+          </div>
+
           <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
             {MEAL_TYPES.map(mt => (
               <button key={mt} onClick={() => setAddMeal(mt)}
@@ -8066,6 +8073,93 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
               </button>
             ))}
           </div>
+
+          {/* 입력 방식 선택 */}
+          <div style={{display:"flex",gap:5,marginBottom:10}}>
+            {[["food","음식 검색"],["quick","칼로리만 기록"],["daily","하루 총칼로리"]].map(([m,l])=>(
+              <button key={m} onClick={()=>setInputMode(m)}
+                style={{flex:1,padding:"7px 0",borderRadius:8,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                  borderColor:inputMode===m?"#a29bfe":"rgba(255,255,255,0.1)",
+                  background:inputMode===m?"rgba(162,155,254,.12)":"rgba(255,255,255,.02)",
+                  color:inputMode===m?"#a29bfe":"#64748b"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* ── 칼로리만 기록 모드 ── */}
+          {inputMode==="quick" && (
+            <Card style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.04)"}}>
+              <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>⚡ 빠른 칼로리 기록</Mo>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div>
+                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>섭취칼로리 (kcal) *</Mo>
+                  <input type="number" value={qKcal} onChange={e=>setQKcal(e.target.value)}
+                    placeholder="예: 650"
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:14,fontWeight:700,
+                      border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4",textAlign:"center"}}/>
+                </div>
+                <div>
+                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>추정 정확도</Mo>
+                  <div style={{display:"flex",gap:4}}>
+                    {["낮음","보통","높음"].map(c=>(
+                      <button key={c} onClick={()=>setQConfidence(c)}
+                        style={{flex:1,padding:"7px 0",borderRadius:5,border:"1px solid",cursor:"pointer",fontSize:9,
+                          borderColor:qConfidence===c?"#ffd166":"rgba(255,255,255,0.1)",
+                          background:qConfidence===c?"rgba(255,209,102,.12)":"transparent",
+                          color:qConfidence===c?"#fcd34d":"#54546a"}}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <textarea value={qMemo} onChange={e=>setQMemo(e.target.value)} rows={2}
+                placeholder="예: 닭가슴살 1팩, 현미밥 반공기 약 500kcal"
+                style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",resize:"none",marginBottom:8}}/>
+              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                {[["qProt","단백질(g)",qProt,setQProt],["qCarb","탄수화물(g)",qCarb,setQCarb],["qFat","지방(g)",qFat,setQFat]].map(([k,l,v,sv])=>(
+                  <input key={k} type="number" value={v} onChange={e=>sv(e.target.value)}
+                    placeholder={l}
+                    style={{flex:1,padding:"6px 7px",borderRadius:6,fontSize:11,
+                      border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
+                ))}
+              </div>
+              <Btn full onClick={saveQuickCalorie} disabled={saving}>{saving?"저장 중...":"💾 칼로리 기록 저장"}</Btn>
+            </Card>
+          )}
+
+          {/* ── 하루 총칼로리 모드 ── */}
+          {inputMode==="daily" && (
+            <Card style={{marginBottom:10,border:"1px solid rgba(249,115,22,.2)",background:"rgba(249,115,22,.04)"}}>
+              <Mo c="#f97316" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>📊 하루 총 섭취칼로리</Mo>
+              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:8}}>식사별 기록이 있으면 합산값이 우선 사용됩니다</Mo>
+              <div style={{marginBottom:8}}>
+                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:4}}>총 섭취칼로리 (kcal) *</Mo>
+                <input type="number" value={dayKcal} onChange={e=>setDayKcal(e.target.value)}
+                  placeholder="예: 1800"
+                  style={{width:"100%",boxSizing:"border-box",padding:"10px",borderRadius:7,fontSize:18,fontWeight:800,
+                    border:"1px solid rgba(249,115,22,.35)",background:"#111827",color:"#f97316",textAlign:"center"}}/>
+              </div>
+              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                {[["dayProt","단백질(g)",dayProt,setDayProt],["dayCarb","탄수화물(g)",dayCarb,setDayCarb],["dayFat","지방(g)",dayFat,setDayFat]].map(([k,l,v,sv])=>(
+                  <input key={k} type="number" value={v} onChange={e=>sv(e.target.value)}
+                    placeholder={l}
+                    style={{flex:1,padding:"6px 7px",borderRadius:6,fontSize:11,
+                      border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
+                ))}
+              </div>
+              <input value={dayMemo} onChange={e=>setDayMemo(e.target.value)}
+                placeholder="메모 (선택)"
+                style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",marginBottom:8}}/>
+              <Btn full onClick={saveDayCalorie} disabled={saving}
+                style={{background:"rgba(249,115,22,.15)",borderColor:"rgba(249,115,22,.3)",color:"#f97316"}}>
+                {saving?"저장 중...":"💾 하루 총칼로리 저장"}
+              </Btn>
+            </Card>
+          )}
 
           <Card title={"✏️ "+addMeal+" 기록"}>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
@@ -10711,102 +10805,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
             </div>
           </div>
 
-          {/* 입력 방식 선택 */}
-          <div style={{display:"flex",gap:5,marginBottom:10}}>
-            {[["food","음식 검색"],["quick","칼로리만 기록"],["daily","하루 총칼로리"]].map(([m,l])=>(
-              <button key={m} onClick={()=>setInputMode(m)}
-                style={{flex:1,padding:"7px 0",borderRadius:8,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                  borderColor:inputMode===m?"#a29bfe":"rgba(255,255,255,0.1)",
-                  background:inputMode===m?"rgba(162,155,254,.12)":"rgba(255,255,255,.02)",
-                  color:inputMode===m?"#a29bfe":"#64748b"}}>
-                {l}
-              </button>
-            ))}
-          </div>
 
-          {/* ── 칼로리만 기록 모드 ── */}
-          {inputMode==="quick" && (
-            <Card style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.04)"}}>
-              <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>⚡ 빠른 칼로리 기록</Mo>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                <div>
-                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>섭취칼로리 (kcal) *</Mo>
-                  <input type="number" value={qKcal} onChange={e=>setQKcal(e.target.value)}
-                    placeholder="예: 650"
-                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:14,fontWeight:700,
-                      border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4",textAlign:"center"}}/>
-                </div>
-                <div>
-                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>추정 정확도</Mo>
-                  <div style={{display:"flex",gap:4}}>
-                    {["낮음","보통","높음"].map(c=>(
-                      <button key={c} onClick={()=>setQConfidence(c)}
-                        style={{flex:1,padding:"7px 0",borderRadius:5,border:"1px solid",cursor:"pointer",fontSize:9,
-                          borderColor:qConfidence===c?"#ffd166":"rgba(255,255,255,0.1)",
-                          background:qConfidence===c?"rgba(255,209,102,.12)":"transparent",
-                          color:qConfidence===c?"#fcd34d":"#54546a"}}>
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <textarea value={qMemo} onChange={e=>setQMemo(e.target.value)} rows={2}
-                placeholder={"예: 닭가슴살 1팩, 현미밥 반공기 약 500kcal\n예: 사진 기준 일반식 1끼 약 650kcal"}
-                style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
-                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",resize:"none",marginBottom:8}}/>
-              <div style={{display:"flex",gap:6,marginBottom:8}}>
-                {[["qProt","단백질(g)",qProt,setQProt],["qCarb","탄수화물(g)",qCarb,setQCarb],["qFat","지방(g)",qFat,setQFat]].map(([k,l,v,sv])=>(
-                  <input key={k} type="number" value={v} onChange={e=>sv(e.target.value)}
-                    placeholder={l}
-                    style={{flex:1,padding:"6px 7px",borderRadius:6,fontSize:11,
-                      border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
-                ))}
-              </div>
-              <Btn full onClick={saveQuickCalorie} disabled={saving}>{saving?"저장 중...":"💾 칼로리 기록 저장"}</Btn>
-            </Card>
-          )}
-
-          {/* ── 하루 총칼로리 모드 ── */}
-          {inputMode==="daily" && (
-            <Card style={{marginBottom:10,border:"1px solid rgba(249,115,22,.2)",background:"rgba(249,115,22,.04)"}}>
-              <Mo c="#f97316" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>📊 하루 총 섭취칼로리</Mo>
-              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:8}}>식사별 기록과 동시에 있을 경우 식사별 합산값이 우선 사용됩니다</Mo>
-              <div style={{marginBottom:8}}>
-                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:4}}>총 섭취칼로리 (kcal) *</Mo>
-                <input type="number" value={dayKcal} onChange={e=>setDayKcal(e.target.value)}
-                  placeholder="예: 1800"
-                  style={{width:"100%",boxSizing:"border-box",padding:"10px",borderRadius:7,fontSize:18,fontWeight:800,
-                    border:"1px solid rgba(249,115,22,.35)",background:"#111827",color:"#f97316",textAlign:"center"}}/>
-              </div>
-              <div style={{display:"flex",gap:6,marginBottom:8}}>
-                {[["dayProt","단백질(g)",dayProt,setDayProt],["dayCarb","탄수화물(g)",dayCarb,setDayCarb],["dayFat","지방(g)",dayFat,setDayFat]].map(([k,l,v,sv])=>(
-                  <input key={k} type="number" value={v} onChange={e=>sv(e.target.value)}
-                    placeholder={l}
-                    style={{flex:1,padding:"6px 7px",borderRadius:6,fontSize:11,
-                      border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
-                ))}
-              </div>
-              <input value={dayMemo} onChange={e=>setDayMemo(e.target.value)}
-                placeholder="메모 (선택)"
-                style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:12,
-                  border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",marginBottom:8}}/>
-              <Btn full onClick={saveDayCalorie} disabled={saving}
-                style={{background:"rgba(249,115,22,.15)",borderColor:"rgba(249,115,22,.3)",color:"#f97316"}}>
-                {saving?"저장 중...":"💾 하루 총칼로리 저장"}
-              </Btn>
-            </Card>
-          )}
-
-          {/* ── 음식 검색 모드 (기존) ── */}
-          {inputMode==="food" && (
-            <div style={{background:"rgba(255,255,255,.02)",borderRadius:8,padding:"10px",border:"1px solid rgba(255,255,255,0.08)"}}>
-              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:6}}>기존 음식 검색/직접 입력 폼 (아래 탭 버튼 사용)</Mo>
-              <Btn full onClick={()=>setTab("기록")} style={{background:"rgba(94,234,212,.1)",borderColor:"rgba(94,234,212,.2)",color:"#5EEAD4"}}>
-                + 음식 직접 추가
-              </Btn>
-            </div>
-          )}
             <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,
               border:"1px dashed rgba(255,255,255,0.15)"}}>
               <div style={{fontSize:32,marginBottom:8}}>📋</div>

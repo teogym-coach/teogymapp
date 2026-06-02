@@ -10787,23 +10787,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {/* ─── 기록 목록 탭 ─── */}
       {tab==="기록" && (
         <div>
-          {/* 날짜 + 식사 구분 */}
-          <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
-            <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)}
-              style={{flex:"1 1 120px",minWidth:0,padding:"6px 8px",borderRadius:7,fontSize:12,
-                border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}}/>
-            <div style={{display:"flex",gap:4,flex:"2 1 200px",flexWrap:"wrap"}}>
-              {["아침","점심","저녁","간식","운동 전","운동 후"].map(m=>(
-                <button key={m} onClick={()=>setAddMeal(m)}
-                  style={{padding:"5px 9px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                    borderColor:addMeal===m?"#5EEAD4":"rgba(255,255,255,0.1)",
-                    background:addMeal===m?"rgba(94,234,212,.12)":"transparent",
-                    color:addMeal===m?"#5EEAD4":"#64748b"}}>
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
+
 
 
             <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,

@@ -1892,32 +1892,6 @@ function MemberForm({ initial, onSave, onBack }) {
   const isEdit = !!initial;
   const sv     = initial?.survey || {};
 
-  // ── 방문 계기 관련 기존 필드 디버그 (수정 모드일 때) ──
-  if (isEdit && initial) {
-    const visitFields = {
-      'visitReason':        initial.visitReason,
-      'referralSource':     initial.referralSource,
-      'source':             initial.source,
-      'inflowPath':         initial.inflowPath,
-      'visitPath':          initial.visitPath,
-      'acquisitionChannel': initial.acquisitionChannel,
-      'consultMemo':        initial.consultMemo,
-      '상담메모':            initial['상담메모'],
-      'note':               initial.note,
-      'memo':               initial.memo,
-      'survey.visitRoutes': initial.survey?.visitRoutes,
-      'survey.visitEtc':    initial.survey?.visitEtc,
-      'survey.visitDetail': initial.survey?.visitDetail,
-      'survey.visitRealMemo': initial.survey?.visitRealMemo,
-    };
-    const nonEmpty = Object.entries(visitFields).filter(([,v])=>v&&(Array.isArray(v)?v.length>0:true));
-    if (nonEmpty.length > 0) {
-      console.log(`[TEO GYM] ${initial.name} 방문 계기 필드:`, Object.fromEntries(nonEmpty));
-    } else {
-      console.log(`[TEO GYM] ${initial.name}: 방문 계기 관련 저장값 없음`);
-    }
-  }
-
   // ── 기존 필드 (하위 호환) ──────────────────────
   const [name,       setName]       = useState(initial?.name         || "");
   const [phone,      setPhone]      = useState(initial?.phone        || "");
@@ -1944,7 +1918,23 @@ function MemberForm({ initial, onSave, onBack }) {
   const [visitAiTool, setVisitAiTool] = useState(sv.visitAiTool || "");
   const [visitKeyword,setVisitKeyword]= useState(sv.visitKeyword|| "");
   const [visitReferer,setVisitReferer]= useState(sv.visitReferer|| "");
-  const [visitRealMemo,setVisitRealMemo]= useState(sv.visitRealMemo||initial?.visitReason||initial?.referralSource||"");
+
+  // ── 방문 계기 데이터 로드 시 레거시 필드 자동 통합 ─────────────────
+  // visitReason, referralSource 등 구버전 필드가 있으면 visitRealMemo로 통합
+  const legacyVisitMemo = (() => {
+    const parts = [];
+    if (initial?.visitReason)     parts.push(initial.visitReason);
+    if (initial?.referralSource)  parts.push(initial.referralSource);
+    if (initial?.source)          parts.push(initial.source);
+    if (initial?.consultMemo)     parts.push(initial.consultMemo);
+    if (initial?.note)            parts.push(initial.note);
+    // 기존 저장값이 있으면 joinX, survey에 이미 있으면 survey 우선
+    return parts.filter(Boolean).join(" / ") || "";
+  })();
+
+  const [visitRealMemo,setVisitRealMemo]= useState(
+    sv.visitRealMemo || legacyVisitMemo || ""
+  );
   const [visitAiMemo,  setVisitAiMemo] = useState(sv.visitAiMemo || "");
   // 헬스 외 운동 경험 (신규)
   const [otherSports, setOtherSports] = useState(sv.otherSports || []);
@@ -2045,6 +2035,7 @@ function MemberForm({ initial, onSave, onBack }) {
     const survey = {
       gender, age, height, weight, job,
       visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo, visitAiMemo,
+      visitReason: visitRealMemo, // 레거시 호환: visitReason에도 동일값 저장
       gymRecent, otherSports,
       purposes, primaryGoal,
       exLevel, exDuration, prevPT, prevPTNote,
@@ -2277,43 +2268,6 @@ function MemberForm({ initial, onSave, onBack }) {
           {/* ─ 방문계기 탭 ─ */}
           {editTab==="방문계기" && (
             <div>
-              {/* ── 기존 데이터 복구 표시 (모든 가능한 필드명 탐색) ── */}
-              {(() => {
-                const legacyFields = [
-                  ['visitReason',        initial?.visitReason],
-                  ['referralSource',     initial?.referralSource],
-                  ['source',             initial?.source],
-                  ['inflowPath',         initial?.inflowPath],
-                  ['visitPath',          initial?.visitPath],
-                  ['acquisitionChannel', initial?.acquisitionChannel],
-                  ['consultMemo',        initial?.consultMemo],
-                  ['상담메모',            initial?.['상담메모']],
-                  ['note',               initial?.note],
-                  ['memo (기본메모)',     initial?.memo],
-                  ['survey.visitEtc',    initial?.survey?.visitEtc],
-                  ['survey.consultMemo', initial?.survey?.consultMemo],
-                ];
-                const found = legacyFields.filter(([,v])=>v&&typeof v==="string"&&v.trim());
-                if (!found.length) return null;
-                return (
-                  <div style={{marginBottom:12,padding:"10px 12px",borderRadius:8,
-                    background:"rgba(249,115,22,.06)",border:"1px solid rgba(249,115,22,.2)"}}>
-                    <Mo c="#f97316" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>
-                      📋 저장된 기존 방문 계기 데이터
-                    </Mo>
-                    {found.map(([k,v])=>(
-                      <div key={k} style={{marginBottom:4}}>
-                        <Mo c="#94a3b8" s={8}>{k}: </Mo>
-                        <Mo c="#fdba74" s={9}>{v}</Mo>
-                      </div>
-                    ))}
-                    <Mo c="#64748b" s={8} style={{marginTop:4,display:"block"}}>
-                      아래 "회원이 직접 말한 방문 이유" 항목에 붙여넣어 통합 관리하세요
-                    </Mo>
-                  </div>
-                );
-              })()}
-
               <StepLabel label="방문 경로 (복수 선택)" />
               <ChipSelect multi
                 options={["네이버 블로그","네이버 플레이스","인스타그램","유튜브","AI 검색","지인 소개","기존 회원 소개","지나가다 발견","카카오 지도","기타"]}
@@ -2367,13 +2321,12 @@ function MemberForm({ initial, onSave, onBack }) {
                 placeholder="상담 시 들은 실제 표현 그대로 메모" rows={3}
                 style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
                   border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",resize:"none"}} />
-              {/* 기존 저장값 복구 안내 */}
-              {(initial?.visitReason||initial?.referralSource) && (
+              {/* 기존 저장값 안내 — survey에 미통합된 구버전 필드가 있을 때 표시 */}
+              {legacyVisitMemo && !sv.visitRealMemo && (
                 <div style={{marginTop:8,padding:"8px 10px",borderRadius:6,background:"rgba(249,115,22,.06)",
                   border:"1px solid rgba(249,115,22,.15)"}}>
-                  <Mo c="#f97316" s={9} style={{display:"block",marginBottom:2,fontWeight:700}}>📋 기존 저장값</Mo>
-                  {initial.visitReason && <Mo c="#94a3b8" s={9}>{initial.visitReason}</Mo>}
-                  {initial.referralSource && <Mo c="#94a3b8" s={9} style={{display:"block"}}>{initial.referralSource}</Mo>}
+                  <Mo c="#f97316" s={9} style={{display:"block",marginBottom:2,fontWeight:700}}>📋 기존 저장값 (자동 불러옴)</Mo>
+                  <Mo c="#fdba74" s={9}>{legacyVisitMemo}</Mo>
                 </div>
               )}
             </div>

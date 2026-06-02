@@ -10160,7 +10160,57 @@ function AssessmentScreen({ member, onBack, showToast }) {
   const [assDate,  setAssDate]  = useState(today);
   const [saving,   setSaving]   = useState(false);
   const [records,  setRecords]  = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("assess_"+member.id)||"[]"); } catch{ return []; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("assess_"+member.id)||"[]");
+
+      // ── 구버전 데이터 마이그레이션 ─────────────────────────────────
+      const migrated = raw.map(r => {
+        // 이미 신버전이면 그대로
+        if (r.muscleItems !== undefined) return r;
+
+        // ── 바디맵 → muscleItems 변환 ──────────────────────────────
+        const muscleItems = [];
+        if (r.bodyMap && typeof r.bodyMap === "object") {
+          Object.entries(r.bodyMap).forEach(([k, v]) => {
+            // k = "근육명_좌" 또는 구버전 SVG id
+            const parts = k.split("_");
+            const side  = ["좌","우","양"].includes(parts[parts.length-1]) ? parts[parts.length-1] : "양";
+            const name  = parts.slice(0, -1).join("_") || k;
+            if (v === "tight" || v === "weak") {
+              muscleItems.push({ id: Date.now()+Math.random(), name, side, type: v });
+            }
+          });
+        }
+
+        // ── 구버전 자세(posture 객체) → postureList 변환 ────────────
+        const postureList = [];
+        if (r.posture && typeof r.posture === "object") {
+          Object.entries(r.posture).forEach(([k, v]) => {
+            const opts = Array.isArray(v) ? v :
+              [...(v.B||[]), ...(v.L||[]).map(x=>"(좌)"+x), ...(v.R||[]).map(x=>"(우)"+x)];
+            if (opts.length > 0) postureList.push(...opts.filter(Boolean));
+          });
+        }
+
+        // ── 구버전 mobility → 새 형식 유지 (호환 가능)────────────────
+        const mobility = r.mobility || {};
+
+        // ── 빠른평가(fParts 등) → painList 보충 ────────────────────
+        const painList = Array.isArray(r.painList) ? [...r.painList] : [];
+        if (r.fParts && r.fParts.length > 0 && painList.length === 0) {
+          r.fParts.forEach(part => {
+            painList.push({ id: Date.now()+Math.random(), part, side: r.fSide||"양측",
+              vas: r.fVas||0, situation: (r.fSituations||[])[0]||"", memo: r.fMemo||"" });
+          });
+        }
+
+        const evalMemo = r.evalMemo || r.fastMemo || r.summary || "";
+
+        return { ...r, muscleItems, postureList, mobility, painList, evalMemo, _migrated: true };
+      });
+
+      return migrated;
+    } catch { return []; }
   });
   const [viewRec,  setViewRec]  = useState(null);
   const [aiResult, setAiResult] = useState("");
@@ -10359,7 +10409,86 @@ function AssessmentScreen({ member, onBack, showToast }) {
   if (viewRec) {
     const tList = (viewRec.muscleItems||[]).filter(m=>m.type==="tight");
     const wList = (viewRec.muscleItems||[]).filter(m=>m.type==="weak");
+    // 구버전 바디맵 폴백
+    const legacyTight = tList.length===0 ? Object.entries(viewRec.bodyMap||{}).filter(([,v])=>v==="tight").map(([k])=>k) : [];
+    const legacyWeak  = wList.length===0 ? Object.entries(viewRec.bodyMap||{}).filter(([,v])=>v==="weak").map(([k])=>k) : [];
+    // 구버전 posture 폴백
+    const legacyPosture = (viewRec.postureList||[]).length===0 && viewRec.posture
+      ? (Array.isArray(POSTURE_ITEMS)?POSTURE_ITEMS:[]).flatMap(item=>{
+          const val = (viewRec.posture||{})[item.key];
+          if (!val) return [];
+          const opts = Array.isArray(val)?val:[...(val.B||[]),(val.L||[]).map(v=>"(좌)"+v),(val.R||[]).map(v=>"(우)"+v)].flat();
+          return opts;
+        })
+      : viewRec.postureList||[];
     return (
+      <div>
+        <SH title={"📋 "+viewRec.date+" 평가"} right={<Btn ghost sm onClick={()=>setViewRec(null)}>← 뒤로</Btn>} />
+        {(viewRec.painList||[]).length>0&&(
+          <Card title="🩺 통증" style={{marginBottom:8}}>
+            {viewRec.painList.map((p,i)=>(
+              <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+                  background:p.vas>=7?"rgba(239,68,68,.15)":p.vas>=4?"rgba(255,209,102,.15)":"rgba(94,234,212,.1)",
+                  color:p.vas>=7?"#f87171":p.vas>=4?"#fcd34d":"#5EEAD4",fontWeight:700}}>VAS {p.vas}</span>
+                <Mo c="#e2e8f0" s={10}>{p.part}{p.side&&p.side!=="중앙"?" "+p.side:""}</Mo>
+                {p.situation&&<Mo c="#54546a" s={9}>{p.situation}</Mo>}
+              </div>
+            ))}
+          </Card>
+        )}
+        {(tList.length>0||legacyTight.length>0)&&(
+          <Card title="🔴 과긴장" style={{marginBottom:8}}>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {tList.map((m,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>{m.name} {m.side}</span>)}
+              {legacyTight.map((k,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(239,68,68,.08)",color:"#f87171",opacity:.7}}>{k}</span>)}
+            </div>
+          </Card>
+        )}
+        {(wList.length>0||legacyWeak.length>0)&&(
+          <Card title="🔵 약화" style={{marginBottom:8}}>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {wList.map((m,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(37,99,235,.1)",color:"#60a5fa"}}>{m.name} {m.side}</span>)}
+              {legacyWeak.map((k,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(37,99,235,.08)",color:"#60a5fa",opacity:.7}}>{k}</span>)}
+            </div>
+          </Card>
+        )}
+        {legacyPosture.length>0&&(
+          <Card title="📐 자세" style={{marginBottom:8}}>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {legacyPosture.map((p,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(255,209,102,.1)",color:"#fcd34d"}}>{p}</span>)}
+            </div>
+          </Card>
+        )}
+        {Object.keys(viewRec.mobility||{}).length>0&&(
+          <Card title="⚡ 기능 평가" style={{marginBottom:8}}>
+            {Object.entries(viewRec.mobility||{}).map(([k,v])=>{
+              const item = FUNC_ITEMS.find(f=>f.key===k);
+              if (!item) return null;
+              const issues = Object.entries(v||{}).filter(([,val])=>val);
+              if (!issues.length) return null;
+              return (
+                <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <Mo c="#64748b" s={9}>{item.label}</Mo>
+                  <Mo c="#fcd34d" s={9}>{issues.map(([s,val])=>s+" "+val).join(" / ")}</Mo>
+                </div>
+              );
+            })}
+          </Card>
+        )}
+        {(viewRec.evalMemo||viewRec.summary)&&(
+          <Card title="📝 메모" style={{marginBottom:8}}>
+            <Mo c="#94a3b8" s={10} style={{lineHeight:1.7}}>{viewRec.evalMemo||viewRec.summary}</Mo>
+          </Card>
+        )}
+        {viewRec.aiRoutine&&(
+          <Card title="🤖 AI 루틴" style={{marginBottom:8}}>
+            <Mo c="#64748b" s={9} style={{lineHeight:1.7,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",display:"block"}}>{viewRec.aiRoutine}</Mo>
+          </Card>
+        )}
+      </div>
+    );
+  }
       <div>
         <SH title={"📋 "+viewRec.date+" 평가"} right={<Btn ghost sm onClick={()=>setViewRec(null)}>← 뒤로</Btn>} />
         {(viewRec.painList||[]).length>0&&(
@@ -10430,6 +10559,80 @@ function AssessmentScreen({ member, onBack, showToast }) {
       <input type="date" value={assDate} onChange={e=>setAssDate(e.target.value)}
         style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:7,fontSize:12,
           border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",marginBottom:10}} />
+
+      {/* ── 최근 평가 요약 카드 ────────────────────────────────────── */}
+      {records.length > 0 && (() => {
+        const latest = records[0];
+        const tList = (latest.muscleItems||[]).filter(m=>m.type==="tight");
+        const wList = (latest.muscleItems||[]).filter(m=>m.type==="weak");
+        const plList = latest.painList||[];
+        const funcLimits = Object.entries(latest.mobility||{}).flatMap(([k,v])=>{
+          const item = FUNC_ITEMS.find(f=>f.key===k);
+          if (!item) return [];
+          return Object.entries(v||{}).filter(([,val])=>val&&val!=="정상")
+            .map(([side,val])=>item.label+" "+side+" "+val);
+        });
+        const hasSummary = plList.length>0||tList.length>0||wList.length>0||
+          (latest.postureList||[]).length>0||funcLimits.length>0;
+        if (!hasSummary) return null;
+        return (
+          <div style={{marginBottom:12,padding:"10px 12px",borderRadius:9,
+            background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.15)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <Mo c="#5EEAD4" s={9} style={{fontWeight:700}}>📊 최근 평가 요약 ({latest.date})</Mo>
+              <button onClick={()=>setViewRec(latest)}
+                style={{background:"none",border:"none",color:"#3a4a5a",cursor:"pointer",fontSize:9}}>전체 보기 ▶</button>
+            </div>
+            {plList.length>0&&(
+              <div style={{marginBottom:4}}>
+                <Mo c="#f87171" s={8} style={{fontWeight:700}}>🩺 통증: </Mo>
+                {plList.map((p,i)=>(
+                  <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
+                    marginRight:4,color:"#f87171"}}>
+                    {p.part}{p.side&&p.side!=="중앙"?" "+p.side:""} VAS{p.vas}
+                  </span>
+                ))}
+              </div>
+            )}
+            {tList.length>0&&(
+              <div style={{marginBottom:4}}>
+                <Mo c="#f87171" s={8} style={{fontWeight:700}}>🔴 과긴장: </Mo>
+                {tList.slice(0,4).map((m,i)=>(
+                  <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,marginRight:4,color:"#f87171"}}>
+                    {m.name} {m.side}
+                  </span>
+                ))}
+              </div>
+            )}
+            {wList.length>0&&(
+              <div style={{marginBottom:4}}>
+                <Mo c="#60a5fa" s={8} style={{fontWeight:700}}>🔵 약화: </Mo>
+                {wList.slice(0,4).map((m,i)=>(
+                  <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,marginRight:4,color:"#60a5fa"}}>
+                    {m.name} {m.side}
+                  </span>
+                ))}
+              </div>
+            )}
+            {funcLimits.length>0&&(
+              <div style={{marginBottom:4}}>
+                <Mo c="#fcd34d" s={8} style={{fontWeight:700}}>⚡ 기능 제한: </Mo>
+                {funcLimits.slice(0,3).map((l,i)=>(
+                  <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,marginRight:4,color:"#fcd34d"}}>{l}</span>
+                ))}
+              </div>
+            )}
+            {(latest.postureList||[]).length>0&&(
+              <div>
+                <Mo c="#fcd34d" s={8} style={{fontWeight:700}}>📐 자세: </Mo>
+                {(latest.postureList||[]).slice(0,3).map((p,i)=>(
+                  <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,marginRight:4,color:"#fcd34d"}}>{p}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ─── 1. 통증 섹션 ─────────────────────────────────────────── */}
       <Sec id="pain" emoji="🩺" title="통증·불편감" count={painList.length} />
@@ -10678,7 +10881,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
       )}
 
       {/* ─── 6. 기록 ─────────────────────────────────────────────── */}
-      <Sec id="history" emoji="📅" title={"과거 기록 ("+records.length+"건)"} count={records.length} />
+      <Sec id="history" emoji="📅" title={"기록 ("+records.length+"건)"} count={records.length} />
       {open.history && (
         <div style={{marginBottom:12}}>
           {records.length===0 ? (
@@ -10688,16 +10891,22 @@ function AssessmentScreen({ member, onBack, showToast }) {
               const tCnt = (r.muscleItems||[]).filter(m=>m.type==="tight").length;
               const wCnt = (r.muscleItems||[]).filter(m=>m.type==="weak").length;
               const pl   = (r.painList||[]).length;
+              // 구버전 데이터 마이그레이션 여부 표시
+              const isLegacy = r._migrated || (r.bodyMap && r.muscleItems?.length===0 && Object.keys(r.bodyMap||{}).length>0);
               return (
                 <div key={r.id} onClick={()=>setViewRec(r)}
                   style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                    padding:"8px 10px",borderRadius:8,background:"#111827",border:"1px solid rgba(255,255,255,.07)",
-                    cursor:"pointer",marginBottom:5}}>
-                  <Mo c="#e2e8f0" s={11} style={{fontWeight:700}}>{r.date}</Mo>
+                    padding:"8px 10px",borderRadius:8,background:"#111827",
+                    border:"1px solid rgba(255,255,255,.07)",cursor:"pointer",marginBottom:5}}>
+                  <div>
+                    <Mo c="#e2e8f0" s={11} style={{fontWeight:700}}>{r.date}</Mo>
+                    {isLegacy&&<Mo c="#3a4a5a" s={8} style={{marginLeft:5}}>구버전</Mo>}
+                  </div>
                   <div style={{display:"flex",gap:4}}>
                     {pl>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(239,68,68,.12)",color:"#f87171"}}>통증 {pl}</span>}
                     {tCnt>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>🔴{tCnt}</span>}
                     {wCnt>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(37,99,235,.1)",color:"#60a5fa"}}>🔵{wCnt}</span>}
+                    {(r.postureList||[]).length>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(255,209,102,.1)",color:"#fcd34d"}}>자세 ✓</span>}
                     <Mo c="#3a4a5a" s={9}>▶</Mo>
                   </div>
                 </div>

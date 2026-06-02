@@ -1945,6 +1945,7 @@ function MemberForm({ initial, onSave, onBack }) {
   const [visitKeyword,setVisitKeyword]= useState(sv.visitKeyword|| "");
   const [visitReferer,setVisitReferer]= useState(sv.visitReferer|| "");
   const [visitRealMemo,setVisitRealMemo]= useState(sv.visitRealMemo||initial?.visitReason||initial?.referralSource||"");
+  const [visitAiMemo,  setVisitAiMemo] = useState(sv.visitAiMemo || "");
   // 헬스 외 운동 경험 (신규)
   const [otherSports, setOtherSports] = useState(sv.otherSports || []);
   const [gymRecent,   setGymRecent]   = useState(sv.gymRecent   || "");
@@ -2043,7 +2044,7 @@ function MemberForm({ initial, onSave, onBack }) {
   function handleSave() {
     const survey = {
       gender, age, height, weight, job,
-      visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo,
+      visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo, visitAiMemo,
       gymRecent, otherSports,
       purposes, primaryGoal,
       exLevel, exDuration, prevPT, prevPTNote,
@@ -2329,6 +2330,11 @@ function MemberForm({ initial, onSave, onBack }) {
                     placeholder="예: 청라 PT 추천, 청라 체형교정, 청라 다이어트 PT"
                     style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
                       border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0",marginBottom:6}} />
+                  <StepLabel label="AI 검색 메모" />
+                  <textarea value={visitAiMemo} onChange={e=>setVisitAiMemo(e.target.value)}
+                    placeholder="AI 검색 관련 메모 (AI가 추천한 내용, 회원이 말한 것 등)" rows={2}
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                      border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0",resize:"none"}} />
                   <StepLabel label="AI가 추천한 내용 메모" />
                   <textarea value={visitDetail} onChange={e=>setVisitDetail(e.target.value)}
                     placeholder="AI가 어떤 내용을 추천했는지 메모" rows={2}
@@ -2514,8 +2520,34 @@ function MemberForm({ initial, onSave, onBack }) {
             <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>어떻게 오셨나요?</Mo>
             <Mo c="#54546a" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
             <ChipSelect multi
-              options={["네이버 검색","네이버 블로그","인스타그램","유튜브","지인 추천","지나가다가","당근","숨고","기타"]}
+              options={["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"]}
               value={visitRoutes} onChange={setVisitRoutes} />
+
+            {/* AI 검색 상세 */}
+            {visitRoutes.includes("AI 검색") && (
+              <div style={{marginTop:10,padding:"12px",borderRadius:8,
+                background:"rgba(162,155,254,.08)",border:"1px solid rgba(162,155,254,.25)"}}>
+                <Mo c="#a29bfe" s={10} style={{display:"block",fontWeight:700,marginBottom:8}}>🤖 AI 검색 상세</Mo>
+                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:5}}>어떤 AI로 검색하셨나요?</Mo>
+                <ChipSelect
+                  options={["ChatGPT","Perplexity","Gemini","Claude","네이버 Cue","기타"]}
+                  value={visitAiTool} onChange={setVisitAiTool} />
+                <div style={{marginTop:8}}>
+                  <Field label="검색 키워드" value={visitKeyword} onChange={setVisitKeyword}
+                    placeholder="예: 청라 PT 추천, 청라 체형교정 PT, 청라 다이어트 PT" />
+                </div>
+                <div style={{marginTop:6}}>
+                  <textarea value={visitAiMemo} onChange={e=>setVisitAiMemo(e.target.value)}
+                    placeholder="AI 검색 관련 메모 (AI가 추천한 내용, 회원이 말한 것 등)"
+                    rows={2}
+                    style={{width:"100%",padding:"8px 10px",borderRadius:6,boxSizing:"border-box",
+                      border:"1px solid rgba(162,155,254,.2)",background:"#111827",
+                      color:"#ddddf0",fontSize:12,resize:"none"}} />
+                </div>
+              </div>
+            )}
+
+            {/* 기타 경로 메모 */}
             {visitRoutes.includes("기타") && (
               <div style={{marginTop:10}}>
                 <Field label="기타 경로 입력" value={visitEtc} onChange={setVisitEtc} placeholder="직접 입력" />

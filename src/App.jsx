@@ -10453,8 +10453,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
               const p=parsePainMemo(val); setParsedPreview(p);
               if(p){if(p.part&&!qPart)setQPart(p.part);if(p.side)setQSide(p.side);if(p.vas!==undefined)setQVas(p.vas);if(p.situation)setQSituation(p.situation);}
             }} rows={2}
-              placeholder={"예: 왼쪽 무릎 통증 VAS7
-예: 앉아있으면 허리 아픔 6"}
+              placeholder={"예: 왼쪽 무릎 통증 VAS7 / 예: 앉아있으면 허리 아픔 6"}
               style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:7,
                 border:"1px solid rgba(162,155,254,.2)",background:"#111827",
                 color:"#ddddf0",fontSize:12,resize:"none"}} />

@@ -10489,55 +10489,6 @@ function AssessmentScreen({ member, onBack, showToast }) {
       </div>
     );
   }
-      <div>
-        <SH title={"📋 "+viewRec.date+" 평가"} right={<Btn ghost sm onClick={()=>setViewRec(null)}>← 뒤로</Btn>} />
-        {(viewRec.painList||[]).length>0&&(
-          <Card title="🩺 통증" style={{marginBottom:8}}>
-            {viewRec.painList.map((p,i)=>(
-              <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                  background:p.vas>=7?"rgba(239,68,68,.15)":p.vas>=4?"rgba(255,209,102,.15)":"rgba(94,234,212,.1)",
-                  color:p.vas>=7?"#f87171":p.vas>=4?"#fcd34d":"#5EEAD4",fontWeight:700}}>VAS {p.vas}</span>
-                <Mo c="#e2e8f0" s={10}>{p.part}{p.side&&p.side!=="중앙"?" "+p.side:""}</Mo>
-                {p.situation&&<Mo c="#54546a" s={9}>{p.situation}</Mo>}
-              </div>
-            ))}
-          </Card>
-        )}
-        {tList.length>0&&(
-          <Card title="🔴 과긴장" style={{marginBottom:8}}>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-              {tList.map((m,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>{m.name} {m.side}</span>)}
-            </div>
-          </Card>
-        )}
-        {wList.length>0&&(
-          <Card title="🔵 약화" style={{marginBottom:8}}>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-              {wList.map((m,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(37,99,235,.1)",color:"#60a5fa"}}>{m.name} {m.side}</span>)}
-            </div>
-          </Card>
-        )}
-        {(viewRec.postureList||[]).length>0&&(
-          <Card title="📐 자세" style={{marginBottom:8}}>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-              {viewRec.postureList.map((p,i)=><span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(255,209,102,.1)",color:"#fcd34d"}}>{p}</span>)}
-            </div>
-          </Card>
-        )}
-        {viewRec.evalMemo&&(
-          <Card title="📝 메모" style={{marginBottom:8}}>
-            <Mo c="#94a3b8" s={10}>{viewRec.evalMemo}</Mo>
-          </Card>
-        )}
-        {viewRec.aiRoutine&&(
-          <Card title="🤖 AI 루틴" style={{marginBottom:8}}>
-            <Mo c="#64748b" s={9} style={{lineHeight:1.7,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap"}}>{viewRec.aiRoutine}</Mo>
-          </Card>
-        )}
-      </div>
-    );
-  }
 
   // ── 메인 렌더 ──────────────────────────────────────────────────────
   return (

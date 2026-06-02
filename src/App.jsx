@@ -9894,17 +9894,29 @@ const POSTURE_ITEMS = [
   {key:"ankle",    label:"발목/발", opts:["회내","회외","편평족","요족"]},
 ];
 const MOBILITY_ITEMS = [
-  {key:"sh_flex",      label:"어깨 굴곡",        opts:["정상","제한"]},
-  {key:"sh_abd",       label:"어깨 외전",        opts:["정상","제한"]},
-  {key:"sh_ir",        label:"어깨 내회전",      opts:["정상","제한"]},
-  {key:"hip_flex",     label:"고관절 굴곡",      opts:["정상","제한"]},
-  {key:"hip_abd",      label:"고관절 외전",      opts:["정상","제한"]},
-  {key:"hip_ir",       label:"고관절 내회전",    opts:["정상","제한"]},
-  {key:"slr",          label:"햄스트링 SLR",     opts:["정상","제한 있음"]},
-  {key:"df",           label:"발목 Dorsiflexion", opts:["정상","제한 있음"]},
-  {key:"core",         label:"코어 안정성",      opts:["약함","보통","강함"]},
-  {key:"glute_fn",     label:"둔근 기능",        opts:["약함","보통","강함"]},
-  {key:"balance",      label:"한발 서기",        opts:["양호","좌측 불안정","우측 불안정"]},
+  {key:"sh_flex",      label:"어깨 굴곡",          opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"sh_er",        label:"어깨 외회전",         opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"sh_ir",        label:"어깨 내회전",         opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"hip_flex",     label:"고관절 굴곡",         opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"hip_er",       label:"고관절 외회전",       opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"hip_ir",       label:"고관절 내회전",       opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"slr",          label:"햄스트링 SLR",        opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"glute_fn",     label:"둔근 기능",           opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"balance",      label:"한발 서기",           opts:["정상","좌측 불안정","우측 불안정","양측 불안정"]},
+  {key:"knee_sq",      label:"무릎 기능 평가",      opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"sh_abd",       label:"어깨 외전",           opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"df",           label:"발목 배측굴곡",        opts:["정상","좌측 제한","우측 제한","양측 제한"]},
+  {key:"core",         label:"코어 안정성",         opts:["약함","보통","강함"]},
+  {key:"elbow_l_pain", label:"팔꿈치(좌) 통증",     opts:["없음","내측","외측","전반적"]},
+  {key:"elbow_r_pain", label:"팔꿈치(우) 통증",     opts:["없음","내측","외측","전반적"]},
+  {key:"elbow_pron",   label:"팔꿈치 회내/회외",    opts:["정상","제한"]},
+  {key:"elbow_click",  label:"팔꿈치 클릭감",       opts:["없음","있음"]},
+  {key:"wrist_l_flex", label:"손목(좌) 굴곡",       opts:["정상","제한"]},
+  {key:"wrist_r_flex", label:"손목(우) 굴곡",       opts:["정상","제한"]},
+  {key:"wrist_l_ext",  label:"손목(좌) 신전",       opts:["정상","제한"]},
+  {key:"wrist_r_ext",  label:"손목(우) 신전",       opts:["정상","제한"]},
+  {key:"push_up",      label:"푸쉬업 패턴",         opts:["정상","익상견갑","보상패턴"]},
+];
   {key:"elbow_l_pain", label:"팔꿈치L 통증",     opts:["없음","내측","외측","전반적"]},
   {key:"elbow_r_pain", label:"팔꿈치R 통증",     opts:["없음","내측","외측","전반적"]},
   {key:"elbow_pron",   label:"팔꿈치 회내/회외", opts:["정상","제한"]},
@@ -9963,7 +9975,7 @@ function generateAutoSummary(bodyMap, posture, mobility) {
 // ════════════════════════════════════════════
 function AssessmentScreen({ member, onBack, showToast }) {
   const today = new Date().toISOString().split("T")[0];
-  const [tab,       setTab]      = useState("⚡빠른평가"); // 빠른평가 1순위
+  const [tab,       setTab]      = useState("통증·불편감"); // 통증·불편감 1순위
   const [records,   setRecords]  = useState(() => {
     try { return JSON.parse(localStorage.getItem("assess_"+member.id)||"[]"); } catch { return []; }
   });
@@ -10244,13 +10256,12 @@ function AssessmentScreen({ member, onBack, showToast }) {
   }
 
   const TABS = [
-    {key:"⚡빠른평가", icon:"⚡"},
-    {key:"바디맵",    icon:"🗺️"},
-    {key:"통증",      icon:"🩺"},
-    {key:"자세",      icon:"📐"},
-    {key:"기능",      icon:"⚡"},
-    {key:"AI루틴",    icon:"🤖"},
-    {key:"기록",      icon:"📅"},
+    {key:"통증·불편감", icon:"🩺"},
+    {key:"바디맵",      icon:"🗺️"},
+    {key:"자세",        icon:"📐"},
+    {key:"기능",        icon:"⚡"},
+    {key:"AI루틴",      icon:"🤖"},
+    {key:"기록",        icon:"📅"},
   ];
   const ac = "#a29bfe";
 
@@ -10333,228 +10344,69 @@ function AssessmentScreen({ member, onBack, showToast }) {
       <div style={{marginBottom:12}}/>
 
       {/* ─── ⚡ 빠른 평가 모드 ─── */}
-      {tab==="⚡빠른평가" && (
-        <div>
-          <div style={{padding:"8px 12px",borderRadius:8,background:"rgba(162,155,254,.08)",
-            border:"1px solid rgba(162,155,254,.2)",marginBottom:12}}>
-            <Mo c="#a29bfe" s={9} style={{fontWeight:700}}>⚡ 빠른 평가 모드</Mo>
-            <Mo c="#54546a" s={8} style={{display:"block",marginTop:2}}>불편 부위·증상·상황을 선택 후 저장하면 통증/자세/기능 탭에 자동 반영됩니다</Mo>
-          </div>
+      {/* ─── 통증·불편감 평가 탭 (빠른평가 + 통증 통합) ─── */}
+      {tab==="통증·불편감" && (() => {
+        // ── 메모 AI 파싱 ───────────────────────────────────────────────
+        function parsePainMemo(text) {
+          if (!text || text.trim().length < 2) return null;
+          const t = text.toLowerCase();
+          const result = {};
+          // 부위 추출
+          const partMap = [
+            ["목","목"],["상부승모","상부승모"],["견갑","견갑"],["어깨","어깨"],
+            ["팔꿈치","팔꿈치"],["손목","손목"],["흉추","흉추"],
+            ["허리","허리"],["고관절","고관절"],["둔근","둔근"],
+            ["햄스트링","햄스트링"],["무릎","무릎"],["종아리","종아리"],
+            ["발목","발목"],["발바닥","발바닥"],
+          ];
+          for (const [k,v] of partMap) { if (t.includes(k)) { result.part = v; break; } }
+          // 좌우 추출
+          if (t.includes("왼쪽")||t.includes("좌측")||t.includes("left")) result.side="왼쪽";
+          else if (t.includes("오른쪽")||t.includes("우측")||t.includes("right")) result.side="오른쪽";
+          else if (t.includes("양측")||t.includes("양쪽")) result.side="양측";
+          // VAS 추출
+          const vasMatch = t.match(/vas\s*(\d+)|(\d+)\s*vas|통증\s*(\d+)|(\d+)점|강도\s*(\d+)/);
+          if (vasMatch) {
+            const v = parseInt(vasMatch[1]||vasMatch[2]||vasMatch[3]||vasMatch[4]||vasMatch[5]);
+            if (v>=0 && v<=10) result.vas = v;
+          }
+          // 단독 숫자 (맨 끝 숫자) VAS fallback
+          if (!result.vas) {
+            const numEnd = t.match(/(\d+)\s*$/);
+            if (numEnd) { const v=parseInt(numEnd[1]); if(v>=0&&v<=10) result.vas=v; }
+          }
+          // 상황 추출
+          const sitMap = [
+            ["앉","오래 앉을 때"],["서있","오래 서있을 때"],["걷","걷기"],
+            ["계단","계단"],["스쿼트","스쿼트"],["런지","런지"],
+            ["벤치프레스","벤치프레스"],["팔 들","팔 들기"],
+            ["운동 중","운동 중"],["운동 후","운동 후"],["아침","아침 기상 시"],
+            ["운전","오래 운전할 때"],["들","무거운거 들때"],["구부","구부릴때"],
+          ];
+          for (const [k,v] of sitMap) { if (t.includes(k)) { result.situation=v; break; } }
+          return Object.keys(result).length > 0 ? result : null;
+        }
 
-          {/* 1. 불편 부위 */}
-          <div style={{marginBottom:12}}>
-            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>① 불편 부위 (다중 선택)</Mo>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {F_PARTS.map(p=>{
-                const sel = fParts.includes(p);
-                return (
-                  <button key={p} onClick={()=>setFParts(prev=>sel?prev.filter(x=>x!==p):[...prev,p])}
-                    style={{padding:"7px 12px",borderRadius:20,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
-                      borderColor:sel?"#ef4444":"rgba(255,255,255,0.12)",
-                      background:sel?"rgba(239,68,68,.15)":"rgba(255,255,255,.02)",
-                      color:sel?"#f87171":"#64748b"}}>
-                    {p}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        const [memoInput, setMemoInput] = (()=>{
+          // 이미 qMemo가 있으면 그 state 사용 - 여기서는 closure로 처리
+          return [qMemo, setQMemo];
+        })();
 
-          {/* 2. 증상 유형 */}
-          <div style={{marginBottom:12}}>
-            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>② 증상 유형</Mo>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {F_SYMPTOMS.map(s=>{
-                const sel = fSymptoms.includes(s);
-                return (
-                  <button key={s} onClick={()=>setFSymptoms(prev=>sel?prev.filter(x=>x!==s):[...prev,s])}
-                    style={{padding:"7px 12px",borderRadius:20,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
-                      borderColor:sel?"#f97316":"rgba(255,255,255,0.12)",
-                      background:sel?"rgba(249,115,22,.15)":"rgba(255,255,255,.02)",
-                      color:sel?"#fdba74":"#64748b"}}>
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        const [parsedPreview, setParsedPreview] = React.useState(null);
 
-          {/* 3. 발생 상황 */}
-          <div style={{marginBottom:12}}>
-            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>③ 발생 상황</Mo>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {F_SITUATIONS.map(s=>{
-                const sel = fSituations.includes(s);
-                return (
-                  <button key={s} onClick={()=>setFSituations(prev=>sel?prev.filter(x=>x!==s):[...prev,s])}
-                    style={{padding:"6px 11px",borderRadius:16,border:"1px solid",cursor:"pointer",fontSize:10,
-                      borderColor:sel?"#5EEAD4":"rgba(255,255,255,0.1)",
-                      background:sel?"rgba(94,234,212,.12)":"rgba(255,255,255,.02)",
-                      color:sel?"#5EEAD4":"#64748b"}}>
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        function handleMemoChange(val) {
+          setQMemo(val);
+          const parsed = parsePainMemo(val);
+          setParsedPreview(parsed);
+          if (parsed) {
+            if (parsed.part && !qPart) setQPart(parsed.part);
+            if (parsed.side) setQSide(parsed.side);
+            if (parsed.vas !== undefined) setQVas(parsed.vas);
+            if (parsed.situation) setQSituation(parsed.situation);
+          }
+        }
 
-          {/* 4. 좌우 + VAS */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-            <div>
-              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>④ 좌우</Mo>
-              <div style={{display:"flex",gap:4}}>
-                {F_SIDES.map(s=>(
-                  <button key={s} onClick={()=>setFSide(s)}
-                    style={{flex:1,padding:"7px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:9,fontWeight:700,
-                      borderColor:fSide===s?"#818cf8":"rgba(255,255,255,0.1)",
-                      background:fSide===s?"rgba(129,140,248,.15)":"transparent",
-                      color:fSide===s?"#a5b4fc":"#64748b"}}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>
-                ⑤ VAS&nbsp;
-                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,
-                  color:fVas<=3?"#5EEAD4":fVas<=6?"#ffd166":"#ef4444"}}>{fVas}</span>
-              </Mo>
-              <div style={{display:"flex",gap:2}}>
-                {[0,1,2,3,4,5,6,7,8,9,10].map(n=>(
-                  <button key={n} onClick={()=>setFVas(n)}
-                    style={{flex:1,padding:"6px 0",borderRadius:4,border:"1px solid",cursor:"pointer",
-                      fontSize:9,fontWeight:800,
-                      borderColor:fVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#ef4444"):"rgba(255,255,255,0.07)",
-                      background:fVas===n?(n<=3?"rgba(94,234,212,.15)":n<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
-                      color:fVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#f87171"):"#3a3a5a"}}>
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 5. 빠른 메모 */}
-          <div style={{marginBottom:14}}>
-            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>⑥ 빠른 메모</Mo>
-            <input value={fMemo} onChange={e=>setFMemo(e.target.value)}
-              placeholder="예: 좌측 견갑 들림 / 흉추 회전 제한 / 앉으면 상부승모 긴장 증가"
-              style={{width:"100%",boxSizing:"border-box",fontSize:13,padding:"8px 10px",borderRadius:7,
-                background:"#111827",border:"1px solid rgba(255,255,255,0.1)",color:"#ddddf0"}}/>
-          </div>
-
-          {/* 선택 미리보기 */}
-          {(fParts.length>0||fSymptoms.length>0) && (
-            <div style={{marginBottom:12,padding:"10px 12px",borderRadius:8,
-              background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.15)"}}>
-              <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:5,fontWeight:700}}>📋 입력 미리보기</Mo>
-              {fParts.length>0 && <Mo c="#f87171" s={9}>{fParts.join(" · ")}</Mo>}
-              {fSymptoms.length>0 && <Mo c="#fdba74" s={9} style={{display:"block",marginTop:2}}>{fSymptoms.join(" · ")}</Mo>}
-              {fSituations.length>0 && <Mo c="#5EEAD4" s={9} style={{display:"block",marginTop:2}}>{fSituations.join(" · ")}</Mo>}
-              {fMemo && <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>📝 {fMemo}</Mo>}
-            </div>
-          )}
-
-          {/* 적용 버튼 */}
-          <Btn full onClick={applyFastAssessment}
-            disabled={fParts.length===0&&fSymptoms.length===0&&!fMemo}>
-            ⚡ 빠른 평가 적용 → 각 탭 자동 연결
-          </Btn>
-          <Mo c="#3a4a5a" s={8} style={{display:"block",marginTop:6,textAlign:"center"}}>
-            적용 후 각 탭에서 세부 수정 가능 · 기록 저장은 하단 저장 버튼 사용
-          </Mo>
-        </div>
-      )}
-
-      {/* ─── 바디맵 탭 ─── */}
-      {tab==="바디맵" && (
-        <div>
-          {/* 모드 선택 */}
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <button onClick={()=>setMode("tight")}
-              style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",cursor:"pointer",
-                borderColor:mode==="tight"?"#dc2626":"#d1d5db",
-                background:mode==="tight"?"#fee2e2":"#f9fafb",
-                color:mode==="tight"?"#dc2626":"#6b7280",fontWeight:700,fontSize:13}}>
-              🔴 타이트 / 과긴장
-            </button>
-            <button onClick={()=>setMode("weak")}
-              style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",cursor:"pointer",
-                borderColor:mode==="weak"?"#2563eb":"#d1d5db",
-                background:mode==="weak"?"#dbeafe":"#f9fafb",
-                color:mode==="weak"?"#2563eb":"#6b7280",fontWeight:700,fontSize:13}}>
-              🔵 약화 / 기능저하
-            </button>
-          </div>
-
-          <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8,textAlign:"center"}}>
-            모드 선택 후 근육 부위를 터치 · 다시 터치하면 해제
-          </Mo>
-
-          {/* 전면/후면 전환 */}
-          <div style={{display:"flex",gap:6,marginBottom:10}}>
-            {["front","back"].map(v=>(
-              <button key={v} onClick={()=>setBodyView(v)}
-                style={{flex:1,padding:"7px",borderRadius:7,border:"1px solid",cursor:"pointer",
-                  borderColor:bodyView===v?ac:"rgba(255,255,255,0.08)",background:bodyView===v?ac+"22":"transparent",
-                  color:bodyView===v?ac:"#54546a",fontSize:11,fontWeight:700}}>
-                {v==="front"?"전면 (Anterior)":"후면 (Posterior)"}
-              </button>
-            ))}
-          </div>
-
-          {/* 카운터 */}
-          <div style={{display:"flex",gap:8,marginBottom:10}}>
-            <div style={{flex:1,padding:"6px 10px",borderRadius:7,background:"#fee2e2",border:"1px solid #fca5a5"}}>
-              <Mo c="#dc2626" s={9} style={{fontWeight:700}}>🔴 과긴장 {tightCount}곳</Mo>
-            </div>
-            <div style={{flex:1,padding:"6px 10px",borderRadius:7,background:"#dbeafe",border:"1px solid #93c5fd"}}>
-              <Mo c="#2563eb" s={9} style={{fontWeight:700}}>🔵 기능저하 {weakCount}곳</Mo>
-            </div>
-          </div>
-
-          {/* 바디맵 */}
-          <Card style={{marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",padding:8}}>
-            <MuscleBodySVG
-              muscles={currentMuscles}
-              bodyMap={bodyMap}
-              mode={mode}
-              onClickMuscle={handleClickMuscle}
-              view={bodyView}
-            />
-          </Card>
-
-          {/* 선택 목록 */}
-          {Object.keys(bodyMap).length > 0 && (
-            <Card style={{marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <Mo c="#ddddf0" s={10} style={{fontWeight:700}}>선택된 근육</Mo>
-                <button onClick={()=>setBodyMap({})}
-                  style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:5,
-                    color:"#54546a",fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer"}}>전체 초기화</button>
-              </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                {Object.entries(bodyMap).map(([id,status])=>{
-                  const col   = BODY_STATUS[status]?.color;
-                  const label = getMuscleLabel(id);
-                  return (
-                    <button key={id}
-                      onClick={()=>setBodyMap(prev=>{const n={...prev};delete n[id];return n;})}
-                      style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 8px",borderRadius:4,
-                        background:bodyMap[id]==="tight"?"#fee2e2":"#dbeafe",color:bodyMap[id]==="tight"?"#dc2626":"#2563eb",border:"1px solid "+(bodyMap[id]==="tight"?"#fca5a5":"#93c5fd"),cursor:"pointer"}}>
-                      {label} ✕
-                    </button>
-                  );
-                })}
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* ─── 통증 탭 (빠른 추가형) ─── */}
-      {tab==="통증" && (
+        return (
         <div>
           {/* 프리셋 */}
           <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
@@ -10567,8 +10419,29 @@ function AssessmentScreen({ member, onBack, showToast }) {
             ))}
           </div>
 
-          <Card title="⚡ 빠른 통증 추가" style={{marginBottom:10}}>
-            {/* 1. 부위 */}
+          {/* AI 메모 자동 파싱 입력 */}
+          <Card style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.04)"}}>
+            <Mo c="#a29bfe" s={9} style={{fontWeight:700,display:"block",marginBottom:6}}>✍️ 메모로 빠른 입력 (AI 자동 인식)</Mo>
+            <textarea value={qMemo} onChange={e=>handleMemoChange(e.target.value)}
+              placeholder={"예: 왼쪽 무릎 통증 VAS7\n예: 앉아있으면 허리 아픔 6\n예: 벤치프레스 시 오른쪽 어깨 통증"}
+              rows={3}
+              style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:7,
+                border:"1px solid rgba(162,155,254,.2)",background:"#111827",
+                color:"#ddddf0",fontSize:12,resize:"none"}} />
+            {parsedPreview && (
+              <div style={{marginTop:6,display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                <Mo c="#a29bfe" s={8}>자동 인식:</Mo>
+                {parsedPreview.part&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.12)",color:"#f87171"}}>{parsedPreview.part}</span>}
+                {parsedPreview.side&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(129,140,248,.12)",color:"#a5b4fc"}}>{parsedPreview.side}</span>}
+                {parsedPreview.vas!==undefined&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,209,102,.12)",color:"#fcd34d"}}>VAS {parsedPreview.vas}</span>}
+                {parsedPreview.situation&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(249,115,22,.12)",color:"#fdba74"}}>{parsedPreview.situation}</span>}
+                <Mo c="#54546a" s={8}>아래에서 수정 가능</Mo>
+              </div>
+            )}
+          </Card>
+
+          <Card title="통증·불편감 추가" style={{marginBottom:10}}>
+            {/* 부위 */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>부위</Mo>
             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
               {QUICK_PARTS.map(p=>(
@@ -10581,7 +10454,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 </button>
               ))}
             </div>
-            {/* 2. 좌/우 */}
+            {/* 좌/우 */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>좌우</Mo>
             <div style={{display:"flex",gap:5,marginBottom:8}}>
               {SIDES.map(s=>(
@@ -10594,8 +10467,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 </button>
               ))}
             </div>
-            {/* 3. 상황 */}
-            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>상황 (선택)</Mo>
+            {/* 상황 */}
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>발생 상황</Mo>
             <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
               {allSituations.map(s=>(
                 <button key={s} onClick={()=>setQSituation(qSituation===s?"":s)}
@@ -10606,23 +10479,10 @@ function AssessmentScreen({ member, onBack, showToast }) {
                   {s}
                 </button>
               ))}
-              <button onClick={()=>setQSituation(qSituation==="직접입력"?"":"직접입력")}
-                style={{padding:"3px 8px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
-                  borderColor:qSituation==="직접입력"?"#f97316":"rgba(255,255,255,0.07)",
-                  background:qSituation==="직접입력"?"rgba(249,115,22,.12)":"transparent",
-                  color:qSituation==="직접입력"?"#fdba74":"#64748b"}}>
-                직접 입력
-              </button>
             </div>
-            {qSituation==="직접입력" && (
-              <input value={qCustomSit} onChange={e=>setQCustomSit(e.target.value)}
-                placeholder="직접 입력..."
-                style={{fontSize:14,padding:"5px 8px",borderRadius:6,width:"100%",boxSizing:"border-box",
-                  background:"#111827",border:"1px solid rgba(249,115,22,.2)",color:"#fdba74",marginBottom:8}} />
-            )}
-            {/* 4. VAS 버튼 */}
+            {/* VAS */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>
-              VAS 통증 강도&nbsp;
+              VAS&nbsp;
               <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,
                 color:qVas===0?"#3a3a4a":qVas<=3?"#5EEAD4":qVas<=6?"#ffd166":"#ef4444"}}>
                 {qVas}
@@ -10640,22 +10500,21 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 </button>
               ))}
             </div>
-            {/* 추가 버튼 */}
             <Btn full onClick={addPainItem}
               style={{background:"rgba(239,68,68,.15)",borderColor:"rgba(239,68,68,.3)",color:"#f87171"}}>
-              + 통증 추가
+              + 통증·불편감 추가
             </Btn>
           </Card>
 
           {/* 통증 리스트 */}
           {painList.length > 0 && (
-            <Card title={`📋 통증 기록 (${painList.length}건)`} style={{marginBottom:10}}>
+            <Card title={`📋 통증·불편감 기록 (${painList.length}건)`} style={{marginBottom:10}}>
               {painList.map((item,i)=>(
                 <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7,
                   padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.15)"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-                      <Mo c="#f87171" s={11} style={{fontWeight:700}}>{item.part}</Mo>
+                      <Mo c="#f87171" s={11} style={{fontWeight:700}}>{item.part||"부위미입력"}</Mo>
                       {item.side && item.side!=="중앙" && <Mo c="#a5b4fc" s={9}>{item.side}</Mo>}
                       {item.situation && <Mo c="#fdba74" s={9}>{item.situation}</Mo>}
                       <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
@@ -10664,6 +10523,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                         VAS {item.vas}
                       </span>
                     </div>
+                    {item.memo && <Mo c="#54546a" s={8} style={{marginTop:2}}>📝 {item.memo}</Mo>}
                   </div>
                   <button onClick={()=>setPainList(prev=>prev.filter((_,idx)=>idx!==i))}
                     style={{fontSize:12,color:"#3a3a5a",background:"none",border:"none",cursor:"pointer",padding:"2px 5px"}}>
@@ -10674,7 +10534,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
             </Card>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ─── 자세 탭 ─── */}
       {tab==="자세" && (
@@ -10977,7 +10838,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
 
 
       {/* 저장 버튼 */}
-      {tab!=="기록" && tab!=="AI루틴" && tab!=="⚡빠른평가" && (
+      {tab!=="기록" && tab!=="AI루틴" && (
         <div style={{marginTop:8}}>
           {summary && tab==="바디맵" && (
             <Card style={{marginBottom:10,border:"1px solid "+ac+"44",background:ac+"08"}}>

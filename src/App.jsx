@@ -10014,17 +10014,6 @@ const MOBILITY_ITEMS = [
   {key:"wrist_r_ext",  label:"손목(우) 신전",       opts:["정상","제한"]},
   {key:"push_up",      label:"푸쉬업 패턴",         opts:["정상","익상견갑","보상패턴"]},
 ];
-  {key:"elbow_l_pain", label:"팔꿈치L 통증",     opts:["없음","내측","외측","전반적"]},
-  {key:"elbow_r_pain", label:"팔꿈치R 통증",     opts:["없음","내측","외측","전반적"]},
-  {key:"elbow_pron",   label:"팔꿈치 회내/회외", opts:["정상","제한"]},
-  {key:"elbow_click",  label:"팔꿈치 클릭감",    opts:["없음","있음"]},
-  {key:"wrist_l_flex", label:"손목L 굴곡",       opts:["정상","제한"]},
-  {key:"wrist_r_flex", label:"손목R 굴곡",       opts:["정상","제한"]},
-  {key:"wrist_l_ext",  label:"손목L 신전",       opts:["정상","제한"]},
-  {key:"wrist_r_ext",  label:"손목R 신전",       opts:["정상","제한"]},
-  {key:"wrist_pain",   label:"손목 통증",         opts:["없음","좌측","우측","양측"]},
-  {key:"push_discomf", label:"푸쉬 동작 불편",   opts:["없음","있음"]},
-];
 // VAS_TIMING 상수는 빠른 통증 입력 UI의 SITUATIONS 객체로 통합됨
 function getMuscleLabel(id) {
   return [...FRONT_MUSCLES, ...BACK_MUSCLES].find(m => m.id === id)?.label || id;

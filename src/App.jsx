@@ -7673,6 +7673,19 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
   const [mCarb,    setMCarb]    = useState("");
   const [mProt,    setMProt]    = useState("");
   const [mFat,     setMFat]     = useState("");
+  // ── 빠른 칼로리 기록 state ────────────────────────────────────────
+  const [inputMode,   setInputMode]   = useState("food");   // food | quick | daily
+  const [qKcal,       setQKcal]       = useState("");
+  const [qMemo,       setQMemo]       = useState("");
+  const [qProt,       setQProt]       = useState("");
+  const [qCarb,       setQCarb]       = useState("");
+  const [qFat,        setQFat]        = useState("");
+  const [qConfidence, setQConfidence] = useState("보통");
+  const [dayKcal,     setDayKcal]     = useState("");
+  const [dayProt,     setDayProt]     = useState("");
+  const [dayCarb,     setDayCarb]     = useState("");
+  const [dayFat,      setDayFat]      = useState("");
+  const [dayMemo,     setDayMemo]     = useState("");
 
   const [sName,   setSName]   = useState("");
   const [sTime,   setSTime]   = useState("");
@@ -7746,6 +7759,54 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
   function resetFoodForm() {
     setFsearch(""); setSelFood(null); setFamount(""); setFunit("g");
     setIsManual(false); setMCal(""); setMCarb(""); setMProt(""); setMFat("");
+  }
+
+  // ── 빠른 칼로리 기록 저장 ────────────────────────────────────────
+  async function saveQuickCalorie() {
+    if (!qKcal && !qMemo) { showToast("kcal 또는 메모를 입력해주세요","err"); return; }
+    setSaving(true);
+    try {
+      const logs = nutritionData?.logs ? [...nutritionData.logs] : [];
+      const entry = {
+        id: "q"+Date.now(), date: selDate, meal: addMeal,
+        name: qMemo || `${addMeal} 칼로리 기록`,
+        cal: parseFloat(qKcal)||0, carb: parseFloat(qCarb)||null,
+        prot: parseFloat(qProt)||null, fat: parseFloat(qFat)||null,
+        isQuickCalorieLog: true, sourceType: "textEstimate",
+        confidenceLevel: qConfidence, foodMemo: qMemo,
+        amount:1, unit:"끼",
+      };
+      logs.push(entry);
+      await onSaveNutrition({ ...nutritionData, logs });
+      setQKcal(""); setQMemo(""); setQProt(""); setQCarb(""); setQFat(""); setQConfidence("보통");
+      showToast("칼로리 기록 저장됨 ✓");
+    } catch(e) { showToast("저장 실패","err"); }
+    setSaving(false);
+  }
+
+  async function saveDayCalorie() {
+    if (!dayKcal) { showToast("총 섭취칼로리를 입력해주세요","err"); return; }
+    setSaving(true);
+    try {
+      const logs = nutritionData?.logs ? [...nutritionData.logs] : [];
+      // 같은 날 daily 기록 교체
+      const filtered = logs.filter(l=>!(l.date===selDate && l.isDailyTotal));
+      const entry = {
+        id: "d"+Date.now(), date: selDate, meal: "하루 총계",
+        name: "하루 총 섭취칼로리",
+        cal: parseFloat(dayKcal)||0,
+        prot: parseFloat(dayProt)||null, carb: parseFloat(dayCarb)||null,
+        fat: parseFloat(dayFat)||null,
+        isDailyTotal: true, isQuickCalorieLog: true,
+        sourceType: "manual", confidenceLevel: "낮음",
+        foodMemo: dayMemo, amount:1, unit:"일",
+      };
+      filtered.push(entry);
+      await onSaveNutrition({ ...nutritionData, logs: filtered });
+      setDayKcal(""); setDayProt(""); setDayCarb(""); setDayFat(""); setDayMemo("");
+      showToast("하루 총칼로리 저장됨 ✓");
+    } catch(e) { showToast("저장 실패","err"); }
+    setSaving(false);
   }
 
   async function addFood() {
@@ -9885,6 +9946,42 @@ function MuscleBodySVG({ muscles, bodyMap, onClickMuscle, view, mode }) {
   );
 }
 
+// ── 통증 메모 AI 자동 파싱 ─────────────────────────────────────────────
+function parsePainMemo(text) {
+  if (!text || text.trim().length < 2) return null;
+  const t = text.toLowerCase();
+  const result = {};
+  const partMap = [
+    ["목","목"],["상부승모","상부승모"],["견갑","견갑"],["어깨","어깨"],
+    ["팔꿈치","팔꿈치"],["손목","손목"],["흉추","흉추"],
+    ["허리","허리"],["고관절","고관절"],["둔근","둔근"],
+    ["햄스트링","햄스트링"],["무릎","무릎"],["종아리","종아리"],
+    ["발목","발목"],["발바닥","발바닥"],
+  ];
+  for (const [k,v] of partMap) { if (t.includes(k)) { result.part = v; break; } }
+  if (t.includes("왼쪽")||t.includes("좌측")||t.includes("left")) result.side="왼쪽";
+  else if (t.includes("오른쪽")||t.includes("우측")||t.includes("right")) result.side="오른쪽";
+  else if (t.includes("양측")||t.includes("양쪽")) result.side="양측";
+  const vasMatch = t.match(/vas\s*(\d+)|(\d+)\s*vas|통증\s*(\d+)|(\d+)점|강도\s*(\d+)/);
+  if (vasMatch) {
+    const v = parseInt(vasMatch[1]||vasMatch[2]||vasMatch[3]||vasMatch[4]||vasMatch[5]);
+    if (v>=0 && v<=10) result.vas = v;
+  }
+  if (!result.vas) {
+    const numEnd = t.match(/(\d+)\s*$/);
+    if (numEnd) { const v=parseInt(numEnd[1]); if(v>=0&&v<=10) result.vas=v; }
+  }
+  const sitMap = [
+    ["앉","오래 앉을 때"],["서있","오래 서있을 때"],["걷","걷기"],
+    ["계단","계단"],["스쿼트","스쿼트"],["런지","런지"],
+    ["벤치프레스","벤치프레스"],["팔 들","팔 들기"],
+    ["운동 중","운동 중"],["운동 후","운동 후"],["아침","아침 기상 시"],
+    ["운전","오래 운전할 때"],
+  ];
+  for (const [k,v] of sitMap) { if (t.includes(k)) { result.situation=v; break; } }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 const POSTURE_ITEMS = [
   {key:"head",     label:"두부",    opts:["전방","후방","측만"]},
   {key:"shoulder", label:"어깨",    opts:["전방","라운드숄더","비대칭"]},
@@ -10026,7 +10123,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
   const [fSide,      setFSide]     = useState("양측");
   const [fVas,       setFVas]      = useState(4);
   const [fMemo,      setFMemo]     = useState("");
-  const [fPainItems, setFPainItems]= useState([]); // 누적 통증 목록
+  const [fPainItems, setFPainItems]= useState([]);
+  const [parsedPreview, setParsedPreview] = useState(null); // AI 파싱 미리보기 // 누적 통증 목록
 
   const F_PARTS = ["목","상부승모","견갑","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
   const F_SYMPTOMS = ["타이트","기능저하","저림","압박감","불안정","가동성 제한","힘 빠짐","뻐근함","통증","당김"];
@@ -10345,68 +10443,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
 
       {/* ─── ⚡ 빠른 평가 모드 ─── */}
       {/* ─── 통증·불편감 평가 탭 (빠른평가 + 통증 통합) ─── */}
-      {tab==="통증·불편감" && (() => {
-        // ── 메모 AI 파싱 ───────────────────────────────────────────────
-        function parsePainMemo(text) {
-          if (!text || text.trim().length < 2) return null;
-          const t = text.toLowerCase();
-          const result = {};
-          // 부위 추출
-          const partMap = [
-            ["목","목"],["상부승모","상부승모"],["견갑","견갑"],["어깨","어깨"],
-            ["팔꿈치","팔꿈치"],["손목","손목"],["흉추","흉추"],
-            ["허리","허리"],["고관절","고관절"],["둔근","둔근"],
-            ["햄스트링","햄스트링"],["무릎","무릎"],["종아리","종아리"],
-            ["발목","발목"],["발바닥","발바닥"],
-          ];
-          for (const [k,v] of partMap) { if (t.includes(k)) { result.part = v; break; } }
-          // 좌우 추출
-          if (t.includes("왼쪽")||t.includes("좌측")||t.includes("left")) result.side="왼쪽";
-          else if (t.includes("오른쪽")||t.includes("우측")||t.includes("right")) result.side="오른쪽";
-          else if (t.includes("양측")||t.includes("양쪽")) result.side="양측";
-          // VAS 추출
-          const vasMatch = t.match(/vas\s*(\d+)|(\d+)\s*vas|통증\s*(\d+)|(\d+)점|강도\s*(\d+)/);
-          if (vasMatch) {
-            const v = parseInt(vasMatch[1]||vasMatch[2]||vasMatch[3]||vasMatch[4]||vasMatch[5]);
-            if (v>=0 && v<=10) result.vas = v;
-          }
-          // 단독 숫자 (맨 끝 숫자) VAS fallback
-          if (!result.vas) {
-            const numEnd = t.match(/(\d+)\s*$/);
-            if (numEnd) { const v=parseInt(numEnd[1]); if(v>=0&&v<=10) result.vas=v; }
-          }
-          // 상황 추출
-          const sitMap = [
-            ["앉","오래 앉을 때"],["서있","오래 서있을 때"],["걷","걷기"],
-            ["계단","계단"],["스쿼트","스쿼트"],["런지","런지"],
-            ["벤치프레스","벤치프레스"],["팔 들","팔 들기"],
-            ["운동 중","운동 중"],["운동 후","운동 후"],["아침","아침 기상 시"],
-            ["운전","오래 운전할 때"],["들","무거운거 들때"],["구부","구부릴때"],
-          ];
-          for (const [k,v] of sitMap) { if (t.includes(k)) { result.situation=v; break; } }
-          return Object.keys(result).length > 0 ? result : null;
-        }
-
-        const [memoInput, setMemoInput] = (()=>{
-          // 이미 qMemo가 있으면 그 state 사용 - 여기서는 closure로 처리
-          return [qMemo, setQMemo];
-        })();
-
-        const [parsedPreview, setParsedPreview] = React.useState(null);
-
-        function handleMemoChange(val) {
-          setQMemo(val);
-          const parsed = parsePainMemo(val);
-          setParsedPreview(parsed);
-          if (parsed) {
-            if (parsed.part && !qPart) setQPart(parsed.part);
-            if (parsed.side) setQSide(parsed.side);
-            if (parsed.vas !== undefined) setQVas(parsed.vas);
-            if (parsed.situation) setQSituation(parsed.situation);
-          }
-        }
-
-        return (
+      {tab==="통증·불편감" && (
         <div>
           {/* 프리셋 */}
           <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
@@ -10419,12 +10456,16 @@ function AssessmentScreen({ member, onBack, showToast }) {
             ))}
           </div>
 
-          {/* AI 메모 자동 파싱 입력 */}
+          {/* AI 메모 자동 파싱 */}
           <Card style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.04)"}}>
             <Mo c="#a29bfe" s={9} style={{fontWeight:700,display:"block",marginBottom:6}}>✍️ 메모로 빠른 입력 (AI 자동 인식)</Mo>
-            <textarea value={qMemo} onChange={e=>handleMemoChange(e.target.value)}
-              placeholder={"예: 왼쪽 무릎 통증 VAS7\n예: 앉아있으면 허리 아픔 6\n예: 벤치프레스 시 오른쪽 어깨 통증"}
-              rows={3}
+            <textarea value={qMemo} onChange={e=>{
+              const val=e.target.value; setQMemo(val);
+              const p=parsePainMemo(val); setParsedPreview(p);
+              if(p){if(p.part&&!qPart)setQPart(p.part);if(p.side)setQSide(p.side);if(p.vas!==undefined)setQVas(p.vas);if(p.situation)setQSituation(p.situation);}
+            }} rows={2}
+              placeholder={"예: 왼쪽 무릎 통증 VAS7
+예: 앉아있으면 허리 아픔 6"}
               style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:7,
                 border:"1px solid rgba(162,155,254,.2)",background:"#111827",
                 color:"#ddddf0",fontSize:12,resize:"none"}} />
@@ -10441,7 +10482,6 @@ function AssessmentScreen({ member, onBack, showToast }) {
           </Card>
 
           <Card title="통증·불편감 추가" style={{marginBottom:10}}>
-            {/* 부위 */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>부위</Mo>
             <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
               {QUICK_PARTS.map(p=>(
@@ -10454,7 +10494,6 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 </button>
               ))}
             </div>
-            {/* 좌/우 */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>좌우</Mo>
             <div style={{display:"flex",gap:5,marginBottom:8}}>
               {SIDES.map(s=>(
@@ -10467,7 +10506,6 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 </button>
               ))}
             </div>
-            {/* 상황 */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>발생 상황</Mo>
             <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
               {allSituations.map(s=>(
@@ -10480,13 +10518,9 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 </button>
               ))}
             </div>
-            {/* VAS */}
             <Mo c="#54546a" s={8} style={{display:"block",marginBottom:5}}>
-              VAS&nbsp;
-              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,
-                color:qVas===0?"#3a3a4a":qVas<=3?"#5EEAD4":qVas<=6?"#ffd166":"#ef4444"}}>
-                {qVas}
-              </span>
+              VAS&nbsp;<span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,
+                color:qVas===0?"#3a3a4a":qVas<=3?"#5EEAD4":qVas<=6?"#ffd166":"#ef4444"}}>{qVas}</span>
             </Mo>
             <div style={{display:"flex",gap:3,marginBottom:10}}>
               {[0,1,2,3,4,5,6,7,8,9,10].map(n=>(
@@ -10506,26 +10540,25 @@ function AssessmentScreen({ member, onBack, showToast }) {
             </Btn>
           </Card>
 
-          {/* 통증 리스트 */}
           {painList.length > 0 && (
-            <Card title={`📋 통증·불편감 기록 (${painList.length}건)`} style={{marginBottom:10}}>
+            <Card title={"📋 통증·불편감 기록 (" + painList.length + "건)"} style={{marginBottom:10}}>
               {painList.map((item,i)=>(
-                <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7,
+                <div key={item.id||i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7,
                   padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.15)"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
                       <Mo c="#f87171" s={11} style={{fontWeight:700}}>{item.part||"부위미입력"}</Mo>
-                      {item.side && item.side!=="중앙" && <Mo c="#a5b4fc" s={9}>{item.side}</Mo>}
-                      {item.situation && <Mo c="#fdba74" s={9}>{item.situation}</Mo>}
+                      {item.side&&item.side!=="중앙"&&<Mo c="#a5b4fc" s={9}>{item.side}</Mo>}
+                      {item.situation&&<Mo c="#fdba74" s={9}>{item.situation}</Mo>}
                       <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                        background:item.vas<=3?"rgba(94,234,212,.15)":item.vas<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.2)",
-                        color:item.vas<=3?"#5EEAD4":item.vas<=6?"#ffd166":"#f87171",fontWeight:700}}>
+                        background:(item.vas||0)<=3?"rgba(94,234,212,.15)":(item.vas||0)<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.2)",
+                        color:(item.vas||0)<=3?"#5EEAD4":(item.vas||0)<=6?"#ffd166":"#f87171",fontWeight:700}}>
                         VAS {item.vas}
                       </span>
                     </div>
-                    {item.memo && <Mo c="#54546a" s={8} style={{marginTop:2}}>📝 {item.memo}</Mo>}
+                    {item.memo&&<Mo c="#54546a" s={8} style={{marginTop:2}}>📝 {item.memo}</Mo>}
                   </div>
-                  <button onClick={()=>setPainList(prev=>prev.filter((_,idx)=>idx!==i))}
+                  <button onClick={()=>setPainList(prev=>prev.filter((_,j)=>j!==i))}
                     style={{fontSize:12,color:"#3a3a5a",background:"none",border:"none",cursor:"pointer",padding:"2px 5px"}}>
                     ✕
                   </button>
@@ -10534,8 +10567,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
             </Card>
           )}
         </div>
-        );
-      })()}
+      )}
 
       {/* ─── 자세 탭 ─── */}
       {tab==="자세" && (
@@ -10673,7 +10705,120 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {/* ─── 기록 목록 탭 ─── */}
       {tab==="기록" && (
         <div>
-          {records.length===0 ? (
+          {/* 날짜 + 식사 구분 */}
+          <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
+            <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)}
+              style={{flex:"1 1 120px",minWidth:0,padding:"6px 8px",borderRadius:7,fontSize:12,
+                border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0"}}/>
+            <div style={{display:"flex",gap:4,flex:"2 1 200px",flexWrap:"wrap"}}>
+              {["아침","점심","저녁","간식","운동 전","운동 후"].map(m=>(
+                <button key={m} onClick={()=>setAddMeal(m)}
+                  style={{padding:"5px 9px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                    borderColor:addMeal===m?"#5EEAD4":"rgba(255,255,255,0.1)",
+                    background:addMeal===m?"rgba(94,234,212,.12)":"transparent",
+                    color:addMeal===m?"#5EEAD4":"#64748b"}}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 입력 방식 선택 */}
+          <div style={{display:"flex",gap:5,marginBottom:10}}>
+            {[["food","음식 검색"],["quick","칼로리만 기록"],["daily","하루 총칼로리"]].map(([m,l])=>(
+              <button key={m} onClick={()=>setInputMode(m)}
+                style={{flex:1,padding:"7px 0",borderRadius:8,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                  borderColor:inputMode===m?"#a29bfe":"rgba(255,255,255,0.1)",
+                  background:inputMode===m?"rgba(162,155,254,.12)":"rgba(255,255,255,.02)",
+                  color:inputMode===m?"#a29bfe":"#64748b"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* ── 칼로리만 기록 모드 ── */}
+          {inputMode==="quick" && (
+            <Card style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.04)"}}>
+              <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>⚡ 빠른 칼로리 기록</Mo>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div>
+                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>섭취칼로리 (kcal) *</Mo>
+                  <input type="number" value={qKcal} onChange={e=>setQKcal(e.target.value)}
+                    placeholder="예: 650"
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:14,fontWeight:700,
+                      border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4",textAlign:"center"}}/>
+                </div>
+                <div>
+                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>추정 정확도</Mo>
+                  <div style={{display:"flex",gap:4}}>
+                    {["낮음","보통","높음"].map(c=>(
+                      <button key={c} onClick={()=>setQConfidence(c)}
+                        style={{flex:1,padding:"7px 0",borderRadius:5,border:"1px solid",cursor:"pointer",fontSize:9,
+                          borderColor:qConfidence===c?"#ffd166":"rgba(255,255,255,0.1)",
+                          background:qConfidence===c?"rgba(255,209,102,.12)":"transparent",
+                          color:qConfidence===c?"#fcd34d":"#54546a"}}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <textarea value={qMemo} onChange={e=>setQMemo(e.target.value)} rows={2}
+                placeholder={"예: 닭가슴살 1팩, 현미밥 반공기 약 500kcal\n예: 사진 기준 일반식 1끼 약 650kcal"}
+                style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",resize:"none",marginBottom:8}}/>
+              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                {[["qProt","단백질(g)",qProt,setQProt],["qCarb","탄수화물(g)",qCarb,setQCarb],["qFat","지방(g)",qFat,setQFat]].map(([k,l,v,sv])=>(
+                  <input key={k} type="number" value={v} onChange={e=>sv(e.target.value)}
+                    placeholder={l}
+                    style={{flex:1,padding:"6px 7px",borderRadius:6,fontSize:11,
+                      border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
+                ))}
+              </div>
+              <Btn full onClick={saveQuickCalorie} disabled={saving}>{saving?"저장 중...":"💾 칼로리 기록 저장"}</Btn>
+            </Card>
+          )}
+
+          {/* ── 하루 총칼로리 모드 ── */}
+          {inputMode==="daily" && (
+            <Card style={{marginBottom:10,border:"1px solid rgba(249,115,22,.2)",background:"rgba(249,115,22,.04)"}}>
+              <Mo c="#f97316" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>📊 하루 총 섭취칼로리</Mo>
+              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:8}}>식사별 기록과 동시에 있을 경우 식사별 합산값이 우선 사용됩니다</Mo>
+              <div style={{marginBottom:8}}>
+                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:4}}>총 섭취칼로리 (kcal) *</Mo>
+                <input type="number" value={dayKcal} onChange={e=>setDayKcal(e.target.value)}
+                  placeholder="예: 1800"
+                  style={{width:"100%",boxSizing:"border-box",padding:"10px",borderRadius:7,fontSize:18,fontWeight:800,
+                    border:"1px solid rgba(249,115,22,.35)",background:"#111827",color:"#f97316",textAlign:"center"}}/>
+              </div>
+              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                {[["dayProt","단백질(g)",dayProt,setDayProt],["dayCarb","탄수화물(g)",dayCarb,setDayCarb],["dayFat","지방(g)",dayFat,setDayFat]].map(([k,l,v,sv])=>(
+                  <input key={k} type="number" value={v} onChange={e=>sv(e.target.value)}
+                    placeholder={l}
+                    style={{flex:1,padding:"6px 7px",borderRadius:6,fontSize:11,
+                      border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
+                ))}
+              </div>
+              <input value={dayMemo} onChange={e=>setDayMemo(e.target.value)}
+                placeholder="메모 (선택)"
+                style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:12,
+                  border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",marginBottom:8}}/>
+              <Btn full onClick={saveDayCalorie} disabled={saving}
+                style={{background:"rgba(249,115,22,.15)",borderColor:"rgba(249,115,22,.3)",color:"#f97316"}}>
+                {saving?"저장 중...":"💾 하루 총칼로리 저장"}
+              </Btn>
+            </Card>
+          )}
+
+          {/* ── 음식 검색 모드 (기존) ── */}
+          {inputMode==="food" && (
+            <div style={{background:"rgba(255,255,255,.02)",borderRadius:8,padding:"10px",border:"1px solid rgba(255,255,255,0.08)"}}>
+              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:6}}>기존 음식 검색/직접 입력 폼 (아래 탭 버튼 사용)</Mo>
+              <Btn full onClick={()=>setTab("기록")} style={{background:"rgba(94,234,212,.1)",borderColor:"rgba(94,234,212,.2)",color:"#5EEAD4"}}>
+                + 음식 직접 추가
+              </Btn>
+            </div>
+          )}
             <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,
               border:"1px dashed rgba(255,255,255,0.15)"}}>
               <div style={{fontSize:32,marginBottom:8}}>📋</div>

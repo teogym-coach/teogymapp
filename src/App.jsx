@@ -1201,20 +1201,30 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     const ss = (sessionsMap[m.id] || []);
     const sorted = [...ss].sort((a,b) => (b.date||"").localeCompare(a.date||""));
     const last   = sorted[0];
-    // 오늘 날짜 세션 직접 탐색 (Firestore 메타 캐시보다 우선)
-    const todaySession = ss.find(s => {
-      const d = s.date || s.sessionDate || s.createdAt?.split?.("T")?.[0] || "";
-      return d === today;
-    });
-    // lastDate: 오늘 세션이 있으면 today, 없으면 기존 메타 or 최신 세션 날짜
+
+    // ── 오늘 수업 판정: sessionsMap 직접 탐색, YYYY-MM-DD 정규화 ──────
+    const normalizeDate = (d) => {
+      if (!d) return "";
+      if (typeof d === "string") return d.slice(0, 10);
+      if (d instanceof Date) return d.toISOString().slice(0, 10);
+      return String(d).slice(0, 10);
+    };
+    const todaySession = ss.find(s =>
+      normalizeDate(s.date || s.sessionDate || s.createdAt) === today
+    );
+
+    // ── lastDate: sessionsMap이 로드됐으면 반드시 세션 직접 계산 ──────
+    // m.lastSessionDate(캐시)는 sessionsMap이 비어있을 때만 폴백
     const lastDate = todaySession ? today
-      : (m.lastSessionDate || last?.date || null);
-    const lastMuscle = m.lastSessionParts?.length
-      ? m.lastSessionParts.join("·")
-      : last
-        ? (last.exercises||[]).map(e=>e.muscleTop).filter(Boolean)
-            .filter((v,i,a)=>a.indexOf(v)===i).slice(0,2).join("·")
-        : null;
+      : last?.date
+        ? normalizeDate(last.date)
+        : (ss.length === 0 ? (m.lastSessionDate ? normalizeDate(m.lastSessionDate) : null) : null);
+
+    const lastMuscle = last
+      ? (last.exercises||[]).map(e=>e.muscleTop).filter(Boolean)
+          .filter((v,i,a)=>a.indexOf(v)===i).slice(0,2).join("·")
+      : (m.lastSessionParts?.length ? m.lastSessionParts.join("·") : null);
+
     const usedCount  = ss.length;
     const totalRaw   = parseInt((m.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
     const remaining  = totalRaw > 0 ? Math.max(0, totalRaw - usedCount) : null;

@@ -940,14 +940,19 @@ export default function App() {
     console.log("[TEO GYM] handleSaveSession — memberId:", member?.id, "data:", d?.sessionNo);
     setLoading(true);
     try {
-      if (editSess?.id) { await updateSession(member.id, editSess.id, d); showToast("수업 수정 완료 ✓"); }
-      else              { await addSession(member.id, d);                  showToast("수업 저장 완료 ✓"); }
+      const now = new Date().toISOString();
+      const payload = { ...d, updatedAt: now };
+      if (editSess?.id) { await updateSession(member.id, editSess.id, payload); showToast("수업 수정 완료 ✓"); }
+      else              { await addSession(member.id, { ...payload, createdAt: now }); showToast("수업 저장 완료 ✓"); }
       setEditSess(null);
       const newSessions = await getSessions(member.id);
       setSessions(newSessions);
       setSessionsMap(prev => ({...prev, [member.id]: newSessions}));
-      const sorted = [...newSessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-      const last   = sorted[0];
+      const todayStr = new Date().toISOString().split("T")[0];
+      const sorted   = [...newSessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+      const last     = sorted[0];
+      // 오늘 수업 여부 재계산 (날짜가 변경될 수 있으므로 반드시 갱신)
+      const hasTodaySession = newSessions.some(s => s.date === todayStr);
       if (last && member.id) {
         const lastParts = (last.exercises||[])
           .map(e=>e.muscleTop).filter(Boolean)
@@ -959,10 +964,21 @@ export default function App() {
             lastSessionNo:    last.sessionNo || "",
           });
           setMembers(prev => prev.map(m => m.id === member.id
-            ? {...m, lastSessionDate: last.date||"", lastSessionParts: lastParts, lastSessionNo: last.sessionNo||""}
+            ? { ...m,
+                lastSessionDate:  last.date || "",
+                lastSessionParts: lastParts,
+                lastSessionNo:    last.sessionNo || "",
+                _todaySession:    hasTodaySession, // 오늘 수업 배지 즉시 갱신
+              }
             : m
           ));
         } catch(e) { console.warn("[TEO GYM] lastSession 업데이트 실패:", e.message); }
+      } else {
+        // 세션이 없거나 last가 없을 때도 todaySession 갱신
+        setMembers(prev => prev.map(m => m.id === member.id
+          ? { ...m, _todaySession: hasTodaySession }
+          : m
+        ));
       }
 
       // ── 체중 양방향 동기화: 수업 체중 → 바디체크 records ───────────────
@@ -1107,7 +1123,7 @@ export default function App() {
               showToast(e.message || "저장 실패", "err");
             }
           }} showToast={showToast} />}
-        {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} onBack={()=>setScreen("hub")} />}
+        {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} nutritionData={nutritionData} onBack={()=>setScreen("hub")} />}
         {screen==="referral"  && <ReferralStatsScreen members={members} onBack={()=>setScreen("hub")} />}
       </div>
       <div id="pportal" style={{display:"none"}} />
@@ -6281,7 +6297,7 @@ function calcDaysLeft(d) {
 // ════════════════════════════════════════════
 // 대사 추정 분석 화면
 // ════════════════════════════════════════════
-function MetabolismScreen({ member, sessions=[], onBack }) {
+function MetabolismScreen({ member, sessions=[], nutritionData, onBack }) {
   const [range, setRange]       = useState(42); // 6주 기본
   const [showDetail, setShowDetail] = useState(false); // 대표님 근거 보기
 
@@ -6334,6 +6350,13 @@ function MetabolismScreen({ member, sessions=[], onBack }) {
     // ── 유산소 ─────────────────────────────────────────────────────────
     const cardioR = recent.reduce((s,ss)=>s+(ss.cardio?.minutes||0),0);
     const cardioO = older.reduce((s,ss)=>s+(ss.cardio?.minutes||0),0);
+
+    // ── 걸음수 (nutritionData.logs에서 읽기) ─────────────────────────
+    const nutLogs = (nutritionData?.logs || member.nutritionData?.logs || []);
+    const stepsR  = nutLogs.filter(l=>l.date>=cutStr && l.steps!=null).map(l=>l.steps);
+    const stepsO  = nutLogs.filter(l=>l.date>=prevCut&&l.date<cutStr && l.steps!=null).map(l=>l.steps);
+    const avgStepsR = stepsR.length ? Math.round(stepsR.reduce((a,b)=>a+b,0)/stepsR.length) : null;
+    const avgStepsO = stepsO.length ? Math.round(stepsO.reduce((a,b)=>a+b,0)/stepsO.length) : null;
 
     // ── 성별/나이/키/목표 ─────────────────────────────────────────────
     const sv = member.survey || {};
@@ -6434,6 +6457,7 @@ function MetabolismScreen({ member, sessions=[], onBack }) {
       volR,volO,
       rpeR,rpeO,condR,condO,
       cardioR,cardioO,
+      avgStepsR, avgStepsO, // 걸음수
       // 근거 데이터
       evidence:{wLast3,wStd,rpeR,rpeO,condR,condO,freqR,freqO,volR,volO,cardioR}
     };
@@ -6489,6 +6513,10 @@ function MetabolismScreen({ member, sessions=[], onBack }) {
           {label:"평균 RPE",val:analysis.rpeR?analysis.rpeR.toFixed(1):"—",
             sub:analysis.rpeO?`이전 ${analysis.rpeO.toFixed(1)}`:null,
             color:analysis.rpeR>=9?"#ef4444":analysis.rpeR>=7.5?"#f97316":"#5EEAD4"},
+          {label:"평균 걸음수",
+            val:analysis.avgStepsR?`${analysis.avgStepsR.toLocaleString()}보`:"—",
+            sub:analysis.avgStepsO?`이전 ${analysis.avgStepsO.toLocaleString()}보`:null,
+            color:analysis.avgStepsR>=8000?"#22c55e":analysis.avgStepsR>=5000?"#ffd166":"#f97316"},
         ].map(({label,val,sub,color})=>(
           <div key={label} style={{background:"#0c1523",borderRadius:10,padding:"10px 13px",
             border:"1px solid rgba(255,255,255,0.07)"}}>
@@ -7686,6 +7714,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
   const [dayCarb,     setDayCarb]     = useState("");
   const [dayFat,      setDayFat]      = useState("");
   const [dayMemo,     setDayMemo]     = useState("");
+  const [daySteps,    setDaySteps]    = useState(""); // 걸음수
 
   const [sName,   setSName]   = useState("");
   const [sTime,   setSTime]   = useState("");
@@ -7797,13 +7826,14 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
         cal: parseFloat(dayKcal)||0,
         prot: parseFloat(dayProt)||null, carb: parseFloat(dayCarb)||null,
         fat: parseFloat(dayFat)||null,
+        steps: daySteps !== "" ? parseInt(daySteps)||0 : null, // 걸음수 (null = 미입력)
         isDailyTotal: true, isQuickCalorieLog: true,
         sourceType: "manual", confidenceLevel: "낮음",
         foodMemo: dayMemo, amount:1, unit:"일",
       };
       filtered.push(entry);
       await onSaveNutrition({ ...nutritionData, logs: filtered });
-      setDayKcal(""); setDayProt(""); setDayCarb(""); setDayFat(""); setDayMemo("");
+      setDayKcal(""); setDayProt(""); setDayCarb(""); setDayFat(""); setDayMemo(""); setDaySteps("");
       showToast("하루 총칼로리 저장됨 ✓");
     } catch(e) { showToast("저장 실패","err"); }
     setSaving(false);
@@ -8153,7 +8183,14 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
               <input value={dayMemo} onChange={e=>setDayMemo(e.target.value)}
                 placeholder="메모 (선택)"
                 style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:12,
-                  border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",marginBottom:8}}/>
+                  border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",marginBottom:6}}/>
+              <div style={{marginBottom:8}}>
+                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>걸음수 (선택)</Mo>
+                <input type="number" value={daySteps} onChange={e=>setDaySteps(e.target.value)}
+                  placeholder="예: 8500"
+                  style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:13,
+                    border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",textAlign:"center"}}/>
+              </div>
               <Btn full onClick={saveDayCalorie} disabled={saving}
                 style={{background:"rgba(249,115,22,.15)",borderColor:"rgba(249,115,22,.3)",color:"#f97316"}}>
                 {saving?"저장 중...":"💾 하루 총칼로리 저장"}

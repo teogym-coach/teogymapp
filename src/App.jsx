@@ -1107,7 +1107,7 @@ export default function App() {
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
-        {screen==="nutrition"  && member && <NutritionScreen member={member} onBack={() => setScreen("hub")} nutritionData={nutritionData} onSaveNutrition={async d => { try { await saveNutrition(member.id, d); setNutritionData(d); } catch(e) { showToast(e.message || "저장 실패", "err"); } }} showToast={showToast} targetCal={(() => { const g=bodyData?.goal; if(!g||!g.currentWeight||!g.height||!g.age) return 0; const mult={'거의 안함':1.2,'가벼운 활동 (주 1-2회)':1.375,'보통 활동 (주 3-5회)':1.55,'활동적 (주 6-7회)':1.725,'매우 활동적':1.9}; const bmr=10*parseFloat(g.currentWeight)+6.25*parseFloat(g.height)-5*parseInt(g.age)+(g.gender==='여성'?-161:5); const tdee=Math.round(bmr*(mult[g.activityLevel]||1.375)); const days=g.targetDate?Math.max(1,Math.ceil((new Date(g.targetDate+'T00:00:00')-new Date())/86400000)):null; const loss=parseFloat(g.currentWeight)-parseFloat(g.targetWeight||0); const def=days&&loss>0?Math.round(loss*7700/days):0; return def>0?Math.max(1200,tdee-def):tdee; })()} />}
+        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{await saveBodyData(member.id,d);setBodyData(d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={(() => { const g=bodyData?.goal; if(!g||!g.currentWeight||!g.height||!g.age) return 0; const mult={'거의 안함':1.2,'가벼운 활동 (주 1-2회)':1.375,'보통 활동 (주 3-5회)':1.55,'활동적 (주 6-7회)':1.725,'매우 활동적':1.9}; const bmr=10*parseFloat(g.currentWeight)+6.25*parseFloat(g.height)-5*parseInt(g.age)+(g.gender==='여성'?-161:5); const tdee=Math.round(bmr*(mult[g.activityLevel]||1.375)); const days=g.targetDate?Math.max(1,Math.ceil((new Date(g.targetDate+'T00:00:00')-new Date())/86400000)):null; const loss=parseFloat(g.currentWeight)-parseFloat(g.targetWeight||0); const def=days&&loss>0?Math.round(loss*7700/days):0; return def>0?Math.max(1200,tdee-def):tdee; })()} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -2795,7 +2795,7 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
     // ── 핵심: 수업 중 가장 자주 사용 ───────────────────
     {icon:"✏️",label:t("수업 기록","운동 기록"),  desc:t("오늘 수업 입력","오늘 운동 입력"),    sc:"session",    c:"#5EEAD4"},
     {icon:"📅",label:t("히스토리","운동일지"),    desc:t("전체 수업 · 수정 · 삭제","전체 운동 · 수정 · 삭제"), sc:"history", c:"#7c6fff"},
-    {icon:"⚖️",label:"바디 체크",      desc:"체중·칼로리·인바디 분석",    sc:"bodycheck",  c:"#00cec9"},
+    {icon:"🏥",label:"건강관리 허브",    desc:"체중·칼로리·걸음수·영양관리 통합", sc:"healthhub", c:"#00cec9"},
     {icon:"🔥",label:"대사 추정 분석",  desc:"유산소·체중·운동량 종합 분석", sc:"metabolism",  c:"#f97316"},
     // ── 분석·설계 ──────────────────────────────────────
     {icon:"💪",label:"근력 분석",      desc:"1RM·5RM·10RM 예측 분석",     sc:"strength",   c:"#ef4444"},
@@ -2809,7 +2809,6 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
     {icon:"💢",label:"근육통 기록",    desc:"부위별 근육통 0~5 기록",     sc:"soreness",   c:"#ff9f43"},
     // ── 보조 관리 ─────────────────────────────────────
     {icon:"📋",label:"평가 기록",      desc:"체형·기능·인체도 평가",      sc:"assessment", c:"#a29bfe"},
-    {icon:"🥗",label:"영양 관리",      desc:"식단·탄단지·보충제 기록",    sc:"nutrition",  c:"#00b894"},
   ];
 
   return (
@@ -6765,8 +6764,225 @@ function ReferralStatsScreen({ members=[], onBack }) {
   );
 }
 
-function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData, showToast }) {
-  const [tab,    setTab]    = useState("대시보드");
+// ════════════════════════════════════════════
+// 건강관리 허브 — 바디체크 + 영양관리 통합
+// ════════════════════════════════════════════
+function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveBodyData, onSaveNutrition, showToast, onBack, targetCal }) {
+  // 통합 탭: 바디체크 탭 + 영양관리 탭
+  const HUB_TABS = [
+    {key:"대시보드", icon:"📊", group:"body"},
+    {key:"기록",     icon:"✏️",  group:"body"},
+    {key:"체중",     icon:"⚖️",  group:"body"},  // 새 빠른 입력 탭
+    {key:"칼로리",   icon:"🔥",  group:"nut"},   // 영양관리 오늘
+    {key:"음식",     icon:"🥗",  group:"nut"},   // 영양관리 기록
+    {key:"걸음수",   icon:"👟",  group:"nut"},   // 새 걸음수 탭
+    {key:"영양제",   icon:"💊",  group:"nut"},
+    {key:"목표",     icon:"🎯",  group:"body"},
+    {key:"인바디",   icon:"📋",  group:"body"},
+    {key:"캘린더",   icon:"📅",  group:"body"},
+    {key:"설문",     icon:"📝",  group:"body"},
+    {key:"즐겨찾기", icon:"⭐",  group:"nut"},
+  ];
+
+  const [hubTab, setHubTab] = useState("대시보드");
+
+  // 바디체크 탭 → group:body, 영양관리 탭 → group:nut
+  const BODY_TABS_MAP = {
+    "대시보드":"대시보드","기록":"기록","목표":"목표","인바디":"인바디","캘린더":"캘린더","설문":"설문"
+  };
+  const NUT_TABS_MAP = {
+    "칼로리":"오늘","음식":"기록","영양제":"영양제","즐겨찾기":"즐겨찾기"
+  };
+
+  const ac = "#00cec9";
+
+  return (
+    <div>
+      <SH title="🏥 건강관리 허브" sub={member.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+      {/* 통합 탭 바 — 가로 스크롤 */}
+      <div style={{display:"flex",gap:5,overflowX:"auto",paddingBottom:4,marginBottom:12,
+        WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}>
+        {HUB_TABS.map(t=>(
+          <button key={t.key} onClick={()=>setHubTab(t.key)}
+            style={{padding:"6px 12px",borderRadius:18,border:"1px solid",flexShrink:0,cursor:"pointer",
+              borderColor:hubTab===t.key?ac:"rgba(255,255,255,0.1)",
+              background:hubTab===t.key?ac+"22":"rgba(255,255,255,.02)",
+              color:hubTab===t.key?ac:"#54546a",fontSize:10,fontWeight:hubTab===t.key?800:400}}>
+            {t.icon} {t.key}
+          </button>
+        ))}
+      </div>
+
+      {/* 빠른 체중 입력 탭 (신규) */}
+      {hubTab==="체중" && (
+        <QuickWeightTab member={member} bodyData={bodyData} onSaveBodyData={onSaveBodyData} showToast={showToast} />
+      )}
+
+      {/* 걸음수 탭 (신규) */}
+      {hubTab==="걸음수" && (
+        <QuickStepsTab member={member} nutritionData={nutritionData} onSaveNutrition={onSaveNutrition} showToast={showToast} />
+      )}
+
+      {/* 바디체크 화면 내용 — 해당 탭 직접 전달 */}
+      {BODY_TABS_MAP[hubTab] && (
+        <BodyCheckScreen
+          member={member} sessions={sessions}
+          bodyData={bodyData} onSaveBodyData={onSaveBodyData}
+          showToast={showToast} onBack={onBack}
+          initialTab={BODY_TABS_MAP[hubTab]}
+          hideHeader={true}
+          hideTabs={true}
+        />
+      )}
+
+      {/* 영양관리 화면 내용 — 해당 탭 직접 전달 */}
+      {NUT_TABS_MAP[hubTab] && (
+        <NutritionScreen
+          member={member}
+          nutritionData={nutritionData} onSaveNutrition={onSaveNutrition}
+          showToast={showToast} onBack={onBack}
+          targetCal={targetCal}
+          initialTab={NUT_TABS_MAP[hubTab]}
+          hideHeader={true}
+          hideTabs={true}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── 빠른 체중 입력 탭 ───────────────────────────────────────────────────
+function QuickWeightTab({ member, bodyData, onSaveBodyData, showToast }) {
+  const [w,  setW]  = useState("");
+  const [bf, setBf] = useState("");
+  const [mm, setMm] = useState("");
+  const [dt, setDt] = useState(new Date().toISOString().split("T")[0]);
+  const [saving, setSaving] = useState(false);
+
+  const records = bodyData?.records || [];
+  const sorted  = [...records].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const last = sorted[0];
+
+  async function save() {
+    if (!w && !bf && !mm) { showToast("체중·체지방·골격근 중 하나를 입력해주세요","err"); return; }
+    setSaving(true);
+    try {
+      const entry = { id:"w"+Date.now(), date:dt, weight:w||null, bodyFat:bf||null, muscleMass:mm||null };
+      const newRecs = [...records.filter(r=>r.date!==dt), entry].sort((a,b)=>b.date.localeCompare(a.date));
+      await onSaveBodyData({ ...bodyData, records: newRecs });
+      setW(""); setBf(""); setMm("");
+      showToast("체중 저장됨 ✓");
+    } catch(e) { showToast("저장 실패","err"); }
+    setSaving(false);
+  }
+
+  return (
+    <div>
+      <Card title="⚖️ 체중 빠른 입력" style={{marginBottom:10}}>
+        <div style={{marginBottom:8}}>
+          <input type="date" value={dt} onChange={e=>setDt(e.target.value)}
+            style={{width:"100%",boxSizing:"border-box",padding:"6px 8px",borderRadius:6,fontSize:12,
+              border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",marginBottom:8}}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+          {[["체중 (kg)",w,setW],["체지방률 (%)",bf,setBf],["골격근량 (kg)",mm,setMm]].map(([l,v,sv])=>(
+            <div key={l}>
+              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:3}}>{l}</Mo>
+              <input type="number" value={v} onChange={e=>sv(e.target.value)} placeholder="—"
+                style={{width:"100%",boxSizing:"border-box",padding:"8px",borderRadius:6,fontSize:14,fontWeight:700,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#5EEAD4",textAlign:"center"}}/>
+            </div>
+          ))}
+        </div>
+        <Btn full onClick={save} disabled={saving}>{saving?"저장 중...":"💾 체중 저장"}</Btn>
+      </Card>
+      {sorted.length>0 && (
+        <Card title="📉 최근 체중 기록" style={{marginBottom:10}}>
+          {sorted.slice(0,7).map((r,i)=>(
+            <div key={r.id||i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
+              borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+              <Mo c="#64748b" s={9}>{r.date}</Mo>
+              <div style={{display:"flex",gap:10}}>
+                {r.weight&&<Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>{r.weight}kg</Mo>}
+                {r.bodyFat&&<Mo c="#fcd34d" s={9}>{r.bodyFat}%</Mo>}
+                {r.muscleMass&&<Mo c="#60a5fa" s={9}>{r.muscleMass}kg</Mo>}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── 걸음수 빠른 입력 탭 ─────────────────────────────────────────────────
+function QuickStepsTab({ member, nutritionData, onSaveNutrition, showToast }) {
+  const [steps, setSteps] = useState("");
+  const [cardio, setCardio] = useState("");
+  const [dt, setDt] = useState(new Date().toISOString().split("T")[0]);
+  const [saving, setSaving] = useState(false);
+
+  const logs  = nutritionData?.logs || [];
+  const stepLogs = [...logs].filter(l=>l.steps!=null||l.cardioMin!=null).sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,7);
+
+  async function save() {
+    if (!steps && !cardio) { showToast("걸음수 또는 유산소 시간을 입력해주세요","err"); return; }
+    setSaving(true);
+    try {
+      const entry = {
+        id:"s"+Date.now(), date:dt, meal:"활동",
+        name:"걸음수·유산소 기록",
+        steps: steps!="" ? parseInt(steps)||null : null,
+        cardioMin: cardio!="" ? parseInt(cardio)||null : null,
+        cal:0, isActivityLog:true,
+      };
+      const filtered = logs.filter(l=>!(l.date===dt&&l.isActivityLog));
+      await onSaveNutrition({ ...nutritionData, logs:[...filtered, entry] });
+      setSteps(""); setCardio("");
+      showToast("걸음수 저장됨 ✓");
+    } catch(e) { showToast("저장 실패","err"); }
+    setSaving(false);
+  }
+
+  return (
+    <div>
+      <Card title="👟 걸음수 · 유산소 입력" style={{marginBottom:10}}>
+        <input type="date" value={dt} onChange={e=>setDt(e.target.value)}
+          style={{width:"100%",boxSizing:"border-box",padding:"6px 8px",borderRadius:6,fontSize:12,
+            border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",marginBottom:8}}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          {[["걸음수 (보)",steps,setSteps,"예: 8000","#5EEAD4"],["유산소 시간 (분)",cardio,setCardio,"예: 40","#f97316"]].map(([l,v,sv,ph,col])=>(
+            <div key={l}>
+              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:3}}>{l}</Mo>
+              <input type="number" value={v} onChange={e=>sv(e.target.value)} placeholder={ph}
+                style={{width:"100%",boxSizing:"border-box",padding:"10px",borderRadius:6,fontSize:16,fontWeight:800,
+                  border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:col,textAlign:"center"}}/>
+            </div>
+          ))}
+        </div>
+        <Btn full onClick={save} disabled={saving}>{saving?"저장 중...":"💾 활동 저장"}</Btn>
+      </Card>
+      {stepLogs.length>0 && (
+        <Card title="📊 최근 활동 기록" style={{marginBottom:10}}>
+          {stepLogs.map((l,i)=>(
+            <div key={l.id||i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
+              borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+              <Mo c="#64748b" s={9}>{l.date}</Mo>
+              <div style={{display:"flex",gap:10}}>
+                {l.steps!=null&&<Mo c="#5EEAD4" s={9}>{l.steps.toLocaleString()}보</Mo>}
+                {l.cardioMin!=null&&<Mo c="#f97316" s={9}>{l.cardioMin}분</Mo>}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData, showToast, initialTab, hideHeader, hideTabs }) {
+  const [tab,    setTab]    = useState(initialTab || "대시보드");
   const [saving, setSaving] = useState(false);
 
   const goal      = bodyData?.goal    || {};
@@ -6896,9 +7112,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
 
   return (
     <div>
-      <SH title="⚖️ 바디 체크" sub={member.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+      {!hideHeader && <SH title="⚖️ 바디 체크" sub={member.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />}
 
-      <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
+      {!hideTabs && <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{padding:"7px 14px",borderRadius:20,border:"1px solid",flexShrink:0,cursor:"pointer",
@@ -6908,7 +7124,7 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
             {t.icon} {t.key}
           </button>
         ))}
-      </div>
+      </div>}
 
       {tab === "대시보드" && (
         <div>
@@ -7685,8 +7901,8 @@ function getSupplFeedback(supps) {
 // ════════════════════════════════════════════
 // NUTRITION SCREEN
 // ════════════════════════════════════════════
-function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showToast, targetCal }) {
-  const [tab,         setTab]       = useState("오늘");
+function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showToast, targetCal, initialTab, hideHeader, hideTabs }) {
+  const [tab,         setTab]       = useState(initialTab || "오늘");
   const [selDate,     setSelDate]   = useState(new Date().toISOString().split("T")[0]);
   const [addMeal,     setAddMeal]   = useState("아침");
   const [saving,      setSaving]    = useState(false);
@@ -7930,9 +8146,9 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
 
   return (
     <div>
-      <SH title="🥗 영양 관리" sub={member.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+      {!hideHeader && <SH title="🥗 영양 관리" sub={member.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />}
 
-      <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
+      {!hideTabs && <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{padding:"7px 14px",borderRadius:20,border:"1px solid",flexShrink:0,cursor:"pointer",
@@ -7942,7 +8158,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
             {t.icon} {t.key}
           </button>
         ))}
-      </div>
+      </div>}
 
       {tab === "오늘" && (
         <div>

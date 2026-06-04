@@ -11398,6 +11398,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
             })
           )}
         </div>
+      </div>
       )}
 
       )}

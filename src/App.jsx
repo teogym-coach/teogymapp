@@ -11400,6 +11400,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
         </div>
       )}
 
+      )}
       {/* ─── 저장 버튼 (입력 탭 - 하단 고정) ─── */}
       {viewMode==="입력" && (
       <div style={{position:"sticky",bottom:12,zIndex:10,marginTop:8}}>

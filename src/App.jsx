@@ -10439,7 +10439,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
   const [aiLoading,setAiLoading]= useState(false);
 
   // ── 섹션 접기/펼치기 ──────────────────────────────────────────────
-  const [open, setOpen] = useState({pain:true, muscle:true, func:true, posture:true, memo:true, history:false});
+  const [open, setOpen] = useState({pain:true, muscle:true, func:true, gait:true, posture:true, memo:true, history:false});
   const toggleOpen = (k) => setOpen(p=>({...p,[k]:!p[k]}));
 
   // ── 통증 ──────────────────────────────────────────────────────────
@@ -10466,7 +10466,55 @@ function AssessmentScreen({ member, onBack, showToast }) {
   // ── 종합 메모 ─────────────────────────────────────────────────────
   const [evalMemo, setEvalMemo] = useState("");
 
-  // ── 상수 ──────────────────────────────────────────────────────────
+  // ── 보행평가 state ──────────────────────────────────────────────────
+  const [gait, setGait] = useState({
+    pelvisSwing:"", weightShift:"", stepLength:"", footLanding:"", footAvoid:"",
+    kneeHyper:"",  trunkLean:"",   hipExt:"",     ankleROM:"",
+    painSpeed:"",  painAction:[],  painSite:[],
+  });
+  const [gaitMemo,   setGaitMemo]   = useState("");
+  const [gaitParsed, setGaitParsed] = useState(null);
+
+  function parseGaitMemo(text) {
+    if (!text) return null;
+    const t = text.toLowerCase();
+    const r = {};
+    if (t.includes("4km")) r.painSpeed = "4km";
+    else if (t.includes("5km")) r.painSpeed = "5km";
+    else if (t.includes("6km")) r.painSpeed = "6km 이상";
+    const acts = [];
+    if (t.includes("계단 내려")||t.includes("계단 하강")) acts.push("계단 내리기");
+    if (t.includes("계단 올라")||t.includes("계단 상승")) acts.push("계단 오르기");
+    if (t.includes("빠른 걸")||t.includes("빨리 걸")) acts.push("빠른 걷기");
+    if (t.includes("평지")) acts.push("평지 걷기");
+    if (acts.length) r.painAction = acts;
+    const sites = [];
+    if (t.includes("무릎")) sites.push("무릎");
+    if (t.includes("고관절")||t.includes("엉덩이")) sites.push("고관절");
+    if (t.includes("발목")) sites.push("발목");
+    if (t.includes("허리")) sites.push("허리");
+    if (sites.length) r.painSite = sites;
+    if (t.includes("우측 체중 회피")||t.includes("우측 체중 감소")) r.weightShift = "우측 감소";
+    else if (t.includes("좌측 체중 회피")||t.includes("좌측 체중 감소")) r.weightShift = "좌측 감소";
+    if (t.includes("우측 보폭 감소")) r.stepLength = "우측 감소";
+    else if (t.includes("좌측 보폭 감소")) r.stepLength = "좌측 감소";
+    if (t.includes("고관절 신전 부족")) r.hipExt = "우측 제한";
+    return Object.keys(r).length > 0 ? r : null;
+  }
+  function applyGaitMemo(text) {
+    const p = parseGaitMemo(text);
+    if (!p) return;
+    setGait(prev => ({
+      ...prev,
+      ...(p.painSpeed   ? {painSpeed:   p.painSpeed} : {}),
+      ...(p.painAction  ? {painAction:  [...new Set([...prev.painAction,...p.painAction])]}  : {}),
+      ...(p.painSite    ? {painSite:    [...new Set([...prev.painSite,  ...p.painSite])]}    : {}),
+      ...(p.weightShift ? {weightShift: p.weightShift} : {}),
+      ...(p.stepLength  ? {stepLength:  p.stepLength}  : {}),
+      ...(p.hipExt      ? {hipExt:      p.hipExt}      : {}),
+    }));
+    setGaitParsed(p);
+  }────────────────────────────────────────────────────────
   const QUICK_PARTS = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
   const SIDES       = ["왼쪽","오른쪽","양측","중앙"];
   const SITUATIONS  = ["오래 앉을 때","오래 서있을 때","걷기","계단","스쿼트","런지","팔 들기","벤치프레스","운동 중","운동 후","아침 기상 시","오래 운전할 때"];
@@ -10560,6 +10608,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
         bodyMap,
         mobility: {...mobility},
         postureList: [...postureList],
+        gait:        {...gait},
+        gaitMemo,
         evalMemo,
         summary,
         // AI 루틴용
@@ -10600,7 +10650,22 @@ function AssessmentScreen({ member, onBack, showToast }) {
       return Object.entries(v).filter(([,val])=>val&&val!=="정상").map(([side,val])=>item.label+" "+side+" "+val);
     });
     if (funcIssues.length>0) { lines.push("[기능 제한]"); funcIssues.forEach(l=>lines.push("- "+l)); lines.push(""); }
-    if (evalMemo) { lines.push("[메모]"); lines.push(evalMemo); lines.push(""); }
+    // 보행평가 분석
+    const gaitIssues = [];
+    if (gait.weightShift && gait.weightShift!=="정상") gaitIssues.push("체중 이동: "+gait.weightShift);
+    if (gait.stepLength  && gait.stepLength!=="정상")  gaitIssues.push("보폭: "+gait.stepLength);
+    if (gait.kneeHyper   && gait.kneeHyper!=="없음")   gaitIssues.push("무릎 과신전: "+gait.kneeHyper);
+    if (gait.hipExt      && gait.hipExt!=="정상")      gaitIssues.push("고관절 신전: "+gait.hipExt);
+    if (gait.ankleROM    && gait.ankleROM!=="정상")    gaitIssues.push("발목 가동성: "+gait.ankleROM);
+    if (gait.painSite?.length)   gaitIssues.push("통증 위치: "+gait.painSite.join(", "));
+    if (gait.painAction?.length) gaitIssues.push("불편 동작: "+gait.painAction.join(", "));
+    if (gait.painSpeed && gait.painSpeed!=="없음") gaitIssues.push("불편 속도: "+gait.painSpeed);
+    if (gaitMemo) gaitIssues.push("보행 메모: "+gaitMemo);
+
+    if (gaitIssues.length > 0) {
+      lines.push("\n[보행평가]");
+      gaitIssues.forEach(l => lines.push("- "+l));
+    }
     lines.push("위 데이터 기반으로 교정 루틴을 구성해주세요:");
     lines.push("1. 릴리즈 (과긴장·통증 부위)");
     lines.push("2. 가동성 (제한된 관절)");
@@ -10701,6 +10766,26 @@ function AssessmentScreen({ member, onBack, showToast }) {
         {(viewRec.evalMemo||viewRec.summary)&&(
           <Card title="📝 메모" style={{marginBottom:8}}>
             <Mo c="#94a3b8" s={10} style={{lineHeight:1.7}}>{viewRec.evalMemo||viewRec.summary}</Mo>
+          </Card>
+        )}
+        {viewRec.gait && Object.entries(viewRec.gait).some(([,v])=>v&&(Array.isArray(v)?v.length>0:v!=="정상"&&v!=="없음"&&v!=="")) && (
+          <Card title="🚶 보행평가" style={{marginBottom:8,border:"1px solid rgba(249,115,22,.2)"}}>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}}>
+              {[["체중 이동",viewRec.gait.weightShift],["보폭",viewRec.gait.stepLength],
+                ["골반 흔들림",viewRec.gait.pelvisSwing],["무릎 과신전",viewRec.gait.kneeHyper],
+                ["고관절 신전",viewRec.gait.hipExt],["발목 가동성",viewRec.gait.ankleROM],
+                ["불편 속도",viewRec.gait.painSpeed],
+              ].filter(([,v])=>v&&v!=="정상"&&v!=="없음").map(([k,v],i)=>(
+                <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(249,115,22,.1)",color:"#f97316"}}>{k}: {v}</span>
+              ))}
+              {(viewRec.gait.painAction||[]).map((a,i)=>(
+                <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>{a}</span>
+              ))}
+              {(viewRec.gait.painSite||[]).map((s,i)=>(
+                <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(239,68,68,.12)",color:"#f87171"}}>통증: {s}</span>
+              ))}
+            </div>
+            {viewRec.gaitMemo && <Mo c="#64748b" s={9} style={{fontStyle:"italic"}}>📝 {viewRec.gaitMemo}</Mo>}
           </Card>
         )}
         {viewRec.aiRoutine&&(
@@ -11003,7 +11088,174 @@ function AssessmentScreen({ member, onBack, showToast }) {
         </div>
       )}
 
-      {/* ─── 4. 자세 평가 ─────────────────────────────────────────── */}
+      {/* ─── 🚶 보행평가 섹션 ─────────────────────────────────────── */}
+      {(() => {
+        const gaitCount = [gait.weightShift,gait.stepLength,gait.kneeHyper,gait.hipExt,gait.ankleROM]
+          .filter(v=>v&&v!=="정상"&&v!=="없음").length
+          + (gait.painSite||[]).length + (gait.painAction||[]).length;
+        return (
+          <>
+            <Sec id="gait" emoji="🚶" title="보행 평가" count={gaitCount} />
+            {open.gait && (
+              <div style={{marginBottom:12,padding:"10px",borderRadius:8,
+                background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)"}}>
+
+                {/* AI 메모 입력 */}
+                <div style={{marginBottom:10,padding:"8px 10px",borderRadius:7,
+                  background:"rgba(162,155,254,.05)",border:"1px solid rgba(162,155,254,.15)"}}>
+                  <Mo c="#a29bfe" s={9} style={{fontWeight:700,display:"block",marginBottom:5}}>✍️ AI 보행 메모</Mo>
+                  <div style={{display:"flex",gap:5}}>
+                    <input value={gaitMemo} onChange={e=>setGaitMemo(e.target.value)}
+                      onBlur={e=>applyGaitMemo(e.target.value)}
+                      placeholder="예: 5km부터 우측 무릎 통증 / 우측 체중 회피 / 계단 내려갈 때 통증"
+                      style={{flex:1,padding:"7px 9px",borderRadius:6,fontSize:11,
+                        border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0"}} />
+                    <button onClick={()=>applyGaitMemo(gaitMemo)}
+                      style={{padding:"7px 10px",borderRadius:6,border:"none",cursor:"pointer",
+                        background:"rgba(162,155,254,.2)",color:"#a29bfe",fontSize:9,fontWeight:700,flexShrink:0}}>
+                      분석
+                    </button>
+                  </div>
+                  {gaitParsed && (
+                    <div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:5}}>
+                      <Mo c="#a29bfe" s={8}>인식: </Mo>
+                      {Object.entries(gaitParsed).map(([k,v])=>Array.isArray(v)
+                        ? v.map((vi,i)=><span key={k+i} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 5px",borderRadius:3,background:"rgba(162,155,254,.12)",color:"#a29bfe"}}>{vi}</span>)
+                        : <span key={k} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 5px",borderRadius:3,background:"rgba(162,155,254,.12)",color:"#a29bfe"}}>{v}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 뒤에서 관찰 */}
+                <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700,marginBottom:6}}>뒤에서 관찰</Mo>
+                {[
+                  {k:"pelvisSwing",label:"골반 흔들림", opts:["없음","좌측","우측","양측"]},
+                  {k:"weightShift",label:"체중 이동",   opts:["정상","좌측 감소","우측 감소"]},
+                  {k:"stepLength", label:"보폭",         opts:["정상","좌측 감소","우측 감소"]},
+                  {k:"footLanding",label:"발 착지",      opts:["정상","과내전","과외전"]},
+                  {k:"footAvoid",  label:"발 회피",      opts:["없음","좌측","우측"]},
+                ].map(item=>(
+                  <div key={item.k} style={{marginBottom:8}}>
+                    <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3,fontWeight:600}}>{item.label}</Mo>
+                    <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                      {item.opts.map(opt=>{
+                        const sel = gait[item.k]===opt;
+                        const col = (opt==="없음"||opt==="정상")?"#5EEAD4":"#f97316";
+                        return (
+                          <button key={opt} onClick={()=>setGait(p=>({...p,[item.k]:p[item.k]===opt?"":opt}))}
+                            style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,
+                              borderColor:sel?col:"rgba(255,255,255,0.08)",
+                              background:sel?col+"22":"transparent",
+                              color:sel?col:"#64748b",fontWeight:sel?700:400}}>
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                {/* 옆에서 관찰 */}
+                <Mo c="#fcd34d" s={9} style={{display:"block",fontWeight:700,marginBottom:6,marginTop:8}}>옆에서 관찰</Mo>
+                {[
+                  {k:"kneeHyper",label:"무릎 과신전",   opts:["없음","좌측","우측"]},
+                  {k:"trunkLean",label:"상체 기울어짐", opts:["없음","전방","좌측","우측"]},
+                  {k:"hipExt",   label:"고관절 신전",   opts:["정상","좌측 제한","우측 제한"]},
+                  {k:"ankleROM", label:"발목 가동성",   opts:["정상","좌측 제한","우측 제한"]},
+                ].map(item=>(
+                  <div key={item.k} style={{marginBottom:8}}>
+                    <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3,fontWeight:600}}>{item.label}</Mo>
+                    <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                      {item.opts.map(opt=>{
+                        const sel = gait[item.k]===opt;
+                        const col = (opt==="없음"||opt==="정상")?"#5EEAD4":"#fcd34d";
+                        return (
+                          <button key={opt} onClick={()=>setGait(p=>({...p,[item.k]:p[item.k]===opt?"":opt}))}
+                            style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,
+                              borderColor:sel?col:"rgba(255,255,255,0.08)",
+                              background:sel?col+"22":"transparent",
+                              color:sel?col:"#64748b",fontWeight:sel?700:400}}>
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                {/* 회원 피드백 */}
+                <Mo c="#f87171" s={9} style={{display:"block",fontWeight:700,marginBottom:6,marginTop:8}}>회원 피드백</Mo>
+                {/* 불편한 속도 */}
+                <div style={{marginBottom:8}}>
+                  <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3,fontWeight:600}}>불편한 속도</Mo>
+                  <div style={{display:"flex",gap:3}}>
+                    {["없음","4km","5km","6km 이상"].map(opt=>{
+                      const sel = gait.painSpeed===opt;
+                      return (
+                        <button key={opt} onClick={()=>setGait(p=>({...p,painSpeed:p.painSpeed===opt?"":opt}))}
+                          style={{flex:1,padding:"6px 0",borderRadius:8,border:"1px solid",cursor:"pointer",fontSize:9,
+                            borderColor:sel?(opt==="없음"?"#5EEAD4":"#f87171"):"rgba(255,255,255,0.08)",
+                            background:sel?(opt==="없음"?"rgba(94,234,212,.15)":"rgba(239,68,68,.15)"):"transparent",
+                            color:sel?(opt==="없음"?"#5EEAD4":"#f87171"):"#64748b",fontWeight:sel?700:400}}>
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 불편한 동작 (다중) */}
+                <div style={{marginBottom:8}}>
+                  <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3,fontWeight:600}}>불편한 동작</Mo>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {["없음","평지 걷기","빠른 걷기","계단 오르기","계단 내리기"].map(opt=>{
+                      const sel = opt==="없음" ? gait.painAction.length===0 : gait.painAction.includes(opt);
+                      return (
+                        <button key={opt} onClick={()=>{
+                          if (opt==="없음") { setGait(p=>({...p,painAction:[]})); return; }
+                          setGait(p=>({...p,painAction:p.painAction.includes(opt)
+                            ? p.painAction.filter(x=>x!==opt)
+                            : [...p.painAction, opt]
+                          }));
+                        }}
+                          style={{padding:"5px 9px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
+                            borderColor:sel?"#f87171":"rgba(255,255,255,0.08)",
+                            background:sel?"rgba(239,68,68,.12)":"transparent",
+                            color:sel?"#f87171":"#64748b",fontWeight:sel?700:400}}>
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 통증 위치 (다중) */}
+                <div>
+                  <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3,fontWeight:600}}>통증 위치</Mo>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {["무릎","고관절","발목","허리","기타"].map(opt=>{
+                      const sel = gait.painSite.includes(opt);
+                      return (
+                        <button key={opt} onClick={()=>setGait(p=>({...p,painSite:sel
+                          ? p.painSite.filter(x=>x!==opt)
+                          : [...p.painSite, opt]
+                        }))}
+                          style={{padding:"5px 9px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
+                            borderColor:sel?"#ef4444":"rgba(255,255,255,0.08)",
+                            background:sel?"rgba(239,68,68,.12)":"transparent",
+                            color:sel?"#f87171":"#64748b",fontWeight:sel?700:400}}>
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {/* ─── 자세 평가 ─────────────────────────────────────────── */}
       <Sec id="posture" emoji="📐" title="자세 평가" count={postureList.length} />
       {open.posture && (
         <div style={{marginBottom:12,padding:"10px",borderRadius:8,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)"}}>

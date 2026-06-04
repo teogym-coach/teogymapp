@@ -6817,17 +6817,17 @@ function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveB
       </div>
 
       {cur.role==="record" && (
-        <HealthRecordTab member={member} bodyData={bodyData} nutritionData={nutritionData}
+        <HealthRecordTab key="record" member={member} bodyData={bodyData} nutritionData={nutritionData}
           onSaveBodyData={onSaveBodyData} onSaveNutrition={onSaveNutrition} showToast={showToast} />
       )}
       {cur.role==="body" && (
-        <BodyCheckScreen member={member} sessions={sessions}
+        <BodyCheckScreen key={"body-"+cur.bodyTab} member={member} sessions={sessions}
           bodyData={bodyData} onSaveBodyData={onSaveBodyData}
           showToast={showToast} onBack={onBack}
           initialTab={cur.bodyTab} hideHeader={true} hideTabs={true} />
       )}
       {cur.role==="nut" && (
-        <NutritionScreen member={member}
+        <NutritionScreen key={"nut-"+cur.nutTab} member={member}
           nutritionData={nutritionData} onSaveNutrition={onSaveNutrition}
           showToast={showToast} onBack={onBack} targetCal={targetCal}
           initialTab={cur.nutTab} hideHeader={true} hideTabs={true} />

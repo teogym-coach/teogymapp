@@ -2882,14 +2882,24 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
           .filter(s => parseFloat(s.bodyWeight) > 0)
           .sort((a,b) => (a.date||"").localeCompare(b.date||""))
           .map(s => ({ date: s.date, weight: parseFloat(s.bodyWeight) }));
-        // bodyData.records 있으면 우선, 없으면 세션 데이터 사용
-        const _combined = _bodyRecs.length > 0
-          ? _bodyRecs.map(r => parseFloat(r.weight))
-          : _sessWeights.map(r => r.weight);
-        const wArr  = _combined;
+        // bodyData.records 있으면 우선, 없으면 세션 데이터 사용 (날짜 포함 구조 유지)
+        const _wEntries = _bodyRecs.length > 0
+          ? _bodyRecs.map(r => ({ date: r.date, weight: parseFloat(r.weight) }))
+          : _sessWeights;
+        const wArr   = _wEntries.map(e => e.weight);
         const wFirst = wArr[0] || null;
         const wLast  = wArr[wArr.length-1] || null;
         const wDiff  = (wFirst && wLast && wFirst!==wLast) ? (wLast-wFirst) : null;
+        // 7일/30일 변화 계산
+        const _todayD   = new Date();
+        const _7dAgo    = new Date(_todayD); _7dAgo.setDate(_7dAgo.getDate()-7);
+        const _30dAgo   = new Date(_todayD); _30dAgo.setDate(_30dAgo.getDate()-30);
+        const _7dAgoStr  = _7dAgo.toISOString().slice(0,10);
+        const _30dAgoStr = _30dAgo.toISOString().slice(0,10);
+        const _w7Start  = _wEntries.filter(e=>e.date<=_7dAgoStr).slice(-1)[0]?.weight || null;
+        const _w30Start = _wEntries.filter(e=>e.date<=_30dAgoStr).slice(-1)[0]?.weight || null;
+        const wDiff7d   = (wLast && _w7Start)  ? Math.round((wLast - _w7Start)*10)/10  : null;
+        const wDiff30d  = (wLast && _w30Start) ? Math.round((wLast - _w30Start)*10)/10 : null;
 
         // 3. 최근 통증 부위 (가장 최근 세션의 painRecord)
         const recentPain = (() => {
@@ -2997,22 +3007,61 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
                 <span style={sm}>{remaining!==null ? `${remaining}회 남음` : "—회"}</span>
               </div>
 
-              {/* 2. 체중 변화 — medium */}
-              <div style={card({flex:"1 1 90px"})}>
-                <span style={lbl}>체중 변화</span>
-                {wDiff!==null ? <>
-                  <span style={big(wDiff<0?"#5EEAD4":"#f97316",18)}>
-                    {wDiff>0?"+":""}{wDiff.toFixed(1)}<span style={{fontSize:10,fontWeight:400}}>kg</span>
-                  </span>
-                  <span style={sm}>{wFirst}→{wLast}kg</span>
-                </> : wLast ? <>
-                  <span style={big("#fff",18)}>{wLast}<span style={{fontSize:10,fontWeight:400}}>kg</span></span>
-                  <span style={sm}>최초 기록 · 추가 입력 시 변화 표시</span>
-                </> : <>
-                  <span style={big("#3a4a5a",16)}>—</span>
-                  <span style={sm}>기록 없음</span>
-                </>}
-              </div>
+              {/* 2. 체중 현황 카드 */}
+              {(() => {
+                const tw = parseFloat(bodyData?.goal?.targetWeight) || null;
+                const toGoal = (wLast && tw) ? Math.round((wLast - tw)*10)/10 : null;
+                return (
+                  <div style={{...card({flex:"2 1 160px"}), padding:"10px 13px"}}>
+                    <span style={lbl}>체중 현황</span>
+                    {wLast ? (
+                      <>
+                        <div style={{display:"flex",alignItems:"baseline",gap:4,margin:"4px 0"}}>
+                          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#fff"}}>{wLast}</span>
+                          <span style={{fontSize:10,color:"#54546a"}}>kg</span>
+                        </div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                          {wDiff7d!==null && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+                              background:wDiff7d<0?"rgba(94,234,212,.12)":wDiff7d>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
+                              color:wDiff7d<0?"#5EEAD4":wDiff7d>0?"#f97316":"#64748b"}}>
+                              7일 {wDiff7d>0?"+":""}{wDiff7d}kg
+                            </span>
+                          )}
+                          {wDiff30d!==null && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+                              background:wDiff30d<0?"rgba(94,234,212,.12)":wDiff30d>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
+                              color:wDiff30d<0?"#5EEAD4":wDiff30d>0?"#f97316":"#64748b"}}>
+                              30일 {wDiff30d>0?"+":""}{wDiff30d}kg
+                            </span>
+                          )}
+                          {wDiff!==null && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+                              background:wDiff<0?"rgba(94,234,212,.12)":wDiff>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
+                              color:wDiff<0?"#5EEAD4":wDiff>0?"#f97316":"#64748b"}}>
+                              시작 {wDiff>0?"+":""}{wDiff.toFixed(1)}kg
+                            </span>
+                          )}
+                          {toGoal!==null && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+                              background:"rgba(255,209,102,.1)",color:"#fcd34d"}}>
+                              목표 {toGoal>0?"+":""}{toGoal}kg
+                            </span>
+                          )}
+                          {!wDiff7d && !wDiff30d && !wDiff && (
+                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a4a5a"}}>추가 기록 시 변화 표시</span>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span style={big("#3a4a5a",16)}>—</span>
+                        <span style={sm}>기록 없음</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* 3. 최근 통증 부위 — wide */}
               <div style={card({flex:"1.5 1 110px",borderColor:recentPain?"rgba(239,68,68,.2)":"rgba(255,255,255,0.07)",background:recentPain?"rgba(239,68,68,.04)":"#0c1523"})}>
@@ -7045,7 +7094,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   }
   const assessment = getAssessment();
 
-  const wGraph = records.slice().sort((a,b) => a.date.localeCompare(b.date))
+  const wGraph = records
+    .filter(r => parseFloat(r.weight) > 0)
+    .slice().sort((a,b) => a.date.localeCompare(b.date))
     .map(r => ({ date:r.date.slice(5), weight:parseFloat(r.weight), target:tw||null }));
 
   const simData = [];

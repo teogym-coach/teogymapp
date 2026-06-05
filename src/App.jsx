@@ -855,11 +855,10 @@ export default function App() {
   }
 
   async function handleAddMember(d) {
-    // survey 데이터 → bodyData.goal 자동 연동 (회원 등록 시 한 번만)
+    // survey 데이터 → bodyData.goal + bodyData.records 자동 연동 (회원 등록 시 한 번만)
     setLoading(true);
     try {
       const saved = await addMember(d);
-      // survey 데이터가 있으면 bodyCheck.goal 자동 초기화 (중복 입력 방지)
       const sv = d.survey || {};
       if (sv && (sv.weight || sv.height || sv.purposes?.length || sv.priorityGoal)) {
         const memberId = saved?.id || d.id;
@@ -882,7 +881,18 @@ export default function App() {
             age:           sv.age           || "",
             gender:        sv.gender        || "",
           };
-          try { await saveBodyCheck(memberId, { goal: autoGoal }); } catch(e) { console.warn("bodyCheck 자동 연동 실패:", e); }
+          // 체중이 있으면 bodyData.records에 초기 레코드 생성 (그래프/대시보드 연동)
+          const autoRecords = sv.weight ? [{
+            id: "r_init_" + memberId,
+            date: d.startDate || new Date().toISOString().split("T")[0],
+            weight: sv.weight,
+            bodyFat: null,
+            muscleMass: null,
+            memo: "등록 시 입력 체중",
+          }] : [];
+          try {
+            await saveBodyCheck(memberId, { goal: autoGoal, records: autoRecords });
+          } catch(e) { console.warn("bodyCheck 자동 연동 실패:", e); }
         }
       }
       showToast("회원 등록 완료 ✓"); setMembers(await getMembers()); setScreen("members");
@@ -897,6 +907,15 @@ export default function App() {
       await updateMember(member.id, d);
       const u = {...member,...d};
       setMember(u);
+      // survey.weight 수정 시 bodyData.goal.currentWeight 동기화
+      const sv = d.survey || {};
+      if (sv.weight && bodyData) {
+        try {
+          const updatedGoal = { ...bodyData.goal, currentWeight: sv.weight };
+          await saveBodyCheck(member.id, { ...bodyData, goal: updatedGoal });
+          setBodyData(prev => ({ ...prev, goal: updatedGoal }));
+        } catch(e) { console.warn("bodyCheck goal 동기화 실패:", e); }
+      }
       showToast("수정 완료 ✓");
       setScreen("hub");
       setSessions(await getSessions(u.id));
@@ -2988,7 +3007,7 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
                   <span style={sm}>{wFirst}→{wLast}kg</span>
                 </> : wLast ? <>
                   <span style={big("#fff",18)}>{wLast}<span style={{fontSize:10,fontWeight:400}}>kg</span></span>
-                  <span style={sm}>변화 기록 부족</span>
+                  <span style={sm}>최초 기록 · 추가 입력 시 변화 표시</span>
                 </> : <>
                   <span style={big("#3a4a5a",16)}>—</span>
                   <span style={sm}>기록 없음</span>
@@ -7212,8 +7231,19 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
                 </Card>
               )}
 
-              {wGraph.length >= 2 && (
+              {wGraph.length >= 1 && (
                 <Card title="📉 체중 변화 그래프" style={{marginBottom:11}}>
+                  {wGraph.length === 1 && (
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"7px 10px",
+                      borderRadius:6,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.12)"}}>
+                      <Mo c="#5EEAD4" s={9}>📌 체중 기록 1개 — 추가 기록이 쌓이면 변화 그래프가 표시됩니다.</Mo>
+                      <button onClick={()=>setTab("기록")}
+                        style={{marginLeft:"auto",padding:"3px 8px",borderRadius:5,border:"none",cursor:"pointer",
+                          background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:9,fontWeight:700,flexShrink:0}}>
+                        + 기록 추가
+                      </button>
+                    </div>
+                  )}
                   <ResponsiveContainer width="100%" height={185}>
                     <LineChart data={wGraph} margin={{top:6,right:14,left:-18,bottom:0}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
@@ -7228,9 +7258,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
                 </Card>
               )}
 
-              {wGraph.length < 2 && (
+              {wGraph.length === 0 && (
                 <div style={{textAlign:"center",padding:"20px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)",marginBottom:11}}>
-                  <Mo c="#1e2a3a" s={10}>체중 기록을 2회 이상 추가하면 그래프가 표시됩니다.</Mo>
+                  <Mo c="#3a4a5a" s={10}>체중 기록이 없습니다.</Mo>
                   <div style={{marginTop:10}}><Btn sm onClick={() => setTab("기록")}>+ 체중 기록 추가</Btn></div>
                 </div>
               )}

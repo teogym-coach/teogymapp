@@ -2874,22 +2874,25 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
         const usedCount = sessions.length;
         const remaining = totalReg > 0 ? Math.max(0, totalReg - usedCount) : null;
 
-        // 2. 체중 변화 — bodyData.records 우선, 세션 bodyWeight 폴백
-        const _bodyRecs = (bodyData?.records || [])
-          .filter(r => parseFloat(r.weight) > 0)
-          .sort((a,b) => (a.date||"").localeCompare(b.date||""));
-        const _sessWeights = sessions
-          .filter(s => parseFloat(s.bodyWeight) > 0)
-          .sort((a,b) => (a.date||"").localeCompare(b.date||""))
-          .map(s => ({ date: s.date, weight: parseFloat(s.bodyWeight) }));
-        // bodyData.records 있으면 우선, 없으면 세션 데이터 사용 (날짜 포함 구조 유지)
-        const _wEntries = _bodyRecs.length > 0
-          ? _bodyRecs.map(r => ({ date: r.date, weight: parseFloat(r.weight) }))
-          : _sessWeights;
+        // 2. 체중 변화 — 모든 소스 통합 (bodyData.records > inbody > sessions)
+        // 날짜별 우선순위: 건강관리허브/바디체크(records) > 인바디(inbody) > 수업(session)
+        const _weightMap = {};  // date → weight (우선순위 높은 것이 덮어씀)
+        // 3순위: 수업 기록 bodyWeight
+        (sessions||[]).filter(s => parseFloat(s.bodyWeight)>0)
+          .forEach(s => { if(!_weightMap[s.date]) _weightMap[s.date] = parseFloat(s.bodyWeight); });
+        // 2순위: 인바디 기록
+        (bodyData?.inbody||[]).filter(r => parseFloat(r.weight||r.bodyWeight)>0)
+          .forEach(r => { _weightMap[r.date] = parseFloat(r.weight||r.bodyWeight); });
+        // 1순위: bodyData.records (건강관리허브 + 바디체크)
+        (bodyData?.records||[]).filter(r => parseFloat(r.weight)>0)
+          .forEach(r => { _weightMap[r.date] = parseFloat(r.weight); });
+        const _wEntries = Object.entries(_weightMap)
+          .map(([date, weight]) => ({ date, weight }))
+          .sort((a,b) => a.date.localeCompare(b.date));
         const wArr   = _wEntries.map(e => e.weight);
         const wFirst = wArr[0] || null;
         const wLast  = wArr[wArr.length-1] || null;
-        const wDiff  = (wFirst && wLast && wFirst!==wLast) ? (wLast-wFirst) : null;
+        const wDiff  = (wFirst && wLast && wFirst!==wLast) ? Math.round((wLast-wFirst)*10)/10 : null;
         // 7일/30일 변화 계산
         const _todayD   = new Date();
         const _7dAgo    = new Date(_todayD); _7dAgo.setDate(_7dAgo.getDate()-7);
@@ -3010,7 +3013,8 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
               {/* 2. 체중 현황 카드 */}
               {(() => {
                 const tw = parseFloat(bodyData?.goal?.targetWeight) || null;
-                const toGoal = (wLast && tw) ? Math.round((wLast - tw)*10)/10 : null;
+                // toGoal = 목표 - 현재 (음수=감량 필요, 양수=증량 필요)
+                const toGoal = (wLast && tw) ? Math.round((tw - wLast)*10)/10 : null;
                 return (
                   <div style={{...card({flex:"2 1 160px"}), padding:"10px 13px"}}>
                     <span style={lbl}>체중 현황</span>
@@ -3044,7 +3048,8 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
                           )}
                           {toGoal!==null && (
                             <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                              background:"rgba(255,209,102,.1)",color:"#fcd34d"}}>
+                              background:toGoal<0?"rgba(94,234,212,.12)":toGoal>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
+                              color:toGoal<0?"#5EEAD4":toGoal>0?"#f97316":"#64748b"}}>
                               목표 {toGoal>0?"+":""}{toGoal}kg
                             </span>
                           )}
@@ -6394,12 +6399,12 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
     const recent = sessions.filter(s=>(s.date||"")>=cutStr);
     const older  = sessions.filter(s=>(s.date||"")>=prevCut&&(s.date||"")<cutStr);
 
-    // ── 체중 — bodyData.records 우선, 세션 bodyWeight 폴백 ─────────────
-    const _brecs = (bodyData?.records||[]).filter(r=>parseFloat(r.weight)>0)
-      .map(r=>({d:r.date,w:parseFloat(r.weight)})).sort((a,b)=>a.d.localeCompare(b.d));
-    const _sWts  = sessions.filter(s=>parseFloat(s.bodyWeight)>0)
-      .map(s=>({d:s.date,w:parseFloat(s.bodyWeight)})).sort((a,b)=>a.d.localeCompare(b.d));
-    const wArr  = _brecs.length > 0 ? _brecs : _sWts;
+    // ── 체중 — 모든 소스 통합 (records > inbody > sessions) ─────────────
+    const _wMapM = {};
+    sessions.filter(s=>parseFloat(s.bodyWeight)>0).forEach(s=>{if(!_wMapM[s.date])_wMapM[s.date]=parseFloat(s.bodyWeight);});
+    (bodyData?.inbody||[]).filter(r=>parseFloat(r.weight||r.bodyWeight)>0).forEach(r=>{_wMapM[r.date]=parseFloat(r.weight||r.bodyWeight);});
+    (bodyData?.records||[]).filter(r=>parseFloat(r.weight)>0).forEach(r=>{_wMapM[r.date]=parseFloat(r.weight);});
+    const wArr  = Object.entries(_wMapM).map(([d,w])=>({d,w})).sort((a,b)=>a.d.localeCompare(b.d));
     // 기간별 체중 필터
     const wR    = wArr.filter(x=>x.d>=cutStr).map(x=>x.w);
     const wO    = wArr.filter(x=>x.d>=prevCut&&x.d<cutStr).map(x=>x.w);
@@ -7094,10 +7099,14 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   }
   const assessment = getAssessment();
 
-  const wGraph = records
-    .filter(r => parseFloat(r.weight) > 0)
-    .slice().sort((a,b) => a.date.localeCompare(b.date))
-    .map(r => ({ date:r.date.slice(5), weight:parseFloat(r.weight), target:tw||null }));
+  // 체중 히스토리 통합 (bodyData.records > inbody > sessions bodyWeight)
+  const _wMap = {};
+  (sessions||[]).filter(s=>parseFloat(s.bodyWeight)>0).forEach(s=>{if(!_wMap[s.date])_wMap[s.date]=parseFloat(s.bodyWeight);});
+  (inbodyList||[]).filter(r=>parseFloat(r.weight||r.bodyWeight)>0).forEach(r=>{_wMap[r.date]=parseFloat(r.weight||r.bodyWeight);});
+  records.filter(r=>parseFloat(r.weight)>0).forEach(r=>{_wMap[r.date]=parseFloat(r.weight);});
+  const wGraph = Object.entries(_wMap)
+    .map(([date,weight])=>({date:date.slice(5),weight,target:tw||null}))
+    .sort((a,b)=>a.date.localeCompare(b.date));
 
   const simData = [];
   if (cw && tw && daysLeft && totalLoss > 0) {

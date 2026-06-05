@@ -11398,10 +11398,10 @@ function AssessmentScreen({ member, onBack, showToast }) {
             })
           )}
         </div>
-      </div>
+      )}
+        </div>
       )}
 
-      )}
       {/* ─── 저장 버튼 (입력 탭 - 하단 고정) ─── */}
       {viewMode==="입력" && (
       <div style={{position:"sticky",bottom:12,zIndex:10,marginTop:8}}>
@@ -11415,6 +11415,18 @@ function AssessmentScreen({ member, onBack, showToast }) {
       </div>
       )}
     </div>
+  );
+}
+
+// ── 변화 분석 탭 헬퍼 컴포넌트 ──
+function AACTitle({children, color}) {
+  return <Mo c={color||"#5EEAD4"} s={10} style={{display:"block",fontWeight:700,marginBottom:8}}>{children}</Mo>;
+}
+function AATag({c, bg, children}) {
+  return (
+    <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
+      background:bg||"rgba(255,255,255,.06)",color:c||"#54546a",
+      marginRight:4,marginBottom:4,display:"inline-block"}}>{children}</span>
   );
 }
 
@@ -11513,28 +11525,20 @@ function AssessmentAnalysisView({ records=[], member }) {
   topWeak.slice(0,2).forEach(([k])=>priorities.push(`${k} 활성화`));
   if (priorities.length === 0) priorities.push("입력 탭에서 평가 데이터를 더 쌓아주세요.");
 
-  const CardTitle = ({children, color="#5EEAD4"}) => (
-    <Mo c={color} s={10} style={{display:"block",fontWeight:700,marginBottom:8}}>{children}</Mo>
-  );
-  const Tag = ({c="#54546a", bg="rgba(255,255,255,.06)", children}) => (
-    <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
-      background:bg,color:c,marginRight:4,marginBottom:4,display:"inline-block"}}>{children}</span>
-  );
-
   return (
     <div>
       {/* 1. 최근 평가 요약 */}
       <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
         background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.15)"}}>
-        <CardTitle color="#5EEAD4">📌 최근 평가 요약 ({latest.date})</CardTitle>
+        <AACTitle color="#5EEAD4">📌 최근 평가 요약 ({latest.date})</AACTitle>
         {(latest.painList||[]).length>0 && (
           <div style={{marginBottom:5}}>
             <Mo c="#f87171" s={8} style={{fontWeight:700}}>통증: </Mo>
             {(latest.painList||[]).map((p,i)=>(
-              <Tag key={i} c={p.vas>=7?"#f87171":p.vas>=4?"#fcd34d":"#5EEAD4"}
+              <AATag key={i} c={p.vas>=7?"#f87171":p.vas>=4?"#fcd34d":"#5EEAD4"}
                 bg={p.vas>=7?"rgba(239,68,68,.12)":p.vas>=4?"rgba(255,209,102,.1)":"rgba(94,234,212,.08)"}>
                 {p.part}{p.side&&p.side!=="중앙"?" "+p.side:""} VAS{p.vas}
-              </Tag>
+              </AATag>
             ))}
           </div>
         )}
@@ -11542,7 +11546,7 @@ function AssessmentAnalysisView({ records=[], member }) {
           <div style={{marginBottom:5}}>
             <Mo c="#f87171" s={8} style={{fontWeight:700}}>🔴 과긴장: </Mo>
             {(latest.muscleItems||[]).filter(m=>m.type==="tight").slice(0,4).map((m,i)=>(
-              <Tag key={i} c="#f87171" bg="rgba(239,68,68,.08)">{m.name} {m.side}</Tag>
+              <AATag key={i} c="#f87171" bg="rgba(239,68,68,.08)">{m.name} {m.side}</AATag>
             ))}
           </div>
         )}
@@ -11550,7 +11554,7 @@ function AssessmentAnalysisView({ records=[], member }) {
           <div style={{marginBottom:5}}>
             <Mo c="#60a5fa" s={8} style={{fontWeight:700}}>🔵 약화: </Mo>
             {(latest.muscleItems||[]).filter(m=>m.type==="weak").slice(0,4).map((m,i)=>(
-              <Tag key={i} c="#60a5fa" bg="rgba(37,99,235,.08)">{m.name} {m.side}</Tag>
+              <AATag key={i} c="#60a5fa" bg="rgba(37,99,235,.08)">{m.name} {m.side}</AATag>
             ))}
           </div>
         )}
@@ -11563,7 +11567,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       {topPain.length > 0 && (
         <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
           background:"rgba(239,68,68,.04)",border:"1px solid rgba(239,68,68,.15)"}}>
-          <CardTitle color="#f87171">🔥 반복 불편 부위 TOP</CardTitle>
+          <AACTitle color="#f87171">🔥 반복 불편 부위 TOP</AACTitle>
           {topPain.map(([part,cnt],i)=>(
             <div key={part} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
               marginBottom:4,padding:"4px 8px",borderRadius:6,
@@ -11582,7 +11586,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       {topVasPart.length > 0 && (
         <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
           background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.08)"}}>
-          <CardTitle>📉 통증 VAS 변화 흐름</CardTitle>
+          <AACTitle>📉 통증 VAS 변화 흐름</AACTitle>
           {topVasPart.map(([part, entries])=>(
             <div key={part} style={{marginBottom:8}}>
               <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4,fontWeight:700}}>{part}</Mo>
@@ -11621,7 +11625,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       {(topTight.length > 0 || topWeak.length > 0) && (
         <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
           background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.08)"}}>
-          <CardTitle>💪 근육 평가 반복 분석</CardTitle>
+          <AACTitle>💪 근육 평가 반복 분석</AACTitle>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             {topTight.length>0 && (
               <div>
@@ -11653,7 +11657,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       {(topFunc.length > 0 || topPosture.length > 0) && (
         <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
           background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.08)"}}>
-          <CardTitle>⚡ 기능·자세 반복 문제</CardTitle>
+          <AACTitle>⚡ 기능·자세 반복 문제</AACTitle>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             {topFunc.length>0 && (
               <div>
@@ -11684,7 +11688,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       {/* 6. AI 자동 분석 요약 */}
       <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
         background:"rgba(162,155,254,.05)",border:"1px solid rgba(162,155,254,.2)"}}>
-        <CardTitle color="#a29bfe">🤖 AI 자동 분석 요약</CardTitle>
+        <AACTitle color="#a29bfe">🤖 AI 자동 분석 요약</AACTitle>
         <Mo c="#94a3b8" s={11} style={{lineHeight:1.8,display:"block",marginBottom:8}}>{autoSummary}</Mo>
         <Mo c="#3a4a5a" s={8}>총 {records.length}건 기록 기반 · 최근 평가: {latest.date}</Mo>
       </div>
@@ -11692,7 +11696,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       {/* 7. 다음 수업 우선순위 */}
       <div style={{padding:"12px 14px",borderRadius:10,
         background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.15)"}}>
-        <CardTitle color="#5EEAD4">📋 다음 수업 참고사항</CardTitle>
+        <AACTitle color="#5EEAD4">📋 다음 수업 참고사항</AACTitle>
         {priorities.slice(0,5).map((p,i)=>(
           <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:5}}>
             <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:3,

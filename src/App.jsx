@@ -1091,7 +1091,7 @@ export default function App() {
         {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={member} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
@@ -1123,7 +1123,7 @@ export default function App() {
               showToast(e.message || "저장 실패", "err");
             }
           }} showToast={showToast} />}
-        {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} nutritionData={nutritionData} onBack={()=>setScreen("hub")} />}
+        {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} nutritionData={nutritionData} bodyData={bodyData} onBack={()=>setScreen("hub")} />}
         {screen==="referral"  && <ReferralStatsScreen members={members} onBack={()=>setScreen("hub")} />}
       </div>
       <div id="pportal" style={{display:"none"}} />
@@ -2791,7 +2791,7 @@ function MemberForm({ initial, onSave, onBack }) {
 // ════════════════════════════════════════════
 // HUB
 // ════════════════════════════════════════════
-function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
+function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
   const isCorr = false;
 
   const totalVol = sessions.reduce((s,ss) => s+(ss.totalVolume||0), 0);
@@ -2855,8 +2855,19 @@ function HubScreen({ member, sessions, loading, setScreen, onEdit }) {
         const usedCount = sessions.length;
         const remaining = totalReg > 0 ? Math.max(0, totalReg - usedCount) : null;
 
-        // 2. 체중 변화
-        const wArr  = sessions.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>parseFloat(s.bodyWeight));
+        // 2. 체중 변화 — bodyData.records 우선, 세션 bodyWeight 폴백
+        const _bodyRecs = (bodyData?.records || [])
+          .filter(r => parseFloat(r.weight) > 0)
+          .sort((a,b) => (a.date||"").localeCompare(b.date||""));
+        const _sessWeights = sessions
+          .filter(s => parseFloat(s.bodyWeight) > 0)
+          .sort((a,b) => (a.date||"").localeCompare(b.date||""))
+          .map(s => ({ date: s.date, weight: parseFloat(s.bodyWeight) }));
+        // bodyData.records 있으면 우선, 없으면 세션 데이터 사용
+        const _combined = _bodyRecs.length > 0
+          ? _bodyRecs.map(r => parseFloat(r.weight))
+          : _sessWeights.map(r => r.weight);
+        const wArr  = _combined;
         const wFirst = wArr[0] || null;
         const wLast  = wArr[wArr.length-1] || null;
         const wDiff  = (wFirst && wLast && wFirst!==wLast) ? (wLast-wFirst) : null;
@@ -6306,7 +6317,7 @@ function calcDaysLeft(d) {
 // ════════════════════════════════════════════
 // 대사 추정 분석 화면
 // ════════════════════════════════════════════
-function MetabolismScreen({ member, sessions=[], nutritionData, onBack }) {
+function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack }) {
   const [range, setRange]       = useState(42); // 6주 기본
   const [showDetail, setShowDetail] = useState(false); // 대표님 근거 보기
 
@@ -6318,10 +6329,15 @@ function MetabolismScreen({ member, sessions=[], nutritionData, onBack }) {
     const recent = sessions.filter(s=>(s.date||"")>=cutStr);
     const older  = sessions.filter(s=>(s.date||"")>=prevCut&&(s.date||"")<cutStr);
 
-    // ── 체중 ──────────────────────────────────────────────────────────
-    const wArr  = sessions.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>({d:s.date,w:parseFloat(s.bodyWeight)})).sort((a,b)=>a.d.localeCompare(b.d));
-    const wR    = recent.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>parseFloat(s.bodyWeight));
-    const wO    = older.filter(s=>parseFloat(s.bodyWeight)>0).map(s=>parseFloat(s.bodyWeight));
+    // ── 체중 — bodyData.records 우선, 세션 bodyWeight 폴백 ─────────────
+    const _brecs = (bodyData?.records||[]).filter(r=>parseFloat(r.weight)>0)
+      .map(r=>({d:r.date,w:parseFloat(r.weight)})).sort((a,b)=>a.d.localeCompare(b.d));
+    const _sWts  = sessions.filter(s=>parseFloat(s.bodyWeight)>0)
+      .map(s=>({d:s.date,w:parseFloat(s.bodyWeight)})).sort((a,b)=>a.d.localeCompare(b.d));
+    const wArr  = _brecs.length > 0 ? _brecs : _sWts;
+    // 기간별 체중 필터
+    const wR    = wArr.filter(x=>x.d>=cutStr).map(x=>x.w);
+    const wO    = wArr.filter(x=>x.d>=prevCut&&x.d<cutStr).map(x=>x.w);
     const avgWR = wR.length ? wR.reduce((a,b)=>a+b,0)/wR.length : null;
     const avgWO = wO.length ? wO.reduce((a,b)=>a+b,0)/wO.length : null;
     const wDiff = (avgWR&&avgWO) ? (avgWR-avgWO) : null;
@@ -6470,7 +6486,7 @@ function MetabolismScreen({ member, sessions=[], nutritionData, onBack }) {
       // 근거 데이터
       evidence:{wLast3,wStd,rpeR,rpeO,condR,condO,freqR,freqO,volR,volO,cardioR}
     };
-  }, [sessions, range, member]);
+  }, [sessions, range, member, bodyData]);
 
   const tt = { background:"#111827", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, fontSize:10, color:"#fff" };
 

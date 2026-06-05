@@ -6800,8 +6800,7 @@ function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveB
   const TABS = [
     {key:"대시보드", role:"body",   bodyTab:"대시보드", icon:"📊"},
     {key:"기록",     role:"record",                     icon:"✏️"},
-    {key:"칼로리",   role:"nut",    nutTab:"오늘",       icon:"🔥"},
-    {key:"음식",     role:"nut",    nutTab:"기록",       icon:"🥗"},
+    {key:"음식",     role:"nut",    nutTab:"오늘",       icon:"🥗"},
     {key:"영양제",   role:"nut",    nutTab:"영양제",     icon:"💊"},
     {key:"목표",     role:"body",   bodyTab:"목표",      icon:"🎯"},
     {key:"인바디",   role:"body",   bodyTab:"인바디",    icon:"📋"},

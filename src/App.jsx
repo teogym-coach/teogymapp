@@ -2903,6 +2903,12 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
         const _w30Start = _wEntries.filter(e=>e.date<=_30dAgoStr).slice(-1)[0]?.weight || null;
         const wDiff7d   = (wLast && _w7Start)  ? Math.round((wLast - _w7Start)*10)/10  : null;
         const wDiff30d  = (wLast && _w30Start) ? Math.round((wLast - _w30Start)*10)/10 : null;
+        // 그래프용 데이터 (통계와 동일한 _wEntries 사용)
+        const wGraph = _wEntries.map(e => ({
+          date: e.date.slice(5),
+          weight: e.weight,
+          target: parseFloat(bodyData?.goal?.targetWeight)||null,
+        }));
 
         // 3. 최근 통증 부위 (가장 최근 세션의 painRecord)
         const recentPain = (() => {
@@ -3100,6 +3106,41 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
                 </span>
               </div>
             </div>
+
+            {/* ── 체중 변화 그래프 ─────────────────────────────── */}
+            {wGraph.length >= 2 && (
+              <div style={{background:"#111827",borderRadius:10,padding:"12px 14px",
+                border:"1px solid rgba(255,255,255,0.08)",marginBottom:11}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>📉 체중 변화 그래프</Mo>
+                  <Mo c="#3a4a5a" s={8}>{wGraph.length}개 기록</Mo>
+                </div>
+                <ResponsiveContainer width="100%" height={160}>
+                  <LineChart data={wGraph} margin={{top:4,right:12,left:-20,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                    <XAxis dataKey="date" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} />
+                    <YAxis domain={["auto","auto"]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} unit="kg" />
+                    <Tooltip contentStyle={{background:"#111827",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,fontSize:10}} formatter={(v)=>[v+"kg","체중"]} />
+                    <Line type="monotone" dataKey="weight" stroke="#5EEAD4" strokeWidth={2.5} dot={{fill:"#5EEAD4",r:3}} activeDot={{r:5}} name="체중" />
+                    {wGraph[0]?.target > 0 && (
+                      <Line type="monotone" dataKey="target" stroke="#f87171" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="목표" />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {wGraph.length === 1 && (
+              <div style={{background:"#111827",borderRadius:10,padding:"10px 14px",
+                border:"1px solid rgba(255,255,255,0.06)",marginBottom:11,
+                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <Mo c="#3a4a5a" s={9}>📌 체중 기록 1개 — 2개 이상부터 그래프가 표시됩니다.</Mo>
+                <button onClick={()=>setScreen("healthhub")}
+                  style={{padding:"4px 9px",borderRadius:5,border:"none",cursor:"pointer",
+                    background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:9,fontWeight:700}}>
+                  + 기록 추가
+                </button>
+              </div>
+            )}
           </>
         );
       })()}

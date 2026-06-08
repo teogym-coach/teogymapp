@@ -3788,41 +3788,28 @@ function updateEx(ei, key, val) {
 
     // 2:1 수업: 회원2에게도 독립 저장
     if (sessionType === "2:1" && member2 && onSave2) {
-    // 2:1 수업: 회원2 exercises 생성
-    // useShared=true → 공통 sets 사용, m2.weight/rpe 오버라이드
-    // useShared=false → m2.sets 개별 사용
+    // 2:1 수업: 회원2 exercises 생성 — m2.sets 개별 데이터 우선 사용
     const exM2 = cleanExercises.map(e => {
       const { m2, ...rest } = e;
       if (!m2) return rest;
-      const useShared = m2.useShared !== false;
-      if (useShared) {
-        // 공통값 사용 — sets는 그대로, RPE는 m2.rpe로 오버라이드
-        return {
-          ...rest,
-          sets: (rest.sets||[]).map(s => ({...s, rpe: m2.rpe || s.rpe})),
-          feedback: m2.note || rest.feedback,
-        };
-      } else {
-        // 개별 입력 사용 — m2.sets로 교체
-        const m2SetsRaw = m2.sets || [];
-        const merged = (rest.sets||[]).map((s, si) => ({
-          ...s,
-          weight:      m2SetsRaw[si]?.weight ?? s.weight,
-          reps:        m2SetsRaw[si]?.reps   ?? s.reps,
-          durationSec: m2SetsRaw[si]?.durationSec ?? s.durationSec,
-          volume: (() => {
-            const w = parseFloat(m2SetsRaw[si]?.weight ?? s.weight)||0;
-            const r = parseInt(m2SetsRaw[si]?.reps ?? s.reps)||0;
-            return Math.round(w * r * 10) / 10;
-          })(),
-          rpe: m2.rpe || s.rpe,
-        }));
-        return {
-          ...rest,
-          sets: merged,
-          feedback: m2.note || rest.feedback,
-        };
-      }
+      const m2SetsRaw = m2.sets || [];
+      // 회원1 sets를 기반으로 회원2 값으로 덮어씀 (입력된 값만 교체)
+      const merged = (rest.sets||[]).map((s, si) => ({
+        ...s,
+        weight:      m2SetsRaw[si]?.weight      !== undefined && m2SetsRaw[si]?.weight      !== ""
+                       ? m2SetsRaw[si].weight      : s.weight,
+        reps:        m2SetsRaw[si]?.reps        !== undefined && m2SetsRaw[si]?.reps        !== ""
+                       ? m2SetsRaw[si].reps        : s.reps,
+        durationSec: m2SetsRaw[si]?.durationSec !== undefined && m2SetsRaw[si]?.durationSec !== ""
+                       ? m2SetsRaw[si].durationSec : s.durationSec,
+        volume: (() => {
+          const w = parseFloat(m2SetsRaw[si]?.weight ?? s.weight) || 0;
+          const r = parseInt(m2SetsRaw[si]?.reps   ?? s.reps)   || 0;
+          return Math.round(w * r * 10) / 10;
+        })(),
+        rpe: m2.rpe || s.rpe,
+      }));
+      return { ...rest, sets: merged, feedback: m2.note || rest.feedback };
     });
       const payload2 = buildPayload({ targetMember: member2, comment: trainerComment2, exList: exM2, isM2: true });
       onSave2(payload2);
@@ -4763,118 +4750,136 @@ function updateEx(ei, key, val) {
                 })}
                 <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed rgba(255,255,255,0.08)",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
 
-                {/* ── 2:1 수업: 회원2 입력 (공통값 기본, 개별 해제 가능) ── */}
+                {/* ── 2:1 수업: 회원2 개별 입력 (기본) + 공통값 복사 보조 기능 ── */}
                 {sessionType==="2:1" && member2 && (() => {
-                  const m2 = ex.m2 || {};
-                  const useShared = m2.useShared !== false; // 기본 true (공통값 사용)
-                  const exTypeM2  = getExerciseType(ex.name);
-                  const isFunc    = isFuncEx(ex);
-                  const isTime    = exTypeM2 === "bodyweight" && (ex.sets||[]).some(s=>s.durationSec);
-                  const m2sets    = m2.sets || (ex.sets||[]).map(() => ({weight:"",reps:"",durationSec:""}));
+                  const m2     = ex.m2 || {};
+                  const exTypeM2 = getExerciseType(ex.name);
+                  const isFunc   = isFuncEx(ex);
+                  const isTime   = !isFunc && (ex.sets||[]).some(s=>s.durationSec);
+                  // 회원2 세트 — 기본값은 회원1 세트 구조를 빈 값으로 초기화
+                  const m2sets = m2.sets || (ex.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}));
 
                   const updateM2 = (field, val) => setExercises(prev => prev.map((x,i)=>i===ei
                     ? {...x, m2:{...(x.m2||{}), [field]:val}} : x));
                   const updateM2Set = (si, field, val) => setExercises(prev => prev.map((x,i)=>{
                     if (i!==ei) return x;
                     const prevM2 = x.m2||{};
-                    const newSets = [...(prevM2.sets || (ex.sets||[]).map(()=>({weight:"",reps:"",durationSec:""})))];
-                    newSets[si] = {...newSets[si], [field]:val};
-                    return {...x, m2:{...prevM2, sets:newSets}};
+                    const base = prevM2.sets || (ex.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}));
+                    const next = [...base];
+                    next[si] = {...next[si], [field]:val};
+                    return {...x, m2:{...prevM2, sets:next}};
                   }));
+                  // 공통값 복사: 회원1 sets의 값을 회원2 sets에 덮어씀
+                  const applyShared = (field) => setExercises(prev => prev.map((x,i)=>{
+                    if (i!==ei) return x;
+                    const prevM2 = x.m2||{};
+                    const base   = prevM2.sets || (x.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}));
+                    const next   = (x.sets||[]).map((s,si)=>({...base[si], [field]: s[field]||""}));
+                    return {...x, m2:{...prevM2, sets:next}};
+                  }));
+
+                  // 레이블
+                  const weightLabel = exTypeM2==="assist"?"보조kg":exTypeM2==="bodyweight"?"추가kg":"중량kg";
 
                   return (
                     <div style={{marginTop:6,borderRadius:7,
-                      border:"1px solid rgba(162,155,254,.2)",overflow:"hidden"}}>
+                      border:"1px solid rgba(162,155,254,.25)",overflow:"hidden"}}>
                       {/* 헤더 */}
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                        padding:"5px 10px",background:"rgba(162,155,254,.07)"}}>
+                        padding:"5px 10px",background:"rgba(162,155,254,.08)"}}>
                         <Mo c="#a29bfe" s={9} style={{fontWeight:700}}>⚡ {member2.name}</Mo>
-                        <button onClick={()=>updateM2('useShared', !useShared)}
-                          style={{padding:"2px 8px",borderRadius:10,border:"1px solid",cursor:"pointer",
-                            fontSize:8,fontWeight:700,
-                            borderColor:useShared?"rgba(162,155,254,.3)":"#a29bfe",
-                            background:useShared?"transparent":"rgba(162,155,254,.12)",
-                            color:useShared?"#64748b":"#a29bfe"}}>
-                          {useShared ? "공통값 사용 중 · 개별 입력" : "✓ 개별 입력 중 · 공통 사용"}
-                        </button>
+                        {/* 공통값 빠른 복사 버튼들 */}
+                        <div style={{display:"flex",gap:3}}>
+                          {!isFunc && !isTime && (
+                            <button onClick={()=>applyShared('weight')}
+                              style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(162,155,254,.3)",
+                                cursor:"pointer",fontSize:8,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                              중량 복사
+                            </button>
+                          )}
+                          {isTime && (
+                            <button onClick={()=>applyShared('durationSec')}
+                              style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(162,155,254,.3)",
+                                cursor:"pointer",fontSize:8,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                              시간 복사
+                            </button>
+                          )}
+                          <button onClick={()=>applyShared('reps')}
+                            style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(162,155,254,.3)",
+                              cursor:"pointer",fontSize:8,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                            횟수 복사
+                          </button>
+                        </div>
                       </div>
 
-                      {/* 공통값 사용 시: 차이 있는 항목만 빠르게 표시 */}
-                      {useShared ? (
-                        <div style={{padding:"6px 10px",display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                          <Mo c="#54546a" s={8}>공통값 적용됨 —</Mo>
-                          {/* RPE 개별 입력 (공통값 사용 시에도 RPE는 항상 개별) */}
-                          <div style={{display:"flex",alignItems:"center",gap:3}}>
-                            <Mo c="#64748b" s={8}>RPE</Mo>
-                            <input type="number" placeholder="—" min="1" max="10"
-                              value={m2.rpe ?? ""}
-                              onChange={e=>updateM2('rpe',e.target.value)}
-                              style={{width:40,textAlign:"center",height:26,padding:"0 3px",
-                                fontSize:12,fontWeight:700,borderRadius:4,
-                                border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
-                          </div>
-                          <div style={{display:"flex",alignItems:"center",gap:3}}>
-                            <Mo c="#64748b" s={8}>메모</Mo>
-                            <input placeholder="특이사항" value={m2.note??""}
-                              onChange={e=>updateM2('note',e.target.value)}
-                              style={{width:100,height:26,padding:"0 6px",fontSize:10,borderRadius:4,
-                                border:"1px solid rgba(162,155,254,.12)",background:"#0c1523",color:"#ddddf0"}} />
-                          </div>
+                      {/* 세트별 개별 입력 */}
+                      <div style={{padding:"6px 10px"}}>
+                        {/* 컬럼 헤더 */}
+                        <div style={{display:"grid",
+                          gridTemplateColumns: isFunc
+                            ? "20px 1fr 1fr"
+                            : isTime
+                              ? "20px 1fr 1fr"
+                              : "20px 1fr 1fr",
+                          gap:4,marginBottom:3}}>
+                          <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>SET</Mo>
+                          {!isFunc && !isTime && <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>{weightLabel}</Mo>}
+                          {isTime && <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>시간(초)</Mo>}
+                          <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>횟수</Mo>
                         </div>
-                      ) : (
-                        /* 개별 입력 모드 */
-                        <div style={{padding:"7px 10px"}}>
-                          {/* 세트별 입력 */}
-                          {m2sets.map((row, si) => (
-                            <div key={si} style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
-                              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",
-                                background:"#111827",borderRadius:4,width:20,height:28,display:"flex",
-                                alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                                {si+1}
-                              </div>
-                              {/* 웨이트 운동: 중량 */}
-                              {!isFunc && !isTime && (
-                                <input type="number" placeholder="kg"
-                                  value={row.weight??""}
-                                  onChange={e=>updateM2Set(si,'weight',e.target.value)}
-                                  style={{width:56,textAlign:"center",height:28,padding:"0 3px",
-                                    fontSize:13,fontWeight:700,borderRadius:4,
-                                    border:"1px solid rgba(162,155,254,.25)",background:"#0c1523",color:"#a29bfe"}} />
-                              )}
-                              {/* 시간 운동: 시간(초) */}
-                              {isTime && (
-                                <input type="number" placeholder="초"
-                                  value={row.durationSec??""}
-                                  onChange={e=>updateM2Set(si,'durationSec',e.target.value)}
-                                  style={{width:52,textAlign:"center",height:28,padding:"0 3px",
-                                    fontSize:13,fontWeight:700,borderRadius:4,
-                                    border:"1px solid rgba(162,155,254,.25)",background:"#0c1523",color:"#a29bfe"}} />
-                              )}
-                              {/* 기능/웨이트: 횟수 */}
-                              <input type="number" placeholder="회"
-                                value={row.reps??""}
-                                onChange={e=>updateM2Set(si,'reps',e.target.value)}
-                                style={{width:46,textAlign:"center",height:28,padding:"0 3px",
-                                  fontSize:13,fontWeight:700,borderRadius:4,
-                                  border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#ddddf0"}} />
-                            </div>
-                          ))}
-                          {/* RPE + 메모 */}
-                          <div style={{display:"flex",gap:5,marginTop:4,alignItems:"center"}}>
-                            <Mo c="#64748b" s={8}>RPE</Mo>
-                            <input type="number" placeholder="—" min="1" max="10"
-                              value={m2.rpe??""}
-                              onChange={e=>updateM2('rpe',e.target.value)}
-                              style={{width:38,textAlign:"center",height:26,padding:"0 3px",
-                                fontSize:12,fontWeight:700,borderRadius:4,
-                                border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
-                            <input placeholder="메모" value={m2.note??""}
-                              onChange={e=>updateM2('note',e.target.value)}
-                              style={{flex:1,height:26,padding:"0 6px",fontSize:10,borderRadius:4,
-                                border:"1px solid rgba(162,155,254,.12)",background:"#0c1523",color:"#ddddf0"}} />
+                        {m2sets.map((row, si) => (
+                          <div key={si} style={{display:"grid",
+                            gridTemplateColumns: isFunc
+                              ? "20px 1fr 1fr"
+                              : isTime
+                                ? "20px 1fr 1fr"
+                                : "20px 1fr 1fr",
+                            gap:4,marginBottom:4,alignItems:"center"}}>
+                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",
+                              background:"#111827",borderRadius:4,height:30,display:"flex",
+                              alignItems:"center",justifyContent:"center"}}>{si+1}</div>
+                            {/* 웨이트: 중량 */}
+                            {!isFunc && !isTime && (
+                              <input type="number" placeholder="kg"
+                                value={row.weight??""}
+                                onChange={e=>updateM2Set(si,'weight',e.target.value)}
+                                style={{textAlign:"center",height:30,padding:"0 3px",
+                                  fontSize:14,fontWeight:700,borderRadius:4,
+                                  border:"1px solid rgba(162,155,254,.25)",background:"#0c1523",color:"#a29bfe"}} />
+                            )}
+                            {/* 시간 운동: 초 */}
+                            {isTime && (
+                              <input type="number" placeholder="초"
+                                value={row.durationSec??""}
+                                onChange={e=>updateM2Set(si,'durationSec',e.target.value)}
+                                style={{textAlign:"center",height:30,padding:"0 3px",
+                                  fontSize:14,fontWeight:700,borderRadius:4,
+                                  border:"1px solid rgba(162,155,254,.25)",background:"#0c1523",color:"#a29bfe"}} />
+                            )}
+                            {/* 공통: 횟수 */}
+                            <input type="number" placeholder="회"
+                              value={row.reps??""}
+                              onChange={e=>updateM2Set(si,'reps',e.target.value)}
+                              style={{textAlign:"center",height:30,padding:"0 3px",
+                                fontSize:14,fontWeight:700,borderRadius:4,
+                                border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#ddddf0"}} />
                           </div>
+                        ))}
+                        {/* RPE + 메모 */}
+                        <div style={{display:"flex",gap:5,marginTop:4,alignItems:"center"}}>
+                          <Mo c="#64748b" s={8}>RPE</Mo>
+                          <input type="number" placeholder="—" min="1" max="10"
+                            value={m2.rpe??""}
+                            onChange={e=>updateM2('rpe',e.target.value)}
+                            style={{width:38,textAlign:"center",height:26,padding:"0 3px",
+                              fontSize:12,fontWeight:700,borderRadius:4,
+                              border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
+                          <input placeholder="메모" value={m2.note??""}
+                            onChange={e=>updateM2('note',e.target.value)}
+                            style={{flex:1,height:26,padding:"0 6px",fontSize:10,borderRadius:4,
+                              border:"1px solid rgba(162,155,254,.12)",background:"#0c1523",color:"#ddddf0"}} />
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })()}

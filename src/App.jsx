@@ -955,6 +955,20 @@ export default function App() {
     } catch {}
   }
 
+  async function handleSaveSession2(payload2) {
+    // 2:1 수업 회원2 독립 저장 — member.id 대신 payload2.memberId 사용
+    try {
+      const m2 = members.find(m => m.id === payload2.memberId);
+      if (!m2) { showToast("회원2를 찾을 수 없습니다","err"); return; }
+      const m2Sessions = await getSessions(m2.id);
+      const m2SessionNo = m2Sessions.length>0 ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0)+1 : 1;
+      const now = new Date().toISOString();
+      await addSession(m2.id, { ...payload2, sessionNo: m2SessionNo, createdAt: now, updatedAt: now });
+      const newSess2 = await getSessions(m2.id);
+      setSessionsMap(prev => ({...prev, [m2.id]: newSess2}));
+      showToast(`${m2.name} 기록 저장 완료 ✓`);
+    } catch(e) { showToast("회원2 저장 실패: "+e.message, "err"); }
+  }
   async function handleSaveSession(d) {
     console.log("[TEO GYM] handleSaveSession — memberId:", member?.id, "data:", d?.sessionNo);
     setLoading(true);
@@ -1111,7 +1125,8 @@ export default function App() {
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={member} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} />}
-        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} />}
+        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
+
         {screen==="history"    && <HistoryScreen sessions={sessions} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
@@ -3190,10 +3205,17 @@ function removeDraft(key) {
   try { localStorage.removeItem(key); } catch {}
 }
 
-function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData }) {
+function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
+  allMembers=[], onSave2=null }) {
   const isCorr = false;
   const isEdit = !!(editData?.id);
   const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
+
+  // ── 수업 형태 & 2:1 멤버 ────────────────────────────────────────────
+  const [sessionType, setSessionType] = useState(editData?.sessionType || "1:1");
+  const [member2Id,   setMember2Id]   = useState(editData?.linkedMemberId || "");
+  const [showM2Picker, setShowM2Picker] = useState(false);
+  const member2 = allMembers.find(m => m.id === member2Id) || null;
 
   // ── 임시저장 state ────────────────────────────────────────────────────
   const draftType = isOwner(member) ? "selfwork" : "lesson";
@@ -3227,6 +3249,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
+  const [trainerComment2, setTrainerComment2] = useState(editData?.trainerComment2 || "");
   // 대표님 전용 내부 메모 (회원 카드에 절대 미노출)
   const [trainerOnlyNote, setTrainerOnlyNote] = useState(editData?.trainerOnlyNote || "");
   // 유산소 기록
@@ -3721,49 +3744,70 @@ function updateEx(ei, key, val) {
       };
     });
 
-    const payload = {
-      memberName:member.name, memberId:member.id,
-      trainerName, gymName, date, sessionNo:Number(sessionNo),
-      programType:member.programType||"일반 PT",
+    // 공통 페이로드 빌더
+    const buildPayload = ({ targetMember, comment, exList, isM2 = false }) => ({
+      memberName: targetMember.name, memberId: targetMember.id,
+      trainerName, gymName, date, sessionNo: Number(sessionNo),
+      programType: targetMember.programType || "일반 PT",
       type: selectedTypes.length ? selectedTypes.join(" · ") : "기타",
       selectedTypes: selectedTypes.length ? selectedTypes : ["기타"],
       intensity, condition,
-      exercises: cleanExercises,
-      stretchingNotes:stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
+      exercises: exList,
+      stretchingNotes: stretchNotes, nextPlan,
+      trainerComment: comment, trainerOnlyNote,
+      sessionType,
+      linkedMemberId: isM2 ? member.id : (member2 ? member2.id : null),
       cardio: (cardioType || cardioMinutes) ? (() => {
-        // 자동 계산 칼로리 (직접 입력값 없을 때)
         const MET_MAP = {"트레드밀":7,"싸이클":6,"천국의 계단":9,"일립티컬":6.5,"로잉머신":7,"야외 걷기":3.5,"야외 러닝":9,"기타":5};
         const met = MET_MAP[cardioType] || 5;
-        const bw  = parseFloat(sessions?.slice(-1)[0]?.bodyWeight || member?.bodyWeight || 70);
-        const autoKcal = (cardioType && cardioMinutes)
-          ? Math.round(met * bw * (parseFloat(cardioMinutes)/60))
-          : null;
-        return {
-          type:      cardioType     || null,
-          minutes:   parseInt(cardioMinutes)  || null,
-          calories:  parseInt(cardioCalories) || autoKcal || null,
-          intensity: cardioIntensity|| null,
-        };
+        const bw  = parseFloat(sessions?.slice(-1)[0]?.bodyWeight || targetMember?.bodyWeight || 70);
+        const autoKcal = (cardioType && cardioMinutes) ? Math.round(met * bw * (parseFloat(cardioMinutes)/60)) : null;
+        return { type:cardioType||null, minutes:parseInt(cardioMinutes)||null, calories:parseInt(cardioCalories)||autoKcal||null, intensity:cardioIntensity||null };
       })() : null,
       workoutStartTime, workoutEndTime,
-      referenceVideo:refVideo, bodyWeight, calories, dietNote,
-      romData, painData, painRecord, totalVolume:totalVol,
-    };
+      referenceVideo: refVideo, bodyWeight: isM2 ? "" : bodyWeight, calories, dietNote,
+      romData, painData, painRecord, totalVolume: exList.reduce((s,e)=>s+exVol(e), 0),
+    });
+
+    // 회원1 exercises: m2 필드 제거 후 저장
+    const exM1 = cleanExercises.map(e => {
+      const { m2, ...rest } = e;
+      return rest;
+    });
+
+    const payload = buildPayload({ targetMember: member, comment: trainerComment, exList: exM1 });
+
     console.log("[저장 직전] exercises:", JSON.stringify(cleanExercises.map(e=>({name:e.name,sets:e.sets?.length}))));
-    // 기능 운동 학습 데이터 저장 (localStorage)
     cleanExercises.forEach(ex => {
       if (isFuncEx(ex) && ex.name && ex.name.trim()) {
-        recordFuncLearn(ex.name, {
-          category:   ex.funcCategory  || null,
-          bodyParts:  ex.funcBodyPart  || [],
-          tool:       ex.funcTool      || null,
-          purpose:    ex.movementPurpose || null,
-        });
+        recordFuncLearn(ex.name, { category:ex.funcCategory||null, bodyParts:ex.funcBodyPart||[], tool:ex.funcTool||null, purpose:ex.movementPurpose||null });
       }
     });
-    // 정식 저장 완료 → 임시저장 삭제
     removeDraft(draftKey);
     setDraftStatus("");
+
+    // 2:1 수업: 회원2에게도 독립 저장
+    if (sessionType === "2:1" && member2 && onSave2) {
+      const exM2 = cleanExercises.map(e => {
+        const { m2, ...rest } = e;
+        // 회원2 중량이 있으면 sets에 반영
+        if (m2?.weight !== undefined || m2?.rpe !== undefined) {
+          return {
+            ...rest,
+            sets: (rest.sets || []).map(s => ({
+              ...s,
+              weight: m2.weight !== undefined ? m2.weight : s.weight,
+              rpe:    m2.rpe    !== undefined ? m2.rpe    : s.rpe,
+            })),
+            feedback: m2.note || rest.feedback,
+          };
+        }
+        return rest;
+      });
+      const payload2 = buildPayload({ targetMember: member2, comment: trainerComment2, exList: exM2, isM2: true });
+      onSave2(payload2);
+    }
+
     onSave(payload);
   }
 
@@ -3843,6 +3887,65 @@ function updateEx(ei, key, val) {
       {draftStatus && !isEdit && (
         <div style={{textAlign:"right",marginTop:-6,marginBottom:6,paddingRight:4}}>
           <Mo c="#3a4a5a" s={8}>{draftStatus}</Mo>
+        </div>
+      )}
+
+      {/* ── 수업 형태 선택 (1:1 / 2:1 / 그룹PT) ─────────────────────── */}
+      {!isEdit && (
+        <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+          <Mo c="#64748b" s={9} style={{fontWeight:700,flexShrink:0}}>수업 형태:</Mo>
+          <div style={{display:"flex",gap:4}}>
+            {["1:1","2:1","그룹PT"].map(t=>(
+              <button key={t} onClick={()=>{setSessionType(t);if(t!=="2:1"){setMember2Id("");setShowM2Picker(false);}}}
+                style={{padding:"4px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
+                  fontSize:10,fontWeight:sessionType===t?800:400,
+                  borderColor:sessionType===t?"#a29bfe":"rgba(255,255,255,.1)",
+                  background:sessionType===t?"rgba(162,155,254,.15)":"transparent",
+                  color:sessionType===t?"#a29bfe":"#54546a"}}>
+                {t}
+              </button>
+            ))}
+          </div>
+          {sessionType==="2:1" && (
+            <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:4}}>
+              <Mo c="#64748b" s={9}>+</Mo>
+              {member2 ? (
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 8px",borderRadius:10,
+                    background:"rgba(162,155,254,.12)",color:"#a29bfe",fontWeight:700}}>
+                    {member2.name}
+                  </span>
+                  <button onClick={()=>{setMember2Id("");setShowM2Picker(false);}}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"#3a4a5a",fontSize:11}}>×</button>
+                </div>
+              ) : (
+                <button onClick={()=>setShowM2Picker(p=>!p)}
+                  style={{padding:"4px 10px",borderRadius:12,border:"1px dashed rgba(162,155,254,.4)",
+                    cursor:"pointer",fontSize:9,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                  회원2 선택 ▼
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 회원2 선택 드롭다운 */}
+      {sessionType==="2:1" && showM2Picker && !member2 && (
+        <div style={{marginBottom:10,background:"#111827",borderRadius:8,
+          border:"1px solid rgba(162,155,254,.2)",padding:"6px",maxHeight:180,overflowY:"auto"}}>
+          <Mo c="#64748b" s={8} style={{display:"block",padding:"2px 4px",marginBottom:4}}>회원 선택</Mo>
+          {allMembers.filter(m=>m.id!==member.id).map(m=>(
+            <button key={m.id} onClick={()=>{setMember2Id(m.id);setShowM2Picker(false);}}
+              style={{display:"block",width:"100%",textAlign:"left",padding:"6px 8px",borderRadius:6,
+                border:"none",cursor:"pointer",background:"transparent",color:"#ddddf0",fontSize:11,
+                marginBottom:2}}>
+              {m.name}
+            </button>
+          ))}
+          {allMembers.filter(m=>m.id!==member.id).length===0 && (
+            <Mo c="#3a4a5a" s={9} style={{padding:"4px"}}>다른 회원이 없습니다.</Mo>
+          )}
         </div>
       )}
 
@@ -4639,8 +4742,50 @@ function updateEx(ei, key, val) {
                   );
                 })}
                 <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed rgba(255,255,255,0.08)",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
+
+                {/* ── 2:1 수업: 회원2 중량 입력 ── */}
+                {sessionType==="2:1" && member2 && (
+                  <div style={{marginTop:6,padding:"7px 10px",borderRadius:7,
+                    background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.18)"}}>
+                    <Mo c="#a29bfe" s={8} style={{display:"block",fontWeight:700,marginBottom:5}}>
+                      ⚡ {member2.name} 개별 입력
+                    </Mo>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      <div>
+                        <Mo c="#64748b" s={7} style={{display:"block",marginBottom:2}}>중량 (kg)</Mo>
+                        <input type="number" placeholder="0"
+                          value={ex.m2?.weight ?? ""}
+                          onChange={e => setExercises(prev => prev.map((x,i)=>i===ei
+                            ? {...x, m2:{...(x.m2||{}), weight:e.target.value}}:x))}
+                          style={{width:64,textAlign:"center",height:32,padding:"0 4px",
+                            fontSize:14,fontWeight:700,borderRadius:5,
+                            border:"1px solid rgba(162,155,254,.3)",background:"#0c1523",color:"#a29bfe"}} />
+                      </div>
+                      <div>
+                        <Mo c="#64748b" s={7} style={{display:"block",marginBottom:2}}>RPE</Mo>
+                        <input type="number" placeholder="—" min="1" max="10"
+                          value={ex.m2?.rpe ?? ""}
+                          onChange={e => setExercises(prev => prev.map((x,i)=>i===ei
+                            ? {...x, m2:{...(x.m2||{}), rpe:e.target.value}}:x))}
+                          style={{width:48,textAlign:"center",height:32,padding:"0 4px",
+                            fontSize:14,fontWeight:700,borderRadius:5,
+                            border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
+                      </div>
+                      <div style={{flex:1,minWidth:80}}>
+                        <Mo c="#64748b" s={7} style={{display:"block",marginBottom:2}}>메모</Mo>
+                        <input placeholder="특이사항"
+                          value={ex.m2?.note ?? ""}
+                          onChange={e => setExercises(prev => prev.map((x,i)=>i===ei
+                            ? {...x, m2:{...(x.m2||{}), note:e.target.value}}:x))}
+                          style={{width:"100%",boxSizing:"border-box",height:32,padding:"0 7px",
+                            fontSize:11,borderRadius:5,
+                            border:"1px solid rgba(162,155,254,.15)",background:"#0c1523",color:"#ddddf0"}} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {(() => {
-                  const exType3 = getExerciseType(ex.name);
                   const latestRec3 = bodyData?.records?.length > 0
                     ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
                     : null;
@@ -4871,7 +5016,21 @@ function updateEx(ei, key, val) {
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
           <TextArea label="스트레칭 / 마무리" value={stretchNotes}   onChange={setStretchNotes}   placeholder="마무리 스트레칭" />
           <TextArea label="다음 수업 계획"    value={nextPlan}        onChange={setNextPlan}        placeholder="다음 수업 집중 포인트" />
-          <TextArea label="트레이너 코멘트"   value={trainerComment}  onChange={setTrainerComment}  placeholder="총평 및 응원 메시지" />
+          <TextArea label={sessionType==="2:1" && member2 ? `트레이너 코멘트 — ${member.name}` : "트레이너 코멘트"}
+            value={trainerComment} onChange={setTrainerComment} placeholder="총평 및 응원 메시지" />
+          {sessionType==="2:1" && member2 && (
+            <div style={{padding:"8px 10px",borderRadius:7,
+              background:"rgba(162,155,254,.05)",border:"1px solid rgba(162,155,254,.18)"}}>
+              <Mo c="#a29bfe" s={9} style={{display:"block",fontWeight:700,marginBottom:5}}>
+                💬 {member2.name} 개별 피드백
+              </Mo>
+              <textarea value={trainerComment2} onChange={e=>setTrainerComment2(e.target.value)}
+                placeholder={`${member2.name}에게 전달할 총평 및 응원 메시지`}
+                style={{width:"100%",boxSizing:"border-box",minHeight:64,padding:"8px 10px",
+                  borderRadius:6,fontSize:11,lineHeight:1.6,resize:"vertical",
+                  border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#ddddf0"}} />
+            </div>
+          )}
           <Field    label="참고 영상 (선택)"  value={refVideo}        onChange={setRefVideo}        placeholder="https://youtube.com/..." />
         </div>
       </Card>

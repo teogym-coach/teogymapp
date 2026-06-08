@@ -4786,6 +4786,7 @@ function updateEx(ei, key, val) {
                 )}
 
                 {(() => {
+                  const exType3 = getExerciseType(ex.name);
                   const latestRec3 = bodyData?.records?.length > 0
                     ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
                     : null;

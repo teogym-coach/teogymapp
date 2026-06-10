@@ -3236,7 +3236,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       // 기존 저장 기록 열기: 저장된 내용 그대로
       return editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
     }
-    // 새 기록: 기능 카드 2개로 시작
+    // 대표님 운동 기록: 빈 운동 종목 1개로 시작 (기능 운동 기본 생성 안 함)
+    if (isOwner(member)) {
+      return [mkEx()];
+    }
+    // 회원 수업 기록: 기능 카드 2개로 시작
     const mkFuncEx = () => ({
       ...mkEx(),
       equipment: "기능",
@@ -5446,7 +5450,7 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   const [reportSession, setReportSession] = useState(null);
   const [cardMode, setCardMode] = useState("simple");
-  const [sortMode, setSortMode] = useState("recent");
+  const [sortMode, setSortMode] = useState("no"); // 기본: 회차별 내림차순
   const [filterPart, setFilterPart] = useState(null);
 
   // 정렬/필터 — sessions 안전 처리
@@ -5455,8 +5459,12 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
       let list = [...sessions];
       if (sortMode === "recent") {
         list.sort((a,b)=>{
-          const ta = (a&&(a.updatedAt||a.createdAt||a.date)) || "";
-          const tb = (b&&(b.updatedAt||b.createdAt||b.date)) || "";
+          // updatedAt 우선, 없으면 createdAt, 둘 다 없으면 맨 뒤
+          const ta = a?.updatedAt || a?.createdAt || "";
+          const tb = b?.updatedAt || b?.createdAt || "";
+          if (!ta && !tb) return 0;
+          if (!ta) return 1;
+          if (!tb) return -1;
           return String(tb).localeCompare(String(ta));
         });
       } else if (sortMode === "part") {

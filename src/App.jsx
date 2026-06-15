@@ -956,14 +956,30 @@ export default function App() {
   }
 
   async function handleSaveSession2(payload2) {
-    // 2:1 수업 회원2 독립 저장 — member.id 대신 payload2.memberId 사용
+    // 2:1 수업 회원2 독립 저장 — 반드시 payload2.memberId 기준으로만 저장
+    if (!payload2?.memberId) { console.warn("[TEO GYM] handleSaveSession2: memberId 없음"); return; }
     try {
       const m2 = members.find(m => m.id === payload2.memberId);
       if (!m2) { showToast("회원2를 찾을 수 없습니다","err"); return; }
+
+      // 회원2의 최신 회차 계산 (회원1 세션과 독립)
       const m2Sessions = await getSessions(m2.id);
-      const m2SessionNo = m2Sessions.length>0 ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0)+1 : 1;
+      const m2SessionNo = m2Sessions.length > 0
+        ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0) + 1
+        : 1;
+
       const now = new Date().toISOString();
-      await addSession(m2.id, { ...payload2, sessionNo: m2SessionNo, createdAt: now, updatedAt: now });
+      // payload2에서 회원1 관련 필드를 완전히 덮어씀
+      const safePayload2 = {
+        ...payload2,
+        memberId:    m2.id,       // 반드시 회원2 ID
+        memberName:  m2.name,     // 반드시 회원2 이름
+        sessionNo:   m2SessionNo, // 회원2 독립 회차
+        createdAt:   now,
+        updatedAt:   now,
+        // exercises는 payload2에서 이미 회원2 전용으로 생성됨
+      };
+      await addSession(m2.id, safePayload2);  // 반드시 m2.id 경로에 저장
       const newSess2 = await getSessions(m2.id);
       setSessionsMap(prev => ({...prev, [m2.id]: newSess2}));
       showToast(`${m2.name} 기록 저장 완료 ✓`);
@@ -3773,9 +3789,9 @@ function updateEx(ei, key, val) {
       romData, painData, painRecord, totalVolume: exList.reduce((s,e)=>s+exVol(e), 0),
     });
 
-    // 회원1 exercises: m2 필드 제거 후 저장
+    // 회원1 exercises: m2 필드 반드시 제거 (회원2 데이터 혼입 방지)
     const exM1 = cleanExercises.map(e => {
-      const { m2, ...rest } = e;
+      const { m2, _histIdx, _loaded, ...rest } = e;
       return rest;
     });
 
@@ -3790,36 +3806,34 @@ function updateEx(ei, key, val) {
     removeDraft(draftKey);
     setDraftStatus("");
 
-    // 2:1 수업: 회원2에게도 독립 저장
+    // 2:1 수업: 회원2 먼저 독립 저장 (회원1 저장보다 먼저 실행)
     if (sessionType === "2:1" && member2 && onSave2) {
-    // 2:1 수업: 회원2 exercises 생성 — m2.sets 개별 데이터 우선 사용
-    const exM2 = cleanExercises.map(e => {
-      const { m2, ...rest } = e;
-      if (!m2) return rest;
-      const m2SetsRaw = m2.sets || [];
-      // 회원1 sets를 기반으로 회원2 값으로 덮어씀 (입력된 값만 교체)
-      const merged = (rest.sets||[]).map((s, si) => ({
-        ...s,
-        weight:      m2SetsRaw[si]?.weight      !== undefined && m2SetsRaw[si]?.weight      !== ""
-                       ? m2SetsRaw[si].weight      : s.weight,
-        reps:        m2SetsRaw[si]?.reps        !== undefined && m2SetsRaw[si]?.reps        !== ""
-                       ? m2SetsRaw[si].reps        : s.reps,
-        durationSec: m2SetsRaw[si]?.durationSec !== undefined && m2SetsRaw[si]?.durationSec !== ""
-                       ? m2SetsRaw[si].durationSec : s.durationSec,
-        volume: (() => {
-          const w = parseFloat(m2SetsRaw[si]?.weight ?? s.weight) || 0;
-          const r = parseInt(m2SetsRaw[si]?.reps   ?? s.reps)   || 0;
-          return Math.round(w * r * 10) / 10;
-        })(),
-        rpe: m2.rpe || s.rpe,
-      }));
-      return { ...rest, sets: merged, feedback: m2.note || rest.feedback };
-    });
+      // 회원2 exercises 생성 — m2.sets 개별 데이터 우선 사용
+      const exM2 = cleanExercises.map(e => {
+        const { m2, ...rest } = e;
+        if (!m2) return {...rest};  // m2 필드 반드시 제거
+        const m2SetsRaw = m2.sets || [];
+        const merged = (rest.sets||[]).map((s, si) => ({
+          ...s,
+          weight:      (m2SetsRaw[si]?.weight      !== undefined && m2SetsRaw[si]?.weight      !== "") ? m2SetsRaw[si].weight      : s.weight,
+          reps:        (m2SetsRaw[si]?.reps        !== undefined && m2SetsRaw[si]?.reps        !== "") ? m2SetsRaw[si].reps        : s.reps,
+          durationSec: (m2SetsRaw[si]?.durationSec !== undefined && m2SetsRaw[si]?.durationSec !== "") ? m2SetsRaw[si].durationSec : s.durationSec,
+          volume: (() => {
+            const w = parseFloat(m2SetsRaw[si]?.weight ?? s.weight) || 0;
+            const r = parseInt(m2SetsRaw[si]?.reps   ?? s.reps)   || 0;
+            return Math.round(w * r * 10) / 10;
+          })(),
+          rpe: m2.rpe || s.rpe,
+        }));
+        return { ...rest, sets: merged, feedback: m2.note || rest.feedback };
+      });
+      // 회원2 전용 payload — 회원2 memberId, 회원2 이름, 회원2 exercises만 포함
       const payload2 = buildPayload({ targetMember: member2, comment: trainerComment2, exList: exM2, isM2: true });
-      onSave2(payload2);
+      onSave2(payload2);  // handleSaveSession2(payload2) → addSession(m2.id, payload2)
     }
 
-    onSave(payload);
+    // 회원1 저장 (2:1이든 1:1이든 항상 회원1은 onSave로 저장)
+    onSave(payload);;
   }
 
   function handleSaveTop() { handleSave(); }

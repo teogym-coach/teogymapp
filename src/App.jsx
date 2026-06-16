@@ -15,7 +15,7 @@ import {
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments,
-  migrateAddTrainerUid,
+  migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -723,7 +723,7 @@ input,select,textarea{
 // ════════════════════════════════════════════
 // LOGIN SCREEN
 // ════════════════════════════════════════════
-function LoginScreen({ onLogin, loading, error }) {
+function LoginScreen({ onLogin, loading, error, memberMode }) {
   const [email, setEmail] = useState("");
   const [pw,    setPw]    = useState("");
   return (
@@ -733,16 +733,16 @@ function LoginScreen({ onLogin, loading, error }) {
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:52,marginBottom:10}}>🏋️</div>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:"#fff",letterSpacing:"-1px"}}>TEO GYM</div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginTop:4}}>트레이너 로그인</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginTop:4}}>{memberMode ? "회원 전용 운동 관리 앱" : "트레이너 로그인"}</div>
         </div>
         <Card>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="trainer@example.com" />
+            <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="email@example.com" />
             <Field label="비밀번호" type="password" value={pw} onChange={setPw} placeholder="••••••••" />
             {error && <div style={{color:"#ff6b6b",fontFamily:"'DM Mono',monospace",fontSize:11,textAlign:"center"}}>{error}</div>}
             <div style={{marginTop:4}}>
               <Btn full onClick={() => onLogin(email, pw)} disabled={loading || !email || !pw}>
-                {loading ? "로그인 중..." : "로그인 →"}
+                {loading ? "로그인 중..." : (memberMode ? "회원 로그인" : "로그인 →")}
               </Btn>
             </div>
           </div>
@@ -754,6 +754,27 @@ function LoginScreen({ onLogin, loading, error }) {
     </div>
   );
 }
+
+
+const MEMBER_COLORS = { background:"#FFFFFF", pageSoft:"#F7F8FA", card:"#FFFFFF", cardSoft:"#F5F6F8", textPrimary:"#20242A", textSecondary:"#8B949E", border:"#E8ECF1", accentBlue:"#3478F6", accentOrange:"#FF7A00", positiveGreen:"#22C55E" };
+function MemberLanding({ onLogin, loading, error }) {
+  const [email,setEmail]=useState(""); const [pw,setPw]=useState("");
+  return <div style={{minHeight:"100vh",background:"#000",display:"flex",alignItems:"center",justifyContent:"center",padding:22}}><style>{CSS}</style><div style={{width:"100%",maxWidth:390,minHeight:"92vh",borderRadius:34,background:"radial-gradient(circle at 50% 20%,#182033,#000 58%)",padding:24,display:"flex",flexDirection:"column",justifyContent:"space-between",boxShadow:"0 24px 80px rgba(0,0,0,.55)",animation:"fi .8s ease"}}><div/><div style={{textAlign:"center",animation:"fi 1.1s ease"}}><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:34,color:"#fff",letterSpacing:".08em"}}>TEO GYM</div><div style={{marginTop:18,color:"#fff",fontSize:18,fontWeight:800}}>기록이 변화를 만듭니다</div><div style={{marginTop:7,color:"#9CA3AF",fontSize:13}}>회원 전용 운동 관리 앱</div></div><div style={{display:"flex",flexDirection:"column",gap:11}}><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="이메일" type="email"/><input value={pw} onChange={e=>setPw(e.target.value)} placeholder="비밀번호" type="password"/>{error&&<div style={{color:"#ff6b6b",fontSize:12,textAlign:"center"}}>{error}</div>}<button onClick={()=>onLogin(email,pw)} disabled={loading||!email||!pw} style={{height:56,borderRadius:18,border:0,background:"#fff",color:"#111",fontWeight:900,fontSize:16}}>{loading?"로그인 중...":"로그인"}</button></div></div></div>;
+}
+function MemberApp({ onLogout }) {
+  const C=MEMBER_COLORS; const today=new Date().toISOString().slice(0,10); const [tab,setTab]=useState("home"); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [loading,setLoading]=useState(true); const [form,setForm]=useState({date:today,weight:"",condition:"보통",soreness:"없음",rpe:5}); const [msg,setMsg]=useState("");
+  const load=useCallback(async()=>{setLoading(true); const p=await getMemberAppProfile(); setProfile(p); if(p){ const [ss,bd,ci,ms]=await Promise.all([getPublishedSessions(p.id),getBodyCheck(p.id),getMemberCheckins(p.id),getMemberMessages(p.id)]); setSessions(ss); setBody(bd); setCheckins(ci); setMessages(ms); const t=ci.find(x=>x.id===today)||ci.find(x=>x.date===today); if(t) setForm(f=>({...f,...t})); } setLoading(false);},[today]); useEffect(()=>{load();},[load]);
+  if(loading) return <div style={{minHeight:"100vh",background:C.pageSoft,display:"grid",placeItems:"center"}}><style>{CSS}</style><Spin/></div>;
+  if(!profile) return <div style={{minHeight:"100vh",background:C.pageSoft,padding:24,color:C.textPrimary}}><style>{CSS}</style><h2>회원 정보를 찾을 수 없습니다</h2><p style={{color:C.textSecondary,margin:"12px 0"}}>관리자에게 회원 이메일 연결을 요청해주세요.</p><button onClick={onLogout}>로그아웃</button></div>;
+  const weights=getBodyWeightRecords(body); const curW=weights.at(-1)?.weight || checkins.find(c=>c.weight)?.weight || "-"; const startW=weights[0]?.weight || curW; const totalReg=parseInt((profile.totalSessions||"").replace(/[^0-9]/g,""))||0; const remaining=totalReg?Math.max(0,totalReg-sessions.length):"-"; const volume=sessions.reduce((a,s)=>a+(s.totalVolume||0),0); const latest=sessions.at(-1);
+  const saveCheck=async()=>{await saveMemberCheckin(profile.id, form.date, form); await load(); alert("오늘 체크 저장 완료");}; const send=async(text=msg)=>{if(!text.trim())return; await addMemberMessage(profile.id,{message:text.trim()}); setMsg(""); await load(); alert("대표에게 전달했습니다");};
+  const card={background:C.card,border:`1px solid ${C.border}`,borderRadius:22,padding:18,boxShadow:"0 8px 24px rgba(32,36,42,.05)"};
+  return <div style={{minHeight:"100vh",background:C.pageSoft,color:C.textPrimary,paddingBottom:88}}><style>{CSS}</style><div style={{maxWidth:430,margin:"0 auto",padding:18}}><header style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><div><b style={{fontSize:22}}>안녕하세요, {profile.name}님</b><div style={{color:C.textSecondary,fontSize:13}}>오늘도 관리 중입니다</div></div><button onClick={onLogout} style={{border:0,background:C.cardSoft,borderRadius:12,padding:"9px 11px",color:C.textSecondary}}>로그아웃</button></header>{tab==="home"&&<div style={{display:"grid",gap:12}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["남은 PT",remaining],["최근 체중",curW==="-"?"-":curW+"kg"],["누적 운동",sessions.length+"회"],["누적 볼륨",Math.round(volume).toLocaleString()+"kg"]].map(([l,v])=><div style={card} key={l}><div style={{color:C.textSecondary,fontSize:12}}>{l}</div><b style={{fontSize:24}}>{v}</b></div>)}</div><button onClick={()=>setTab("record")} style={{height:58,border:0,borderRadius:18,background:C.accentBlue,color:"#fff",fontWeight:900,fontSize:16}}>오늘 체크</button><div style={card}><b>다음 수업 정보</b><p style={{color:C.textSecondary,marginTop:8}}>대표가 수업 준비 내용을 확인하고 있어요.</p></div><div style={card}><b>최근 공개된 수업일지</b>{latest?<SessionMini s={latest}/>:<p style={{color:C.textSecondary,marginTop:8}}>아직 공개된 수업일지가 없습니다.</p>}</div><LinksCard/></div>}{tab==="record"&&<div style={{display:"grid",gap:12}}><div style={card}><b>오늘 체크 기록</b><Field label="체중" value={form.weight||""} onChange={v=>setForm({...form,weight:v})} type="number" placeholder="kg"/><SelectLine label="컨디션" value={form.condition} opts={["좋음","보통","피곤","매우 피곤"]} onChange={v=>setForm({...form,condition:v})}/><SelectLine label="근육통" value={form.soreness} opts={["없음","약간","심함"]} onChange={v=>setForm({...form,soreness:v})}/><Field label="RPE (0~10)" value={form.rpe} onChange={v=>setForm({...form,rpe:v})} type="number"/><button onClick={saveCheck} style={{width:"100%",height:48,border:0,borderRadius:14,background:C.accentBlue,color:"#fff",fontWeight:900}}>저장</button></div><div style={card}><b>공개 수업일지</b>{sessions.slice().reverse().map(s=><SessionMini key={s.id} s={s}/>)}</div></div>}{tab==="change"&&<div style={{display:"grid",gap:12}}><div style={card}><b>내 변화</b><p>시작 체중 {startW}kg → 현재 체중 {curW}kg</p><p>변화량 {curW!=="-"&&startW!=="-"?(curW-startW).toFixed(1):"-"}kg</p><p>목표 진행률 {totalReg?Math.round((sessions.length/totalReg)*100):0}%</p></div><div style={card}><b>변화 타임라인</b>{["첫 상담","체중 변화","운동 기록 증가","통증 감소","목표 달성"].map(x=><p key={x} style={{marginTop:10}}>● {x}</p>)}</div></div>}{tab==="talk"&&<div style={{display:"grid",gap:12}}><div style={card}><b>대표와 소통</b>{["오늘 허리가 불편해요","컨디션이 좋지 않아요","식단이 어려웠어요","운동 후 근육통이 심해요"].map(x=><button key={x} onClick={()=>send(x)} style={{display:"block",width:"100%",marginTop:9,padding:13,borderRadius:14,border:`1px solid ${C.border}`,background:C.cardSoft,textAlign:"left"}}>{x}</button>)}<textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="대표에게 전달할 메모" style={{marginTop:10,background:C.cardSoft,color:C.textPrimary,border:`1px solid ${C.border}`}}/><button onClick={()=>send()} style={{width:"100%",height:46,border:0,borderRadius:14,background:C.accentOrange,color:"#fff",fontWeight:900}}>보내기</button></div><LinksCard review/></div>}</div><nav style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"center"}}><div style={{maxWidth:430,width:"100%",display:"grid",gridTemplateColumns:"repeat(4,1fr)"}}>{[["home","홈"],["record","기록"],["change","변화"],["talk","소통"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{height:64,border:0,background:"#fff",color:tab===k?C.accentBlue:C.textSecondary,fontWeight:900}}>{l}</button>)}</div></nav></div>;
+}
+function SelectLine({label,value,opts,onChange}){return <div style={{margin:"10px 0"}}><label>{label}</label><select value={value} onChange={e=>onChange(e.target.value)}>{opts.map(o=><option key={o}>{o}</option>)}</select></div>}
+function SessionMini({s}){return <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #E8ECF1"}}><b>{s.date} · {s.sessionNo||""}회차</b>{(s.exercises||[]).map((e,i)=><p key={i} style={{fontSize:13,marginTop:6}}>{e.name||e.movementPurpose} {(e.sets||[]).map(x=>`${x.weight||""}kg ${x.reps||""}회`).join(" · ")}</p>)}{s.trainerComment&&<p style={{color:"#3478F6",marginTop:8}}>대표 코멘트: {s.trainerComment}</p>}</div>}
+function LinksCard({review}){return <div style={{background:"#fff",border:"1px solid #E8ECF1",borderRadius:22,padding:18}}><b>{review?"지금까지의 변화를 후기로 남겨주세요":"테오짐 콘텐츠"}</b><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>{["테오짐 블로그","인스타그램","네이버 플레이스","유튜브"].map(x=><button key={x} style={{border:0,borderRadius:13,background:"#F5F6F8",padding:12}}>{x}</button>)}</div></div>}
+function AdminMemberAppPanel({memberId}){const [ci,setCi]=useState([]),[ms,setMs]=useState([]); useEffect(()=>{if(memberId)Promise.all([getMemberCheckins(memberId,5),getMemberMessages(memberId,5)]).then(([a,b])=>{setCi(a);setMs(b);}).catch(()=>{});},[memberId]); return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"} · RPE {c.rpe??"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>}
 
 // ════════════════════════════════════════════
 // ROOT APP
@@ -771,6 +792,7 @@ export default function App() {
   const [loading,  setLoading]  = useState(false);
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
+  const memberMode = window.location.pathname.startsWith("/member") || new URLSearchParams(window.location.search).get("app") === "member";
 
   function showToast(msg, type) {
     setToast({msg, type: type||"ok"});
@@ -1140,7 +1162,9 @@ export default function App() {
   );
 
   // 로그인 전
-  if (!user) return <LoginScreen onLogin={handleLogin} loading={loading} error={loginErr} />;
+  if (!user) return memberMode ? <MemberLanding onLogin={handleLogin} loading={loading} error={loginErr} /> : <LoginScreen onLogin={handleLogin} loading={loading} error={loginErr} />;
+
+  if (memberMode) return <MemberApp onLogout={handleLogout} user={user} />;
 
   return (
     <div style={{minHeight:"100vh",background:"#0B1120"}}>
@@ -2958,6 +2982,7 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
           </div>
         )}
         {member.memo && <div style={{marginTop:6,padding:"7px 10px",background:"#0B1120",borderRadius:6,fontSize:11,color:"#54546a",borderLeft:"2px solid rgba(255,255,255,0.10)"}}>{member.memo}</div>}
+        <AdminMemberAppPanel memberId={member.id} />
       </div>
 
       {!loading && (() => {

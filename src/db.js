@@ -242,8 +242,9 @@ export async function getNutrition(memberId) {
     const nutSnap  = await getDocs(collection(db, "members", memberId, "nutrition"));
     const dates    = {};
     nutSnap.docs.forEach(d => { if (d.id !== "meta") dates[d.id] = d.data(); });
-    dbLog("getNutrition", `완료: dates=${Object.keys(dates).length}일`);
-    return { goal: meta.goal || "체중 감량", favFoods: meta.favFoods || [], dates };
+    const logs     = (meta.logs || []).map(l => ({ ...l }));
+    dbLog("getNutrition", `완료: dates=${Object.keys(dates).length}일 logs=${logs.length}개`);
+    return { goal: meta.goal || "체중 감량", favFoods: meta.favFoods || [], logs, dates };
   } catch(e) {
     console.error("[DB] getNutrition error:", e.message, `memberId=${memberId}`);
     return null;
@@ -259,6 +260,7 @@ export async function saveNutrition(memberId, data) {
     batch.set(metaRef, {
       goal:      data.goal      || "체중 감량",
       favFoods:  clean(data.favFoods) || [],
+      logs:      clean(data.logs) || [],
       updatedAt: serverTimestamp(),
     });
     const dates = data.dates || {};
@@ -272,7 +274,7 @@ export async function saveNutrition(memberId, data) {
       });
     });
     await batch.commit();
-    dbLog("saveNutrition", `완료: dates=${Object.keys(dates).length}일`);
+    dbLog("saveNutrition", `완료: dates=${Object.keys(dates).length}일 logs=${(data.logs || []).length}개`);
   } catch(e) {
     console.error("[DB] saveNutrition error:", e.message, `memberId=${memberId}`);
     throw new Error("영양 관리 저장 실패: " + e.message);

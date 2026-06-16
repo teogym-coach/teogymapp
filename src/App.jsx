@@ -68,6 +68,37 @@ function formatTypes(raw) {
   return arr.length ? arr.join(" · ") : "";
 }
 
+
+function toPositiveNumber(value) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// 체중 단일 원본: bodyData.records만 체중 표시/그래프/분석에 사용한다.
+function getBodyWeightRecords(bodyData) {
+  return (bodyData?.records || [])
+    .map(r => ({ ...r, weight: toPositiveNumber(r.weight) }))
+    .filter(r => r.date && r.weight)
+    .sort((a,b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function getLatestBodyWeight(bodyData, dateLimit = null) {
+  const records = getBodyWeightRecords(bodyData)
+    .filter(r => !dateLimit || String(r.date) <= String(dateLimit));
+  return records.length ? records[records.length - 1] : null;
+}
+
+function upsertBodyRecord(records = [], rec = {}) {
+  const date = rec.date;
+  if (!date) return records;
+  const next = [...records];
+  const idx = next.findIndex(r => r.date === date);
+  const merged = { ...(idx >= 0 ? next[idx] : { id: rec.id || "r" + Date.now(), date }), ...rec, updatedAt: new Date().toISOString() };
+  if (idx >= 0) next[idx] = merged;
+  else next.push(merged);
+  return next.sort((a,b) => String(b.date || "").localeCompare(String(a.date || "")));
+}
+
 function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightReps"}; }
 function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
 function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimPrimary:"",stimSecondary:"",stimNote:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
@@ -1144,7 +1175,7 @@ export default function App() {
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
 
-        {screen==="history"    && <HistoryScreen sessions={sessions} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="consultReport" && member && (
@@ -1158,7 +1189,7 @@ export default function App() {
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
-        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={(() => { const g=bodyData?.goal; if(!g||!g.currentWeight||!g.height||!g.age) return 0; const mult={'거의 안함':1.2,'가벼운 활동 (주 1-2회)':1.375,'보통 활동 (주 3-5회)':1.55,'활동적 (주 6-7회)':1.725,'매우 활동적':1.9}; const bmr=10*parseFloat(g.currentWeight)+6.25*parseFloat(g.height)-5*parseInt(g.age)+(g.gender==='여성'?-161:5); const tdee=Math.round(bmr*(mult[g.activityLevel]||1.375)); const days=g.targetDate?Math.max(1,Math.ceil((new Date(g.targetDate+'T00:00:00')-new Date())/86400000)):null; const loss=parseFloat(g.currentWeight)-parseFloat(g.targetWeight||0); const def=days&&loss>0?Math.round(loss*7700/days):0; return def>0?Math.max(1200,tdee-def):tdee; })()} />}
+        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={(() => { const g=bodyData?.goal; const currentWeight=getLatestBodyWeight(bodyData)?.weight || parseFloat(g?.currentWeight); if(!g||!currentWeight||!g.height||!g.age) return 0; const mult={'거의 안함':1.2,'가벼운 활동 (주 1-2회)':1.375,'보통 활동 (주 3-5회)':1.55,'활동적 (주 6-7회)':1.725,'매우 활동적':1.9}; const bmr=10*currentWeight+6.25*parseFloat(g.height)-5*parseInt(g.age)+(g.gender==='여성'?-161:5); const tdee=Math.round(bmr*(mult[g.activityLevel]||1.375)); const days=g.targetDate?Math.max(1,Math.ceil((new Date(g.targetDate+'T00:00:00')-new Date())/86400000)):null; const loss=currentWeight-parseFloat(g.targetWeight||0); const def=days&&loss>0?Math.round(loss*7700/days):0; return def>0?Math.max(1200,tdee-def):tdee; })()} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -2847,17 +2878,9 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
 
   const totalVol = sessions.reduce((s,ss) => s+(ss.totalVolume||0), 0);
   const last     = sessions.length > 0 ? sessions[sessions.length-1] : null;
-  // 체중 히스토리 통합 (records > inbody > sessions) — 그래프 + 통계 공통 소스
-  const _wMapHub = {};
-  (sessions||[]).filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0)
-    .forEach(s=>{if(!_wMapHub[s.date])_wMapHub[s.date]=parseFloat(s.bodyWeight);});
-  (bodyData?.inbody||[]).filter(r=>parseFloat(r.weight||r.bodyWeight)>0)
-    .forEach(r=>{_wMapHub[r.date]=parseFloat(r.weight||r.bodyWeight);});
-  (bodyData?.records||[]).filter(r=>parseFloat(r.weight)>0)
-    .forEach(r=>{_wMapHub[r.date]=parseFloat(r.weight);});
-  const wData = Object.entries(_wMapHub)
-    .map(([date,w])=>({name:date.slice(5),w,date}))
-    .sort((a,b)=>a.date.localeCompare(b.date));
+  // 체중 히스토리 단일화: bodyData.records만 그래프 + 통계 공통 소스로 사용
+  const wData = getBodyWeightRecords(bodyData)
+    .map(r => ({ name:String(r.date).slice(5), w:r.weight, date:r.date }));
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업; // 대표님 전용 텍스트 헬퍼
 
@@ -3727,13 +3750,8 @@ function updateEx(ei, key, val) {
         if (!isFunc && (key==="weight"||key==="reps")) {
           const w = key==="weight" ? val : row.weight;
           const r = key==="reps"   ? val : row.reps;
-          const latestBodyRec = bodyData?.records?.length > 0
-            ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
-            : null;
-          const mbw = bodyWeight
-            || latestBodyRec?.weight
-            || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "")
-            || "";
+          const latestBodyRec = getLatestBodyWeight(bodyData, sessionDate);
+          const mbw = bodyWeight || latestBodyRec?.weight || "";
           u.volume = calcVol(w, r, exType, mbw);
         }
         // 기능운동은 durationSec 필드도 허용, volume=0 유지
@@ -3781,7 +3799,7 @@ function updateEx(ei, key, val) {
       cardio: (cardioType || cardioMinutes) ? (() => {
         const MET_MAP = {"트레드밀":7,"싸이클":6,"천국의 계단":9,"일립티컬":6.5,"로잉머신":7,"야외 걷기":3.5,"야외 러닝":9,"기타":5};
         const met = MET_MAP[cardioType] || 5;
-        const bw  = parseFloat(sessions?.slice(-1)[0]?.bodyWeight || targetMember?.bodyWeight || 70);
+        const bw  = parseFloat(getLatestBodyWeight(bodyData, sessionDate)?.weight || targetMember?.bodyWeight || 70);
         const autoKcal = (cardioType && cardioMinutes) ? Math.round(met * bw * (parseFloat(cardioMinutes)/60)) : null;
         return { type:cardioType||null, minutes:parseInt(cardioMinutes)||null, calories:parseInt(cardioCalories)||autoKcal||null, intensity:cardioIntensity||null };
       })() : null,
@@ -3993,7 +4011,7 @@ function updateEx(ei, key, val) {
                   "로잉머신":7,"야외 걷기":3.5,"야외 러닝":9,"기타":5,
                 };
                 const met = MET_MAP[cardioType] || 5;
-                const bodyW = parseFloat(sessions?.slice(-1)[0]?.bodyWeight || member?.bodyWeight || 70);
+                const bodyW = parseFloat(getLatestBodyWeight(bodyData, sessionDate)?.weight || member?.bodyWeight || 70);
                 const auto = Math.round(met * bodyW * (parseFloat(cardioMinutes)/60));
                 return <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
                   color:"#fdba74",background:"rgba(249,115,22,.12)",borderRadius:4,padding:"1px 6px"}}>
@@ -4467,12 +4485,7 @@ function updateEx(ei, key, val) {
 
                 const isFunc  = rec.muscleTop === "기능" || ex.muscleTop === "기능";
                 const exType  = getExerciseType(rec.exName || ex.name);
-                const mbw     = bodyWeight
-                  || (bodyData?.records?.length > 0
-                    ? [...(bodyData.records)].sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0]?.weight
-                    : null)
-                  || (sessions.length > 0 ? sessions[sessions.length-1]?.bodyWeight : "")
-                  || "";
+                const mbw     = bodyWeight || getLatestBodyWeight(bodyData, sessionDate)?.weight || "";
 
                 // sets deep copy (Firestore 원본 참조 방지)
                 const recSets = rec.sets || rec.exerciseSets || [];
@@ -4743,10 +4756,8 @@ function updateEx(ei, key, val) {
                 })()}
                 {ex.sets.map((row, si) => {
                   const exTypeRow = getExerciseType(ex.name);
-                  const latestRec2 = bodyData?.records?.length > 0
-                    ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
-                    : null;
-                  const mbwRow = bodyWeight || latestRec2?.weight || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "") || "";
+                  const latestRec2 = getLatestBodyWeight(bodyData, sessionDate);
+                  const mbwRow = bodyWeight || latestRec2?.weight || "";
                   const realWRow  = exTypeRow==="assist" ? getRealWeight(row.weight, exTypeRow, mbwRow) : null;
                   return (
                     <div key={si} style={{marginBottom:3}}>
@@ -4905,10 +4916,8 @@ function updateEx(ei, key, val) {
 
                 {(() => {
                   const exType3 = getExerciseType(ex.name);
-                  const latestRec3 = bodyData?.records?.length > 0
-                    ? [...(bodyData.records)].sort((a,b) => (b.date||"").localeCompare(a.date||""))[0]
-                    : null;
-                  const mbw3 = bodyWeight || latestRec3?.weight || (sessions.length>0 ? sessions[sessions.length-1]?.bodyWeight : "") || "";
+                  const latestRec3 = getLatestBodyWeight(bodyData, sessionDate);
+                  const mbw3 = bodyWeight || latestRec3?.weight || "";
                   const vol3    = exVol(ex, mbw3);
                   return (
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:7}}>
@@ -5461,7 +5470,7 @@ function ExNameList({ exercises }) {
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelete, member }) {
+function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, member }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   const [reportSession, setReportSession] = useState(null);
   const [cardMode, setCardMode] = useState("simple");
@@ -5507,6 +5516,7 @@ function HistoryScreen({ sessions: rawSessions, loading, onBack, onEdit, onDelet
         s={reportSession}
         member={member}
         sessions={sessions}
+        bodyData={bodyData}
         cardMode={cardMode}
         setCardMode={setCardMode}
         onClose={() => setReportSession(null)}
@@ -5849,7 +5859,7 @@ function PartVolBadges({ exercises, style={} }) {
   );
 }
 
-function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onClose, onEdit }) {
+function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit }) {
   const [saving, setSaving] = useState(false);
 
   // 세션 데이터에서 필드 추출
@@ -5859,7 +5869,7 @@ function SessionReportModal({ s, member, sessions=[], cardMode, setCardMode, onC
   const stretchNotes  = s.stretchingNotes || s.stretchNotes || "";
   const nextPlan      = s.nextPlan      || "";
   const painRecord    = s.painRecord    || null;
-  const bodyWeight    = s.bodyWeight    || "";
+  const bodyWeight    = getLatestBodyWeight(bodyData, s.date)?.weight || "";
   const trainerName   = s.trainerName   || "김태오";
   const gymName       = s.gymName       || "테오짐";
   const intensity     = s.intensity     || "";
@@ -6678,12 +6688,8 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
     const recent = sessions.filter(s=>(s.date||"")>=cutStr);
     const older  = sessions.filter(s=>(s.date||"")>=prevCut&&(s.date||"")<cutStr);
 
-    // ── 체중 — 모든 소스 통합 (records > inbody > sessions) ─────────────
-    const _wMapM = {};
-    sessions.filter(s=>parseFloat(s.bodyWeight)>0).forEach(s=>{if(!_wMapM[s.date])_wMapM[s.date]=parseFloat(s.bodyWeight);});
-    (bodyData?.inbody||[]).filter(r=>parseFloat(r.weight||r.bodyWeight)>0).forEach(r=>{_wMapM[r.date]=parseFloat(r.weight||r.bodyWeight);});
-    (bodyData?.records||[]).filter(r=>parseFloat(r.weight)>0).forEach(r=>{_wMapM[r.date]=parseFloat(r.weight);});
-    const wArr  = Object.entries(_wMapM).map(([d,w])=>({d,w})).sort((a,b)=>a.d.localeCompare(b.d));
+    // ── 체중 — bodyData.records 단일 원본 ─────────────────────────────
+    const wArr  = getBodyWeightRecords(bodyData).map(r=>({d:r.date,w:r.weight}));
     // 기간별 체중 필터
     const wR    = wArr.filter(x=>x.d>=cutStr).map(x=>x.w);
     const wO    = wArr.filter(x=>x.d>=prevCut&&x.d<cutStr).map(x=>x.w);
@@ -7333,13 +7339,13 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   const [gAct,setGAct]= useState(goal.activityLevel || sv0.actLv   || sv0.activityLevel || "보통 활동 (주 3-5회)");
 
   const [rDate, setRDate] = useState(new Date().toISOString().split("T")[0]);
-  // 같은 날짜 수업 기록 체중 자동 불러오기 (초기값)
-  const sessWeightForDate = useMemo(() => {
+  // 기록 입력 초기값도 bodyData.records만 사용
+  const recordWeightForDate = useMemo(() => {
     const todayStr = new Date().toISOString().split("T")[0];
-    const rec = [...(sessions||[])].find(s => s.date === todayStr && s.bodyWeight && parseFloat(s.bodyWeight) > 0);
-    return rec?.bodyWeight ? String(rec.bodyWeight) : "";
-  }, [sessions]);
-  const [rW,    setRW]    = useState(sessWeightForDate || "");
+    const rec = (bodyData?.records||[]).find(r => r.date === todayStr && toPositiveNumber(r.weight));
+    return rec?.weight ? String(rec.weight) : "";
+  }, [bodyData]);
+  const [rW,    setRW]    = useState(recordWeightForDate || "");
   const [rBF,   setRBF]   = useState("");
   const [rMM,   setRMM]   = useState("");
   const [rFast, setRFast] = useState(true);
@@ -7378,14 +7384,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   }
   const assessment = getAssessment();
 
-  // 체중 히스토리 통합 (bodyData.records > inbody > sessions bodyWeight)
-  const _wMap = {};
-  (sessions||[]).filter(s=>parseFloat(s.bodyWeight)>0).forEach(s=>{if(!_wMap[s.date])_wMap[s.date]=parseFloat(s.bodyWeight);});
-  (inbodyList||[]).filter(r=>parseFloat(r.weight||r.bodyWeight)>0).forEach(r=>{_wMap[r.date]=parseFloat(r.weight||r.bodyWeight);});
-  records.filter(r=>parseFloat(r.weight)>0).forEach(r=>{_wMap[r.date]=parseFloat(r.weight);});
-  const wGraph = Object.entries(_wMap)
-    .map(([date,weight])=>({date:date.slice(5),weight,target:tw||null}))
-    .sort((a,b)=>a.date.localeCompare(b.date));
+  // 체중 히스토리 단일화: bodyData.records만 사용
+  const wGraph = getBodyWeightRecords(bodyData)
+    .map(r=>({date:String(r.date).slice(5), weight:r.weight, target:tw||null}));
 
   const simData = [];
   if (cw && tw && daysLeft && totalLoss > 0) {
@@ -7408,20 +7409,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
   async function saveRecord() {
     if (!rW) { showToast("체중을 입력해주세요","err"); return; }
     setSaving(true);
-    const existingRecs = bodyData?.records || [];
-    const sameDateIdx  = existingRecs.findIndex(r => r.date === rDate);
-    let updatedRecords;
-    if (sameDateIdx >= 0) {
-      // 같은 날짜 기록이 있으면 업데이트
-      updatedRecords = existingRecs.map((r, i) =>
-        i === sameDateIdx
-          ? { ...r, weight:rW, bodyFat:rBF, muscleMass:rMM, fasting:rFast, water:rH2O, memo:rMemo, updatedAt:new Date().toISOString() }
-          : r
-      );
-    } else {
-      // 없으면 새 레코드 추가
-      updatedRecords = [...existingRecs, { id:"r"+Date.now(), date:rDate, weight:rW, bodyFat:rBF, muscleMass:rMM, fasting:rFast, water:rH2O, memo:rMemo, updatedAt:new Date().toISOString() }];
-    }
+    const updatedRecords = upsertBodyRecord(bodyData?.records || [], {
+      id:"r"+Date.now(), date:rDate, weight:rW, bodyFat:rBF, muscleMass:rMM, fasting:rFast, water:rH2O, memo:rMemo
+    });
     await onSaveBodyData({ ...bodyData, records: updatedRecords });
     showToast("기록 저장 완료 ✓");
     setRW(""); setRBF(""); setRMM(""); setRMemo(""); setRH2O("");
@@ -7432,7 +7422,10 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, onSaveBodyData
     if (!iW) { showToast("체중을 입력해주세요","err"); return; }
     setSaving(true);
     const rec = { id:"i"+Date.now(), date:iDate, weight:iW, bodyFat:iBF, muscleMass:iMM, bmi:iBMI, memo:iMemo };
-    await onSaveBodyData({ ...bodyData, inbody:[...(bodyData?.inbody||[]), rec] });
+    const updatedRecords = upsertBodyRecord(bodyData?.records || [], {
+      id:"r"+Date.now(), date:iDate, weight:iW, bodyFat:iBF, muscleMass:iMM, memo:iMemo
+    });
+    await onSaveBodyData({ ...bodyData, records:updatedRecords, inbody:[...(bodyData?.inbody||[]), rec] });
     showToast("인바디 저장 완료 ✓");
     setIW(""); setIBF(""); setIMM(""); setIBMI(""); setIMemo("");
     setSaving(false);
@@ -9463,8 +9456,8 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
     const rec3   = sorted.slice(0,3);
     const rec10  = sorted.slice(0,10);
 
-    const wS     = sorted.filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0).slice(0,5);
-    const wDelta = wS.length>=2 ? (parseFloat(wS[0].bodyWeight)-parseFloat(wS[wS.length-1].bodyWeight)).toFixed(1) : null;
+    const wS     = getBodyWeightRecords(bodyData).slice(-5).reverse();
+    const wDelta = wS.length>=2 ? (wS[0].weight-wS[wS.length-1].weight).toFixed(1) : null;
 
     const rpeList = rec10.flatMap(s=>(s.exercises||[]).filter(e=>e.rpe).map(e=>Number(e.rpe)));
     const avgRpe  = rpeList.length ? (rpeList.reduce((a,b)=>a+b,0)/rpeList.length).toFixed(1) : null;
@@ -9519,8 +9512,8 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
 
   const progressPct = (() => {
     const cw=parseFloat(goal.currentWeight)||0, tw=parseFloat(goal.targetWeight)||0;
-    const wS=[...sessions].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).filter(s=>s.bodyWeight&&parseFloat(s.bodyWeight)>0);
-    const curW=wS.length?parseFloat(wS[0].bodyWeight):cw;
+    const latestWeightRec = getLatestBodyWeight(bodyData);
+    const curW=latestWeightRec?.weight || cw;
     if(!cw||!tw||cw===tw)return null;
     return Math.min(100,Math.round((Math.abs(cw-curW)/Math.abs(cw-tw))*100));
   })();

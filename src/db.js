@@ -663,6 +663,66 @@ export async function saveMemberOnboarding(memberId, data) {
 // ════════════════════════════════════════════════════
 // 마이그레이션 — 기존 회원에 trainerUid 추가 (1회만 실행)
 // ════════════════════════════════════════════════════
+export async function migrateNormalizeMemberEmails() {
+  const uid = requireUid();
+  console.log("[EMAIL MIGRATION] 시작 — uid:", uid);
+
+  let count = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  try {
+    const snap = await getDocs(collection(db, "members"));
+    console.log("[EMAIL MIGRATION] 조회된 members 문서 수:", snap.docs.length);
+
+    const updates = [];
+    for (const d of snap.docs) {
+      const data = d.data();
+      const rawEmail = data.email;
+      const canManage = !data.trainerUid || data.trainerUid === uid;
+
+      if (!canManage) {
+        skipped++;
+        continue;
+      }
+
+      if (typeof rawEmail !== "string") {
+        skipped++;
+        continue;
+      }
+
+      const normalizedEmail = rawEmail.trim().toLowerCase();
+      if (!normalizedEmail || normalizedEmail === rawEmail) {
+        skipped++;
+        continue;
+      }
+
+      updates.push({ ref: d.ref, email: normalizedEmail, name: data.name || d.id });
+    }
+
+    for (let i = 0; i < updates.length; i += 450) {
+      const batch = writeBatch(db);
+      for (const u of updates.slice(i, i + 450)) {
+        batch.update(u.ref, {
+          email: u.email,
+          updatedAt: serverTimestamp(),
+        });
+        console.log(`[EMAIL MIGRATION] 정규화 예정: ${u.name}`);
+      }
+      await batch.commit();
+    }
+
+    count = updates.length;
+    console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵`);
+  } catch(e) {
+    console.error("[EMAIL MIGRATION] 오류:", e.message);
+    errors++;
+    throw new Error("이메일 정규화 오류: " + e.message);
+  }
+
+  return { count, skipped, errors };
+}
+
 export async function migrateAddTrainerUid() {
   const uid = requireUid();
   console.log("[MIGRATION] 시작 — uid:", uid);

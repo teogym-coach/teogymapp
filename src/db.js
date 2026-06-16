@@ -661,6 +661,59 @@ export async function saveMemberOnboarding(memberId, data) {
 }
 
 // ════════════════════════════════════════════════════
+// 마이그레이션 — 기존 회원 이메일 정규화 (1회 실행용)
+// ════════════════════════════════════════════════════
+export async function migrateNormalizeMemberEmails() {
+  const uid = requireUid();
+  console.log("[EMAIL MIGRATION] 시작 — uid:", uid);
+
+  let count = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  try {
+    const q = query(collection(db, "members"), where("trainerUid", "==", uid));
+    const snap = await getDocs(q);
+    console.log("[EMAIL MIGRATION] 조회된 문서 수:", snap.docs.length);
+
+    const updates = [];
+    for (const d of snap.docs) {
+      const data = d.data();
+      if (typeof data.email !== "string" || !data.email) {
+        skipped++;
+        continue;
+      }
+
+      const normalizedEmail = data.email.trim().toLowerCase();
+      if (normalizedEmail && normalizedEmail !== data.email) {
+        updates.push({ ref: d.ref, email: normalizedEmail, name: data.name || d.id });
+      } else {
+        skipped++;
+      }
+    }
+
+    if (updates.length > 0) {
+      const batch = writeBatch(db);
+      for (const u of updates) {
+        batch.update(u.ref, { email: u.email, updatedAt: serverTimestamp() });
+        console.log(`[EMAIL MIGRATION] 정규화 예정: ${u.name}`);
+      }
+      await batch.commit();
+      count = updates.length;
+      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵`);
+    } else {
+      console.log(`[EMAIL MIGRATION] 업데이트 없음. ${skipped}명 스킵`);
+    }
+  } catch(e) {
+    console.error("[EMAIL MIGRATION] 오류:", e.message);
+    errors++;
+    throw new Error("이메일 정규화 오류: " + e.message);
+  }
+
+  return { count, skipped, errors };
+}
+
+// ════════════════════════════════════════════════════
 // 마이그레이션 — 기존 회원에 trainerUid 추가 (1회만 실행)
 // ════════════════════════════════════════════════════
 export async function migrateAddTrainerUid() {

@@ -11,7 +11,7 @@ import {
 } from "firebase/auth";
 import {
   getMembers, addMember, updateMember, deleteMember,
-  getSessions, addSession, updateSession, deleteSession,
+  getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments,
@@ -1094,10 +1094,39 @@ export default function App() {
     finally { setLoading(false); }
   }
 
+  async function refreshSessionsForMember(memberId) {
+    const newSessions = await getSessions(memberId);
+    setSessions(newSessions);
+    setSessionsMap(prev => ({...prev, [memberId]: newSessions}));
+    return newSessions;
+  }
+
+  async function handlePublishSession(s) {
+    if (!member?.id || !s?.id) return;
+    setLoading(true);
+    try {
+      await publishSession(member.id, s.id);
+      await refreshSessionsForMember(member.id);
+      showToast("회원에게 전송 완료 ✓");
+    } catch(e) { showToast(e.message || "전송 실패", "err"); }
+    finally { setLoading(false); }
+  }
+
+  async function handleUnpublishSession(s) {
+    if (!member?.id || !s?.id) return;
+    setLoading(true);
+    try {
+      await unpublishSession(member.id, s.id, "completed");
+      await refreshSessionsForMember(member.id);
+      showToast("회원 공개 취소 완료");
+    } catch(e) { showToast(e.message || "공개 취소 실패", "err"); }
+    finally { setLoading(false); }
+  }
+
   async function handleDeleteSession(s) {
     if (!window.confirm("이 수업 기록을 삭제할까요?")) return;
     setLoading(true);
-    try { await deleteSession(member.id, s.id); showToast("삭제 완료"); setSessions(await getSessions(member.id)); }
+    try { await deleteSession(member.id, s.id); showToast("삭제 완료"); await refreshSessionsForMember(member.id); }
     catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }
@@ -1175,7 +1204,7 @@ export default function App() {
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
 
-        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="consultReport" && member && (
@@ -3788,6 +3817,9 @@ function updateEx(ei, key, val) {
       memberName: targetMember.name, memberId: targetMember.id,
       trainerName, gymName, date, sessionNo: Number(sessionNo),
       programType: targetMember.programType || "일반 PT",
+      status: editData?.status || "draft",
+      isPublished: editData?.isPublished === true,
+      publishedAt: editData?.publishedAt || null,
       type: selectedTypes.length ? selectedTypes.join(" · ") : "기타",
       selectedTypes: selectedTypes.length ? selectedTypes : ["기타"],
       intensity, condition,
@@ -5174,7 +5206,7 @@ function updateEx(ei, key, val) {
       </Card>
 
       <div style={{marginTop:14,paddingBottom:32}}>
-        <Btn full onClick={handleSave}>{isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "수정 저장 →" : "저장하기 →")}</Btn>
+        <Btn full onClick={handleSave}>{isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "관리자용 저장 →" : "관리자용 저장 →")}</Btn>
       </div>
 
       <div ref={pRef} style={{display:"none"}}>
@@ -5470,7 +5502,7 @@ function ExNameList({ exercises }) {
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, member }) {
+function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, onPublish, onUnpublish, member }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   const [reportSession, setReportSession] = useState(null);
   const [cardMode, setCardMode] = useState("simple");
@@ -5521,6 +5553,8 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
         setCardMode={setCardMode}
         onClose={() => setReportSession(null)}
         onEdit={() => { onEdit(reportSession); setReportSession(null); }}
+        onPublish={async () => { await onPublish?.(reportSession); setReportSession(null); }}
+        onUnpublish={async () => { await onUnpublish?.(reportSession); setReportSession(null); }}
       />
     );
   }
@@ -5577,6 +5611,9 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <Mo c="#54546a" s={9} style={{marginBottom:2}}>{s.date} · {s.sessionNo}회차</Mo>
+                    <div style={{display:"inline-flex",marginBottom:4,padding:"2px 7px",borderRadius:999,fontSize:8,fontWeight:800,background:s.isPublished?"rgba(94,234,212,.12)":"rgba(255,209,102,.10)",color:s.isPublished?"#5EEAD4":"#ffd166",border:"1px solid "+(s.isPublished?"rgba(94,234,212,.24)":"rgba(255,209,102,.22)")}}>
+                      {s.isPublished ? "회원 공개" : (s.status === "completed" ? "비공개·완료" : "비공개·초안")}
+                    </div>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#fff",marginBottom:4}}>
                       {typeLbl || "웨이트"}
                     </div>
@@ -5859,7 +5896,7 @@ function PartVolBadges({ exercises, style={} }) {
   );
 }
 
-function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit }) {
+function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit, onPublish, onUnpublish }) {
   const [saving, setSaving] = useState(false);
 
   // 세션 데이터에서 필드 추출
@@ -5877,6 +5914,8 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
   const date          = s.date          || "";
   const sessionNo     = s.sessionNo     || "";
   const typeLbl       = formatTypes(s.selectedTypes || s.type) || "";
+  const isPublished   = s.isPublished === true;
+  const statusLabel   = isPublished ? "공개됨" : (s.status === "completed" ? "작성 완료·비공개" : "임시저장·비공개");
 
   const ic = IC[intensity] || "#ffd166";
   const cc = CC[condition] || CC["상"];
@@ -5940,6 +5979,15 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
               </button>
             ))}
           </div>
+          <span style={{fontSize:10,fontWeight:800,color:isPublished?"#5EEAD4":"#ffd166",padding:"5px 8px",borderRadius:7,background:isPublished?"rgba(94,234,212,.10)":"rgba(255,209,102,.10)",border:"1px solid "+(isPublished?"rgba(94,234,212,.22)":"rgba(255,209,102,.22)")}}>{statusLabel}</span>
+          {isPublished ? (
+            <Btn ghost sm onClick={onUnpublish}>공개 취소</Btn>
+          ) : (
+            <button onClick={onPublish}
+              style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#a29bfe,#7c6fff)",color:"#fff",fontSize:10,fontWeight:800}}>
+              회원에게 전송
+            </button>
+          )}
           <Btn ghost sm onClick={onEdit}>✏️ 수정</Btn>
           <button onClick={handleSaveImage} disabled={saving}
             style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:saving?"not-allowed":"pointer",

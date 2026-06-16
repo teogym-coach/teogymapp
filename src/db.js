@@ -140,6 +140,71 @@ async function verifyMemberOwnership(memberId) {
 // ════════════════════════════════════════════════════
 // 수업 일지 (sessions)
 // ════════════════════════════════════════════════════
+const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "movementPurpose", "funcCategory", "funcBodyPart", "funcTool"]);
+
+function normalizeSessionForRead(data = {}) {
+  const isPublished = data.isPublished === true;
+  return {
+    ...data,
+    status: data.status || (isPublished ? "published" : "draft"),
+    isPublished,
+    publishedAt: data.publishedAt || null,
+  };
+}
+
+function withSessionDefaults(data = {}) {
+  const isPublished = data.isPublished === true;
+  return {
+    ...data,
+    status: data.status || (isPublished ? "published" : "draft"),
+    isPublished,
+    publishedAt: data.publishedAt || null,
+  };
+}
+
+function publicSet(set = {}) {
+  return {
+    weight: set.weight || "",
+    reps: set.reps || "",
+    durationSec: set.durationSec || "",
+    volume: set.volume || 0,
+    recordType: set.recordType || "weightReps",
+  };
+}
+
+function publicExercise(ex = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(ex)) {
+    if (key === "sets") out.sets = (value || []).map(publicSet);
+    else if (SESSION_PUBLIC_FIELDS.has(key)) out[key] = value;
+  }
+  return out;
+}
+
+function publicSession(data = {}) {
+  return {
+    id: data.id,
+    memberName: data.memberName || "",
+    memberId: data.memberId || "",
+    trainerName: data.trainerName || "",
+    gymName: data.gymName || "",
+    date: data.date || "",
+    sessionNo: data.sessionNo || "",
+    type: data.type || "",
+    selectedTypes: data.selectedTypes || [],
+    intensity: data.intensity || "",
+    condition: data.condition || "",
+    totalVolume: data.totalVolume || 0,
+    exercises: (data.exercises || []).map(publicExercise),
+    trainerComment: data.trainerComment || "",
+    stretchingNotes: data.stretchingNotes || "",
+    cardio: data.cardio || null,
+    isPublished: true,
+    status: "published",
+    publishedAt: data.publishedAt || null,
+  };
+}
+
 export async function getSessions(memberId) {
   requireUid();
   dbLog("getSessions", `memberId=${memberId}`);
@@ -149,7 +214,20 @@ export async function getSessions(memberId) {
   );
   const snap = await getDocs(q);
   dbLog("getSessions", `결과: ${snap.docs.length}개`);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  return snap.docs.map(d => ({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+}
+
+export async function getPublishedSessions(memberId) {
+  requireUid();
+  dbLog("getPublishedSessions", `memberId=${memberId}`);
+  const q = query(
+    collection(db, "members", memberId, "sessions"),
+    where("isPublished", "==", true),
+    orderBy("sessionNo", "asc")
+  );
+  const snap = await getDocs(q);
+  dbLog("getPublishedSessions", `결과: ${snap.docs.length}개`);
+  return snap.docs.map(d => publicSession({ id: d.id, ...normalizeSessionForRead(d.data()) }));
 }
 
 export async function addSession(memberId, data) {
@@ -157,7 +235,7 @@ export async function addSession(memberId, data) {
   dbLog("addSession", `memberId=${memberId} sessionNo=${data.sessionNo}`);
   const ref = await addDoc(
     collection(db, "members", memberId, "sessions"),
-    { ...clean(data), createdAt: serverTimestamp() }
+    { ...clean(withSessionDefaults(data)), createdAt: serverTimestamp() }
   );
   dbLog("addSession", `완료: ${ref.id}`);
   return { id: ref.id, ...data };
@@ -168,9 +246,33 @@ export async function updateSession(memberId, sessionId, data) {
   dbLog("updateSession", `memberId=${memberId} sessionId=${sessionId}`);
   await updateDoc(
     doc(db, "members", memberId, "sessions", sessionId),
-    { ...clean(data), updatedAt: serverTimestamp() }
+    { ...clean(withSessionDefaults(data)), updatedAt: serverTimestamp() }
   );
   dbLog("updateSession", "완료");
+}
+
+export async function publishSession(memberId, sessionId) {
+  await verifyMemberOwnership(memberId);
+  dbLog("publishSession", `memberId=${memberId} sessionId=${sessionId}`);
+  await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+    status: "published",
+    isPublished: true,
+    publishedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  dbLog("publishSession", "완료");
+}
+
+export async function unpublishSession(memberId, sessionId, nextStatus = "completed") {
+  await verifyMemberOwnership(memberId);
+  dbLog("unpublishSession", `memberId=${memberId} sessionId=${sessionId}`);
+  await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+    status: nextStatus === "draft" ? "draft" : "completed",
+    isPublished: false,
+    publishedAt: null,
+    updatedAt: serverTimestamp(),
+  });
+  dbLog("unpublishSession", "완료");
 }
 
 export async function deleteSession(memberId, sessionId) {

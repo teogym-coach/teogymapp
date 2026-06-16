@@ -5,10 +5,11 @@ import {
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from "recharts";
-import { auth, firebaseConfig } from "./firebase-config";
+import { auth, firebaseConfig, functions } from "./firebase-config";
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
 } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import {
   getMembers, addMember, updateMember, deleteMember,
   getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession,
@@ -812,6 +813,12 @@ async function createMemberAuthAccountIfNeeded(email){
   if(code==="EMAIL_EXISTS") return {created:false,alreadyExists:true,uid:null,code};
   throw new Error(`Firebase Auth 사용자 생성 실패: ${getFirebaseAuthErrorMessage(code)}`);
 }
+
+async function reconnectMemberUidByEmail(memberId,email){
+  const callable=httpsCallable(functions,"reconnectMemberUidByEmail");
+  const result=await callable({memberId,email});
+  return result.data;
+}
 function getMemberAppInviteStatus(member){
   const email=(member?.email||"").trim().toLowerCase();
   const accountEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
@@ -835,20 +842,11 @@ function AdminMemberAppPanel({member,onAccountCreated}){
     setBusy(true); setMsg(""); setInviteLog([]);
     try{
       addLog(true,`재연결 기준 이메일 확인: ${email}`);
-      const prepared=await createMemberAuthAccountIfNeeded(email);
-      const now=new Date().toISOString();
-      const patch={memberAppAccountEmail:email,memberAppUidReconnectRequestedAt:now,memberAppAccountStatus:prepared.uid?"available":"auth-exists-relink-required",memberAppLastInviteLog:{ok:true,code:prepared.code,uid:prepared.uid||null,at:now}};
-      if(prepared.uid){
-        patch.memberUid=prepared.uid;
-        addLog(true,`Firebase Auth UID 확인/생성 완료 · members.memberUid 재연결: ${prepared.uid}`);
-        setMsg("memberUid 재연결이 완료되었습니다.");
-      }else{
-        patch.memberUid="";
-        patch.memberUidPrevious=(member?.memberUid||"").trim();
-        addLog(false,"기존 Firebase Auth 사용자의 UID는 클라이언트에서 직접 조회할 수 없어 저장된 memberUid를 비웠습니다. 회원이 이메일로 로그인하면 회원앱에서 안전하게 자동 재연결됩니다.");
-        setMsg("기존 Auth UID 조회 제한으로 memberUid를 비웠습니다. 회원이 다시 로그인하면 이메일 일치 기준으로 자동 재연결됩니다.");
-      }
-      await updateMember(memberId,patch);
+      const linked=await reconnectMemberUidByEmail(memberId,email);
+      const patch={memberUid:linked.memberUid,memberAppAccountEmail:email,memberAppAccountStatus:"available",memberAppLastInviteLog:{ok:true,code:"ADMIN_AUTH_UID_LINKED",uid:linked.authUid,at:new Date().toISOString()}};
+      addLog(true,`Firebase Admin UID 조회 성공 · auth UID: ${linked.authUid}`);
+      addLog(true,`members.memberUid 저장 완료 · members.memberUid: ${linked.memberUid}`);
+      setMsg(`memberUid 재연결 완료 · auth UID: ${linked.authUid} · members.memberUid: ${linked.memberUid}`);
       onAccountCreated?.(patch);
     }catch(e){
       const fail=e?.message||"memberUid 재연결 실패";
@@ -884,8 +882,14 @@ function AdminMemberAppPanel({member,onAccountCreated}){
         addLog(true,`기존 members.memberUid 확인 완료: ${existingMemberUid}`);
         setMsg("회원앱 초대를 발송했습니다. 기존 저장 UID가 있어 회원앱 사용 가능 상태로 처리했습니다.");
       }else{
-        addLog(false,"기존 Auth 사용자의 UID는 클라이언트 SDK로 조회할 수 없어 memberUid를 저장하지 못했습니다. Firebase Admin 서버 함수가 필요합니다.");
-        setMsg("비밀번호 재설정 메일은 발송됐지만 기존 Auth UID를 저장하지 못했습니다. 화면 로그를 확인해주세요.");
+        const linked=await reconnectMemberUidByEmail(memberId,email);
+        patch.memberUid=linked.memberUid;
+        patch.memberAppAccountStatus="available";
+        patch.memberAppLastInviteLog={ok:true,code:"ADMIN_AUTH_UID_LINKED",uid:linked.authUid,at:now};
+        await updateMember(memberId,{memberUid:linked.memberUid,memberAppAccountStatus:"available",memberAppLastInviteLog:patch.memberAppLastInviteLog});
+        addLog(true,`Firebase Admin UID 조회 성공 · auth UID: ${linked.authUid}`);
+        addLog(true,`members.memberUid 저장 완료: ${linked.memberUid}`);
+        setMsg(`회원앱 초대를 발송했고 UID 재연결도 완료되었습니다. auth UID: ${linked.authUid} · members.memberUid: ${linked.memberUid}`);
       }
       onAccountCreated?.(patch);
     }catch(e){
@@ -900,7 +904,7 @@ function AdminMemberAppPanel({member,onAccountCreated}){
   const linkedEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
   const emailChangedWithUid=!!member?.memberUid&&!!linkedEmail&&!!currentEmail&&linkedEmail!==currentEmail;
   const uidNeedsRelink=!member?.memberUid||emailChangedWithUid||member?.memberAppAccountStatus==="auth-exists-relink-required";
-  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>저장된 UID: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"현재 이메일 기준 재연결 필요 또는 확인 필요":"현재 이메일과 저장 UID 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>현재 이메일과 UID 발급/초대 당시 이메일이 다릅니다. 이전 memberUid가 남아 꼬일 수 있으므로 재연결하세요. 이전 이메일: {linkedEmail}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn><Btn ghost sm onClick={reconnectMemberUid} disabled={busy||!member?.email} style={{color:"#fbbf24",borderColor:"#fbbf2444"}}>memberUid 재연결</Btn></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
+  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"현재 이메일 기준 재연결 필요 또는 확인 필요":"현재 이메일과 저장 UID 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>현재 이메일과 UID 발급/초대 당시 이메일이 다릅니다. 이전 memberUid가 남아 꼬일 수 있으므로 재연결하세요. 이전 이메일: {linkedEmail}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn><Btn ghost sm onClick={reconnectMemberUid} disabled={busy||!member?.email} style={{color:"#fbbf24",borderColor:"#fbbf2444"}}>memberUid 재연결</Btn></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
 }
 
 

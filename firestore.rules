@@ -1,12 +1,13 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════
-//  TEO GYM — Firestore 보안 규칙 v3
+//  TEO GYM — Firestore 보안 규칙 v4
 //
 //  회원앱 원칙:
 //    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터만 접근
-//    - 회원 본인: memberUid 또는 Authentication email 이 회원 문서와 일치할 때만 접근
-//    - trainerUid == null 인 문서를 모든 로그인 사용자에게 열어주는 예외는 제거
+//    - 회원 본인: memberAppIndex/{uid} 를 통해 memberId 를 얻은 뒤,
+//                members/{memberId}.memberUid == request.auth.uid 일 때만 접근
+//    - 이메일 기반 조회는 memberAppIndex 도입으로 제거
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
 // ═══════════════════════════════════════════════════════════════
 
@@ -31,38 +32,19 @@ service cloud.firestore {
 
     function isMemberSelf(memberId) {
       let m = memberDoc(memberId);
-      return isSignedIn()
-        && (
-          m.memberUid == uid()
-          || (
-            m.email != null
-            && request.auth.token.email != null
-            && request.auth.token.email.lower() == m.email.lower()
-          )
-        );
+      return isSignedIn() && m.memberUid == uid();
     }
 
     function canAccessMember(memberId) {
       return isTrainerOfMember(memberId) || isMemberSelf(memberId);
     }
 
-    function signedInEmailMatchesMember() {
-      return isSignedIn()
-        && resource.data.email != null
-        && request.auth.token.email != null
-        && request.auth.token.email.lower() == resource.data.email.lower();
-    }
-
-    function isMemberUidOnlyLinkUpdate() {
-      return signedInEmailMatchesMember()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "memberUid",
-          "memberUidLinkedAt",
-          "memberUidLinkedBy",
-          "memberUidPrevious"
-        ])
-        && request.resource.data.memberUid == uid()
-        && request.resource.data.memberUidLinkedBy == uid();
+    // ── memberAppIndex ──────────────────────────────────────
+    // 회원 본인만 자신의 인덱스 문서를 읽을 수 있음
+    // 쓰기는 Cloud Functions (Admin SDK) 또는 관리자만 허용
+    match /memberAppIndex/{indexUid} {
+      allow read: if isSignedIn() && request.auth.uid == indexUid;
+      allow write: if false; // Admin SDK(Cloud Functions)와 Firebase Console만 허용
     }
 
     match /members/{memberId} {
@@ -70,23 +52,16 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.trainerUid == uid()
         || resource.data.memberUid == uid()
-        || (
-          resource.data.email != null
-          && request.auth.token.email != null
-          && request.auth.token.email.lower() == resource.data.email.lower()
-        )
       );
 
       // 생성: 반드시 내 uid로 trainerUid 설정
       allow create: if isSignedIn()
                     && request.resource.data.trainerUid == uid();
 
-      // 수정: 대표자는 전체 관리 가능. 회원 본인은 이메일이 일치하는 경우 memberUid 연결 필드만 수정 가능.
-      allow update: if (
-                      isSignedIn()
-                      && resource.data.trainerUid == uid()
-                      && request.resource.data.trainerUid == uid()
-                    ) || isMemberUidOnlyLinkUpdate();
+      // 수정: 대표자만 전체 관리 가능
+      allow update: if isSignedIn()
+                    && resource.data.trainerUid == uid()
+                    && request.resource.data.trainerUid == uid();
 
       allow delete: if isSignedIn()
                     && resource.data.trainerUid == uid();

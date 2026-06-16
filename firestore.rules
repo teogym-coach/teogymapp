@@ -59,6 +59,10 @@ service cloud.firestore {
         allow read, write: if canAccessMember(memberId);
       }
 
+      match /assessments/{assessmentId} {
+        allow read, write: if canAccessMember(memberId);
+      }
+
       match /nutrition/{docId} {
         allow read, write: if canAccessMember(memberId);
       }

@@ -109,15 +109,17 @@ export async function deleteMember(id) {
   const snap = await getDoc(doc(db, "members", id));
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
-  const [sessSnap, nutSnap, bcSnap] = await Promise.all([
+  const [sessSnap, nutSnap, bcSnap, assSnap] = await Promise.all([
     getDocs(collection(db, "members", id, "sessions")),
     getDocs(collection(db, "members", id, "nutrition")),
     getDocs(collection(db, "members", id, "bodyCheck")),
+    getDocs(collection(db, "members", id, "assessments")),
   ]);
   await Promise.all([
     ...sessSnap.docs.map(d => deleteDoc(d.ref)),
     ...nutSnap.docs.map(d => deleteDoc(d.ref)),
     ...bcSnap.docs.map(d => deleteDoc(d.ref)),
+    ...assSnap.docs.map(d => deleteDoc(d.ref)),
     deleteDoc(doc(db, "members", id)),
   ]);
   dbLog("deleteMember", "완료");
@@ -226,6 +228,69 @@ export async function saveBodyCheck(memberId, data) {
   } catch(e) {
     console.error("[DB] saveBodyCheck error:", e.message, `memberId=${memberId}`);
     throw new Error("바디체크 저장 실패: " + e.message);
+  }
+}
+
+
+// ════════════════════════════════════════════════════
+// 체형평가 (assessments)
+// ════════════════════════════════════════════════════
+export async function getAssessments(memberId) {
+  try {
+    requireUid();
+    dbLog("getAssessments", `memberId=${memberId}`);
+    const q = query(
+      collection(db, "members", memberId, "assessments"),
+      orderBy("date", "desc")
+    );
+    const snap = await getDocs(q);
+    const result = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    dbLog("getAssessments", `완료: ${result.length}개`);
+    return result;
+  } catch(e) {
+    console.error("[DB] getAssessments error:", e.message, `memberId=${memberId}`);
+    return [];
+  }
+}
+
+export async function saveAssessment(memberId, data) {
+  try {
+    await verifyMemberOwnership(memberId);
+    const assessmentId = data.id || `a${Date.now()}`;
+    dbLog("saveAssessment", `memberId=${memberId} assessmentId=${assessmentId}`);
+    const ref = doc(db, "members", memberId, "assessments", assessmentId);
+    const payload = {
+      ...clean(data),
+      id: assessmentId,
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(ref, payload, { merge: true });
+    const saved = await getDoc(ref);
+    return { id: saved.id, ...saved.data() };
+  } catch(e) {
+    console.error("[DB] saveAssessment error:", e.message, `memberId=${memberId}`);
+    throw new Error("체형평가 저장 실패: " + e.message);
+  }
+}
+
+export async function saveAssessments(memberId, records = []) {
+  try {
+    await verifyMemberOwnership(memberId);
+    dbLog("saveAssessments", `memberId=${memberId} count=${records.length}`);
+    const batch = writeBatch(db);
+    records.forEach((record, idx) => {
+      const assessmentId = record.id || `a${Date.now()}_${idx}`;
+      const ref = doc(db, "members", memberId, "assessments", assessmentId);
+      batch.set(ref, {
+        ...clean(record),
+        id: assessmentId,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+    await batch.commit();
+  } catch(e) {
+    console.error("[DB] saveAssessments error:", e.message, `memberId=${memberId}`);
+    throw new Error("체형평가 마이그레이션 실패: " + e.message);
   }
 }
 

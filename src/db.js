@@ -27,10 +27,14 @@ function requireUid() {
 }
 
 // ── undefined 제거 + Firestore 특수 객체 보존 ──────
+export function normalizeMemberEmail(email) {
+  return typeof email === "string" ? email.trim().toLowerCase() : email;
+}
+
 function normalizeMemberData(data) {
   const normalized = { ...data };
   if (typeof normalized.email === "string") {
-    normalized.email = normalized.email.trim().toLowerCase();
+    normalized.email = normalizeMemberEmail(normalized.email);
   }
   return normalized;
 }
@@ -563,15 +567,17 @@ export async function getMemberAppProfile() {
     "memberUidMatches",
     "members where memberUid == auth.uid"
   );
-  const emailMatches = authEmail ? await readAll(
-    query(collection(db, "members"), where("email", "==", authEmail)),
-    "emailMatches",
-    "members where email == auth.email"
-  ) : [];
+  if (authEmail) {
+    await readAll(
+      query(collection(db, "members"), where("email", "==", authEmail)),
+      "emailMatches",
+      "members where email == auth.email"
+    );
+  }
 
-  let profile = memberUidMatches[0] || emailMatches[0] || null;
+  let profile = memberUidMatches[0] || null;
   diagnostics.matchedMemberId = profile?.id || null;
-  diagnostics.matchedBy = memberUidMatches[0] ? "memberUid" : (emailMatches[0] ? "email" : "none");
+  diagnostics.matchedBy = memberUidMatches[0] ? "memberUid" : "none";
 
   if (profile) {
     profile = { ...profile, _matchedBy: diagnostics.matchedBy, _diagnostics: diagnostics };
@@ -581,8 +587,8 @@ export async function getMemberAppProfile() {
     return profile;
   }
 
-  dbWarn("getMemberAppProfile", "현재 Auth UID 또는 이메일과 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
-  const err = new Error("현재 로그인 UID 또는 이메일과 일치하는 회원 문서를 찾을 수 없습니다.");
+  dbWarn("getMemberAppProfile", "현재 Auth UID와 memberUid가 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
+  const err = new Error("현재 로그인 UID와 memberUid가 일치하는 회원 문서를 찾을 수 없습니다.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
   err.memberAppDetails = { code: err.code, path: "members diagnostic queries", ...diagnostics };
   throw err;
@@ -654,6 +660,43 @@ export async function saveMemberOnboarding(memberId, data) {
 }
 
 // ════════════════════════════════════════════════════
+
+export async function migrateNormalizeMemberEmails() {
+  const uid = requireUid();
+  console.log("[MIGRATION] email normalize 시작 — uid:", uid);
+  let count = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  try {
+    const snap = await getDocs(query(collection(db, "members"), where("trainerUid", "==", uid)));
+    const batch = writeBatch(db);
+    for (const d of snap.docs) {
+      const data = d.data();
+      if (typeof data.email !== "string" || !data.email) {
+        skipped++;
+        continue;
+      }
+      const normalizedEmail = normalizeMemberEmail(data.email);
+      if (normalizedEmail && normalizedEmail !== data.email) {
+        batch.update(d.ref, { email: normalizedEmail, emailNormalizedAt: serverTimestamp() });
+        count++;
+        console.log(`[MIGRATION] email 정규화 예정: ${d.id} ${data.email} -> ${normalizedEmail}`);
+      } else {
+        skipped++;
+      }
+    }
+    if (count > 0) await batch.commit();
+    console.log(`[MIGRATION] email normalize 완료: ${count}명 업데이트, ${skipped}명 스킵`);
+  } catch(e) {
+    console.error("[MIGRATION] email normalize 오류:", e.message);
+    errors++;
+    throw new Error("이메일 정규화 마이그레이션 오류: " + e.message);
+  }
+
+  return { count, skipped, errors };
+}
+
 // 마이그레이션 — 기존 회원에 trainerUid 추가 (1회만 실행)
 // ════════════════════════════════════════════════════
 export async function migrateAddTrainerUid() {

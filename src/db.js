@@ -68,6 +68,45 @@ function dbLog(fn, ...args) {
   console.log(`[DB:${fn}] uid=${uid}`, ...args);
 }
 
+function dbWarn(fn, ...args) {
+  const uid = auth.currentUser?.uid || "none";
+  console.warn(`[DB:${fn}] uid=${uid}`, ...args);
+}
+
+function describeFirestoreError(e) {
+  return {
+    code: e?.code || "unknown",
+    message: e?.message || String(e),
+    name: e?.name || "Error",
+  };
+}
+
+function logMemberRulesEvaluation(fn, memberId, memberData) {
+  const user = auth.currentUser;
+  const uid = user?.uid || null;
+  const authEmail = (user?.email || "").trim().toLowerCase();
+  const memberEmail = (memberData?.email || "").trim().toLowerCase();
+  const result = {
+    path: `members/${memberId}`,
+    authUid: uid,
+    authEmail,
+    trainerUid: memberData?.trainerUid || null,
+    memberUid: memberData?.memberUid || null,
+    memberEmail,
+    trainerMatch: !!uid && memberData?.trainerUid === uid,
+    memberUidMatch: !!uid && memberData?.memberUid === uid,
+    emailMatch: !!authEmail && !!memberEmail && authEmail === memberEmail,
+  };
+  result.canAccessMember = result.trainerMatch || result.memberUidMatch || result.emailMatch;
+  result.publishedSessionsRule = "trainerMatch OR (memberUidMatch/emailMatch AND sessions.isPublished == true)";
+  result.bodyCheckRule = "trainerMatch OR memberUidMatch OR emailMatch";
+  result.memberCheckinsRule = "trainerMatch OR memberUidMatch OR emailMatch";
+  result.memberMessagesRule = "trainerMatch OR memberUidMatch OR emailMatch";
+  result.memberOnboardingRule = "현재 firestore.rules의 wildcard 때문에 trainerMatch만 허용";
+  dbLog(fn, "Firestore Rules 평가(클라이언트 추정):", result);
+  return result;
+}
+
 // ════════════════════════════════════════════════════
 // 회원 (members)
 // ════════════════════════════════════════════════════
@@ -227,15 +266,21 @@ export async function getSessions(memberId) {
 
 export async function getPublishedSessions(memberId) {
   requireUid();
-  dbLog("getPublishedSessions", `memberId=${memberId}`);
-  const q = query(
-    collection(db, "members", memberId, "sessions"),
-    where("isPublished", "==", true),
-    orderBy("sessionNo", "asc")
-  );
-  const snap = await getDocs(q);
-  dbLog("getPublishedSessions", `결과: ${snap.docs.length}개`);
-  return snap.docs.map(d => publicSession({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+  const path = `members/${memberId}/sessions`;
+  dbLog("getPublishedSessions", "읽기 시작:", path, "where isPublished == true");
+  try {
+    const q = query(
+      collection(db, "members", memberId, "sessions"),
+      where("isPublished", "==", true),
+      orderBy("sessionNo", "asc")
+    );
+    const snap = await getDocs(q);
+    dbLog("getPublishedSessions", `결과: ${snap.docs.length}개`);
+    return snap.docs.map(d => publicSession({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+  } catch(e) {
+    console.error("[DB:getPublishedSessions] read failed:", { path, collection: "sessions", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
 }
 
 export async function addSession(memberId, data) {
@@ -309,7 +354,7 @@ export async function getBodyCheck(memberId) {
     dbLog("getBodyCheck", `완료: records=${result.records.length}`);
     return result;
   } catch(e) {
-    console.error("[DB] getBodyCheck error:", e.message, `memberId=${memberId}`);
+    console.error("[DB] getBodyCheck error:", { path: `members/${memberId}/bodyCheck/main`, collection: "bodyCheck", ...describeFirestoreError(e), memberId });
     return null;
   }
 }
@@ -421,7 +466,7 @@ export async function getNutrition(memberId) {
     dbLog("getNutrition", `완료: dates=${Object.keys(dates).length}일 logs=${logs.length}개`);
     return { goal: meta.goal || "체중 감량", favFoods: meta.favFoods || [], logs, dates };
   } catch(e) {
-    console.error("[DB] getNutrition error:", e.message, `memberId=${memberId}`);
+    console.error("[DB] getNutrition error:", { path: `members/${memberId}/nutrition`, collection: "nutrition", ...describeFirestoreError(e), memberId });
     return null;
   }
 }
@@ -461,9 +506,26 @@ export async function saveNutrition(memberId, data) {
 // ════════════════════════════════════════════════════
 export async function getMemberAppProfile() {
   const uid = requireUid();
-  const byUid = await getDocs(query(collection(db, "members"), where("memberUid", "==", uid), limit(1)));
-  if (!byUid.empty) return { id: byUid.docs[0].id, ...byUid.docs[0].data() };
-  return null;
+  const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
+  const memberQuery = query(collection(db, "members"), where("memberUid", "==", uid), limit(1));
+  dbLog("getMemberAppProfile", "1) Firebase Auth UID:", uid, "email:", authEmail);
+  dbLog("getMemberAppProfile", "읽기 시작: members where memberUid == auth.uid limit 1");
+  try {
+    const byUid = await getDocs(memberQuery);
+    dbLog("getMemberAppProfile", `members 쿼리 성공: ${byUid.docs.length}건`);
+    if (!byUid.empty) {
+      const profile = { id: byUid.docs[0].id, ...byUid.docs[0].data() };
+      dbLog("getMemberAppProfile", "2) members.memberUid:", profile.memberUid || null);
+      dbLog("getMemberAppProfile", "3) UID 일치 여부:", profile.memberUid === uid);
+      logMemberRulesEvaluation("getMemberAppProfile", profile.id, profile);
+      return profile;
+    }
+    dbWarn("getMemberAppProfile", "members.memberUid가 현재 Auth UID와 일치하는 문서를 찾지 못했습니다.", { authUid: uid, authEmail });
+    return null;
+  } catch(e) {
+    console.error("[DB:getMemberAppProfile] permission/read failed:", { path: "members", query: "where memberUid == auth.uid limit 1", ...describeFirestoreError(e), authUid: uid, authEmail });
+    throw e;
+  }
 }
 
 export async function saveMemberCheckin(memberId, dateKey, data) {
@@ -474,8 +536,16 @@ export async function saveMemberCheckin(memberId, dateKey, data) {
 
 export async function getMemberCheckins(memberId, max = 30) {
   requireUid();
-  const snap = await getDocs(query(collection(db, "members", memberId, "memberCheckins"), orderBy("date", "desc"), limit(max)));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const path = `members/${memberId}/memberCheckins`;
+  dbLog("getMemberCheckins", "읽기 시작:", path);
+  try {
+    const snap = await getDocs(query(collection(db, "members", memberId, "memberCheckins"), orderBy("date", "desc"), limit(max)));
+    dbLog("getMemberCheckins", `성공: ${snap.docs.length}건`);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) {
+    console.error("[DB:getMemberCheckins] read failed:", { path, collection: "memberCheckins", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
 }
 
 export async function addMemberMessage(memberId, data) {
@@ -488,15 +558,31 @@ export async function addMemberMessage(memberId, data) {
 
 export async function getMemberMessages(memberId, max = 30) {
   requireUid();
-  const snap = await getDocs(query(collection(db, "members", memberId, "memberMessages"), orderBy("createdAt", "desc"), limit(max)));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const path = `members/${memberId}/memberMessages`;
+  dbLog("getMemberMessages", "읽기 시작:", path);
+  try {
+    const snap = await getDocs(query(collection(db, "members", memberId, "memberMessages"), orderBy("createdAt", "desc"), limit(max)));
+    dbLog("getMemberMessages", `성공: ${snap.docs.length}건`);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) {
+    console.error("[DB:getMemberMessages] read failed:", { path, collection: "memberMessages", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
 }
 
 
 export async function getMemberOnboarding(memberId) {
   requireUid();
-  const snap = await getDoc(doc(db, "members", memberId, "memberOnboarding", "main"));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  const path = `members/${memberId}/memberOnboarding/main`;
+  dbLog("getMemberOnboarding", "읽기 시작:", path);
+  try {
+    const snap = await getDoc(doc(db, "members", memberId, "memberOnboarding", "main"));
+    dbLog("getMemberOnboarding", snap.exists() ? "성공: 문서 있음" : "성공: 문서 없음");
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  } catch(e) {
+    console.error("[DB:getMemberOnboarding] read failed:", { path, collection: "memberOnboarding", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
 }
 
 export async function saveMemberOnboarding(memberId, data) {

@@ -82,8 +82,8 @@ service cloud.firestore {
       }
 
       match /memberMessages/{messageId} {
-        allow read, create: if canAccessMember(memberId);
-        allow update, delete: if isTrainerOfMember(memberId);
+        allow read, create, update: if canAccessMember(memberId);
+        allow delete: if isTrainerOfMember(memberId);
       }
 
       match /bodyCheck/{docId} {
@@ -98,6 +98,11 @@ service cloud.firestore {
       match /nutrition/{docId} {
         allow read: if canAccessMember(memberId);
         allow write: if isTrainerOfMember(memberId);
+      }
+
+      match /memberOnboarding/{docId} {
+        allow read, create, update: if canAccessMember(memberId);
+        allow delete: if isTrainerOfMember(memberId);
       }
 
       match /{subCollection}/{docId} {

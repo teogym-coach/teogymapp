@@ -96,7 +96,8 @@ service cloud.firestore {
       }
 
       match /nutrition/{docId} {
-        allow read, write: if isTrainerOfMember(memberId);
+        allow read: if canAccessMember(memberId);
+        allow write: if isTrainerOfMember(memberId);
       }
 
       match /{subCollection}/{docId} {

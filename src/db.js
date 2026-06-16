@@ -106,7 +106,7 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
   result.bodyCheckRule = "trainerMatch OR memberUidMatch OR emailMatch";
   result.memberCheckinsRule = "trainerMatch OR memberUidMatch OR emailMatch";
   result.memberMessagesRule = "trainerMatch OR memberUidMatch OR emailMatch";
-  result.memberOnboardingRule = "현재 firestore.rules의 wildcard 때문에 trainerMatch만 허용";
+  result.memberOnboardingRule = "trainerMatch OR memberUidMatch OR emailMatch";
   dbLog(fn, "Firestore Rules 평가(클라이언트 추정):", result);
   return result;
 }
@@ -546,38 +546,43 @@ export async function getMemberAppProfile() {
     matchedBy: "none",
   };
 
-  const readAll = async (q, key, label) => {
-    dbLog("getMemberAppProfile", `읽기 시작: ${label}`);
+  const readAll = async (q, key, label, sourceLocation) => {
+    dbLog("getMemberAppProfile", `읽기 시작: ${label}`, { sourceLocation });
     try {
       const snap = await getDocs(q);
       const rows = snap.docs.map(toMember);
       diagnostics[key] = rows;
-      dbLog("getMemberAppProfile", `${label} 성공: ${rows.length}건`);
+      dbLog("getMemberAppProfile", `${label} 성공: ${rows.length}건`, { sourceLocation });
       return rows;
     } catch (e) {
-      const details = { path: label, ...describeFirestoreError(e), authUid: uid, authEmail };
+      const details = { path: label, sourceLocation, ...describeFirestoreError(e), authUid: uid, authEmail };
       diagnostics.queryErrors[key] = details;
-      console.error("[DB:getMemberAppProfile] diagnostic query failed:", details);
+      console.error("[DB:getMemberAppProfile] permission-denied/query failed:", details);
       return [];
     }
   };
 
+  const memberUidQueryPath = "members where memberUid == auth.currentUser.uid";
+  const emailQueryPath = "members where email == auth.currentUser.email.toLowerCase()";
   const memberUidMatches = await readAll(
     query(collection(db, "members"), where("memberUid", "==", uid)),
     "memberUidMatches",
-    "members where memberUid == auth.uid"
+    memberUidQueryPath,
+    "src/db.js:getMemberAppProfile:memberUid query"
   );
+  let emailMatches = [];
   if (authEmail) {
-    await readAll(
+    emailMatches = await readAll(
       query(collection(db, "members"), where("email", "==", authEmail)),
       "emailMatches",
-      "members where email == auth.email"
+      emailQueryPath,
+      "src/db.js:getMemberAppProfile:email query"
     );
   }
 
-  let profile = memberUidMatches[0] || null;
+  let profile = memberUidMatches[0] || emailMatches[0] || null;
   diagnostics.matchedMemberId = profile?.id || null;
-  diagnostics.matchedBy = memberUidMatches[0] ? "memberUid" : "none";
+  diagnostics.matchedBy = memberUidMatches[0] ? "memberUid" : (emailMatches[0] ? "email" : "none");
 
   if (profile) {
     profile = { ...profile, _matchedBy: diagnostics.matchedBy, _diagnostics: diagnostics };
@@ -587,10 +592,10 @@ export async function getMemberAppProfile() {
     return profile;
   }
 
-  dbWarn("getMemberAppProfile", "현재 Auth UID와 memberUid가 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
-  const err = new Error("현재 로그인 UID와 memberUid가 일치하는 회원 문서를 찾을 수 없습니다.");
+  dbWarn("getMemberAppProfile", "현재 Auth UID 또는 이메일과 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
+  const err = new Error("현재 로그인 UID 또는 이메일과 일치하는 회원 문서를 찾을 수 없습니다.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
-  err.memberAppDetails = { code: err.code, path: "members diagnostic queries", ...diagnostics };
+  err.memberAppDetails = { code: err.code, path: "members where memberUid == auth.currentUser.uid OR members where email == auth.currentUser.email.toLowerCase()", sourceLocation: "src/db.js:getMemberAppProfile", ...diagnostics };
   throw err;
 }
 

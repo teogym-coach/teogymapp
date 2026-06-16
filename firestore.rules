@@ -37,7 +37,7 @@ service cloud.firestore {
           || (
             m.email != null
             && request.auth.token.email != null
-            && request.auth.token.email.lower() == m.email
+            && request.auth.token.email.lower() == m.email.lower()
           )
         );
     }
@@ -50,7 +50,7 @@ service cloud.firestore {
       return isSignedIn()
         && resource.data.email != null
         && request.auth.token.email != null
-        && request.auth.token.email.lower() == resource.data.email;
+        && request.auth.token.email.lower() == resource.data.email.lower();
     }
 
     function isMemberUidOnlyLinkUpdate() {
@@ -73,7 +73,7 @@ service cloud.firestore {
         || (
           resource.data.email != null
           && request.auth.token.email != null
-          && request.auth.token.email.lower() == resource.data.email
+          && request.auth.token.email.lower() == resource.data.email.lower()
         )
       );
 

@@ -1,11 +1,13 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════
-//  TEO GYM — Firestore 보안 규칙 v2
+//  TEO GYM — Firestore 보안 규칙 v3
 //
-//  마이그레이션 대응:
-//    trainerUid 없는 문서도 로그인한 사용자가 읽고 업데이트 가능
-//    → 마이그레이션 완료 후 이 조건 제거 가능
+//  회원앱 원칙:
+//    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터만 접근
+//    - 회원 본인: memberUid 또는 Authentication email 이 회원 문서와 일치할 때만 접근
+//    - trainerUid == null 인 문서를 모든 로그인 사용자에게 열어주는 예외는 제거
+//    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
 // ═══════════════════════════════════════════════════════════════
 
 service cloud.firestore {
@@ -19,56 +21,78 @@ service cloud.firestore {
       return request.auth.uid;
     }
 
-    function getMemberTrainerUid(memberId) {
-      return get(/databases/$(database)/documents/members/$(memberId)).data.trainerUid;
+    function memberDoc(memberId) {
+      return get(/databases/$(database)/documents/members/$(memberId)).data;
     }
 
-    // 내 회원 OR trainerUid 없는 회원 (마이그레이션용)
+    function isTrainerOfMember(memberId) {
+      return isSignedIn() && memberDoc(memberId).trainerUid == uid();
+    }
+
+    function isMemberSelf(memberId) {
+      let m = memberDoc(memberId);
+      return isSignedIn()
+        && (
+          m.memberUid == uid()
+          || (m.email != null && request.auth.token.email == m.email)
+        );
+    }
+
     function canAccessMember(memberId) {
-      let trainerUid = getMemberTrainerUid(memberId);
-      return isSignedIn() && (trainerUid == uid() || trainerUid == null);
+      return isTrainerOfMember(memberId) || isMemberSelf(memberId);
     }
 
     match /members/{memberId} {
 
-      // 읽기: 내 회원 OR trainerUid 미설정 문서 (마이그레이션 전)
       allow read: if isSignedIn() && (
-        !("trainerUid" in resource.data) ||
         resource.data.trainerUid == uid()
+        || resource.data.memberUid == uid()
+        || (resource.data.email != null && request.auth.token.email == resource.data.email)
       );
 
       // 생성: 반드시 내 uid로 trainerUid 설정
       allow create: if isSignedIn()
                     && request.resource.data.trainerUid == uid();
 
-      // 수정: 내 회원 OR trainerUid 없는 문서 (마이그레이션 허용)
-      allow update: if isSignedIn() && (
-        !("trainerUid" in resource.data) ||
-        resource.data.trainerUid == uid()
-      ) && request.resource.data.trainerUid == uid();
+      // 수정/삭제: 대표자만 허용. 회원 본인은 하위 checkins/messages만 작성한다.
+      allow update: if isSignedIn()
+                    && resource.data.trainerUid == uid()
+                    && request.resource.data.trainerUid == uid();
 
-      // 삭제: 내 회원만
       allow delete: if isSignedIn()
                     && resource.data.trainerUid == uid();
 
       match /sessions/{sessionId} {
-        allow read, write: if canAccessMember(memberId);
+        allow read: if isTrainerOfMember(memberId)
+                    || (isMemberSelf(memberId) && resource.data.isPublished == true);
+        allow write: if isTrainerOfMember(memberId);
+      }
+
+      match /memberCheckins/{checkinId} {
+        allow read, create, update: if canAccessMember(memberId);
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
+      match /memberMessages/{messageId} {
+        allow read, create: if canAccessMember(memberId);
+        allow update, delete: if isTrainerOfMember(memberId);
       }
 
       match /bodyCheck/{docId} {
-        allow read, write: if canAccessMember(memberId);
+        allow read: if canAccessMember(memberId);
+        allow write: if isTrainerOfMember(memberId);
       }
 
       match /assessments/{assessmentId} {
-        allow read, write: if canAccessMember(memberId);
+        allow read, write: if isTrainerOfMember(memberId);
       }
 
       match /nutrition/{docId} {
-        allow read, write: if canAccessMember(memberId);
+        allow read, write: if isTrainerOfMember(memberId);
       }
 
       match /{subCollection}/{docId} {
-        allow read, write: if canAccessMember(memberId);
+        allow read, write: if isTrainerOfMember(memberId);
       }
     }
   }

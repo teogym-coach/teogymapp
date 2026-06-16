@@ -15,7 +15,7 @@
 // ═══════════════════════════════════════════════════
 import {
   collection, doc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch,
+  query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit,
 } from "firebase/firestore";
 import { db, auth } from "./firebase-config";
 
@@ -446,6 +446,47 @@ export async function saveNutrition(memberId, data) {
     console.error("[DB] saveNutrition error:", e.message, `memberId=${memberId}`);
     throw new Error("영양 관리 저장 실패: " + e.message);
   }
+}
+
+// ════════════════════════════════════════════════════
+// 회원앱 MVP (memberCheckins / memberMessages)
+// ════════════════════════════════════════════════════
+export async function getMemberAppProfile() {
+  const uid = requireUid();
+  const email = (auth.currentUser?.email || "").trim();
+  const byUid = await getDocs(query(collection(db, "members"), where("memberUid", "==", uid), limit(1)));
+  if (!byUid.empty) return { id: byUid.docs[0].id, ...byUid.docs[0].data() };
+  if (email) {
+    const byEmail = await getDocs(query(collection(db, "members"), where("email", "==", email), limit(1)));
+    if (!byEmail.empty) return { id: byEmail.docs[0].id, ...byEmail.docs[0].data() };
+  }
+  return null;
+}
+
+export async function saveMemberCheckin(memberId, dateKey, data) {
+  requireUid();
+  const ref = doc(db, "members", memberId, "memberCheckins", dateKey);
+  await setDoc(ref, { ...clean(data), date: dateKey, updatedAt: serverTimestamp(), createdBy: auth.currentUser.uid }, { merge: true });
+}
+
+export async function getMemberCheckins(memberId, max = 30) {
+  requireUid();
+  const snap = await getDocs(query(collection(db, "members", memberId, "memberCheckins"), orderBy("date", "desc"), limit(max)));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function addMemberMessage(memberId, data) {
+  requireUid();
+  const ref = await addDoc(collection(db, "members", memberId, "memberMessages"), {
+    ...clean(data), status: "new", createdAt: serverTimestamp(), createdBy: auth.currentUser.uid,
+  });
+  return { id: ref.id, ...data };
+}
+
+export async function getMemberMessages(memberId, max = 30) {
+  requireUid();
+  const snap = await getDocs(query(collection(db, "members", memberId, "memberMessages"), orderBy("createdAt", "desc"), limit(max)));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 // ════════════════════════════════════════════════════

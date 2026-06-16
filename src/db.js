@@ -489,6 +489,20 @@ export async function getMemberMessages(memberId, max = 30) {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
+
+export async function getMemberOnboarding(memberId) {
+  requireUid();
+  const snap = await getDoc(doc(db, "members", memberId, "memberOnboarding", "main"));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+export async function saveMemberOnboarding(memberId, data) {
+  requireUid();
+  const ref = doc(db, "members", memberId, "memberOnboarding", "main");
+  await setDoc(ref, { ...clean(data), updatedAt: serverTimestamp() }, { merge: true });
+  return { id: "main", ...data };
+}
+
 // ════════════════════════════════════════════════════
 // 마이그레이션 — 기존 회원에 trainerUid 추가 (1회만 실행)
 // ════════════════════════════════════════════════════

@@ -46,6 +46,25 @@ service cloud.firestore {
       return isTrainerOfMember(memberId) || isMemberSelf(memberId);
     }
 
+    function signedInEmailMatchesMember() {
+      return isSignedIn()
+        && resource.data.email != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == resource.data.email;
+    }
+
+    function isMemberUidOnlyLinkUpdate() {
+      return signedInEmailMatchesMember()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "memberUid",
+          "memberUidLinkedAt",
+          "memberUidLinkedBy",
+          "memberUidPrevious"
+        ])
+        && request.resource.data.memberUid == uid()
+        && request.resource.data.memberUidLinkedBy == uid();
+    }
+
     match /members/{memberId} {
 
       allow read: if isSignedIn() && (
@@ -62,10 +81,12 @@ service cloud.firestore {
       allow create: if isSignedIn()
                     && request.resource.data.trainerUid == uid();
 
-      // 수정/삭제: 대표자만 허용. 회원 본인은 하위 checkins/messages만 작성한다.
-      allow update: if isSignedIn()
-                    && resource.data.trainerUid == uid()
-                    && request.resource.data.trainerUid == uid();
+      // 수정: 대표자는 전체 관리 가능. 회원 본인은 이메일이 일치하는 경우 memberUid 연결 필드만 수정 가능.
+      allow update: if (
+                      isSignedIn()
+                      && resource.data.trainerUid == uid()
+                      && request.resource.data.trainerUid == uid()
+                    ) || isMemberUidOnlyLinkUpdate();
 
       allow delete: if isSignedIn()
                     && resource.data.trainerUid == uid();

@@ -141,9 +141,18 @@ export async function updateMember(id, data) {
   dbLog("updateMember", id);
   const snap = await getDoc(doc(db, "members", id));
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
-  if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
+  const before = snap.data();
+  if (before.trainerUid !== uid) throw new Error("권한이 없습니다.");
+  const normalized = clean(normalizeMemberData(data));
+  const beforeEmail = (before.email || "").trim().toLowerCase();
+  const nextEmail = typeof normalized.email === "string" ? normalized.email : beforeEmail;
+  if (before.memberUid && nextEmail && beforeEmail && nextEmail !== beforeEmail && normalized.memberUid === undefined) {
+    normalized.memberUid = "";
+    normalized.memberUidUnlinkedAt = new Date().toISOString();
+    normalized.memberUidUnlinkReason = "member-email-changed";
+  }
   await updateDoc(doc(db, "members", id), {
-    ...clean(normalizeMemberData(data)),
+    ...normalized,
     trainerUid: uid,
     updatedAt:  serverTimestamp(),
   });
@@ -504,29 +513,56 @@ export async function saveNutrition(memberId, data) {
 // ════════════════════════════════════════════════════
 // 회원앱 MVP (memberCheckins / memberMessages)
 // ════════════════════════════════════════════════════
+export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = null) {
+  const uid = requireUid();
+  const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
+  if (!authEmail) throw new Error("Firebase Auth 이메일이 없어 회원 문서 연결을 진행할 수 없습니다.");
+  await updateDoc(doc(db, "members", memberId), {
+    memberUid: uid,
+    memberUidLinkedAt: serverTimestamp(),
+    memberUidLinkedBy: uid,
+    memberUidPrevious: previousMemberUid || "",
+  });
+  dbLog("linkMemberUidToCurrentUser", `members/${memberId} -> ${uid}`);
+}
+
 export async function getMemberAppProfile() {
   const uid = requireUid();
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
-  const memberQuery = query(collection(db, "members"), where("memberUid", "==", uid), limit(1));
   dbLog("getMemberAppProfile", "1) Firebase Auth UID:", uid, "email:", authEmail);
-  dbLog("getMemberAppProfile", "읽기 시작: members where memberUid == auth.uid limit 1");
+
+  const readFirst = async (q, label) => {
+    dbLog("getMemberAppProfile", `읽기 시작: ${label}`);
+    const snap = await getDocs(q);
+    dbLog("getMemberAppProfile", `${label} 성공: ${snap.docs.length}건`);
+    return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data(), _matchedBy: label };
+  };
+
   try {
-    const byUid = await getDocs(memberQuery);
-    dbLog("getMemberAppProfile", `members 쿼리 성공: ${byUid.docs.length}건`);
-    if (!byUid.empty) {
-      const profile = { id: byUid.docs[0].id, ...byUid.docs[0].data() };
+    let profile = await readFirst(query(collection(db, "members"), where("memberUid", "==", uid), limit(1)), "members where memberUid == auth.uid limit 1");
+    if (!profile && authEmail) {
+      profile = await readFirst(query(collection(db, "members"), where("email", "==", authEmail), limit(1)), "members where email == auth.email limit 1");
+      if (profile && profile.memberUid !== uid) {
+        const previousMemberUid = profile.memberUid || "";
+        dbWarn("getMemberAppProfile", "이메일 일치 회원의 memberUid를 현재 Auth UID로 재연결합니다.", { memberId: profile.id, previousMemberUid, authUid: uid, authEmail });
+        await linkMemberUidToCurrentUser(profile.id, previousMemberUid);
+        profile = { ...profile, memberUid: uid, memberUidPrevious: previousMemberUid, memberUidRelinked: true };
+      }
+    }
+    if (profile) {
       dbLog("getMemberAppProfile", "2) members.memberUid:", profile.memberUid || null);
       dbLog("getMemberAppProfile", "3) UID 일치 여부:", profile.memberUid === uid);
       logMemberRulesEvaluation("getMemberAppProfile", profile.id, profile);
       return profile;
     }
-    dbWarn("getMemberAppProfile", "members.memberUid가 현재 Auth UID와 일치하는 문서를 찾지 못했습니다.", { authUid: uid, authEmail });
+    dbWarn("getMemberAppProfile", "현재 Auth UID 또는 이메일과 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail });
     return null;
   } catch(e) {
-    console.error("[DB:getMemberAppProfile] permission/read failed:", { path: "members", query: "where memberUid == auth.uid limit 1", ...describeFirestoreError(e), authUid: uid, authEmail });
+    console.error("[DB:getMemberAppProfile] permission/read/link failed:", { path: "members", query: "memberUid == auth.uid OR email == auth.email", ...describeFirestoreError(e), authUid: uid, authEmail });
     throw e;
   }
 }
+
 
 export async function saveMemberCheckin(memberId, dateKey, data) {
   requireUid();

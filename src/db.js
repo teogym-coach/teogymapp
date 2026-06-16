@@ -27,6 +27,14 @@ function requireUid() {
 }
 
 // ── undefined 제거 + Firestore 특수 객체 보존 ──────
+function normalizeMemberData(data) {
+  const normalized = { ...data };
+  if (typeof normalized.email === "string") {
+    normalized.email = normalized.email.trim().toLowerCase();
+  }
+  return normalized;
+}
+
 function clean(obj) {
   if (obj === undefined) return undefined;
   if (obj === null)      return undefined;
@@ -80,7 +88,7 @@ export async function addMember(data) {
   const uid = requireUid();
   dbLog("addMember", data.name);
   const payload = {
-    ...clean(data),
+    ...clean(normalizeMemberData(data)),
     trainerUid: uid,
     createdAt:  serverTimestamp(),
   };
@@ -96,7 +104,7 @@ export async function updateMember(id, data) {
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
   await updateDoc(doc(db, "members", id), {
-    ...clean(data),
+    ...clean(normalizeMemberData(data)),
     trainerUid: uid,
     updatedAt:  serverTimestamp(),
   });
@@ -453,7 +461,7 @@ export async function saveNutrition(memberId, data) {
 // ════════════════════════════════════════════════════
 export async function getMemberAppProfile() {
   const uid = requireUid();
-  const email = (auth.currentUser?.email || "").trim();
+  const email = (auth.currentUser?.email || "").trim().toLowerCase();
   const byUid = await getDocs(query(collection(db, "members"), where("memberUid", "==", uid), limit(1)));
   if (!byUid.empty) return { id: byUid.docs[0].id, ...byUid.docs[0].data() };
   if (email) {

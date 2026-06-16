@@ -1658,6 +1658,13 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                         <Mo c="#3a3a5a" s={9}>{meta.lastMuscle}</Mo>
                       )}
                     </div>
+                    {/* 이메일 */}
+                    {m.email && (
+                      <Mo c="#3a3a5a" s={9} style={{display:"block",marginTop:1,
+                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        ✉️ {m.email}
+                      </Mo>
+                    )}
                     {/* 목표 */}
                     {m.goal && (
                       <Mo c="#2a2a42" s={9} style={{display:"block",marginTop:1,
@@ -2074,6 +2081,7 @@ function MemberForm({ initial, onSave, onBack }) {
   // ── 기존 필드 (하위 호환) ──────────────────────
   const [name,       setName]       = useState(initial?.name         || "");
   const [phone,      setPhone]      = useState(initial?.phone        || "");
+  const [email,      setEmail]      = useState(initial?.email        || "");
   const [goal,       setGoal]       = useState(initial?.goal         || sv.primaryGoal || "");
   const [startDate,  setStartDate]  = useState(initial?.startDate    || new Date().toISOString().split("T")[0]);
   const [painArea,   setPainArea]   = useState(initial?.painArea     || "");
@@ -2230,8 +2238,9 @@ function MemberForm({ initial, onSave, onBack }) {
       ? painParts.join(", ") + (painSituation ? ` (${painSituation})` : "")
       : painArea;
     const syncedGoal = primaryGoal || goal;
+    const normalizedEmail = email.trim().toLowerCase();
     onSave({
-      name, phone, startDate, memo, totalSessions: sessions, ticketInfo,
+      name, phone, email: normalizedEmail, startDate, memo, totalSessions: sessions, ticketInfo,
       goal: syncedGoal, painArea: syncedPainArea,
       survey,
     });
@@ -2301,6 +2310,7 @@ function MemberForm({ initial, onSave, onBack }) {
                 <Field label="이름 *" value={name} onChange={setName} placeholder="김회원" />
                 <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
               </div>
+              <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
               <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
                 <StepLabel label="성별" />
@@ -2628,6 +2638,9 @@ function MemberForm({ initial, onSave, onBack }) {
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginTop:12}}>
               <Field label="나이" value={age} onChange={setAge} placeholder="예: 32" type="number" />
               <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
+            </div>
+            <div style={{marginTop:9}}>
+              <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginTop:9}}>
               <Field label="키 (cm)" value={height} onChange={setHeight} placeholder="예: 170" type="number" />
@@ -2986,6 +2999,7 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit }) {
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"#fff"}}>{member.name}</div>
               <Mo c="#54546a" s={9}>{member.startDate || ""}{member.ticketInfo ? " · "+member.ticketInfo : ""}</Mo>
+              {member.email && <Mo c="#64748b" s={10} style={{display:"block",marginTop:2}}>✉️ {member.email}</Mo>}
               {member.goal && <Mo c="#7070a0" s={11} style={{display:"block",marginTop:2}}>{member.goal}</Mo>}
             </div>
           </div>

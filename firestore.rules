@@ -34,7 +34,11 @@ service cloud.firestore {
       return isSignedIn()
         && (
           m.memberUid == uid()
-          || (m.email != null && request.auth.token.email == m.email)
+          || (
+            m.email != null
+            && request.auth.token.email != null
+            && request.auth.token.email.lower() == m.email
+          )
         );
     }
 
@@ -47,7 +51,11 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.trainerUid == uid()
         || resource.data.memberUid == uid()
-        || (resource.data.email != null && request.auth.token.email == resource.data.email)
+        || (
+          resource.data.email != null
+          && request.auth.token.email != null
+          && request.auth.token.email.lower() == resource.data.email
+        )
       );
 
       // 생성: 반드시 내 uid로 trainerUid 설정

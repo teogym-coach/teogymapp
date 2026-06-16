@@ -461,13 +461,8 @@ export async function saveNutrition(memberId, data) {
 // ════════════════════════════════════════════════════
 export async function getMemberAppProfile() {
   const uid = requireUid();
-  const email = (auth.currentUser?.email || "").trim().toLowerCase();
   const byUid = await getDocs(query(collection(db, "members"), where("memberUid", "==", uid), limit(1)));
   if (!byUid.empty) return { id: byUid.docs[0].id, ...byUid.docs[0].data() };
-  if (email) {
-    const byEmail = await getDocs(query(collection(db, "members"), where("email", "==", email), limit(1)));
-    if (!byEmail.empty) return { id: byEmail.docs[0].id, ...byEmail.docs[0].data() };
-  }
   return null;
 }
 

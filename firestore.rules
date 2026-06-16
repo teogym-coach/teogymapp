@@ -1,13 +1,14 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════
-//  TEO GYM — Firestore 보안 규칙 v4
+//  TEO GYM — Firestore 보안 규칙 v5
 //
 //  회원앱 원칙:
-//    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터만 접근
-//    - 회원 본인: memberAppIndex/{uid} 를 통해 memberId 를 얻은 뒤,
-//                members/{memberId}.memberUid == request.auth.uid 일 때만 접근
-//    - 이메일 기반 조회는 memberAppIndex 도입으로 제거
+//    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터 접근
+//    - 회원 본인: members/{memberId}.memberUid == request.auth.uid 인 자기 문서 접근
+//    - memberAppIndex/{uid} 는 회원 본인이 자신의 memberId를 찾기 위한 인덱스
+//    - 이메일 기반 members 조회는 UID 인덱스가 없거나 진단/마이그레이션이
+//      필요한 경우에만 본인 Auth 이메일과 문서 이메일이 정확히 일치할 때 허용
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
 // ═══════════════════════════════════════════════════════════════
 
@@ -22,17 +23,47 @@ service cloud.firestore {
       return request.auth.uid;
     }
 
+    function authEmail() {
+      return request.auth.token.email;
+    }
+
+    function hasAuthEmail() {
+      return isSignedIn() && authEmail() is string && authEmail() != "";
+    }
+
     function memberDoc(memberId) {
       return get(/databases/$(database)/documents/members/$(memberId)).data;
     }
 
+    function isTrainerData(data) {
+      return isSignedIn() && data.trainerUid == uid();
+    }
+
+    function isMemberUidData(data) {
+      return isSignedIn() && data.memberUid == uid();
+    }
+
+    function isMemberEmailData(data) {
+      return hasAuthEmail()
+             && (
+               data.email == authEmail()
+               || data.memberAppAccountEmail == authEmail()
+             );
+    }
+
+    function canReadMemberData(data) {
+      return isTrainerData(data)
+             || isMemberUidData(data)
+             || isMemberEmailData(data);
+    }
+
     function isTrainerOfMember(memberId) {
-      return isSignedIn() && memberDoc(memberId).trainerUid == uid();
+      return isTrainerData(memberDoc(memberId));
     }
 
     function isMemberSelf(memberId) {
       let m = memberDoc(memberId);
-      return isSignedIn() && m.memberUid == uid();
+      return isMemberUidData(m) || isMemberEmailData(m);
     }
 
     function canAccessMember(memberId) {
@@ -41,24 +72,28 @@ service cloud.firestore {
 
     // ── memberAppIndex ──────────────────────────────────────
     // 회원 본인만 자신의 인덱스 문서를 읽을 수 있음
-    // 쓰기는 Cloud Functions (Admin SDK) 또는 관리자만 허용
+    // 쓰기는 Cloud Functions(Admin SDK), Firebase Console 등 서버 권한에서 수행
     match /memberAppIndex/{indexUid} {
-      allow read: if isSignedIn() && request.auth.uid == indexUid;
-      allow write: if false; // Admin SDK(Cloud Functions)와 Firebase Console만 허용
+      allow get, list: if isSignedIn() && uid() == indexUid;
+      allow create, update, delete: if false;
     }
 
     match /members/{memberId} {
 
-      allow read: if isSignedIn() && (
-        resource.data.trainerUid == uid()
-        || resource.data.memberUid == uid()
-      );
+      // get: members/{memberId} 직접 읽기 허용
+      // list: where("memberUid", "==", request.auth.uid),
+      //       where("trainerUid", "==", request.auth.uid),
+      //       where("email", "==", request.auth.token.email),
+      //       where("memberAppAccountEmail", "==", request.auth.token.email)
+      //       처럼 Rules가 모든 반환 문서가 본인 접근 가능하다고 증명할 수 있는
+      //       쿼리만 허용됨. 조건 없는 전체 목록 조회는 거부됨.
+      allow get, list: if canReadMemberData(resource.data);
 
       // 생성: 반드시 내 uid로 trainerUid 설정
       allow create: if isSignedIn()
                     && request.resource.data.trainerUid == uid();
 
-      // 수정: 대표자만 전체 관리 가능
+      // 수정: 대표자만 전체 관리 가능하며 trainerUid 소유권은 유지해야 함
       allow update: if isSignedIn()
                     && resource.data.trainerUid == uid()
                     && request.resource.data.trainerUid == uid();

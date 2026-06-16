@@ -61,7 +61,10 @@ exports.reconnectMemberUidByEmail = onCall({ region: "us-central1" }, async (req
   const previousMemberUid = data.memberUid || "";
   const uid = userRecord.uid;
   try {
-    await ref.update({
+    const batch = admin.firestore().batch();
+
+    // 1) members 문서 업데이트
+    batch.update(ref, {
       memberUid: uid,
       memberUidLinkedAt: admin.firestore.FieldValue.serverTimestamp(),
       memberUidLinkedBy: request.auth.uid,
@@ -72,6 +75,18 @@ exports.reconnectMemberUidByEmail = onCall({ region: "us-central1" }, async (req
       memberAppLastInviteLog: { ok: true, code: "ADMIN_AUTH_UID_LINKED", uid, email, at: new Date().toISOString() },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+
+    // 2) memberAppIndex/{uid} 인덱스 문서 저장
+    const indexRef = admin.firestore().collection("memberAppIndex").doc(uid);
+    batch.set(indexRef, {
+      memberId,
+      email,
+      linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+      linkedBy: request.auth.uid,
+    });
+
+    await batch.commit();
+    console.log("[reconnectMemberUidByEmail] members + memberAppIndex 저장 완료", { memberId, uid, email });
   } catch (error) {
     console.error("[reconnectMemberUidByEmail] members.memberUid update failed", {
       code: error?.code || "unknown",

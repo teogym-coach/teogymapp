@@ -814,6 +814,15 @@ async function createMemberAuthAccountIfNeeded(email){
   throw new Error(`Firebase Auth 사용자 생성 실패: ${getFirebaseAuthErrorMessage(code)}`);
 }
 
+function getCallableErrorDetails(error){
+  return error?.details||error?.customData?._tokenResponse||{};
+}
+function formatCallableError(error){
+  const details=getCallableErrorDetails(error);
+  const detailCode=details?.code||error?.code||"unknown";
+  const message=details?.message||error?.message||String(error);
+  return {details,detailCode,message,text:`${detailCode} · ${message}`};
+}
 async function reconnectMemberUidByEmail(memberId,email){
   const callable=httpsCallable(functions,"reconnectMemberUidByEmail");
   const result=await callable({memberId,email});
@@ -841,16 +850,23 @@ function AdminMemberAppPanel({member,onAccountCreated}){
     if(!email){setMsg("회원 이메일을 먼저 저장해주세요."); return;}
     setBusy(true); setMsg(""); setInviteLog([]);
     try{
-      addLog(true,`재연결 기준 이메일 확인: ${email}`);
+      addLog(true,`요청 이메일: ${email}`);
+      addLog(true,`호출한 Firebase projectId: ${firebaseConfig.projectId}`);
       const linked=await reconnectMemberUidByEmail(memberId,email);
       const patch={memberUid:linked.memberUid,memberAppAccountEmail:email,memberAppAccountStatus:"available",memberAppLastInviteLog:{ok:true,code:"ADMIN_AUTH_UID_LINKED",uid:linked.authUid,at:new Date().toISOString()}};
-      addLog(true,`Firebase Admin UID 조회 성공 · auth UID: ${linked.authUid}`);
+      addLog(true,`Cloud Function projectId: ${linked.projectId||"unknown"}`);
+      addLog(true,`Auth UID 조회 성공 여부: ${linked.authUidLookupSucceeded?"성공":"실패"}`);
+      addLog(true,`조회된 UID: ${linked.authUid||linked.memberUid||"없음"}`);
+      addLog(true,`members.memberUid 저장 성공 여부: ${linked.membersMemberUidSaved?"성공":"실패"}`);
       addLog(true,`members.memberUid 저장 완료 · members.memberUid: ${linked.memberUid}`);
       setMsg(`memberUid 재연결 완료 · auth UID: ${linked.authUid} · members.memberUid: ${linked.memberUid}`);
       onAccountCreated?.(patch);
     }catch(e){
-      const fail=e?.message||"memberUid 재연결 실패";
-      addLog(false,fail); setMsg(fail);
+      const {details,text}=formatCallableError(e);
+      addLog(false,`Auth UID 조회 성공 여부: ${details?.authUidLookupSucceeded?"성공":"실패"}`);
+      addLog(false,`members.memberUid 저장 성공 여부: ${details?.membersMemberUidSaved?"성공":"실패"}`);
+      addLog(false,`실패 원본 오류: ${text}`);
+      setMsg(`memberUid 재연결 실패 · ${text}`);
     }finally{setBusy(false);}
   };
   const sendInvite=async()=>{
@@ -887,14 +903,18 @@ function AdminMemberAppPanel({member,onAccountCreated}){
         patch.memberAppAccountStatus="available";
         patch.memberAppLastInviteLog={ok:true,code:"ADMIN_AUTH_UID_LINKED",uid:linked.authUid,at:now};
         await updateMember(memberId,{memberUid:linked.memberUid,memberAppAccountStatus:"available",memberAppLastInviteLog:patch.memberAppLastInviteLog});
-        addLog(true,`Firebase Admin UID 조회 성공 · auth UID: ${linked.authUid}`);
+        addLog(true,`Cloud Function projectId: ${linked.projectId||"unknown"}`);
+        addLog(true,`Auth UID 조회 성공 여부: ${linked.authUidLookupSucceeded?"성공":"실패"}`);
+        addLog(true,`조회된 UID: ${linked.authUid||linked.memberUid||"없음"}`);
+        addLog(true,`members.memberUid 저장 성공 여부: ${linked.membersMemberUidSaved?"성공":"실패"}`);
         addLog(true,`members.memberUid 저장 완료: ${linked.memberUid}`);
         setMsg(`회원앱 초대를 발송했고 UID 재연결도 완료되었습니다. auth UID: ${linked.authUid} · members.memberUid: ${linked.memberUid}`);
       }
       onAccountCreated?.(patch);
     }catch(e){
+      const {details,text}=formatCallableError(e);
       const fail=e?.message||"회원앱 초대 처리 실패";
-      addLog(false,fail);
+      addLog(false,details?.code?`원본 오류: ${text}`:fail);
       const patch={memberAppAccountEmail:email,memberAppAccountStatus:"invite-failed",memberAppLastInviteLog:{ok:false,error:fail,uid:prepared?.uid||existingMemberUid||null,at:new Date().toISOString()}};
       try{await updateMember(memberId,patch); onAccountCreated?.(patch);}catch{}
       setMsg(fail);

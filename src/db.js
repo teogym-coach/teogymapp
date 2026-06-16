@@ -531,36 +531,61 @@ export async function getMemberAppProfile() {
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
   dbLog("getMemberAppProfile", "1) Firebase Auth UID:", uid, "email:", authEmail);
 
-  const readFirst = async (q, label) => {
-    dbLog("getMemberAppProfile", `읽기 시작: ${label}`);
-    const snap = await getDocs(q);
-    dbLog("getMemberAppProfile", `${label} 성공: ${snap.docs.length}건`);
-    return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data(), _matchedBy: label };
+  const toMember = (docSnap) => ({ id: docSnap.id, ...docSnap.data() });
+  const diagnostics = {
+    authUid: uid,
+    authEmail,
+    memberUidMatches: [],
+    emailMatches: [],
+    queryErrors: {},
+    matchedMemberId: null,
+    matchedBy: "none",
   };
 
-  try {
-    let profile = await readFirst(query(collection(db, "members"), where("memberUid", "==", uid), limit(1)), "members where memberUid == auth.uid limit 1");
-    if (!profile && authEmail) {
-      profile = await readFirst(query(collection(db, "members"), where("email", "==", authEmail), limit(1)), "members where email == auth.email limit 1");
-      if (profile && profile.memberUid !== uid) {
-        const previousMemberUid = profile.memberUid || "";
-        dbWarn("getMemberAppProfile", "이메일 일치 회원의 memberUid를 현재 Auth UID로 재연결합니다.", { memberId: profile.id, previousMemberUid, authUid: uid, authEmail });
-        await linkMemberUidToCurrentUser(profile.id, previousMemberUid);
-        profile = { ...profile, memberUid: uid, memberUidPrevious: previousMemberUid, memberUidRelinked: true };
-      }
+  const readAll = async (q, key, label) => {
+    dbLog("getMemberAppProfile", `읽기 시작: ${label}`);
+    try {
+      const snap = await getDocs(q);
+      const rows = snap.docs.map(toMember);
+      diagnostics[key] = rows;
+      dbLog("getMemberAppProfile", `${label} 성공: ${rows.length}건`);
+      return rows;
+    } catch (e) {
+      const details = { path: label, ...describeFirestoreError(e), authUid: uid, authEmail };
+      diagnostics.queryErrors[key] = details;
+      console.error("[DB:getMemberAppProfile] diagnostic query failed:", details);
+      return [];
     }
-    if (profile) {
-      dbLog("getMemberAppProfile", "2) members.memberUid:", profile.memberUid || null);
-      dbLog("getMemberAppProfile", "3) UID 일치 여부:", profile.memberUid === uid);
-      logMemberRulesEvaluation("getMemberAppProfile", profile.id, profile);
-      return profile;
-    }
-    dbWarn("getMemberAppProfile", "현재 Auth UID 또는 이메일과 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail });
-    return null;
-  } catch(e) {
-    console.error("[DB:getMemberAppProfile] permission/read/link failed:", { path: "members", query: "memberUid == auth.uid OR email == auth.email", ...describeFirestoreError(e), authUid: uid, authEmail });
-    throw e;
+  };
+
+  const memberUidMatches = await readAll(
+    query(collection(db, "members"), where("memberUid", "==", uid)),
+    "memberUidMatches",
+    "members where memberUid == auth.uid"
+  );
+  const emailMatches = authEmail ? await readAll(
+    query(collection(db, "members"), where("email", "==", authEmail)),
+    "emailMatches",
+    "members where email == auth.email"
+  ) : [];
+
+  let profile = memberUidMatches[0] || emailMatches[0] || null;
+  diagnostics.matchedMemberId = profile?.id || null;
+  diagnostics.matchedBy = memberUidMatches[0] ? "memberUid" : (emailMatches[0] ? "email" : "none");
+
+  if (profile) {
+    profile = { ...profile, _matchedBy: diagnostics.matchedBy, _diagnostics: diagnostics };
+    dbLog("getMemberAppProfile", "2) 최종 매칭 기준:", diagnostics.matchedBy);
+    dbLog("getMemberAppProfile", "3) 최종 members.memberUid:", profile.memberUid || null);
+    logMemberRulesEvaluation("getMemberAppProfile", profile.id, profile);
+    return profile;
   }
+
+  dbWarn("getMemberAppProfile", "현재 Auth UID 또는 이메일과 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
+  const err = new Error("현재 로그인 UID 또는 이메일과 일치하는 회원 문서를 찾을 수 없습니다.");
+  err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
+  err.memberAppDetails = { code: err.code, path: "members diagnostic queries", ...diagnostics };
+  throw err;
 }
 
 

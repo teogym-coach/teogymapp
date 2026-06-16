@@ -27,14 +27,10 @@ function requireUid() {
 }
 
 // ── undefined 제거 + Firestore 특수 객체 보존 ──────
-export function normalizeMemberEmail(email) {
-  return typeof email === "string" ? email.trim().toLowerCase() : email;
-}
-
 function normalizeMemberData(data) {
   const normalized = { ...data };
   if (typeof normalized.email === "string") {
-    normalized.email = normalizeMemberEmail(normalized.email);
+    normalized.email = normalized.email.trim().toLowerCase();
   }
   return normalized;
 }
@@ -106,7 +102,7 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
   result.bodyCheckRule = "trainerMatch OR memberUidMatch OR emailMatch";
   result.memberCheckinsRule = "trainerMatch OR memberUidMatch OR emailMatch";
   result.memberMessagesRule = "trainerMatch OR memberUidMatch OR emailMatch";
-  result.memberOnboardingRule = "trainerMatch OR memberUidMatch OR emailMatch";
+  result.memberOnboardingRule = "현재 firestore.rules의 wildcard 때문에 trainerMatch만 허용";
   dbLog(fn, "Firestore Rules 평가(클라이언트 추정):", result);
   return result;
 }
@@ -535,7 +531,6 @@ export async function getMemberAppProfile() {
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
   dbLog("getMemberAppProfile", "1) Firebase Auth UID:", uid, "email:", authEmail);
 
-  const toMember = (docSnap) => ({ id: docSnap.id, ...docSnap.data() });
   const diagnostics = {
     authUid: uid,
     authEmail,
@@ -546,56 +541,57 @@ export async function getMemberAppProfile() {
     matchedBy: "none",
   };
 
-  const readAll = async (q, key, label, sourceLocation) => {
-    dbLog("getMemberAppProfile", `읽기 시작: ${label}`, { sourceLocation });
-    try {
-      const snap = await getDocs(q);
-      const rows = snap.docs.map(toMember);
-      diagnostics[key] = rows;
-      dbLog("getMemberAppProfile", `${label} 성공: ${rows.length}건`, { sourceLocation });
-      return rows;
-    } catch (e) {
-      const details = { path: label, sourceLocation, ...describeFirestoreError(e), authUid: uid, authEmail };
-      diagnostics.queryErrors[key] = details;
-      console.error("[DB:getMemberAppProfile] permission-denied/query failed:", details);
-      return [];
+  // ── Step 1: memberAppIndex/{uid} 읽기 ─────────────────────
+  let memberId = null;
+  try {
+    const indexSnap = await getDoc(doc(db, "memberAppIndex", uid));
+    if (indexSnap.exists()) {
+      memberId = indexSnap.data()?.memberId || null;
+      dbLog("getMemberAppProfile", "2) memberAppIndex 조회 성공 memberId:", memberId);
+    } else {
+      dbLog("getMemberAppProfile", "2) memberAppIndex 문서 없음 uid:", uid);
     }
-  };
-
-  const memberUidQueryPath = "members where memberUid == auth.currentUser.uid";
-  const emailQueryPath = "members where email == auth.currentUser.email.toLowerCase()";
-  const memberUidMatches = await readAll(
-    query(collection(db, "members"), where("memberUid", "==", uid)),
-    "memberUidMatches",
-    memberUidQueryPath,
-    "src/db.js:getMemberAppProfile:memberUid query"
-  );
-  let emailMatches = [];
-  if (authEmail) {
-    emailMatches = await readAll(
-      query(collection(db, "members"), where("email", "==", authEmail)),
-      "emailMatches",
-      emailQueryPath,
-      "src/db.js:getMemberAppProfile:email query"
-    );
+  } catch (e) {
+    const details = { path: `memberAppIndex/${uid}`, ...describeFirestoreError(e), authUid: uid, authEmail };
+    diagnostics.queryErrors["memberAppIndex"] = details;
+    console.error("[DB:getMemberAppProfile] memberAppIndex 읽기 실패:", details);
   }
 
-  let profile = memberUidMatches[0] || emailMatches[0] || null;
-  diagnostics.matchedMemberId = profile?.id || null;
-  diagnostics.matchedBy = memberUidMatches[0] ? "memberUid" : (emailMatches[0] ? "email" : "none");
-
-  if (profile) {
-    profile = { ...profile, _matchedBy: diagnostics.matchedBy, _diagnostics: diagnostics };
-    dbLog("getMemberAppProfile", "2) 최종 매칭 기준:", diagnostics.matchedBy);
-    dbLog("getMemberAppProfile", "3) 최종 members.memberUid:", profile.memberUid || null);
-    logMemberRulesEvaluation("getMemberAppProfile", profile.id, profile);
-    return profile;
+  // ── Step 2: members/{memberId} 직접 읽기 ──────────────────
+  if (memberId) {
+    try {
+      const memberSnap = await getDoc(doc(db, "members", memberId));
+      if (memberSnap.exists()) {
+        const data = memberSnap.data();
+        diagnostics.matchedMemberId = memberId;
+        diagnostics.matchedBy = "memberAppIndex";
+        // memberUidMatches 진단용 채우기 (진단 화면 호환)
+        diagnostics.memberUidMatches = [{ id: memberId, ...data }];
+        const profile = {
+          id: memberId,
+          ...data,
+          _matchedBy: "memberAppIndex",
+          _diagnostics: diagnostics,
+        };
+        dbLog("getMemberAppProfile", "3) members 읽기 성공 memberId:", memberId, "memberUid:", data.memberUid || null);
+        logMemberRulesEvaluation("getMemberAppProfile", memberId, data);
+        return profile;
+      } else {
+        dbLog("getMemberAppProfile", "3) members 문서 없음 memberId:", memberId);
+        diagnostics.queryErrors["members"] = { path: `members/${memberId}`, code: "not-found", message: "문서 없음", authUid: uid, authEmail };
+      }
+    } catch (e) {
+      const details = { path: `members/${memberId}`, ...describeFirestoreError(e), authUid: uid, authEmail };
+      diagnostics.queryErrors["members"] = details;
+      console.error("[DB:getMemberAppProfile] members 읽기 실패:", details);
+    }
   }
 
-  dbWarn("getMemberAppProfile", "현재 Auth UID 또는 이메일과 일치하는 회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
+  // ── Step 3: 찾지 못한 경우 ────────────────────────────────
+  dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
   const err = new Error("현재 로그인 UID 또는 이메일과 일치하는 회원 문서를 찾을 수 없습니다.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
-  err.memberAppDetails = { code: err.code, path: "members where memberUid == auth.currentUser.uid OR members where email == auth.currentUser.email.toLowerCase()", sourceLocation: "src/db.js:getMemberAppProfile", ...diagnostics };
+  err.memberAppDetails = { code: err.code, path: "memberAppIndex lookup", ...diagnostics };
   throw err;
 }
 
@@ -665,43 +661,6 @@ export async function saveMemberOnboarding(memberId, data) {
 }
 
 // ════════════════════════════════════════════════════
-
-export async function migrateNormalizeMemberEmails() {
-  const uid = requireUid();
-  console.log("[MIGRATION] email normalize 시작 — uid:", uid);
-  let count = 0;
-  let skipped = 0;
-  let errors = 0;
-
-  try {
-    const snap = await getDocs(query(collection(db, "members"), where("trainerUid", "==", uid)));
-    const batch = writeBatch(db);
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (typeof data.email !== "string" || !data.email) {
-        skipped++;
-        continue;
-      }
-      const normalizedEmail = normalizeMemberEmail(data.email);
-      if (normalizedEmail && normalizedEmail !== data.email) {
-        batch.update(d.ref, { email: normalizedEmail, emailNormalizedAt: serverTimestamp() });
-        count++;
-        console.log(`[MIGRATION] email 정규화 예정: ${d.id} ${data.email} -> ${normalizedEmail}`);
-      } else {
-        skipped++;
-      }
-    }
-    if (count > 0) await batch.commit();
-    console.log(`[MIGRATION] email normalize 완료: ${count}명 업데이트, ${skipped}명 스킵`);
-  } catch(e) {
-    console.error("[MIGRATION] email normalize 오류:", e.message);
-    errors++;
-    throw new Error("이메일 정규화 마이그레이션 오류: " + e.message);
-  }
-
-  return { count, skipped, errors };
-}
-
 // 마이그레이션 — 기존 회원에 trainerUid 추가 (1회만 실행)
 // ════════════════════════════════════════════════════
 export async function migrateAddTrainerUid() {

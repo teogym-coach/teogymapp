@@ -14,6 +14,7 @@ import {
   getSessions, addSession, updateSession, deleteSession,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
+  getAssessments, saveAssessment, saveAssessments,
   migrateAddTrainerUid,
 } from "./db";
 
@@ -10752,6 +10753,75 @@ function generateAutoSummary(bodyMap, posture, mobility) {
   }
 }
 
+
+function normalizeAssessmentRecords(rawRecords = []) {
+  return (Array.isArray(rawRecords) ? rawRecords : []).map(r => {
+    if (r.muscleItems !== undefined) return r;
+
+    const muscleItems = [];
+    if (r.bodyMap && typeof r.bodyMap === "object") {
+      Object.entries(r.bodyMap).forEach(([k, v]) => {
+        const parts = k.split("_");
+        const side  = ["좌","우","양"].includes(parts[parts.length-1]) ? parts[parts.length-1] : "양";
+        const name  = parts.slice(0, -1).join("_") || k;
+        if (v === "tight" || v === "weak") {
+          muscleItems.push({ id: Date.now()+Math.random(), name, side, type: v });
+        }
+      });
+    }
+
+    const postureList = [];
+    if (r.posture && typeof r.posture === "object") {
+      Object.values(r.posture).forEach(v => {
+        const opts = Array.isArray(v) ? v :
+          [...(v.B||[]), ...(v.L||[]).map(x=>"(좌)"+x), ...(v.R||[]).map(x=>"(우)"+x)];
+        if (opts.length > 0) postureList.push(...opts.filter(Boolean));
+      });
+    }
+
+    const painList = Array.isArray(r.painList) ? [...r.painList] : [];
+    if (r.fParts && r.fParts.length > 0 && painList.length === 0) {
+      r.fParts.forEach(part => {
+        painList.push({ id: Date.now()+Math.random(), part, side: r.fSide||"양측",
+          vas: r.fVas||0, situation: (r.fSituations||[])[0]||"", memo: r.fMemo||"" });
+      });
+    }
+
+    return {
+      ...r,
+      id: r.id || `a${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      muscleItems,
+      postureList,
+      mobility: r.mobility || {},
+      painList,
+      evalMemo: r.evalMemo || r.fastMemo || r.summary || "",
+      _migrated: true,
+    };
+  });
+}
+
+function loadLocalAssessmentRecords(memberId) {
+  try {
+    return normalizeAssessmentRecords(JSON.parse(localStorage.getItem("assess_"+memberId)||"[]"));
+  } catch {
+    return [];
+  }
+}
+
+function sortAssessments(records = []) {
+  return [...records].sort((a,b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.savedAt || "").localeCompare(String(a.savedAt || "")));
+}
+
+function mergeAssessments(...groups) {
+  const byId = new Map();
+  groups.flat().forEach(record => {
+    if (!record) return;
+    const id = record.id || `a${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    byId.set(id, { ...record, id });
+  });
+  return sortAssessments([...byId.values()]);
+}
+
 // ════════════════════════════════════════════
 // ASSESSMENT SCREEN
 // ════════════════════════════════════════════
@@ -10762,59 +10832,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
   const [assDate,  setAssDate]  = useState(today);
   const [saving,   setSaving]   = useState(false);
   const [viewMode, setViewMode] = useState("입력"); // 입력 | 기록 | 변화 분석
-  const [records,  setRecords]  = useState(()=>{
-    try {
-      const raw = JSON.parse(localStorage.getItem("assess_"+member.id)||"[]");
-
-      // ── 구버전 데이터 마이그레이션 ─────────────────────────────────
-      const migrated = raw.map(r => {
-        // 이미 신버전이면 그대로
-        if (r.muscleItems !== undefined) return r;
-
-        // ── 바디맵 → muscleItems 변환 ──────────────────────────────
-        const muscleItems = [];
-        if (r.bodyMap && typeof r.bodyMap === "object") {
-          Object.entries(r.bodyMap).forEach(([k, v]) => {
-            // k = "근육명_좌" 또는 구버전 SVG id
-            const parts = k.split("_");
-            const side  = ["좌","우","양"].includes(parts[parts.length-1]) ? parts[parts.length-1] : "양";
-            const name  = parts.slice(0, -1).join("_") || k;
-            if (v === "tight" || v === "weak") {
-              muscleItems.push({ id: Date.now()+Math.random(), name, side, type: v });
-            }
-          });
-        }
-
-        // ── 구버전 자세(posture 객체) → postureList 변환 ────────────
-        const postureList = [];
-        if (r.posture && typeof r.posture === "object") {
-          Object.entries(r.posture).forEach(([k, v]) => {
-            const opts = Array.isArray(v) ? v :
-              [...(v.B||[]), ...(v.L||[]).map(x=>"(좌)"+x), ...(v.R||[]).map(x=>"(우)"+x)];
-            if (opts.length > 0) postureList.push(...opts.filter(Boolean));
-          });
-        }
-
-        // ── 구버전 mobility → 새 형식 유지 (호환 가능)────────────────
-        const mobility = r.mobility || {};
-
-        // ── 빠른평가(fParts 등) → painList 보충 ────────────────────
-        const painList = Array.isArray(r.painList) ? [...r.painList] : [];
-        if (r.fParts && r.fParts.length > 0 && painList.length === 0) {
-          r.fParts.forEach(part => {
-            painList.push({ id: Date.now()+Math.random(), part, side: r.fSide||"양측",
-              vas: r.fVas||0, situation: (r.fSituations||[])[0]||"", memo: r.fMemo||"" });
-          });
-        }
-
-        const evalMemo = r.evalMemo || r.fastMemo || r.summary || "";
-
-        return { ...r, muscleItems, postureList, mobility, painList, evalMemo, _migrated: true };
-      });
-
-      return migrated;
-    } catch { return []; }
-  });
+  const [records,  setRecords]  = useState(() => loadLocalAssessmentRecords(member.id));
+  const [loadingRecords, setLoadingRecords] = useState(true);
   const [viewRec,  setViewRec]  = useState(null);
   const [aiResult, setAiResult] = useState("");
   const [aiLoading,setAiLoading]= useState(false);
@@ -10896,6 +10915,45 @@ function AssessmentScreen({ member, onBack, showToast }) {
     }));
     setGaitParsed(p);
   }
+
+
+  useEffect(() => {
+    let alive = true;
+    const localKey = "assess_" + member.id;
+    const migrationKey = "assess_migrated_" + member.id;
+
+    async function loadAssessments() {
+      setLoadingRecords(true);
+      try {
+        const localRecords = loadLocalAssessmentRecords(member.id);
+        const remoteRecords = normalizeAssessmentRecords(await getAssessments(member.id));
+        const merged = mergeAssessments(remoteRecords, localRecords);
+
+        if (!alive) return;
+        setRecords(merged);
+        localStorage.setItem(localKey, JSON.stringify(merged));
+
+        if (localRecords.length > 0 && localStorage.getItem(migrationKey) !== "done") {
+          await saveAssessments(member.id, localRecords);
+          localStorage.setItem(migrationKey, "done");
+          const refreshed = normalizeAssessmentRecords(await getAssessments(member.id));
+          if (alive) {
+            const synced = mergeAssessments(refreshed, merged);
+            setRecords(synced);
+            localStorage.setItem(localKey, JSON.stringify(synced));
+          }
+        }
+      } catch(e) {
+        console.error("[TEO GYM] 체형평가 불러오기/마이그레이션 오류:", e);
+        if (alive) showToast("체형평가 동기화 실패: "+e.message, "err");
+      } finally {
+        if (alive) setLoadingRecords(false);
+      }
+    }
+
+    loadAssessments();
+    return () => { alive = false; };
+  }, [member.id, showToast]);
 
   // ── 상수 ──────────────────────────────────────────────────────────
   const QUICK_PARTS = ["목","상부승모","견갑","어깨","팔꿈치","손목","흉추","허리","고관절","둔근","햄스트링","무릎","종아리","발목","발바닥","기타"];
@@ -10999,7 +11057,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
         aiRoutine: aiResult || undefined,
       };
       console.log("[TEO GYM] 체형평가 저장:", rec);
-      const next = [...records.filter(r=>r.date!==assDate), rec].sort((a,b)=>b.date.localeCompare(a.date));
+      const savedRec = await saveAssessment(member.id, rec);
+      const next = sortAssessments([...records.filter(r=>r.date!==assDate), savedRec]);
       setRecords(next);
       localStorage.setItem("assess_"+member.id, JSON.stringify(next));
       localStorage.removeItem("assess_draft_"+member.id);
@@ -11221,7 +11280,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {viewMode==="기록" && (
         <div style={{marginBottom:12}}>
           {records.length===0 ? (
-            <div style={{textAlign:"center",padding:"30px",color:"#3a4a5a",fontSize:11}}>아직 저장된 평가 기록이 없습니다.</div>
+            <div style={{textAlign:"center",padding:"30px",color:"#3a4a5a",fontSize:11}}>{loadingRecords ? "체형평가 기록을 동기화 중입니다..." : "아직 저장된 평가 기록이 없습니다."}</div>
           ) : (
             records.map(r=>{
               const tCnt=(r.muscleItems||[]).filter(m=>m.type==="tight").length;
@@ -11749,7 +11808,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
       {open.history && (
         <div style={{marginBottom:12}}>
           {records.length===0 ? (
-            <div style={{textAlign:"center",padding:"20px",color:"#3a4a5a",fontSize:11}}>아직 저장된 평가 기록이 없습니다.</div>
+            <div style={{textAlign:"center",padding:"20px",color:"#3a4a5a",fontSize:11}}>{loadingRecords ? "체형평가 기록을 동기화 중입니다..." : "아직 저장된 평가 기록이 없습니다."}</div>
           ) : (
             records.map(r=>{
               const tCnt = (r.muscleItems||[]).filter(m=>m.type==="tight").length;

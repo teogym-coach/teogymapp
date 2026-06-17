@@ -142,6 +142,12 @@ export async function addMember(data) {
     createdAt:  serverTimestamp(),
   };
   const ref = await addDoc(collection(db, "members"), payload);
+  if (payload.memberUid) {
+    await setDoc(doc(db, "memberAppIndex", payload.memberUid), {
+      ...buildMemberAppIndexData(ref.id, payload, payload.memberUid),
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+  }
   dbLog("addMember", `생성 완료: ${ref.id}`);
   return { id: ref.id, ...data, trainerUid: uid };
 }

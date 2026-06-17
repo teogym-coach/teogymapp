@@ -4,8 +4,10 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8');
 const db = fs.readFileSync(path.join(root, 'src', 'db.js'), 'utf8');
+const firestoreRules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
 
 const memberProfileFn = db.slice(db.indexOf('export async function getMemberAppProfile'), db.indexOf('export async function saveMemberCheckin'));
+const memberAppIndexRule = firestoreRules.slice(firestoreRules.indexOf('match /memberAppIndex/{indexUid}'), firestoreRules.indexOf('match /members/{memberId}'));
 
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
@@ -20,6 +22,8 @@ const checks = [
   ['Firebase 저장 구조', db.includes('collection(db, "members", memberId, "sessions")') && db.includes('doc(db, "members", memberId, "bodyCheck", "main")') && db.includes('doc(db, "members", memberId, "memberOnboarding", "main")')],
   ['회원앱 memberAppIndex 단일 문서 조회', memberProfileFn.includes('doc(db, "memberAppIndex", uid)') && memberProfileFn.includes('doc(db, "members", memberId)')],
   ['회원앱 members 컬렉션 query 미사용', !memberProfileFn.includes('collection(db, "members")') && !memberProfileFn.includes('where("memberUid"') && !memberProfileFn.includes('where("email"')],
+  ['Firestore Rules memberAppIndex 본인 읽기 허용', memberAppIndexRule.includes('allow read: if isSignedIn() && uid() == indexUid')],
+  ['Firestore Rules members 본인 직접 get 허용', firestoreRules.includes('allow get, list: if canReadMemberData(resource.data)') && firestoreRules.includes('return isTrainerData(data) || isMemberUidData(data)')],
 ];
 
 let failed = 0;

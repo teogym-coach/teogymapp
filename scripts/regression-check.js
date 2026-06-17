@@ -5,9 +5,9 @@ const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8');
 const db = fs.readFileSync(path.join(root, 'src', 'db.js'), 'utf8');
 const firestoreRules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+const functionsIndex = fs.readFileSync(path.join(root, 'functions', 'index.js'), 'utf8');
 
 const memberProfileFn = db.slice(db.indexOf('export async function getMemberAppProfile'), db.indexOf('export async function saveMemberCheckin'));
-const memberAppIndexRule = firestoreRules.slice(firestoreRules.indexOf('match /memberAppIndex/{indexUid}'), firestoreRules.indexOf('match /members/{memberId}'));
 
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
@@ -20,10 +20,10 @@ const checks = [
   ['최근 수정 정렬', app.includes('sortMode') && app.includes('updatedAt')],
   ['2:1 수업 저장', app.includes('handleSaveSession2') && app.includes('payload2.memberId') && app.includes('member2')],
   ['Firebase 저장 구조', db.includes('collection(db, "members", memberId, "sessions")') && db.includes('doc(db, "members", memberId, "bodyCheck", "main")') && db.includes('doc(db, "members", memberId, "memberOnboarding", "main")')],
-  ['회원앱 memberAppIndex 단일 문서 조회', memberProfileFn.includes('doc(db, "memberAppIndex", uid)') && memberProfileFn.includes('doc(db, "members", memberId)')],
-  ['회원앱 members 컬렉션 query 미사용', !memberProfileFn.includes('collection(db, "members")') && !memberProfileFn.includes('where("memberUid"') && !memberProfileFn.includes('where("email"')],
-  ['Firestore Rules memberAppIndex 본인 읽기 허용', memberAppIndexRule.includes('allow read: if isSignedIn() && uid() == indexUid')],
-  ['Firestore Rules members 본인 직접 get 허용', firestoreRules.includes('allow get, list: if canReadMemberData(resource.data)') && firestoreRules.includes('return isTrainerData(data) || isMemberUidData(data)')],
+  ['회원앱 members.memberUid 쿼리 조회', memberProfileFn.includes('collection(db, "members")') && memberProfileFn.includes('where("memberUid", "==", uid)') && memberProfileFn.includes('limit(1)')],
+  ['회원앱 memberAppIndex 미사용', !memberProfileFn.includes('memberAppIndex') && !app.includes('memberAppIndex')],
+  ['Firestore Rules members 본인 list 허용', firestoreRules.includes('allow get, list: if canReadMemberData(resource.data)') && firestoreRules.includes('return isTrainerData(data) || isMemberUidData(data)')],
+  ['createMemberAppIndexForMember Cloud Function 제거', !functionsIndex.includes('exports.createMemberAppIndexForMember') && !functionsIndex.includes('memberAppIndex/{')],
 ];
 
 let failed = 0;

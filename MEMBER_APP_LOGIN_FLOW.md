@@ -1,33 +1,23 @@
-# 회원앱 로그인 흐름
+# 회원앱 로그인 흐름 (Spark 플랜 구조)
 
-## 1. 회원 문서 준비
-관리자 앱에서 회원을 등록할 때 `members/{memberId}` 문서에 회원 이메일을 저장합니다. 관리자 앱은 회원 이메일과 `memberUid`를 기준으로 `memberAppIndex/{auth.uid}` 인덱스를 생성합니다. 회원앱은 `members` 컬렉션 query를 사용하지 않습니다.
+관리자 앱은 회원 문서(`members/{memberId}`)에 회원 이메일과 `memberUid`를 저장합니다. 회원앱은 Cloud Functions와 `memberAppIndex` 없이 Firebase Auth로 로그인한 뒤 `members` 컬렉션에서 `memberUid == auth.uid` 조건으로 자기 회원 문서만 조회합니다.
 
-## 2. 회원앱 초대 발송
-관리자 회원 상세 화면의 **[회원앱 초대 보내기]** 버튼을 사용합니다.
+## 관리자 준비
 
-1. 관리자는 회원 이메일만 확인합니다.
-2. Firebase Authentication 계정이 이미 있으면 계정 생성 없이 비밀번호 재설정 메일만 발송합니다.
-3. Firebase Authentication 계정이 없으면 이메일 기준 계정을 준비한 뒤 비밀번호 설정/재설정 메일을 발송합니다.
-4. 대표 화면에는 임시 비밀번호가 표시되지 않으며, 회원 비밀번호는 Firestore에 저장하지 않습니다.
-5. 회원은 이메일 링크에서 직접 비밀번호를 설정하고 로그인합니다.
-6. 관리자 화면에는 `초대 전`, `초대 발송 완료`, `회원앱 사용 가능` 상태만 표시합니다.
+1. 회원 이메일을 `members/{memberId}.email`에 저장합니다.
+2. 회원앱 초대를 보내 Firebase Auth 계정을 생성하거나 비밀번호 설정/재설정 메일을 발송합니다.
+3. 새 계정을 만든 경우 반환된 Auth UID를 `members/{memberId}.memberUid`에 저장합니다.
+4. 이미 존재하던 Auth 계정은 클라이언트에서 UID를 조회할 수 없으므로, 회원이 로그인 오류 화면의 `auth.uid`를 복사해 전달하면 관리자 화면의 수동 연결 입력칸에 저장합니다.
 
-## 3. 회원 로그인
-회원이 `/member` 또는 `?app=member` 화면에서 이메일과 비밀번호로 로그인합니다.
+## 회원앱 조회 순서
 
-- Firebase Authentication 계정이 없으면 로그인 화면에 “회원 이메일은 저장되어 있지만 Firebase Authentication 계정이 없습니다. 대표에게 회원앱 초대 발송을 요청해주세요.” 안내가 표시됩니다.
-- 비밀번호가 틀렸거나 다른 인증 오류가 있으면 일반 로그인 실패 안내가 표시됩니다.
+1. Firebase Auth 로그인으로 `auth.uid`를 확인합니다.
+2. `members` 컬렉션에서 `where("memberUid", "==", auth.uid)` + `limit(1)` 쿼리로 회원 문서를 찾습니다.
+3. 찾은 `members/{memberId}` 하위의 공개 수업일지, 바디체크, 영양, 체크인, 메시지, 온보딩 정보를 불러옵니다.
 
-## 4. 프로필 로딩
-로그인 후 `getMemberAppProfile()`을 호출합니다.
+## Firestore Rules 원칙
 
-1. `auth.currentUser.uid`를 확인합니다.
-2. `memberAppIndex/{auth.uid}` 단일 문서를 `getDoc`으로 읽어 `memberId`를 확보합니다.
-3. `members/{memberId}` 단일 문서를 `getDoc`으로 읽습니다.
-4. 인덱스 문서가 없거나 직접 문서 읽기에 실패하면 회원앱 접근 권한이 없는 상태로 처리합니다. 이메일 일치만으로는 접근을 허용하지 않습니다.
-5. 호출 실패 또는 후속 데이터 로딩 실패 시 로딩을 종료하고 에러 화면을 표시합니다.
-6. 로그인 후 5초 이상 응답이 없으면 타임아웃 에러 화면을 표시합니다.
-
-## 5. 회원앱 데이터 로딩
-프로필 문서를 찾으면 `members/{memberId}` 하위의 공개 수업일지, 바디체크, 영양, 체크인, 메시지, 온보딩 정보를 불러옵니다. 이 단계도 5초 타임아웃을 적용해 무한 로딩을 방지합니다.
+- 대표자는 `trainerUid == request.auth.uid`인 회원 문서와 하위 데이터를 관리합니다.
+- 회원 본인은 `memberUid == request.auth.uid`인 자기 회원 문서만 읽습니다.
+- 회원 본인의 수업일지는 `isPublished == true`인 문서만 읽을 수 있습니다.
+- `memberAppIndex` 컬렉션과 관련 Cloud Function은 사용하지 않습니다.

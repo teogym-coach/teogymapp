@@ -914,6 +914,7 @@ function AdminMemberAppPanel({member,onAccountCreated}){
       const formatted=formatCallableError(e);
       console.error("[MemberAppIndex:create button] failed", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember",error:e,details:formatted.details});
       addLog(false,`memberAppIndex 생성 실패: function=createMemberAppIndexForMember path=${writePath} code=${formatted.detailCode}${formatted.details?.failedStep?` step=${formatted.details.failedStep}`:""}`);
+      addLog(false,`error.details 전체: ${JSON.stringify(formatted.details||{},null,2)}`);
       addLog(false,`실제 오류 메시지: ${formatted.message}`);
       if(formatted.stack) addLog(false,`실제 오류 stack: ${formatted.stack}`);
       setMsg(`memberAppIndex 생성 실패 · ${formatted.text}`);

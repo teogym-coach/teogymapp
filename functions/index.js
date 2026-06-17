@@ -228,9 +228,8 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       deploymentRevision: DEPLOYMENT_REVISION,
     });
 
-    const indexRef = admin.firestore().collection("memberAppIndex").doc(memberUid);
     try {
-      await indexRef.set(payload, { merge: true });
+      await admin.firestore().collection("memberAppIndex").doc(memberUid).set(payload, { merge: true });
     } catch (error) {
       const original = describeFunctionError(error);
       console.error("[createMemberAppIndexForMember] memberAppIndex set 실패", {
@@ -245,7 +244,7 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         region: "us-central1",
         deploymentRevision: DEPLOYMENT_REVISION,
       });
-      throw new HttpsError("internal", original.message || "memberAppIndex 문서 생성에 실패했습니다.", {
+      const details = {
         functionName,
         failedStep: "memberAppIndex.set",
         originalCode: original.code,
@@ -259,28 +258,53 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         projectId: FIREBASE_PROJECT_ID,
         region: "us-central1",
         deploymentRevision: DEPLOYMENT_REVISION,
-      });
+      };
+      console.error("[createMemberAppIndexForMember] HttpsError details", details);
+      throw new HttpsError("internal", original.message || "memberAppIndex 문서 생성에 실패했습니다.", details);
     }
 
-    await ref.set({
-      memberAppAccountStatus: "available",
-      memberAppIndexPath: writePath,
-      memberAppIndexUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      memberAppLastInviteLog: {
-        ok: true,
-        code: "MEMBER_APP_INDEX_CREATED",
-        uid: memberUid,
-        path: writePath,
-        at: new Date().toISOString(),
-      },
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    try {
+      await ref.set({
+        memberAppAccountStatus: "available",
+        memberAppIndexPath: writePath,
+        memberAppIndexUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        memberAppLastInviteLog: {
+          ok: true,
+          code: "MEMBER_APP_INDEX_CREATED",
+          uid: memberUid,
+          path: writePath,
+          at: new Date().toISOString(),
+        },
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch (error) {
+      const original = describeFunctionError(error);
+      const details = {
+        functionName,
+        failedStep: "members.update",
+        originalCode: original.code,
+        originalMessage: original.message,
+        originalStack: original.stack,
+        errorName: original.name,
+        memberId,
+        memberUid,
+        writePath: `members/${memberId}`,
+        memberAppIndexWritePath: writePath,
+        payload,
+        projectId: FIREBASE_PROJECT_ID,
+        region: "us-central1",
+        deploymentRevision: DEPLOYMENT_REVISION,
+      };
+      console.error("[createMemberAppIndexForMember] members update 실패", details);
+      console.error("[createMemberAppIndexForMember] HttpsError details", details);
+      throw new HttpsError("internal", original.message || "members 문서 업데이트에 실패했습니다.", details);
+    }
     console.log("[createMemberAppIndexForMember] 저장 완료", { functionName, authUid: actorUid, memberId, memberUid, writePath, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION });
-    return { ok: true, message: "memberAppIndex 생성 완료", memberId, memberUid, writePath, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
+    return { ok: true, message: "memberAppIndex 생성 완료", failedStep: null, originalMessage: null, originalStack: null, memberId, memberUid, writePath, payload, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
   } catch (error) {
     const original = describeFunctionError(error);
-    console.error(error);
-    console.error(error?.stack);
+    console.error("FULL_ERROR", error);
+    console.error("FULL_STACK", error?.stack);
     console.error("[createMemberAppIndexForMember] 실패", {
       functionName,
       ...original,
@@ -310,9 +334,12 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
     };
 
     if (error instanceof HttpsError) {
-      throw new HttpsError(error.code, error.message, { ...(error.details || {}), ...details });
+      const mergedDetails = { ...details, ...(error.details || {}) };
+      console.error("[createMemberAppIndexForMember] HttpsError details", mergedDetails);
+      throw new HttpsError(error.code, error.message, mergedDetails);
     }
 
+    console.error("[createMemberAppIndexForMember] HttpsError details", details);
     throw new HttpsError("internal", original.message || "memberAppIndex 저장에 실패했습니다.", details);
   }
 });

@@ -54,7 +54,7 @@ service cloud.firestore {
     // 회원 본인만 자신의 인덱스 문서를 읽을 수 있음
     // 쓰기는 Cloud Functions(Admin SDK), Firebase Console 등 서버 권한에서 수행
     match /memberAppIndex/{indexUid} {
-      allow get, list: if isSignedIn() && uid() == indexUid;
+      allow read: if isSignedIn() && uid() == indexUid;
       allow create, update: if isSignedIn()
                             && request.resource.data.memberId is string
                             && (uid() == indexUid || isTrainerOfMember(request.resource.data.memberId))
@@ -66,10 +66,9 @@ service cloud.firestore {
     match /members/{memberId} {
 
       // get: members/{memberId} 직접 읽기 허용
-      // list: where("memberUid", "==", request.auth.uid),
-      //       where("trainerUid", "==", request.auth.uid)
-      //       처럼 Rules가 모든 반환 문서가 본인 접근 가능하다고 증명할 수 있는
-      //       쿼리만 허용됨. 조건 없는 전체 목록 조회는 거부됨.
+      // list: 대표자 관리 화면의 trainerUid 쿼리만 허용됩니다.
+      //       회원앱은 members 컬렉션 query를 사용하지 않고
+      //       memberAppIndex/{auth.uid} -> members/{memberId} 단일 문서 get만 사용합니다.
       allow get, list: if canReadMemberData(resource.data);
 
       // 생성: 반드시 내 uid로 trainerUid 설정

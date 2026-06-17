@@ -30,6 +30,28 @@ function buildMemberAppIndexPayload(memberId, memberData, memberUid, actorUid) {
   return payload;
 }
 
+function buildMemberAppIndexDebugPayload(memberId, memberData, memberUid, actorUid) {
+  const email = normalizeEmail(memberData.email || memberData.memberAppAccountEmail);
+  const payload = {
+    memberId,
+    memberUid,
+    trainerUid: memberData.trainerUid || actorUid || "",
+    updatedAt: "serverTimestamp()",
+    linkedAt: "serverTimestamp()",
+    linkedBy: actorUid || "",
+  };
+  if (email) payload.email = email;
+  return payload;
+}
+
+function toCallableDetailsValue(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return { serializationError: error?.message || String(error) };
+  }
+}
+
 async function assertTrainerOwnsMember(memberId, trainerUid) {
   if (!trainerUid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   const ref = admin.firestore().collection("members").doc(memberId);
@@ -217,19 +239,23 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
     }
 
     const payload = buildMemberAppIndexPayload(memberId, memberData, memberUid, actorUid);
+    const payloadDetails = buildMemberAppIndexDebugPayload(memberId, memberData, memberUid, actorUid);
+    console.log("PAYLOAD", JSON.stringify(payloadDetails));
     console.log("[createMemberAppIndexForMember] memberAppIndex set 직전", {
       functionName,
       path: writePath,
       memberId,
       memberUid,
-      payload,
+      payload: payloadDetails,
       projectId: FIREBASE_PROJECT_ID,
       region: "us-central1",
       deploymentRevision: DEPLOYMENT_REVISION,
     });
 
     try {
+      console.log("SET_START");
       await admin.firestore().collection("memberAppIndex").doc(memberUid).set(payload, { merge: true });
+      console.log("SET_SUCCESS");
     } catch (error) {
       const original = describeFunctionError(error);
       console.error("[createMemberAppIndexForMember] memberAppIndex set 실패", {
@@ -239,7 +265,7 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         memberId,
         memberUid,
         writePath,
-        payload,
+        payload: payloadDetails,
         projectId: FIREBASE_PROJECT_ID,
         region: "us-central1",
         deploymentRevision: DEPLOYMENT_REVISION,
@@ -254,16 +280,18 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         memberId,
         memberUid,
         writePath,
-        payload,
+        payload: payloadDetails,
         projectId: FIREBASE_PROJECT_ID,
         region: "us-central1",
         deploymentRevision: DEPLOYMENT_REVISION,
       };
+      console.error("details", details);
       console.error("[createMemberAppIndexForMember] HttpsError details", details);
       throw new HttpsError("internal", original.message || "memberAppIndex 문서 생성에 실패했습니다.", details);
     }
 
     try {
+      console.log("MEMBERS_UPDATE_START");
       await ref.set({
         memberAppAccountStatus: "available",
         memberAppIndexPath: writePath,
@@ -277,6 +305,7 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         },
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      console.log("MEMBERS_UPDATE_SUCCESS");
     } catch (error) {
       const original = describeFunctionError(error);
       const details = {
@@ -290,17 +319,18 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         memberUid,
         writePath: `members/${memberId}`,
         memberAppIndexWritePath: writePath,
-        payload,
+        payload: payloadDetails,
         projectId: FIREBASE_PROJECT_ID,
         region: "us-central1",
         deploymentRevision: DEPLOYMENT_REVISION,
       };
       console.error("[createMemberAppIndexForMember] members update 실패", details);
+      console.error("details", details);
       console.error("[createMemberAppIndexForMember] HttpsError details", details);
       throw new HttpsError("internal", original.message || "members 문서 업데이트에 실패했습니다.", details);
     }
     console.log("[createMemberAppIndexForMember] 저장 완료", { functionName, authUid: actorUid, memberId, memberUid, writePath, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION });
-    return { ok: true, message: "memberAppIndex 생성 완료", failedStep: null, originalMessage: null, originalStack: null, memberId, memberUid, writePath, payload, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
+    return { ok: true, message: "memberAppIndex 생성 완료", failedStep: null, originalMessage: null, originalStack: null, memberId, memberUid, writePath, payload: payloadDetails, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
   } catch (error) {
     const original = describeFunctionError(error);
     console.error("FULL_ERROR", error);
@@ -311,7 +341,7 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       authUid: actorUid,
       memberId,
       memberUid,
-      memberData,
+      memberData: toCallableDetailsValue(memberData),
       writePath,
       projectId: FIREBASE_PROJECT_ID,
       region: "us-central1",
@@ -326,7 +356,7 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       errorName: original.name,
       memberId,
       memberUid,
-      memberData,
+      memberData: toCallableDetailsValue(memberData),
       writePath,
       projectId: FIREBASE_PROJECT_ID,
       region: "us-central1",
@@ -334,12 +364,15 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
     };
 
     if (error instanceof HttpsError) {
-      const mergedDetails = { ...details, ...(error.details || {}) };
+      const mergedDetails = toCallableDetailsValue({ ...details, ...(error.details || {}) });
+      console.error("details", mergedDetails);
       console.error("[createMemberAppIndexForMember] HttpsError details", mergedDetails);
       throw new HttpsError(error.code, error.message, mergedDetails);
     }
 
-    console.error("[createMemberAppIndexForMember] HttpsError details", details);
-    throw new HttpsError("internal", original.message || "memberAppIndex 저장에 실패했습니다.", details);
+    const serializableDetails = toCallableDetailsValue(details);
+    console.error("details", serializableDetails);
+    console.error("[createMemberAppIndexForMember] HttpsError details", serializableDetails);
+    throw new HttpsError("internal", original.message || "memberAppIndex 저장에 실패했습니다.", serializableDetails);
   }
 });

@@ -7,8 +7,6 @@ rules_version = '2';
 //    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터 접근
 //    - 회원 본인: members/{memberId}.memberUid == request.auth.uid 인 자기 문서 접근
 //    - memberAppIndex/{uid} 는 회원 본인이 자신의 memberId를 찾기 위한 인덱스
-//    - 이메일 기반 members 조회는 UID 인덱스가 없거나 진단/마이그레이션이
-//      필요한 경우에만 본인 Auth 이메일과 문서 이메일이 정확히 일치할 때 허용
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
 // ═══════════════════════════════════════════════════════════════
 
@@ -23,18 +21,6 @@ service cloud.firestore {
       return request.auth.uid;
     }
 
-    function authEmail() {
-      return request.auth.token.email;
-    }
-
-    function authEmailLower() {
-      return authEmail().lower();
-    }
-
-    function hasAuthEmail() {
-      return isSignedIn() && authEmail() is string && authEmail() != "";
-    }
-
     function memberDoc(memberId) {
       return get(/databases/$(database)/documents/members/$(memberId)).data;
     }
@@ -47,18 +33,8 @@ service cloud.firestore {
       return isSignedIn() && data.memberUid == uid();
     }
 
-    function isMemberEmailData(data) {
-      return hasAuthEmail()
-             && (
-               data.email == authEmailLower()
-               || data.memberAppAccountEmail == authEmailLower()
-             );
-    }
-
     function canReadMemberData(data) {
-      return isTrainerData(data)
-             || isMemberUidData(data)
-             || isMemberEmailData(data);
+      return isTrainerData(data) || isMemberUidData(data);
     }
 
     function isTrainerOfMember(memberId) {
@@ -67,7 +43,7 @@ service cloud.firestore {
 
     function isMemberSelf(memberId) {
       let m = memberDoc(memberId);
-      return isMemberUidData(m) || isMemberEmailData(m);
+      return isMemberUidData(m);
     }
 
     function canAccessMember(memberId) {
@@ -79,16 +55,19 @@ service cloud.firestore {
     // 쓰기는 Cloud Functions(Admin SDK), Firebase Console 등 서버 권한에서 수행
     match /memberAppIndex/{indexUid} {
       allow get, list: if isSignedIn() && uid() == indexUid;
-      allow create, update, delete: if false;
+      allow create, update: if isSignedIn()
+                            && request.resource.data.memberId is string
+                            && (uid() == indexUid || isTrainerOfMember(request.resource.data.memberId))
+                            && request.resource.data.trainerUid == memberDoc(request.resource.data.memberId).trainerUid
+                            && request.resource.data.email == memberDoc(request.resource.data.memberId).email;
+      allow delete: if false;
     }
 
     match /members/{memberId} {
 
       // get: members/{memberId} 직접 읽기 허용
       // list: where("memberUid", "==", request.auth.uid),
-      //       where("trainerUid", "==", request.auth.uid),
-      //       where("email", "==", request.auth.token.email.lower()),
-      //       where("memberAppAccountEmail", "==", request.auth.token.email.lower())
+      //       where("trainerUid", "==", request.auth.uid)
       //       처럼 Rules가 모든 반환 문서가 본인 접근 가능하다고 증명할 수 있는
       //       쿼리만 허용됨. 조건 없는 전체 목록 조회는 거부됨.
       allow get, list: if canReadMemberData(resource.data);

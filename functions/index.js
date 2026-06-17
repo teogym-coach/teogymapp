@@ -81,9 +81,12 @@ exports.reconnectMemberUidByEmail = onCall({ region: "us-central1" }, async (req
     batch.set(indexRef, {
       memberId,
       email,
+      trainerUid: data.trainerUid || request.auth.uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       linkedAt: admin.firestore.FieldValue.serverTimestamp(),
       linkedBy: request.auth.uid,
-    });
+    }, { merge: true });
 
     await batch.commit();
     console.log("[reconnectMemberUidByEmail] members + memberAppIndex 저장 완료", { memberId, uid, email });

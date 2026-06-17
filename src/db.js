@@ -81,16 +81,6 @@ function describeFirestoreError(e) {
   };
 }
 
-function buildMemberAppIndexData(memberId, memberData = {}, memberUid = "") {
-  const email = (memberData.email || memberData.memberAppAccountEmail || auth.currentUser?.email || "").trim().toLowerCase();
-  return clean({
-    memberId,
-    email,
-    trainerUid: memberData.trainerUid || "",
-    updatedAt: serverTimestamp(),
-  });
-}
-
 function logMemberRulesEvaluation(fn, memberId, memberData) {
   const user = auth.currentUser;
   const uid = user?.uid || null;
@@ -142,13 +132,7 @@ export async function addMember(data) {
     createdAt:  serverTimestamp(),
   };
   const ref = await addDoc(collection(db, "members"), payload);
-  if (payload.memberUid) {
-    await setDoc(doc(db, "memberAppIndex", payload.memberUid), {
-      ...buildMemberAppIndexData(ref.id, payload, payload.memberUid),
-      createdAt: serverTimestamp(),
-    }, { merge: true });
-  }
-  dbLog("addMember", `생성 완료: ${ref.id}`);
+  dbLog("addMember", `생성 완료: ${ref.id} (memberAppIndex는 Cloud Function으로 생성)`);
   return { id: ref.id, ...data, trainerUid: uid };
 }
 
@@ -168,22 +152,11 @@ export async function updateMember(id, data) {
     normalized.memberUidUnlinkReason = "member-email-changed";
   }
   const memberRef = doc(db, "members", id);
-  const nextData = { ...before, ...normalized, trainerUid: uid };
-  const batch = writeBatch(db);
-  batch.update(memberRef, {
+  await updateDoc(memberRef, {
     ...normalized,
     trainerUid: uid,
     updatedAt:  serverTimestamp(),
   });
-  const indexMemberUid = normalized.memberUid || (normalized.memberUid === undefined ? before.memberUid : "");
-  if (indexMemberUid) {
-    const indexRef = doc(db, "memberAppIndex", indexMemberUid);
-    batch.set(indexRef, {
-      ...buildMemberAppIndexData(id, nextData, indexMemberUid),
-      createdAt: serverTimestamp(),
-    }, { merge: true });
-  }
-  await batch.commit();
   dbLog("updateMember", "완료");
 }
 
@@ -548,7 +521,6 @@ export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = n
   const memberRef = doc(db, "members", memberId);
   const snap = await getDoc(memberRef);
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
-  const memberData = snap.data();
   const batch = writeBatch(db);
   batch.update(memberRef, {
     memberUid: uid,
@@ -558,30 +530,14 @@ export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = n
     memberAppAccountEmail: authEmail,
     updatedAt: serverTimestamp(),
   });
-  batch.set(doc(db, "memberAppIndex", uid), {
-    ...buildMemberAppIndexData(memberId, { ...memberData, memberAppAccountEmail: authEmail }, uid),
-    createdAt: serverTimestamp(),
-  }, { merge: true });
   await batch.commit();
   dbLog("linkMemberUidToCurrentUser", `members/${memberId} -> ${uid}`);
 }
 
-export async function createMemberAppIndexForMember(memberId) {
-  const uid = requireUid();
-  const memberRef = doc(db, "members", memberId);
-  const snap = await getDoc(memberRef);
-  if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
-  const memberData = snap.data();
-  if (memberData.trainerUid !== uid) throw new Error("권한이 없습니다.");
-  const memberUid = (memberData.memberUid || "").trim();
-  if (!memberUid) throw new Error("memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다.");
-  await setDoc(doc(db, "memberAppIndex", memberUid), {
-    ...buildMemberAppIndexData(memberId, memberData, memberUid),
-    createdAt: serverTimestamp(),
-  }, { merge: true });
-  dbLog("createMemberAppIndexForMember", `memberAppIndex/${memberUid} -> members/${memberId}`);
-  return { memberUid, memberId };
+export async function createMemberAppIndexForMember() {
+  throw new Error("memberAppIndex는 클라이언트에서 직접 생성할 수 없습니다. 관리자 화면의 Cloud Function 버튼을 사용하세요.");
 }
+
 
 export async function getMemberAppProfile() {
   const uid = requireUid();
@@ -740,7 +696,6 @@ export async function migrateNormalizeMemberEmails() {
     console.log("[EMAIL MIGRATION] 조회된 문서 수:", snap.docs.length);
 
     const updates = [];
-    const indexUpdates = [];
     for (const d of snap.docs) {
       const data = d.data();
       if (typeof data.email !== "string" || !data.email) {
@@ -749,9 +704,6 @@ export async function migrateNormalizeMemberEmails() {
       }
 
       const normalizedEmail = data.email.trim().toLowerCase();
-      if (data.memberUid && normalizedEmail) {
-        indexUpdates.push({ memberUid: data.memberUid, memberId: d.id, email: normalizedEmail, trainerUid: data.trainerUid || uid });
-      }
       if (normalizedEmail && normalizedEmail !== data.email) {
         updates.push({ ref: d.ref, email: normalizedEmail, name: data.name || d.id });
       } else {
@@ -759,24 +711,15 @@ export async function migrateNormalizeMemberEmails() {
       }
     }
 
-    if (updates.length > 0 || indexUpdates.length > 0) {
+    if (updates.length > 0) {
       const batch = writeBatch(db);
       for (const u of updates) {
         batch.update(u.ref, { email: u.email, updatedAt: serverTimestamp() });
         console.log(`[EMAIL MIGRATION] 정규화 예정: ${u.name}`);
       }
-      for (const u of indexUpdates) {
-        batch.set(doc(db, "memberAppIndex", u.memberUid), {
-          memberId: u.memberId,
-          email: u.email,
-          trainerUid: u.trainerUid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-      }
       await batch.commit();
       count = updates.length;
-      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵, memberAppIndex ${indexUpdates.length}건 저장`);
+      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵, memberAppIndex 0건 저장(Cloud Function 전용)`);
     } else {
       console.log(`[EMAIL MIGRATION] 업데이트 없음. ${skipped}명 스킵`);
     }

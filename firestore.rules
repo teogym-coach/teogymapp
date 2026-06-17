@@ -52,16 +52,12 @@ service cloud.firestore {
 
     // ── memberAppIndex ──────────────────────────────────────
     // 회원앱 로그인 로딩: memberAppIndex/{auth.uid} 단일 문서 read 허용
-    // 쓰기는 Cloud Functions(Admin SDK), Firebase Console 또는 대표자 앱에서 수행
+    // 쓰기는 Cloud Functions(Admin SDK) 또는 Firebase Console 관리자 권한으로만 수행
     match /memberAppIndex/{indexUid} {
       allow read: if isSignedIn() && uid() == indexUid;
-      allow create, update: if isSignedIn()
-                            && request.resource.data.memberId is string
-                            && memberDoc(request.resource.data.memberId).memberUid == indexUid
-                            && (uid() == indexUid || isTrainerOfMember(request.resource.data.memberId))
-                            && request.resource.data.trainerUid == memberDoc(request.resource.data.memberId).trainerUid
-                            && request.resource.data.email == memberDoc(request.resource.data.memberId).email;
-      allow delete: if false;
+      // 쓰기는 Cloud Functions(Admin SDK) 또는 Firebase Console 관리자 권한으로만 수행합니다.
+      // 클라이언트 SDK에서는 대표자/회원 모두 memberAppIndex를 직접 생성·수정하지 않습니다.
+      allow create, update, delete: if false;
     }
 
     match /members/{memberId} {

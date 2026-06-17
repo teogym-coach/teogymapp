@@ -51,8 +51,8 @@ service cloud.firestore {
     }
 
     // ── memberAppIndex ──────────────────────────────────────
-    // 회원 본인만 자신의 인덱스 문서를 읽을 수 있음
-    // 쓰기는 Cloud Functions(Admin SDK), Firebase Console 등 서버 권한에서 수행
+    // 회원앱 로그인 로딩: memberAppIndex/{auth.uid} 단일 문서 read 허용
+    // 쓰기는 Cloud Functions(Admin SDK), Firebase Console 또는 대표자 앱에서 수행
     match /memberAppIndex/{indexUid} {
       allow read: if isSignedIn() && uid() == indexUid;
       allow create, update: if isSignedIn()

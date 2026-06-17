@@ -1,12 +1,12 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════
-//  TEO GYM — Firestore 보안 규칙 v5
+//  TEO GYM — Firestore 보안 규칙 v6
 //
 //  회원앱 원칙:
 //    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터 접근
 //    - 회원 본인: members/{memberId}.memberUid == request.auth.uid 인 자기 문서 접근
-//    - memberAppIndex/{uid} 는 회원 본인이 자신의 memberId를 찾기 위한 인덱스
+//    - 회원앱은 members where memberUid == request.auth.uid 쿼리로 자기 문서 조회
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
 // ═══════════════════════════════════════════════════════════════
 
@@ -50,22 +50,10 @@ service cloud.firestore {
       return isTrainerOfMember(memberId) || isMemberSelf(memberId);
     }
 
-    // ── memberAppIndex ──────────────────────────────────────
-    // 회원앱 로그인 로딩: memberAppIndex/{auth.uid} 단일 문서 read 허용
-    // 쓰기는 Cloud Functions(Admin SDK) 또는 Firebase Console 관리자 권한으로만 수행
-    match /memberAppIndex/{indexUid} {
-      allow read: if isSignedIn() && uid() == indexUid;
-      // 쓰기는 Cloud Functions(Admin SDK) 또는 Firebase Console 관리자 권한으로만 수행합니다.
-      // 클라이언트 SDK에서는 대표자/회원 모두 memberAppIndex를 직접 생성·수정하지 않습니다.
-      allow create, update, delete: if false;
-    }
-
     match /members/{memberId} {
 
-      // get: members/{memberId} 직접 읽기 허용
-      // list: 대표자 관리 화면의 trainerUid 쿼리만 허용됩니다.
-      //       회원앱은 members 컬렉션 query를 사용하지 않고
-      //       memberAppIndex/{auth.uid} -> members/{memberId} 단일 문서 get만 사용합니다.
+      // get/list: 대표자 trainerUid 쿼리와 회원 본인 memberUid 쿼리 허용.
+      // 회원앱은 Cloud Functions 없이 members where memberUid == auth.uid 쿼리만 사용합니다.
       allow get, list: if canReadMemberData(resource.data);
 
       // 생성: 반드시 내 uid로 trainerUid 설정

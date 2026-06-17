@@ -5,11 +5,10 @@ import {
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from "recharts";
-import { auth, firebaseConfig, functions } from "./firebase-config";
+import { auth, firebaseConfig } from "./firebase-config";
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
 } from "firebase/auth";
-import { httpsCallable } from "firebase/functions";
 import {
   getMembers, addMember, updateMember, deleteMember,
   getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession,
@@ -769,7 +768,7 @@ function MemberLanding({ onLogin, loading, error }) {
 function MemberApp({ onLogout }) {
   const C=MEMBER_COLORS; const today=new Date().toISOString().slice(0,10); const [tab,setTab]=useState("home"); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",condition:"보통",soreness:"없음"}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({});
   const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg)),ms))]);
-  const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ console.group("[MemberApp] 최초 진입 읽기 순서"); const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); console.log("0) Firebase Auth", {uid:authUid,email:authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(!p){ setMemberError("memberAppIndex에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다."); setMemberErrorDetails({code:"member/not-found",path:`memberAppIndex/${authUid}`,authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:`memberAppIndex/${authUid}`,status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); console.log("1) members 프로필", {path:`members/${p.id}`, authUid, authEmail, memberUid:p.memberUid||null, memberEmail:p.email||null, match:uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); console.log(`${label}) 읽기 시작`, {collection:collectionName,path}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); console.log(`${label}) 읽기 성공`, {collection:collectionName,path,count:Array.isArray(data)?data.length:(data?1:0)}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); console.error(`${label}) permission-denied/읽기 실패`, details); return fallback; } }; const ss=await readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]); const bd=await readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null); const nt=await readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null); const ci=await readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]); const ms=await readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]); const ob=await readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); const w=getLatestBodyWeight(bd)?.weight||p.weight||p.startWeight||""; setForm(f=>({...f,weight:w})); }catch(e){ console.error("[MemberApp] load failed:",e); setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ console.groupEnd?.(); setLoading(false); }},[]); useEffect(()=>{load();},[load]);
+  const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ console.group("[MemberApp] 최초 진입 읽기 순서"); const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); console.log("0) Firebase Auth", {uid:authUid,email:authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(!p){ setMemberError("members 컬렉션에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다."); setMemberErrorDetails({code:"member/not-found",path:"members?where(memberUid==auth.uid)",authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:"members?where(memberUid==auth.uid)",status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); console.log("1) members 프로필", {path:`members/${p.id}`, authUid, authEmail, memberUid:p.memberUid||null, memberEmail:p.email||null, match:uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); console.log(`${label}) 읽기 시작`, {collection:collectionName,path}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); console.log(`${label}) 읽기 성공`, {collection:collectionName,path,count:Array.isArray(data)?data.length:(data?1:0)}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); console.error(`${label}) permission-denied/읽기 실패`, details); return fallback; } }; const ss=await readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]); const bd=await readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null); const nt=await readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null); const ci=await readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]); const ms=await readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]); const ob=await readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); const w=getLatestBodyWeight(bd)?.weight||p.weight||p.startWeight||""; setForm(f=>({...f,weight:w})); }catch(e){ console.error("[MemberApp] load failed:",e); setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ console.groupEnd?.(); setLoading(false); }},[]); useEffect(()=>{load();},[load]);
   if(loading) return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><Spin/></div>;
   if(memberError||!profile) return <MemberAppError message={memberError||"회원 정보를 찾을 수 없습니다. 대표에게 문의해주세요."} details={memberErrorDetails} logs={accessLogs} onRetry={load} onLogout={onLogout}/>;
   const onboardingReadFailed=!!accessErrors.memberOnboarding; const effectiveOnboarding=onboarding||{goal:"온보딩 정보 확인 필요",weeklyWorkoutCount:"-",focusAreas:[]};
@@ -781,7 +780,7 @@ function MemberApp({ onLogout }) {
 }
 
 function CopyValueButton({value,label="복사"}){const [done,setDone]=useState(false); if(!value)return null; return <button onClick={async()=>{try{await navigator.clipboard?.writeText(value);setDone(true);setTimeout(()=>setDone(false),1500);}catch{}}} style={{marginLeft:6,padding:"2px 6px",borderRadius:5,border:"1px solid rgba(47,115,246,.25)",background:"rgba(47,115,246,.08)",color:"#2f73f6",fontSize:10}}>{done?"복사됨":label}</button>}
-function MemberDiagnostics({profile,details}){const d=profile?._diagnostics||details||{}; const matched=profile||{}; const queryErrors=d.queryErrors||{}; return <><div className="notice"><b>auth.uid:</b> {d.authUid||auth.currentUser?.uid||"-"}<CopyValueButton value={d.authUid||auth.currentUser?.uid||""}/><br/><b>auth.email:</b> {d.authEmail||auth.currentUser?.email||"-"}<br/><b>memberAppIndex 조회 성공 여부:</b> {d.memberAppIndexRead?"성공":"실패/없음"}<br/><b>memberAppIndex.memberId:</b> {d.memberAppIndexMemberId||"-"}<br/><b>members/{d.memberAppIndexMemberId||matched.id||"memberId"} 조회 성공 여부:</b> {d.membersRead?"성공":"실패/없음"}<br/><b>실패한 Firestore 경로:</b> {d.failedFirestorePath||Object.values(queryErrors)[0]?.path||"-"}<br/><b>최종 매칭된 memberId:</b> {d.matchedMemberId||matched.id||"-"}<br/><b>최종 매칭 기준:</b> {d.matchedBy||matched._matchedBy||"none"}<br/><b>최종 매칭 name:</b> {matched.name||"-"}<br/><b>최종 매칭 email:</b> {matched.email||"-"}<br/><b>최종 매칭 memberUid:</b> {matched.memberUid||"-"}<br/><b>최종 매칭 trainerUid:</b> {matched.trainerUid||"-"}</div>{Object.keys(queryErrors).length>0&&<div className="danger">진단 조회 실패: {Object.entries(queryErrors).map(([k,e])=>`${k} · ${e.path} (${e.code||"unknown"})`).join(" · ")}</div>}</>;}
+function MemberDiagnostics({profile,details}){const d=profile?._diagnostics||details||{}; const matched=profile||{}; const queryErrors=d.queryErrors||{}; return <><div className="notice"><b>auth.uid:</b> {d.authUid||auth.currentUser?.uid||"-"}<CopyValueButton value={d.authUid||auth.currentUser?.uid||""}/><br/><b>auth.email:</b> {d.authEmail||auth.currentUser?.email||"-"}<br/><b>members.memberUid 쿼리 성공 여부:</b> {d.membersQueryRead?"성공":"실패/없음"}<br/><b>members/{d.matchedMemberId||matched.id||"memberId"} 조회 성공 여부:</b> {d.membersRead?"성공":"실패/없음"}<br/><b>실패한 Firestore 경로:</b> {d.failedFirestorePath||Object.values(queryErrors)[0]?.path||"-"}<br/><b>최종 매칭된 memberId:</b> {d.matchedMemberId||matched.id||"-"}<br/><b>최종 매칭 기준:</b> {d.matchedBy||matched._matchedBy||"none"}<br/><b>최종 매칭 name:</b> {matched.name||"-"}<br/><b>최종 매칭 email:</b> {matched.email||"-"}<br/><b>최종 매칭 memberUid:</b> {matched.memberUid||"-"}<br/><b>최종 매칭 trainerUid:</b> {matched.trainerUid||"-"}</div>{Object.keys(queryErrors).length>0&&<div className="danger">진단 조회 실패: {Object.entries(queryErrors).map(([k,e])=>`${k} · ${e.path} (${e.code||"unknown"})`).join(" · ")}</div>}</>;}
 function MemberDebugPanel({profile,logs,errors}){const failed=Object.values(errors||{}); return <MCard title="회원앱 문서 매칭 진단"><MemberDiagnostics profile={profile}/>{failed.length>0&&<div className="danger">권한/조회 실패 경로: {failed.map(e=>`${e.path} (${e.code})`).join(" · ")}</div>}<div className="notice"><b>Firestore 읽기 순서</b>{(logs||[]).map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div></MCard>}
 
 function MemberAppError({message,details,logs,onRetry,onLogout}){const isAuthMissing=details?.code==="auth/user-not-found"; return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><div className="member-page"><MCard title="회원앱을 열 수 없습니다"><p className="danger">{message}</p>{details&&<><div className="notice"><b>오류 코드:</b> {details.code||"unknown"}{details.path&&<><br/><b>실패 경로:</b> {details.path}</>}</div><MemberDiagnostics details={details}/></>}{logs?.length>0&&<div className="notice"><b>Firestore 읽기 순서</b>{logs.map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div>}<p className="notice">{isAuthMissing?"Firebase Authentication 사용자 계정을 찾을 수 없습니다. 회원앱 초대/비밀번호 설정 상태를 확인해주세요.":"Firebase Authentication 로그인은 완료됐지만 Firestore 권한 또는 데이터 조회 단계에서 실패했습니다. 위 오류 코드와 실패 경로를 확인해주세요."}</p><button className="primary" onClick={onRetry}>다시 시도</button><button className="ghost" onClick={onLogout}>로그아웃</button></MCard></div></div>}
@@ -816,30 +815,6 @@ async function createMemberAuthAccountIfNeeded(email){
   throw new Error(`Firebase Auth 사용자 생성 실패: ${getFirebaseAuthErrorMessage(code)}`);
 }
 
-function getCallableErrorDetails(error){
-  return error?.details||error?.customData?._tokenResponse||{};
-}
-function formatCallableError(error){
-  const details=getCallableErrorDetails(error);
-  const detailCode=details?.originalCode||details?.code||error?.code||"unknown";
-  const message=details?.originalMessage||details?.message||error?.message||String(error);
-  const stack=details?.originalStack||details?.stack||error?.stack||"";
-  const functionName=details?.functionName?` · function=${details.functionName}`:"";
-  const path=details?.writePath?` · path=${details.writePath}`:"";
-  const failedStep=details?.failedStep?` · step=${details.failedStep}`:"";
-  const stackLine=stack?` · stack=${stack.split("\n")[0]}`:"";
-  return {details,detailCode,message,stack,text:`${detailCode} · ${message}${functionName}${path}${failedStep}${stackLine}`};
-}
-async function reconnectMemberUidByEmail(memberId,email){
-  const callable=httpsCallable(functions,"reconnectMemberUidByEmail");
-  const result=await callable({memberId,email});
-  return result.data;
-}
-async function createMemberAppIndexWithFunction(memberId,memberUid){
-  const callable=httpsCallable(functions,"createMemberAppIndexForMember");
-  const result=await callable({memberId,memberUid});
-  return result.data;
-}
 function getMemberAppInviteStatus(member){
   const email=(member?.email||"").trim().toLowerCase();
   const accountEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
@@ -858,30 +833,7 @@ function AdminMemberAppPanel({member,onAccountCreated}){
   useEffect(()=>{if(memberId)Promise.all([getMemberCheckins(memberId,5),getMemberMessages(memberId,5),getMemberOnboarding(memberId)]).then(([a,b,c])=>{setCi(a);setMs(b);setOb(c);}).catch(()=>{});},[memberId]);
   const inviteStatus=getMemberAppInviteStatus(member);
   const addLog=(ok,text)=>setInviteLog(prev=>[...prev,{ok,text,at:new Date().toLocaleTimeString()}]);
-  const reconnectMemberUid=async()=>{
-    const email=(member?.email||"").trim().toLowerCase();
-    if(!email){setMsg("회원 이메일을 먼저 저장해주세요."); return;}
-    setBusy(true); setMsg(""); setInviteLog([]);
-    try{
-      addLog(true,`요청 이메일: ${email}`);
-      addLog(true,`호출한 Firebase projectId: ${firebaseConfig.projectId}`);
-      const linked=await reconnectMemberUidByEmail(memberId,email);
-      const patch={memberUid:linked.memberUid,memberAppAccountEmail:email,memberAppAccountStatus:"available",memberAppLastInviteLog:{ok:true,code:"ADMIN_AUTH_UID_LINKED",uid:linked.authUid,at:new Date().toISOString()}};
-      addLog(true,`Cloud Function projectId: ${linked.projectId||"unknown"}`);
-      addLog(true,`Auth UID 조회 성공 여부: ${linked.authUidLookupSucceeded?"성공":"실패"}`);
-      addLog(true,`조회된 UID: ${linked.authUid||linked.memberUid||"없음"}`);
-      addLog(true,`members.memberUid 저장 성공 여부: ${linked.membersMemberUidSaved?"성공":"실패"}`);
-      addLog(true,`members.memberUid 저장 완료 · members.memberUid: ${linked.memberUid}`);
-      setMsg(`memberUid 재연결 완료 · auth UID: ${linked.authUid} · members.memberUid: ${linked.memberUid}`);
-      onAccountCreated?.(patch);
-    }catch(e){
-      const {details,text}=formatCallableError(e);
-      addLog(false,`Auth UID 조회 성공 여부: ${details?.authUidLookupSucceeded?"성공":"실패"}`);
-      addLog(false,`members.memberUid 저장 성공 여부: ${details?.membersMemberUidSaved?"성공":"실패"}`);
-      addLog(false,`실패 원본 오류: ${text}`);
-      setMsg(`memberUid 재연결 실패 · ${text}`);
-    }finally{setBusy(false);}
-  };
+
 
   const saveManualMemberUid=async()=>{
     const uid=manualUid.trim();
@@ -893,32 +845,8 @@ function AdminMemberAppPanel({member,onAccountCreated}){
       await updateMember(memberId,patch);
       onAccountCreated?.(patch);
       setManualUid("");
-      setMsg(`회원 UID 수동 연결 완료 · 회원앱은 memberAppIndex/{auth.uid}에서 memberId를 찾습니다: ${uid}`);
+      setMsg(`회원 UID 수동 연결 완료 · 회원앱은 members.memberUid로 회원 문서를 찾습니다: ${uid}`);
     }catch(e){setMsg(`회원 UID 수동 연결 실패 · ${e?.message||String(e)}`);}finally{setBusy(false);}
-  };
-  const createMemberAppIndex=async()=>{
-    const authUid=auth.currentUser?.uid||null;
-    const memberUid=(member?.memberUid||"").trim();
-    const writePath=memberUid?`memberAppIndex/${memberUid}`:"memberAppIndex/(missing-memberUid)";
-    console.log("[MemberAppIndex:create button] debug", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember"});
-    addLog(true,`memberAppIndex 생성 호출: function=createMemberAppIndexForMember path=${writePath} auth.uid=${authUid||"-"} memberId=${memberId||"-"} memberUid=${memberUid||"-"}`);
-    if(!memberUid){setMsg("memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다."); return;}
-    setBusy(true); setMsg("");
-    try{
-      const result=await createMemberAppIndexWithFunction(memberId,memberUid);
-      console.log("[MemberAppIndex:create button] success", result);
-      setMsg(`memberAppIndex 생성 완료 · ${result.writePath||`memberAppIndex/${result.memberUid}`} → members/${result.memberId}`);
-      addLog(true,`Cloud Function region: ${result.region||"unknown"} · revision: ${result.deploymentRevision||"unknown"}`);
-      addLog(true,`memberAppIndex 생성 완료: ${result.writePath||result.memberUid}`);
-    }catch(e){
-      const formatted=formatCallableError(e);
-      console.error("[MemberAppIndex:create button] failed", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember",error:e,details:formatted.details});
-      addLog(false,`memberAppIndex 생성 실패: function=createMemberAppIndexForMember path=${writePath} code=${formatted.detailCode}${formatted.details?.failedStep?` step=${formatted.details.failedStep}`:""}`);
-      addLog(false,`error.details 전체: ${JSON.stringify(formatted.details||{},null,2)}`);
-      addLog(false,`실제 오류 메시지: ${formatted.message}`);
-      if(formatted.stack) addLog(false,`실제 오류 stack: ${formatted.stack}`);
-      setMsg(`memberAppIndex 생성 실패 · ${formatted.text}`);
-    }finally{setBusy(false);}
   };
   const sendInvite=async()=>{
     const email=(member?.email||"").trim().toLowerCase();
@@ -949,23 +877,13 @@ function AdminMemberAppPanel({member,onAccountCreated}){
         addLog(true,`기존 members.memberUid 확인 완료: ${existingMemberUid}`);
         setMsg("회원앱 초대를 발송했습니다. 기존 저장 UID가 있어 회원앱 사용 가능 상태로 처리했습니다.");
       }else{
-        const linked=await reconnectMemberUidByEmail(memberId,email);
-        patch.memberUid=linked.memberUid;
-        patch.memberAppAccountStatus="available";
-        patch.memberAppLastInviteLog={ok:true,code:"ADMIN_AUTH_UID_LINKED",uid:linked.authUid,at:now};
-        await updateMember(memberId,{memberUid:linked.memberUid,memberAppAccountStatus:"available",memberAppLastInviteLog:patch.memberAppLastInviteLog});
-        addLog(true,`Cloud Function projectId: ${linked.projectId||"unknown"}`);
-        addLog(true,`Auth UID 조회 성공 여부: ${linked.authUidLookupSucceeded?"성공":"실패"}`);
-        addLog(true,`조회된 UID: ${linked.authUid||linked.memberUid||"없음"}`);
-        addLog(true,`members.memberUid 저장 성공 여부: ${linked.membersMemberUidSaved?"성공":"실패"}`);
-        addLog(true,`members.memberUid 저장 완료: ${linked.memberUid}`);
-        setMsg(`회원앱 초대를 발송했고 UID 재연결도 완료되었습니다. auth UID: ${linked.authUid} · members.memberUid: ${linked.memberUid}`);
+        addLog(false,"이미 존재하는 Auth 사용자의 UID는 클라이언트에서 조회할 수 없습니다. 회원이 로그인 오류 화면의 auth.uid를 전달하면 아래 수동 연결에 저장해주세요.");
+        setMsg("회원앱 초대 메일은 발송했습니다. 기존 Auth 계정 UID는 수동 연결이 필요합니다.");
       }
       onAccountCreated?.(patch);
     }catch(e){
-      const {details,text}=formatCallableError(e);
       const fail=e?.message||"회원앱 초대 처리 실패";
-      addLog(false,details?.code?`원본 오류: ${text}`:fail);
+      addLog(false,fail);
       const patch={memberAppAccountEmail:email,memberAppAccountStatus:"invite-failed",memberAppLastInviteLog:{ok:false,error:fail,uid:prepared?.uid||existingMemberUid||null,at:new Date().toISOString()}};
       try{await updateMember(memberId,patch); onAccountCreated?.(patch);}catch{}
       setMsg(fail);
@@ -975,7 +893,7 @@ function AdminMemberAppPanel({member,onAccountCreated}){
   const linkedEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
   const emailChangedWithUid=!!member?.memberUid&&!!linkedEmail&&!!currentEmail&&linkedEmail!==currentEmail;
   const uidNeedsRelink=!member?.memberUid||emailChangedWithUid||member?.memberAppAccountStatus==="auth-exists-relink-required";
-  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"현재 이메일 기준 재연결 필요 또는 확인 필요":"현재 이메일과 저장 UID 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>현재 이메일과 UID 발급/초대 당시 이메일이 다릅니다. 이전 memberUid가 남아 꼬일 수 있으므로 재연결하세요. 이전 이메일: {linkedEmail}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 및 memberAppIndex 저장</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn><Btn ghost sm onClick={reconnectMemberUid} disabled={busy||!member?.email} style={{color:"#fbbf24",borderColor:"#fbbf2444"}}>memberUid 재연결</Btn><Btn ghost sm onClick={createMemberAppIndex} disabled={busy||!member?.memberUid} style={{color:"#93c5fd",borderColor:"#93c5fd44"}}>memberAppIndex 생성</Btn></div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>회원 UID 수동 연결</Mo><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>회원앱 로그인 오류 화면의 auth.uid를 복사해 붙여넣으면 members.memberUid에 직접 저장합니다.</div><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 붙여넣기" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
+  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"현재 이메일 기준 재연결 필요 또는 확인 필요":"현재 이메일과 저장 UID 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>현재 이메일과 UID 발급/초대 당시 이메일이 다릅니다. 이전 memberUid가 남아 꼬일 수 있으므로 재연결하세요. 이전 이메일: {linkedEmail}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn></div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>회원 UID 수동 연결</Mo><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>회원앱 로그인 오류 화면의 auth.uid를 복사해 붙여넣으면 members.memberUid에 직접 저장합니다.</div><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 붙여넣기" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
 }
 
 

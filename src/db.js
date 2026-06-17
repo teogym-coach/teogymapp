@@ -132,7 +132,7 @@ export async function addMember(data) {
     createdAt:  serverTimestamp(),
   };
   const ref = await addDoc(collection(db, "members"), payload);
-  dbLog("addMember", `생성 완료: ${ref.id} (memberAppIndex는 Cloud Function으로 생성)`);
+  dbLog("addMember", `생성 완료: ${ref.id} (회원앱은 members.memberUid 직접 조회)`);
   return { id: ref.id, ...data, trainerUid: uid };
 }
 
@@ -534,11 +534,6 @@ export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = n
   dbLog("linkMemberUidToCurrentUser", `members/${memberId} -> ${uid}`);
 }
 
-export async function createMemberAppIndexForMember() {
-  throw new Error("memberAppIndex는 클라이언트에서 직접 생성할 수 없습니다. 관리자 화면의 Cloud Function 버튼을 사용하세요.");
-}
-
-
 export async function getMemberAppProfile() {
   const uid = requireUid();
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
@@ -547,70 +542,46 @@ export async function getMemberAppProfile() {
   const diagnostics = {
     authUid: uid,
     authEmail,
-    memberAppIndexRead: false,
+    membersQueryRead: false,
     membersRead: false,
-    memberAppIndexMemberId: null,
     failedFirestorePath: null,
     queryErrors: {},
     matchedMemberId: null,
     matchedBy: "none",
   };
 
-  // ── Step 2: memberAppIndex/{uid} 단일 문서 읽기 ───────────
-  let memberId = null;
   try {
-    const indexSnap = await getDoc(doc(db, "memberAppIndex", uid));
-    if (indexSnap.exists()) {
-      memberId = indexSnap.data()?.memberId || null;
-      diagnostics.memberAppIndexRead = true;
-      diagnostics.memberAppIndexMemberId = memberId;
-      dbLog("getMemberAppProfile", "2) memberAppIndex 조회 성공 memberId:", memberId);
-    } else {
-      dbLog("getMemberAppProfile", "2) memberAppIndex 문서 없음 uid:", uid);
+    const membersQuery = query(collection(db, "members"), where("memberUid", "==", uid), limit(1));
+    const snap = await getDocs(membersQuery);
+    diagnostics.membersQueryRead = true;
+    if (!snap.empty) {
+      const memberDoc = snap.docs[0];
+      const data = memberDoc.data();
+      diagnostics.membersRead = true;
+      diagnostics.matchedMemberId = memberDoc.id;
+      diagnostics.matchedBy = "members.memberUid";
+      const profile = {
+        id: memberDoc.id,
+        ...data,
+        _matchedBy: "members.memberUid",
+        _diagnostics: diagnostics,
+      };
+      dbLog("getMemberAppProfile", "2) members query 성공 memberId:", memberDoc.id, "memberUid:", data.memberUid || null);
+      logMemberRulesEvaluation("getMemberAppProfile", memberDoc.id, data);
+      return profile;
     }
+    dbLog("getMemberAppProfile", "2) members query 결과 없음 uid:", uid);
   } catch (e) {
-    const details = { path: `memberAppIndex/${uid}`, ...describeFirestoreError(e), authUid: uid, authEmail };
+    const details = { path: "members?where(memberUid==auth.uid)", ...describeFirestoreError(e), authUid: uid, authEmail };
     diagnostics.failedFirestorePath = details.path;
-    diagnostics.queryErrors["memberAppIndex"] = details;
-    console.error("[DB:getMemberAppProfile] memberAppIndex 읽기 실패:", details);
+    diagnostics.queryErrors.members = details;
+    console.error("[DB:getMemberAppProfile] members.memberUid query 실패:", details);
   }
 
-  // ── Step 4: members/{memberId} 단일 문서 읽기 ─────────────
-  if (memberId) {
-    try {
-      const memberSnap = await getDoc(doc(db, "members", memberId));
-      if (memberSnap.exists()) {
-        const data = memberSnap.data();
-        diagnostics.membersRead = true;
-        diagnostics.matchedMemberId = memberId;
-        diagnostics.matchedBy = "memberAppIndex";
-        const profile = {
-          id: memberId,
-          ...data,
-          _matchedBy: "memberAppIndex",
-          _diagnostics: diagnostics,
-        };
-        dbLog("getMemberAppProfile", "3) members 읽기 성공 memberId:", memberId, "memberUid:", data.memberUid || null);
-        logMemberRulesEvaluation("getMemberAppProfile", memberId, data);
-        return profile;
-      } else {
-        dbLog("getMemberAppProfile", "3) members 문서 없음 memberId:", memberId);
-        diagnostics.failedFirestorePath = `members/${memberId}`;
-        diagnostics.queryErrors["members"] = { path: `members/${memberId}`, code: "not-found", message: "문서 없음", authUid: uid, authEmail };
-      }
-    } catch (e) {
-      const details = { path: `members/${memberId}`, ...describeFirestoreError(e), authUid: uid, authEmail };
-      diagnostics.failedFirestorePath = details.path;
-      diagnostics.queryErrors["members"] = details;
-      console.error("[DB:getMemberAppProfile] members 읽기 실패:", details);
-    }
-  }
-
-  // ── memberAppIndex 또는 members 단일 문서로 찾지 못한 경우 ─
   dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
-  const err = new Error("memberAppIndex에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다.");
+  const err = new Error("members 컬렉션에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
-  err.memberAppDetails = { code: err.code, path: `memberAppIndex/${uid}`, ...diagnostics };
+  err.memberAppDetails = { code: err.code, path: "members?where(memberUid==auth.uid)", ...diagnostics };
   throw err;
 }
 
@@ -719,7 +690,7 @@ export async function migrateNormalizeMemberEmails() {
       }
       await batch.commit();
       count = updates.length;
-      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵, memberAppIndex 0건 저장(Cloud Function 전용)`);
+      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵, 회원 인덱스 사용 안 함`);
     } else {
       console.log(`[EMAIL MIGRATION] 업데이트 없음. ${skipped}명 스킵`);
     }

@@ -834,9 +834,9 @@ async function reconnectMemberUidByEmail(memberId,email){
   const result=await callable({memberId,email});
   return result.data;
 }
-async function createMemberAppIndexWithFunction(memberId){
+async function createMemberAppIndexWithFunction(memberId,memberUid){
   const callable=httpsCallable(functions,"createMemberAppIndexForMember");
-  const result=await callable({memberId});
+  const result=await callable({memberId,memberUid});
   return result.data;
 }
 function getMemberAppInviteStatus(member){
@@ -904,9 +904,10 @@ function AdminMemberAppPanel({member,onAccountCreated}){
     if(!memberUid){setMsg("memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다."); return;}
     setBusy(true); setMsg("");
     try{
-      const result=await createMemberAppIndexWithFunction(memberId);
+      const result=await createMemberAppIndexWithFunction(memberId,memberUid);
       console.log("[MemberAppIndex:create button] success", result);
       setMsg(`memberAppIndex 생성 완료 · ${result.writePath||`memberAppIndex/${result.memberUid}`} → members/${result.memberId}`);
+      addLog(true,`Cloud Function region: ${result.region||"unknown"} · revision: ${result.deploymentRevision||"unknown"}`);
       addLog(true,`memberAppIndex 생성 완료: ${result.writePath||result.memberUid}`);
     }catch(e){
       const formatted=formatCallableError(e);

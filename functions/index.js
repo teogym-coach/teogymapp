@@ -2,6 +2,11 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 
 const FIREBASE_PROJECT_ID = "teocoach-a7fa0";
+const DEPLOYMENT_REVISION =
+  process.env.K_REVISION ||
+  process.env.FUNCTION_TARGET ||
+  process.env.GCLOUD_PROJECT ||
+  "local";
 
 admin.initializeApp({
   projectId: FIREBASE_PROJECT_ID,
@@ -13,15 +18,16 @@ function normalizeEmail(email) {
 
 function buildMemberAppIndexPayload(memberId, memberData, memberUid, actorUid) {
   const email = normalizeEmail(memberData.email || memberData.memberAppAccountEmail);
-  return {
+  const payload = {
     memberId,
-    email,
     memberUid,
-    trainerUid: memberData.trainerUid || actorUid,
+    trainerUid: memberData.trainerUid || actorUid || "",
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     linkedAt: admin.firestore.FieldValue.serverTimestamp(),
-    linkedBy: actorUid,
+    linkedBy: actorUid || "",
   };
+  if (email) payload.email = email;
+  return payload;
 }
 
 async function assertTrainerOwnsMember(memberId, trainerUid) {
@@ -150,12 +156,21 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
 
   try {
     memberId = String(request.data?.memberId || "").trim();
+    const requestedMemberUid = String(request.data?.memberUid || "").trim();
     actorUid = request.auth?.uid || null;
-    console.log(`[${functionName}] 시작`, { functionName, authUid: actorUid, memberId, projectId: FIREBASE_PROJECT_ID });
+    console.log(`[${functionName}] 시작`, {
+      functionName,
+      authUid: actorUid,
+      memberId,
+      requestedMemberUid,
+      projectId: FIREBASE_PROJECT_ID,
+      region: "us-central1",
+      deploymentRevision: DEPLOYMENT_REVISION,
+    });
 
     if (!memberId) throw new HttpsError("invalid-argument", "memberId가 필요합니다.");
 
-    const { data } = await assertTrainerOwnsMember(memberId, actorUid);
+    const { ref, data } = await assertTrainerOwnsMember(memberId, actorUid);
     memberData = data || {};
     memberUid = String(memberData.memberUid || "").trim();
     writePath = memberUid ? `memberAppIndex/${memberUid}` : "memberAppIndex/(missing-memberUid)";
@@ -171,6 +186,8 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       writePath,
       trainerUid: memberData.trainerUid || null,
       projectId: FIREBASE_PROJECT_ID,
+      region: "us-central1",
+      deploymentRevision: DEPLOYMENT_REVISION,
     });
 
     if (!memberUid) {
@@ -181,6 +198,21 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
         memberData,
         writePath,
         projectId: FIREBASE_PROJECT_ID,
+        region: "us-central1",
+        deploymentRevision: DEPLOYMENT_REVISION,
+      });
+    }
+
+    if (requestedMemberUid && requestedMemberUid !== memberUid) {
+      throw new HttpsError("failed-precondition", "요청 UID와 members.memberUid가 일치하지 않습니다. 최신 회원 정보를 새로고침한 뒤 다시 시도해주세요.", {
+        functionName,
+        memberId,
+        requestedMemberUid,
+        memberUid,
+        writePath,
+        projectId: FIREBASE_PROJECT_ID,
+        region: "us-central1",
+        deploymentRevision: DEPLOYMENT_REVISION,
       });
     }
 
@@ -192,11 +224,28 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       memberUid,
       payload,
       projectId: FIREBASE_PROJECT_ID,
+      region: "us-central1",
+      deploymentRevision: DEPLOYMENT_REVISION,
     });
 
-    await admin.firestore().collection("memberAppIndex").doc(memberUid).set(payload, { merge: true });
-    console.log("[createMemberAppIndexForMember] 저장 완료", { functionName, authUid: actorUid, memberId, memberUid, writePath, projectId: FIREBASE_PROJECT_ID });
-    return { ok: true, memberId, memberUid, writePath, functionName, projectId: FIREBASE_PROJECT_ID };
+    const batch = admin.firestore().batch();
+    batch.set(admin.firestore().collection("memberAppIndex").doc(memberUid), payload, { merge: true });
+    batch.set(ref, {
+      memberAppAccountStatus: "available",
+      memberAppIndexPath: writePath,
+      memberAppIndexUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      memberAppLastInviteLog: {
+        ok: true,
+        code: "MEMBER_APP_INDEX_CREATED",
+        uid: memberUid,
+        path: writePath,
+        at: new Date().toISOString(),
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await batch.commit();
+    console.log("[createMemberAppIndexForMember] 저장 완료", { functionName, authUid: actorUid, memberId, memberUid, writePath, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION });
+    return { ok: true, memberId, memberUid, writePath, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
   } catch (error) {
     const original = describeFunctionError(error);
     console.error(error);
@@ -210,6 +259,8 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       memberData,
       writePath,
       projectId: FIREBASE_PROJECT_ID,
+      region: "us-central1",
+      deploymentRevision: DEPLOYMENT_REVISION,
     });
 
     const details = {
@@ -223,6 +274,8 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       memberData,
       writePath,
       projectId: FIREBASE_PROJECT_ID,
+      region: "us-central1",
+      deploymentRevision: DEPLOYMENT_REVISION,
     };
 
     if (error instanceof HttpsError) {

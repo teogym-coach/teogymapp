@@ -16,6 +16,7 @@ function buildMemberAppIndexPayload(memberId, memberData, memberUid, actorUid) {
   return {
     memberId,
     email,
+    memberUid,
     trainerUid: memberData.trainerUid || actorUid,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     linkedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -93,6 +94,7 @@ exports.reconnectMemberUidByEmail = onCall({ region: "us-central1" }, async (req
     batch.set(indexRef, {
       memberId,
       email,
+      memberUid: uid,
       trainerUid: data.trainerUid || request.auth.uid,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),

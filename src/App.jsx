@@ -821,9 +821,13 @@ function getCallableErrorDetails(error){
 }
 function formatCallableError(error){
   const details=getCallableErrorDetails(error);
-  const detailCode=details?.code||error?.code||"unknown";
-  const message=details?.message||error?.message||String(error);
-  return {details,detailCode,message,text:`${detailCode} · ${message}`};
+  const detailCode=details?.originalCode||details?.code||error?.code||"unknown";
+  const message=details?.originalMessage||details?.message||error?.message||String(error);
+  const stack=details?.originalStack||details?.stack||"";
+  const functionName=details?.functionName?` · function=${details.functionName}`:"";
+  const path=details?.writePath?` · path=${details.writePath}`:"";
+  const stackLine=stack?` · stack=${stack.split("\n")[0]}`:"";
+  return {details,detailCode,message,stack,text:`${detailCode} · ${message}${functionName}${path}${stackLine}`};
 }
 async function reconnectMemberUidByEmail(memberId,email){
   const callable=httpsCallable(functions,"reconnectMemberUidByEmail");
@@ -908,6 +912,8 @@ function AdminMemberAppPanel({member,onAccountCreated}){
       const formatted=formatCallableError(e);
       console.error("[MemberAppIndex:create button] failed", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember",error:e,details:formatted.details});
       addLog(false,`memberAppIndex 생성 실패: function=createMemberAppIndexForMember path=${writePath} code=${formatted.detailCode}`);
+      if(formatted.details?.originalMessage) addLog(false,`실제 오류 메시지: ${formatted.details.originalMessage}`);
+      if(formatted.details?.originalStack) addLog(false,`오류 위치: ${formatted.details.originalStack.split("\n")[1]||formatted.details.originalStack.split("\n")[0]}`);
       setMsg(`memberAppIndex 생성 실패 · ${formatted.text}`);
     }finally{setBusy(false);}
   };

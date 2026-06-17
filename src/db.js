@@ -169,10 +169,11 @@ export async function updateMember(id, data) {
     trainerUid: uid,
     updatedAt:  serverTimestamp(),
   });
-  if (normalized.memberUid) {
-    const indexRef = doc(db, "memberAppIndex", normalized.memberUid);
+  const indexMemberUid = normalized.memberUid || (normalized.memberUid === undefined ? before.memberUid : "");
+  if (indexMemberUid) {
+    const indexRef = doc(db, "memberAppIndex", indexMemberUid);
     batch.set(indexRef, {
-      ...buildMemberAppIndexData(id, nextData, normalized.memberUid),
+      ...buildMemberAppIndexData(id, nextData, indexMemberUid),
       createdAt: serverTimestamp(),
     }, { merge: true });
   }
@@ -632,9 +633,9 @@ export async function getMemberAppProfile() {
 
   // ── Step 3: 찾지 못한 경우 ────────────────────────────────
   dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
-  const err = new Error("현재 로그인 UID 또는 이메일과 일치하는 회원 문서를 찾을 수 없습니다.");
+  const err = new Error("memberAppIndex에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
-  err.memberAppDetails = { code: err.code, path: "memberAppIndex lookup", ...diagnostics };
+  err.memberAppDetails = { code: err.code, path: `memberAppIndex/${uid}`, ...diagnostics };
   throw err;
 }
 

@@ -5,6 +5,8 @@ const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8');
 const db = fs.readFileSync(path.join(root, 'src', 'db.js'), 'utf8');
 
+const memberProfileFn = db.slice(db.indexOf('export async function getMemberAppProfile'), db.indexOf('export async function saveMemberCheckin'));
+
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
@@ -16,6 +18,8 @@ const checks = [
   ['최근 수정 정렬', app.includes('sortMode') && app.includes('updatedAt')],
   ['2:1 수업 저장', app.includes('handleSaveSession2') && app.includes('payload2.memberId') && app.includes('member2')],
   ['Firebase 저장 구조', db.includes('collection(db, "members", memberId, "sessions")') && db.includes('doc(db, "members", memberId, "bodyCheck", "main")') && db.includes('doc(db, "members", memberId, "memberOnboarding", "main")')],
+  ['회원앱 memberAppIndex 단일 문서 조회', memberProfileFn.includes('doc(db, "memberAppIndex", uid)') && memberProfileFn.includes('doc(db, "members", memberId)')],
+  ['회원앱 members 컬렉션 query 미사용', !memberProfileFn.includes('collection(db, "members")') && !memberProfileFn.includes('where("memberUid"') && !memberProfileFn.includes('where("email"')],
 ];
 
 let failed = 0;

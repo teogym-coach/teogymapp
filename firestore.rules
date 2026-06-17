@@ -27,6 +27,10 @@ service cloud.firestore {
       return request.auth.token.email;
     }
 
+    function authEmailLower() {
+      return authEmail().lower();
+    }
+
     function hasAuthEmail() {
       return isSignedIn() && authEmail() is string && authEmail() != "";
     }
@@ -46,8 +50,8 @@ service cloud.firestore {
     function isMemberEmailData(data) {
       return hasAuthEmail()
              && (
-               data.email == authEmail()
-               || data.memberAppAccountEmail == authEmail()
+               data.email == authEmailLower()
+               || data.memberAppAccountEmail == authEmailLower()
              );
     }
 
@@ -83,8 +87,8 @@ service cloud.firestore {
       // get: members/{memberId} 직접 읽기 허용
       // list: where("memberUid", "==", request.auth.uid),
       //       where("trainerUid", "==", request.auth.uid),
-      //       where("email", "==", request.auth.token.email),
-      //       where("memberAppAccountEmail", "==", request.auth.token.email)
+      //       where("email", "==", request.auth.token.email.lower()),
+      //       where("memberAppAccountEmail", "==", request.auth.token.email.lower())
       //       처럼 Rules가 모든 반환 문서가 본인 접근 가능하다고 증명할 수 있는
       //       쿼리만 허용됨. 조건 없는 전체 목록 조회는 거부됨.
       allow get, list: if canReadMemberData(resource.data);

@@ -566,6 +566,23 @@ export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = n
   dbLog("linkMemberUidToCurrentUser", `members/${memberId} -> ${uid}`);
 }
 
+export async function createMemberAppIndexForMember(memberId) {
+  const uid = requireUid();
+  const memberRef = doc(db, "members", memberId);
+  const snap = await getDoc(memberRef);
+  if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
+  const memberData = snap.data();
+  if (memberData.trainerUid !== uid) throw new Error("권한이 없습니다.");
+  const memberUid = (memberData.memberUid || "").trim();
+  if (!memberUid) throw new Error("memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다.");
+  await setDoc(doc(db, "memberAppIndex", memberUid), {
+    ...buildMemberAppIndexData(memberId, memberData, memberUid),
+    createdAt: serverTimestamp(),
+  }, { merge: true });
+  dbLog("createMemberAppIndexForMember", `memberAppIndex/${memberUid} -> members/${memberId}`);
+  return { memberUid, memberId };
+}
+
 export async function getMemberAppProfile() {
   const uid = requireUid();
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
@@ -578,14 +595,12 @@ export async function getMemberAppProfile() {
     membersRead: false,
     memberAppIndexMemberId: null,
     failedFirestorePath: null,
-    memberUidMatches: [],
-    emailMatches: [],
     queryErrors: {},
     matchedMemberId: null,
     matchedBy: "none",
   };
 
-  // ── Step 1: memberAppIndex/{uid} 읽기 ─────────────────────
+  // ── Step 2: memberAppIndex/{uid} 단일 문서 읽기 ───────────
   let memberId = null;
   try {
     const indexSnap = await getDoc(doc(db, "memberAppIndex", uid));
@@ -604,7 +619,7 @@ export async function getMemberAppProfile() {
     console.error("[DB:getMemberAppProfile] memberAppIndex 읽기 실패:", details);
   }
 
-  // ── Step 2: members/{memberId} 직접 읽기 ──────────────────
+  // ── Step 4: members/{memberId} 단일 문서 읽기 ─────────────
   if (memberId) {
     try {
       const memberSnap = await getDoc(doc(db, "members", memberId));
@@ -613,8 +628,6 @@ export async function getMemberAppProfile() {
         diagnostics.membersRead = true;
         diagnostics.matchedMemberId = memberId;
         diagnostics.matchedBy = "memberAppIndex";
-        // memberUidMatches 진단용 채우기 (진단 화면 호환)
-        diagnostics.memberUidMatches = [{ id: memberId, ...data }];
         const profile = {
           id: memberId,
           ...data,
@@ -637,7 +650,7 @@ export async function getMemberAppProfile() {
     }
   }
 
-  // ── Step 3: 찾지 못한 경우 ────────────────────────────────
+  // ── memberAppIndex 또는 members 단일 문서로 찾지 못한 경우 ─
   dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
   const err = new Error("memberAppIndex에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";

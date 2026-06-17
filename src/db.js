@@ -81,6 +81,16 @@ function describeFirestoreError(e) {
   };
 }
 
+function buildMemberAppIndexData(memberId, memberData = {}, memberUid = "") {
+  const email = (memberData.email || memberData.memberAppAccountEmail || auth.currentUser?.email || "").trim().toLowerCase();
+  return clean({
+    memberId,
+    email,
+    trainerUid: memberData.trainerUid || "",
+    updatedAt: serverTimestamp(),
+  });
+}
+
 function logMemberRulesEvaluation(fn, memberId, memberData) {
   const user = auth.currentUser;
   const uid = user?.uid || null;
@@ -151,11 +161,22 @@ export async function updateMember(id, data) {
     normalized.memberUidUnlinkedAt = new Date().toISOString();
     normalized.memberUidUnlinkReason = "member-email-changed";
   }
-  await updateDoc(doc(db, "members", id), {
+  const memberRef = doc(db, "members", id);
+  const nextData = { ...before, ...normalized, trainerUid: uid };
+  const batch = writeBatch(db);
+  batch.update(memberRef, {
     ...normalized,
     trainerUid: uid,
     updatedAt:  serverTimestamp(),
   });
+  if (normalized.memberUid) {
+    const indexRef = doc(db, "memberAppIndex", normalized.memberUid);
+    batch.set(indexRef, {
+      ...buildMemberAppIndexData(id, nextData, normalized.memberUid),
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+  }
+  await batch.commit();
   dbLog("updateMember", "완료");
 }
 
@@ -517,12 +538,24 @@ export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = n
   const uid = requireUid();
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();
   if (!authEmail) throw new Error("Firebase Auth 이메일이 없어 회원 문서 연결을 진행할 수 없습니다.");
-  await updateDoc(doc(db, "members", memberId), {
+  const memberRef = doc(db, "members", memberId);
+  const snap = await getDoc(memberRef);
+  if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
+  const memberData = snap.data();
+  const batch = writeBatch(db);
+  batch.update(memberRef, {
     memberUid: uid,
     memberUidLinkedAt: serverTimestamp(),
     memberUidLinkedBy: uid,
     memberUidPrevious: previousMemberUid || "",
+    memberAppAccountEmail: authEmail,
+    updatedAt: serverTimestamp(),
   });
+  batch.set(doc(db, "memberAppIndex", uid), {
+    ...buildMemberAppIndexData(memberId, { ...memberData, memberAppAccountEmail: authEmail }, uid),
+    createdAt: serverTimestamp(),
+  }, { merge: true });
+  await batch.commit();
   dbLog("linkMemberUidToCurrentUser", `members/${memberId} -> ${uid}`);
 }
 
@@ -534,6 +567,10 @@ export async function getMemberAppProfile() {
   const diagnostics = {
     authUid: uid,
     authEmail,
+    memberAppIndexRead: false,
+    membersRead: false,
+    memberAppIndexMemberId: null,
+    failedFirestorePath: null,
     memberUidMatches: [],
     emailMatches: [],
     queryErrors: {},
@@ -547,12 +584,15 @@ export async function getMemberAppProfile() {
     const indexSnap = await getDoc(doc(db, "memberAppIndex", uid));
     if (indexSnap.exists()) {
       memberId = indexSnap.data()?.memberId || null;
+      diagnostics.memberAppIndexRead = true;
+      diagnostics.memberAppIndexMemberId = memberId;
       dbLog("getMemberAppProfile", "2) memberAppIndex 조회 성공 memberId:", memberId);
     } else {
       dbLog("getMemberAppProfile", "2) memberAppIndex 문서 없음 uid:", uid);
     }
   } catch (e) {
     const details = { path: `memberAppIndex/${uid}`, ...describeFirestoreError(e), authUid: uid, authEmail };
+    diagnostics.failedFirestorePath = details.path;
     diagnostics.queryErrors["memberAppIndex"] = details;
     console.error("[DB:getMemberAppProfile] memberAppIndex 읽기 실패:", details);
   }
@@ -563,6 +603,7 @@ export async function getMemberAppProfile() {
       const memberSnap = await getDoc(doc(db, "members", memberId));
       if (memberSnap.exists()) {
         const data = memberSnap.data();
+        diagnostics.membersRead = true;
         diagnostics.matchedMemberId = memberId;
         diagnostics.matchedBy = "memberAppIndex";
         // memberUidMatches 진단용 채우기 (진단 화면 호환)
@@ -578,10 +619,12 @@ export async function getMemberAppProfile() {
         return profile;
       } else {
         dbLog("getMemberAppProfile", "3) members 문서 없음 memberId:", memberId);
+        diagnostics.failedFirestorePath = `members/${memberId}`;
         diagnostics.queryErrors["members"] = { path: `members/${memberId}`, code: "not-found", message: "문서 없음", authUid: uid, authEmail };
       }
     } catch (e) {
       const details = { path: `members/${memberId}`, ...describeFirestoreError(e), authUid: uid, authEmail };
+      diagnostics.failedFirestorePath = details.path;
       diagnostics.queryErrors["members"] = details;
       console.error("[DB:getMemberAppProfile] members 읽기 실패:", details);
     }
@@ -677,6 +720,7 @@ export async function migrateNormalizeMemberEmails() {
     console.log("[EMAIL MIGRATION] 조회된 문서 수:", snap.docs.length);
 
     const updates = [];
+    const indexUpdates = [];
     for (const d of snap.docs) {
       const data = d.data();
       if (typeof data.email !== "string" || !data.email) {
@@ -685,6 +729,9 @@ export async function migrateNormalizeMemberEmails() {
       }
 
       const normalizedEmail = data.email.trim().toLowerCase();
+      if (data.memberUid && normalizedEmail) {
+        indexUpdates.push({ memberUid: data.memberUid, memberId: d.id, email: normalizedEmail, trainerUid: data.trainerUid || uid });
+      }
       if (normalizedEmail && normalizedEmail !== data.email) {
         updates.push({ ref: d.ref, email: normalizedEmail, name: data.name || d.id });
       } else {
@@ -692,15 +739,24 @@ export async function migrateNormalizeMemberEmails() {
       }
     }
 
-    if (updates.length > 0) {
+    if (updates.length > 0 || indexUpdates.length > 0) {
       const batch = writeBatch(db);
       for (const u of updates) {
         batch.update(u.ref, { email: u.email, updatedAt: serverTimestamp() });
         console.log(`[EMAIL MIGRATION] 정규화 예정: ${u.name}`);
       }
+      for (const u of indexUpdates) {
+        batch.set(doc(db, "memberAppIndex", u.memberUid), {
+          memberId: u.memberId,
+          email: u.email,
+          trainerUid: u.trainerUid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
       await batch.commit();
       count = updates.length;
-      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵`);
+      console.log(`[EMAIL MIGRATION] 완료: ${count}명 업데이트, ${skipped}명 스킵, memberAppIndex ${indexUpdates.length}건 저장`);
     } else {
       console.log(`[EMAIL MIGRATION] 업데이트 없음. ${skipped}명 스킵`);
     }

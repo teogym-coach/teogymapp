@@ -228,9 +228,41 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       deploymentRevision: DEPLOYMENT_REVISION,
     });
 
-    const batch = admin.firestore().batch();
-    batch.set(admin.firestore().collection("memberAppIndex").doc(memberUid), payload, { merge: true });
-    batch.set(ref, {
+    const indexRef = admin.firestore().collection("memberAppIndex").doc(memberUid);
+    try {
+      await indexRef.set(payload, { merge: true });
+    } catch (error) {
+      const original = describeFunctionError(error);
+      console.error("[createMemberAppIndexForMember] memberAppIndex set 실패", {
+        functionName,
+        ...original,
+        authUid: actorUid,
+        memberId,
+        memberUid,
+        writePath,
+        payload,
+        projectId: FIREBASE_PROJECT_ID,
+        region: "us-central1",
+        deploymentRevision: DEPLOYMENT_REVISION,
+      });
+      throw new HttpsError("internal", original.message || "memberAppIndex 문서 생성에 실패했습니다.", {
+        functionName,
+        failedStep: "memberAppIndex.set",
+        originalCode: original.code,
+        originalMessage: original.message,
+        originalStack: original.stack,
+        errorName: original.name,
+        memberId,
+        memberUid,
+        writePath,
+        payload,
+        projectId: FIREBASE_PROJECT_ID,
+        region: "us-central1",
+        deploymentRevision: DEPLOYMENT_REVISION,
+      });
+    }
+
+    await ref.set({
       memberAppAccountStatus: "available",
       memberAppIndexPath: writePath,
       memberAppIndexUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -243,9 +275,8 @@ exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async 
       },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
-    await batch.commit();
     console.log("[createMemberAppIndexForMember] 저장 완료", { functionName, authUid: actorUid, memberId, memberUid, writePath, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION });
-    return { ok: true, memberId, memberUid, writePath, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
+    return { ok: true, message: "memberAppIndex 생성 완료", memberId, memberUid, writePath, functionName, projectId: FIREBASE_PROJECT_ID, region: "us-central1", deploymentRevision: DEPLOYMENT_REVISION };
   } catch (error) {
     const original = describeFunctionError(error);
     console.error(error);

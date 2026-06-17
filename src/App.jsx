@@ -823,11 +823,12 @@ function formatCallableError(error){
   const details=getCallableErrorDetails(error);
   const detailCode=details?.originalCode||details?.code||error?.code||"unknown";
   const message=details?.originalMessage||details?.message||error?.message||String(error);
-  const stack=details?.originalStack||details?.stack||"";
+  const stack=details?.originalStack||details?.stack||error?.stack||"";
   const functionName=details?.functionName?` · function=${details.functionName}`:"";
   const path=details?.writePath?` · path=${details.writePath}`:"";
+  const failedStep=details?.failedStep?` · step=${details.failedStep}`:"";
   const stackLine=stack?` · stack=${stack.split("\n")[0]}`:"";
-  return {details,detailCode,message,stack,text:`${detailCode} · ${message}${functionName}${path}${stackLine}`};
+  return {details,detailCode,message,stack,text:`${detailCode} · ${message}${functionName}${path}${failedStep}${stackLine}`};
 }
 async function reconnectMemberUidByEmail(memberId,email){
   const callable=httpsCallable(functions,"reconnectMemberUidByEmail");
@@ -912,9 +913,9 @@ function AdminMemberAppPanel({member,onAccountCreated}){
     }catch(e){
       const formatted=formatCallableError(e);
       console.error("[MemberAppIndex:create button] failed", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember",error:e,details:formatted.details});
-      addLog(false,`memberAppIndex 생성 실패: function=createMemberAppIndexForMember path=${writePath} code=${formatted.detailCode}`);
-      if(formatted.details?.originalMessage) addLog(false,`실제 오류 메시지: ${formatted.details.originalMessage}`);
-      if(formatted.details?.originalStack) addLog(false,`오류 위치: ${formatted.details.originalStack.split("\n")[1]||formatted.details.originalStack.split("\n")[0]}`);
+      addLog(false,`memberAppIndex 생성 실패: function=createMemberAppIndexForMember path=${writePath} code=${formatted.detailCode}${formatted.details?.failedStep?` step=${formatted.details.failedStep}`:""}`);
+      addLog(false,`실제 오류 메시지: ${formatted.message}`);
+      if(formatted.stack) addLog(false,`실제 오류 stack: ${formatted.stack}`);
       setMsg(`memberAppIndex 생성 실패 · ${formatted.text}`);
     }finally{setBusy(false);}
   };

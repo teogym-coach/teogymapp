@@ -11,7 +11,7 @@ import {
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import {
-  getMembers, addMember, updateMember, deleteMember, createMemberAppIndexForMember,
+  getMembers, addMember, updateMember, deleteMember,
   getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
@@ -830,6 +830,11 @@ async function reconnectMemberUidByEmail(memberId,email){
   const result=await callable({memberId,email});
   return result.data;
 }
+async function createMemberAppIndexWithFunction(memberId){
+  const callable=httpsCallable(functions,"createMemberAppIndexForMember");
+  const result=await callable({memberId});
+  return result.data;
+}
 function getMemberAppInviteStatus(member){
   const email=(member?.email||"").trim().toLowerCase();
   const accountEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
@@ -887,13 +892,24 @@ function AdminMemberAppPanel({member,onAccountCreated}){
     }catch(e){setMsg(`회원 UID 수동 연결 실패 · ${e?.message||String(e)}`);}finally{setBusy(false);}
   };
   const createMemberAppIndex=async()=>{
-    if(!member?.memberUid){setMsg("memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다."); return;}
+    const authUid=auth.currentUser?.uid||null;
+    const memberUid=(member?.memberUid||"").trim();
+    const writePath=memberUid?`memberAppIndex/${memberUid}`:"memberAppIndex/(missing-memberUid)";
+    console.log("[MemberAppIndex:create button] debug", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember"});
+    addLog(true,`memberAppIndex 생성 호출: function=createMemberAppIndexForMember path=${writePath} auth.uid=${authUid||"-"} memberId=${memberId||"-"} memberUid=${memberUid||"-"}`);
+    if(!memberUid){setMsg("memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다."); return;}
     setBusy(true); setMsg("");
     try{
-      const result=await createMemberAppIndexForMember(memberId);
-      setMsg(`memberAppIndex 생성 완료 · memberAppIndex/${result.memberUid} → members/${result.memberId}`);
-      addLog(true,`memberAppIndex 생성 완료: ${result.memberUid}`);
-    }catch(e){setMsg(`memberAppIndex 생성 실패 · ${e?.message||String(e)}`);}finally{setBusy(false);}
+      const result=await createMemberAppIndexWithFunction(memberId);
+      console.log("[MemberAppIndex:create button] success", result);
+      setMsg(`memberAppIndex 생성 완료 · ${result.writePath||`memberAppIndex/${result.memberUid}`} → members/${result.memberId}`);
+      addLog(true,`memberAppIndex 생성 완료: ${result.writePath||result.memberUid}`);
+    }catch(e){
+      const formatted=formatCallableError(e);
+      console.error("[MemberAppIndex:create button] failed", {authUid,memberId,memberUid,writePath,functionName:"createMemberAppIndexForMember",error:e,details:formatted.details});
+      addLog(false,`memberAppIndex 생성 실패: function=createMemberAppIndexForMember path=${writePath} code=${formatted.detailCode}`);
+      setMsg(`memberAppIndex 생성 실패 · ${formatted.text}`);
+    }finally{setBusy(false);}
   };
   const sendInvite=async()=>{
     const email=(member?.email||"").trim().toLowerCase();

@@ -11,6 +11,18 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function buildMemberAppIndexPayload(memberId, memberData, memberUid, actorUid) {
+  const email = normalizeEmail(memberData.email || memberData.memberAppAccountEmail);
+  return {
+    memberId,
+    email,
+    trainerUid: memberData.trainerUid || actorUid,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+    linkedBy: actorUid,
+  };
+}
+
 async function assertTrainerOwnsMember(memberId, trainerUid) {
   if (!trainerUid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   const ref = admin.firestore().collection("members").doc(memberId);
@@ -114,4 +126,58 @@ exports.reconnectMemberUidByEmail = onCall({ region: "us-central1" }, async (req
   }
 
   return { ok: true, authUid: uid, memberUid: uid, previousMemberUid, email, memberId, projectId: FIREBASE_PROJECT_ID, authUidLookupSucceeded: true, membersMemberUidSaved: true };
+});
+
+
+exports.createMemberAppIndexForMember = onCall({ region: "us-central1" }, async (request) => {
+  const memberId = String(request.data?.memberId || "").trim();
+  if (!memberId) throw new HttpsError("invalid-argument", "memberId가 필요합니다.");
+  const actorUid = request.auth?.uid || null;
+  const { data } = await assertTrainerOwnsMember(memberId, actorUid);
+  const memberUid = String(data.memberUid || "").trim();
+  const writePath = `memberAppIndex/${memberUid}`;
+  console.log("[createMemberAppIndexForMember] 요청", {
+    authUid: actorUid,
+    memberId,
+    memberUid,
+    writePath,
+    trainerUid: data.trainerUid || null,
+    projectId: FIREBASE_PROJECT_ID,
+  });
+  if (!memberUid) {
+    throw new HttpsError("failed-precondition", "memberUid가 있는 회원만 memberAppIndex를 생성할 수 있습니다.", {
+      memberId,
+      memberUid,
+      writePath: "memberAppIndex/(missing-memberUid)",
+      projectId: FIREBASE_PROJECT_ID,
+    });
+  }
+
+  try {
+    await admin.firestore().collection("memberAppIndex").doc(memberUid).set(
+      buildMemberAppIndexPayload(memberId, data, memberUid, actorUid),
+      { merge: true }
+    );
+    console.log("[createMemberAppIndexForMember] 저장 완료", { authUid: actorUid, memberId, memberUid, writePath, projectId: FIREBASE_PROJECT_ID });
+    return { ok: true, memberId, memberUid, writePath, functionName: "createMemberAppIndexForMember", projectId: FIREBASE_PROJECT_ID };
+  } catch (error) {
+    console.error("[createMemberAppIndexForMember] 저장 실패", {
+      code: error?.code || "unknown",
+      message: error?.message || String(error),
+      stack: error?.stack || null,
+      authUid: actorUid,
+      memberId,
+      memberUid,
+      writePath,
+      projectId: FIREBASE_PROJECT_ID,
+    });
+    throw new HttpsError("internal", "memberAppIndex 저장에 실패했습니다.", {
+      code: error?.code || "unknown",
+      message: error?.message || String(error),
+      memberId,
+      memberUid,
+      writePath,
+      projectId: FIREBASE_PROJECT_ID,
+    });
+  }
 });

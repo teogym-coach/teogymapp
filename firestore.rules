@@ -57,6 +57,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && uid() == indexUid;
       allow create, update: if isSignedIn()
                             && request.resource.data.memberId is string
+                            && memberDoc(request.resource.data.memberId).memberUid == indexUid
                             && (uid() == indexUid || isTrainerOfMember(request.resource.data.memberId))
                             && request.resource.data.trainerUid == memberDoc(request.resource.data.memberId).trainerUid
                             && request.resource.data.email == memberDoc(request.resource.data.memberId).email;

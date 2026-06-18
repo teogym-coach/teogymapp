@@ -334,17 +334,26 @@ export async function getPublishedSessions(memberId) {
   const path = `members/${memberId}/sessions`;
   dbLog("getPublishedSessions", "읽기 시작:", path, "where isPublished == true");
   try {
+    // Spark 플랜/기본 인덱스에서도 동작하도록 단일 where만 사용합니다.
+    // where + orderBy 조합은 composite index가 없어 failed-precondition을 만들 수 있어
+    // 정렬은 클라이언트에서 수행합니다.
     const q = query(
       collection(db, "members", memberId, "sessions"),
-      where("isPublished", "==", true),
-      orderBy("sessionNo", "asc")
+      where("isPublished", "==", true)
     );
     const snap = await getDocs(q);
-    dbLog("getPublishedSessions", `결과: ${snap.docs.length}개`);
-    return snap.docs.map(d => publicSession({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+    const sessions = snap.docs
+      .map(d => publicSession({ id: d.id, ...normalizeSessionForRead(d.data()) }))
+      .sort((a, b) => {
+        const sessionNoDiff = (Number(a.sessionNo) || 0) - (Number(b.sessionNo) || 0);
+        if (sessionNoDiff) return sessionNoDiff;
+        return String(a.date || "").localeCompare(String(b.date || ""));
+      });
+    dbLog("getPublishedSessions", `결과: ${sessions.length}개`);
+    return sessions;
   } catch(e) {
-    console.error("[DB:getPublishedSessions] read failed:", { path, collection: "sessions", ...describeFirestoreError(e), memberId });
-    throw e;
+    console.warn("[DB:getPublishedSessions] read failed; returning [] so member app can continue:", { path, collection: "sessions", ...describeFirestoreError(e), memberId });
+    return [];
   }
 }
 

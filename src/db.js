@@ -346,6 +346,8 @@ function publicSession(data = {}) {
     trainerComment: data.trainerComment || "",
     stretchingNotes: data.stretchingNotes || "",
     cardio: data.cardio || null,
+    sorenessReport: data.sorenessReport || null,
+    sorenessUpdatedAt: data.sorenessUpdatedAt || null,
     isPublished: true,
     status: "published",
     publishedAt: data.publishedAt || null,
@@ -411,6 +413,16 @@ export async function updateSession(memberId, sessionId, data) {
     { ...clean(withSessionDefaults(data)), updatedAt: serverTimestamp() }
   );
   dbLog("updateSession", "완료");
+}
+
+export async function saveSessionSoreness(memberId, sessionId, sorenessReport) {
+  requireUid();
+  dbLog("saveSessionSoreness", `memberId=${memberId} sessionId=${sessionId}`);
+  await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+    sorenessReport: clean(sorenessReport),
+    sorenessUpdatedAt: serverTimestamp(),
+  });
+  dbLog("saveSessionSoreness", "완료");
 }
 
 export async function publishSession(memberId, sessionId) {

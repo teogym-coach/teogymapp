@@ -287,7 +287,7 @@ async function verifyMemberOwnership(memberId) {
 // ════════════════════════════════════════════════════
 // 수업 일지 (sessions)
 // ════════════════════════════════════════════════════
-const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "movementPurpose", "funcCategory", "funcBodyPart", "funcTool"]);
+const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "movementPurpose", "funcCategory", "funcBodyPart", "funcTool", "isFavorite", "favorite", "isRecommended", "recommended", "memberAppRecommended"]);
 
 function normalizeSessionForRead(data = {}) {
   const isPublished = data.isPublished === true;
@@ -505,6 +505,66 @@ export async function saveBodyCheck(memberId, data) {
     console.error("[DB] saveBodyCheck error:", e.message, `memberId=${memberId}`);
     throw new Error("바디체크 저장 실패: " + e.message);
   }
+}
+
+export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
+  requireUid();
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+
+  if (data.weight !== undefined && data.weight !== "") {
+    const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
+    const snap = await getDoc(bodyRef);
+    const current = snap.exists() ? snap.data() : {};
+    batch.set(bodyRef, {
+      goal: current.goal || {},
+      inbody: current.inbody || [],
+      records: clean(upsertRecordByDate(current.records || [], {
+        id: `member_${dateKey}`,
+        date: dateKey,
+        weight: data.weight,
+        note: "회원앱 직접 입력",
+      })),
+      updatedAt: now,
+    });
+  }
+
+  if (data.kcal !== undefined && data.kcal !== "") {
+    const metaRef = doc(db, "members", memberId, "nutrition", "meta");
+    const dateRef = doc(db, "members", memberId, "nutrition", dateKey);
+    const metaSnap = await getDoc(metaRef);
+    const meta = metaSnap.exists() ? metaSnap.data() : {};
+    batch.set(metaRef, {
+      goal: meta.goal || "체중 감량",
+      favFoods: clean(meta.favFoods) || [],
+      logs: clean(upsertRecordByDate(meta.logs || [], { id: dateKey, date: dateKey, kcal: data.kcal, source: "member-app" })),
+      updatedAt: now,
+    });
+    batch.set(dateRef, {
+      ...(meta.dates?.[dateKey] || {}),
+      totalKcal: data.kcal,
+      memberInputKcal: data.kcal,
+      updatedAt: now,
+    }, { merge: true });
+  }
+
+  if (data.steps !== undefined && data.steps !== "") {
+    const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
+    batch.set(checkRef, { steps: data.steps, date: dateKey, updatedAt: now, createdBy: auth.currentUser.uid }, { merge: true });
+  }
+
+  await batch.commit();
+}
+
+function upsertRecordByDate(records = [], rec = {}) {
+  const date = rec.date;
+  if (!date) return records;
+  const next = [...records];
+  const idx = next.findIndex(r => r.date === date || r.id === rec.id);
+  const merged = { ...(idx >= 0 ? next[idx] : {}), ...rec };
+  if (idx >= 0) next[idx] = merged;
+  else next.push(merged);
+  return next.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
 }
 
 

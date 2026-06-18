@@ -76,6 +76,17 @@ service cloud.firestore {
                       || (isMemberSelf(memberId)
                           && resource.data.isPublished == true
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["sorenessReport", "sorenessUpdatedAt"]));
+
+        match /memberFeedback/{feedbackUid} {
+          allow read: if isTrainerOfMember(memberId)
+                      || (isMemberSelf(memberId) && feedbackUid == uid());
+          allow create, update: if isTrainerOfMember(memberId)
+                                || (isMemberSelf(memberId)
+                                    && feedbackUid == uid()
+                                    && request.resource.data.source == "memberApp"
+                                    && request.resource.data.keys().hasOnly(["sorenessLevel", "sorenessBodyPart", "rpe", "memo", "createdAt", "updatedAt", "source"]));
+          allow delete: if isTrainerOfMember(memberId);
+        }
       }
 
       match /memberCheckins/{checkinId} {

@@ -1,7 +1,7 @@
 {
-  "short_name": "PT Journal",
-  "name": "PT Journal - 수업일지",
-  "description": "PT 트레이너용 수업일지 관리 앱",
+  "short_name": "TEO GYM",
+  "name": "TEO GYM 회원앱",
+  "description": "TEO GYM 회원 전용 운동 관리 앱",
   "icons": [
     {
       "src": "icon-192.png",
@@ -16,7 +16,7 @@
       "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/member?app=member",
   "display": "standalone",
   "orientation": "portrait",
   "theme_color": "#09090c",

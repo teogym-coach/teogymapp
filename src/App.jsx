@@ -6,6 +6,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from "recharts";
 import { auth, firebaseConfig } from "./firebase-config";
+import { isMemberMode } from "./app-mode";
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
@@ -950,7 +951,7 @@ export default function App() {
   const [loading,  setLoading]  = useState(false);
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
-  const memberMode = window.location.pathname.startsWith("/member") || new URLSearchParams(window.location.search).get("app") === "member";
+  const memberMode = isMemberMode();
 
   function showToast(msg, type) {
     setToast({msg, type: type||"ok"});

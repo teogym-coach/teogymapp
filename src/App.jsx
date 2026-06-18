@@ -16,7 +16,7 @@ import {
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments,
   migrateAddTrainerUid, migrateNormalizeMemberEmails, getPublishedSessions, getMemberAppProfile, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
-  getMemberOnboarding, saveMemberOnboarding,
+  getMemberOnboarding, saveMemberOnboarding, cleanupMemberAppEmailIdentity, buildMemberIdentityDiagnostics,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -816,15 +816,12 @@ async function createMemberAuthAccountIfNeeded(email){
 }
 
 function getMemberAppInviteStatus(member){
-  const email=(member?.email||"").trim().toLowerCase();
-  const accountEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
-  if(member?.memberUid&&accountEmail&&email&&accountEmail!==email) return {label:"이메일 변경됨 · UID 재연결 필요",color:"#ff9f43"};
-  if(member?.memberUid) return {label:"회원앱 사용 가능",color:"#86efac"};
+  if(member?.memberUid) return {label:"회원앱 사용 가능 · memberUid 기준",color:"#86efac"};
   if(member?.memberAppAccountStatus==="auth-exists-missing-uid") return {label:"Auth 있음 · UID 미저장",color:"#fbbf24"};
   if(member?.memberAppInviteSentAt) return {label:"초대 발송 완료",color:"#93c5fd"};
   return {label:"초대 전",color:"#fbbf24"};
 }
-function AdminMemberAppPanel({member,onAccountCreated}){
+function AdminMemberAppPanel({member,members=[],onAccountCreated}){
   const memberId=member?.id;
   const [manualUid,setManualUid]=useState("");
   const [ci,setCi]=useState([]),[ms,setMs]=useState([]),[ob,setOb]=useState(null);
@@ -832,6 +829,9 @@ function AdminMemberAppPanel({member,onAccountCreated}){
   const [inviteLog,setInviteLog]=useState([]);
   useEffect(()=>{if(memberId)Promise.all([getMemberCheckins(memberId,5),getMemberMessages(memberId,5),getMemberOnboarding(memberId)]).then(([a,b,c])=>{setCi(a);setMs(b);setOb(c);}).catch(()=>{});},[memberId]);
   const inviteStatus=getMemberAppInviteStatus(member);
+  const identityDiagnostics=useMemo(()=>buildMemberIdentityDiagnostics(members,member,auth.currentUser?.uid||null),[members,member]);
+  const duplicateEmailMembers=identityDiagnostics.current?.emailDuplicateMembers||[];
+  const duplicateUidMembers=identityDiagnostics.current?.memberUidDuplicateMembers||[];
   const addLog=(ok,text)=>setInviteLog(prev=>[...prev,{ok,text,at:new Date().toLocaleTimeString()}]);
 
 
@@ -892,8 +892,9 @@ function AdminMemberAppPanel({member,onAccountCreated}){
   const currentEmail=(member?.email||"").trim().toLowerCase();
   const linkedEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
   const emailChangedWithUid=!!member?.memberUid&&!!linkedEmail&&!!currentEmail&&linkedEmail!==currentEmail;
-  const uidNeedsRelink=!member?.memberUid||emailChangedWithUid||member?.memberAppAccountStatus==="auth-exists-relink-required";
-  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"현재 이메일 기준 재연결 필요 또는 확인 필요":"현재 이메일과 저장 UID 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>현재 이메일과 UID 발급/초대 당시 이메일이 다릅니다. 이전 memberUid가 남아 꼬일 수 있으므로 재연결하세요. 이전 이메일: {linkedEmail}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn></div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>회원 UID 수동 연결</Mo><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>회원앱 로그인 오류 화면의 auth.uid를 복사해 붙여넣으면 members.memberUid에 직접 저장합니다.</div><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 붙여넣기" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
+  const uidNeedsRelink=!member?.memberUid||member?.memberAppAccountStatus==="auth-exists-relink-required";
+  const cleanupTeoGym12=async()=>{setBusy(true); setMsg(""); try{const patch=await cleanupMemberAppEmailIdentity(memberId,"teogym12@gmail.com"); onAccountCreated?.({email:"teogym12@gmail.com",memberAppAccountEmail:"teogym12@gmail.com",memberAppInviteEmail:"teogym12@gmail.com",previousEmail:"",memberUidUnlinkReason:"",memberUidUnlinkedAt:"",memberAppLastInviteLog:patch.memberAppLastInviteLog||member?.memberAppLastInviteLog}); setMsg("대표 운동기록 회원 이메일 기준 정리 완료 · memberUid는 유지했습니다.");}catch(e){setMsg(`이메일 기준 정리 실패 · ${e?.message||String(e)}`);}finally{setBusy(false);}};
+  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"memberUid 없음 또는 수동 확인 필요":"memberUid 기준 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>참고: 현재 이메일과 과거 초대 이메일이 다르지만 memberUid가 있으면 재연결 경고 대상이 아닙니다. 과거 이메일: {linkedEmail}</div>}{duplicateEmailMembers.length>0&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>이미 다른 회원이 사용 중인 이메일입니다. 테스트 회원과 실제 회원 이메일이 겹치면 회원앱 연결이 꼬일 수 있습니다. ({duplicateEmailMembers.map(m=>m.name||m.id).join(" · ")})</div>}{duplicateUidMembers.length>0&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>같은 memberUid를 가진 다른 회원이 있습니다: {duplicateUidMembers.map(m=>m.name||m.id).join(" · ")}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",fontSize:10,color:"#94a3b8"}}><b style={{color:"#cbd5e1"}}>관리자 진단</b><br/>현재 회원 email/memberUid/Auth UID: {identityDiagnostics.current?.email||"-"} / {identityDiagnostics.current?.memberUid||"-"} / {identityDiagnostics.current?.authUid||"-"}<br/>현재 회원 memberUid == Auth UID: {identityDiagnostics.current?.memberUidMatchesAuthUid?"일치":"불일치 또는 관리자 Auth"}<br/>중복 email 그룹: {identityDiagnostics.duplicateEmails.length?identityDiagnostics.duplicateEmails.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}<br/>중복 memberUid 그룹: {identityDiagnostics.duplicateMemberUids.length?identityDiagnostics.duplicateMemberUids.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn><Btn ghost sm onClick={cleanupTeoGym12} disabled={busy} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>teogym12 기준 정리</Btn></div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>회원 UID 수동 연결</Mo><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>회원앱 로그인 오류 화면의 auth.uid를 복사해 붙여넣으면 members.memberUid에 직접 저장합니다.</div><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 붙여넣기" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
 }
 
 
@@ -1367,7 +1368,7 @@ export default function App() {
         {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={member} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} allMembers={members} sessions={sessions} bodyData={bodyData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
 
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} />}
@@ -3081,7 +3082,7 @@ function MemberForm({ initial, onSave, onBack }) {
 // ════════════════════════════════════════════
 // HUB
 // ════════════════════════════════════════════
-function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit, onMemberPatch }) {
+function HubScreen({ member, allMembers, sessions, bodyData, loading, setScreen, onEdit, onMemberPatch }) {
   const isCorr = false;
 
   const totalVol = sessions.reduce((s,ss) => s+(ss.totalVolume||0), 0);
@@ -3141,7 +3142,7 @@ function HubScreen({ member, sessions, bodyData, loading, setScreen, onEdit, onM
           </div>
         )}
         {member.memo && <div style={{marginTop:6,padding:"7px 10px",background:"#0B1120",borderRadius:6,fontSize:11,color:"#54546a",borderLeft:"2px solid rgba(255,255,255,0.10)"}}>{member.memo}</div>}
-        <AdminMemberAppPanel member={member} onAccountCreated={onMemberPatch} />
+        <AdminMemberAppPanel member={member} members={allMembers} onAccountCreated={onMemberPatch} />
       </div>
 
       {!loading && (() => {

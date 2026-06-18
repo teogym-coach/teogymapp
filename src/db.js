@@ -15,7 +15,7 @@
 // ═══════════════════════════════════════════════════
 import {
   collection, doc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit,
+  query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit, deleteField,
 } from "firebase/firestore";
 import { db, auth } from "./firebase-config";
 
@@ -95,13 +95,13 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
     memberEmail,
     trainerMatch: !!uid && memberData?.trainerUid === uid,
     memberUidMatch: !!uid && memberData?.memberUid === uid,
-    emailMatch: !!authEmail && !!memberEmail && authEmail === memberEmail,
+    emailMatchesForDisplayOnly: !!authEmail && !!memberEmail && authEmail === memberEmail,
   };
-  result.canAccessMember = result.trainerMatch || result.memberUidMatch || result.emailMatch;
-  result.publishedSessionsRule = "trainerMatch OR (memberUidMatch/emailMatch AND sessions.isPublished == true)";
-  result.bodyCheckRule = "trainerMatch OR memberUidMatch OR emailMatch";
-  result.memberCheckinsRule = "trainerMatch OR memberUidMatch OR emailMatch";
-  result.memberMessagesRule = "trainerMatch OR memberUidMatch OR emailMatch";
+  result.canAccessMember = result.trainerMatch || result.memberUidMatch;
+  result.publishedSessionsRule = "trainerMatch OR (memberUidMatch AND sessions.isPublished == true)";
+  result.bodyCheckRule = "trainerMatch OR memberUidMatch";
+  result.memberCheckinsRule = "trainerMatch OR memberUidMatch";
+  result.memberMessagesRule = "trainerMatch OR memberUidMatch";
   result.memberOnboardingRule = "현재 firestore.rules의 wildcard 때문에 trainerMatch만 허용";
   dbLog(fn, "Firestore Rules 평가(클라이언트 추정):", result);
   return result;
@@ -144,13 +144,8 @@ export async function updateMember(id, data) {
   const before = snap.data();
   if (before.trainerUid !== uid) throw new Error("권한이 없습니다.");
   const normalized = clean(normalizeMemberData(data));
-  const beforeEmail = (before.email || "").trim().toLowerCase();
-  const nextEmail = typeof normalized.email === "string" ? normalized.email : beforeEmail;
-  if (before.memberUid && nextEmail && beforeEmail && nextEmail !== beforeEmail && normalized.memberUid === undefined) {
-    normalized.memberUid = "";
-    normalized.memberUidUnlinkedAt = new Date().toISOString();
-    normalized.memberUidUnlinkReason = "member-email-changed";
-  }
+  // Spark 회원앱 로그인은 email이 아니라 members.memberUid == auth.uid를 기준으로 한다.
+  // 따라서 표시용 이메일이 바뀌어도 이미 연결된 memberUid를 자동 해제하지 않는다.
   const memberRef = doc(db, "members", id);
   await updateDoc(memberRef, {
     ...normalized,
@@ -158,6 +153,66 @@ export async function updateMember(id, data) {
     updatedAt:  serverTimestamp(),
   });
   dbLog("updateMember", "완료");
+}
+
+export async function cleanupMemberAppEmailIdentity(memberId, canonicalEmail = "teogym12@gmail.com") {
+  const uid = requireUid();
+  const email = canonicalEmail.trim().toLowerCase();
+  if (!email) throw new Error("기준 이메일이 필요합니다.");
+  const memberRef = doc(db, "members", memberId);
+  const snap = await getDoc(memberRef);
+  if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
+  const data = snap.data();
+  if (data.trainerUid !== uid) throw new Error("권한이 없습니다.");
+
+  const patch = {
+    email,
+    memberAppAccountEmail: email,
+    memberAppInviteEmail: email,
+    previousEmail: deleteField(),
+    memberUidUnlinkReason: deleteField(),
+    memberUidUnlinkedAt: deleteField(),
+    updatedAt: serverTimestamp(),
+  };
+
+  const lastInvite = data.memberAppLastInviteLog;
+  if (lastInvite && typeof lastInvite === "object") {
+    patch.memberAppLastInviteLog = { ...lastInvite, email };
+  }
+
+  await updateDoc(memberRef, patch);
+  dbLog("cleanupMemberAppEmailIdentity", `members/${memberId} email=${email} memberUid=${data.memberUid || ""}`);
+  return { id: memberId, ...patch, previousEmail: undefined, memberUidUnlinkReason: undefined, memberUidUnlinkedAt: undefined };
+}
+
+export function buildMemberIdentityDiagnostics(members = [], currentMember = null, authUid = auth.currentUser?.uid || null) {
+  const normalize = value => (value || "").trim().toLowerCase();
+  const summarize = m => ({ id: m.id, name: m.name || "", email: normalize(m.email), memberUid: m.memberUid || "" });
+  const groupBy = (field, normalizer = value => (value || "").trim()) => {
+    const map = new Map();
+    for (const member of members) {
+      const key = normalizer(member[field]);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(summarize(member));
+    }
+    return [...map.entries()].filter(([, list]) => list.length > 1).map(([value, list]) => ({ value, members: list }));
+  };
+  const currentEmail = normalize(currentMember?.email);
+  return {
+    duplicateEmails: groupBy("email", normalize),
+    duplicateMemberUids: groupBy("memberUid"),
+    current: currentMember ? {
+      id: currentMember.id,
+      name: currentMember.name || "",
+      email: currentEmail,
+      memberUid: currentMember.memberUid || "",
+      authUid: authUid || "",
+      emailDuplicateMembers: members.filter(m => m.id !== currentMember.id && normalize(m.email) && normalize(m.email) === currentEmail).map(summarize),
+      memberUidDuplicateMembers: members.filter(m => m.id !== currentMember.id && m.memberUid && m.memberUid === currentMember.memberUid).map(summarize),
+      memberUidMatchesAuthUid: !!authUid && !!currentMember.memberUid && currentMember.memberUid === authUid,
+    } : null,
+  };
 }
 
 export async function deleteMember(id) {

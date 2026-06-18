@@ -348,10 +348,26 @@ function publicSession(data = {}) {
     cardio: data.cardio || null,
     sorenessReport: data.sorenessReport || null,
     sorenessUpdatedAt: data.sorenessUpdatedAt || null,
+    memberFeedback: data.memberFeedback || null,
     isPublished: true,
     status: "published",
     publishedAt: data.publishedAt || null,
   };
+}
+
+async function attachSessionMemberFeedback(memberId, sessions = []) {
+  const uid = auth.currentUser?.uid || null;
+  return Promise.all((sessions || []).map(async session => {
+    try {
+      const feedbackSnap = await getDocs(collection(db, "members", memberId, "sessions", session.id, "memberFeedback"));
+      const feedbackList = feedbackSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const ownFeedback = uid ? feedbackList.find(f => f.id === uid) : null;
+      return { ...session, memberFeedback: ownFeedback || feedbackList[0] || null, memberFeedbackList: feedbackList };
+    } catch (e) {
+      console.warn("[DB:attachSessionMemberFeedback] read failed", { memberId, sessionId: session.id, code: e?.code, message: e?.message });
+      return session;
+    }
+  }));
 }
 
 export async function getSessions(memberId) {
@@ -363,7 +379,8 @@ export async function getSessions(memberId) {
   );
   const snap = await getDocs(q);
   dbLog("getSessions", `결과: ${snap.docs.length}개`);
-  return snap.docs.map(d => ({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+  const sessions = snap.docs.map(d => ({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+  return attachSessionMemberFeedback(memberId, sessions);
 }
 
 export async function getPublishedSessions(memberId) {
@@ -386,8 +403,9 @@ export async function getPublishedSessions(memberId) {
         if (sessionNoDiff) return sessionNoDiff;
         return String(a.date || "").localeCompare(String(b.date || ""));
       });
-    dbLog("getPublishedSessions", `결과: ${sessions.length}개`);
-    return sessions;
+    const withFeedback = await attachSessionMemberFeedback(memberId, sessions);
+    dbLog("getPublishedSessions", `결과: ${withFeedback.length}개`);
+    return withFeedback;
   } catch(e) {
     console.warn("[DB:getPublishedSessions] read failed; returning [] so member app can continue:", { path, collection: "sessions", ...describeFirestoreError(e), memberId });
     return [];
@@ -423,6 +441,23 @@ export async function saveSessionSoreness(memberId, sessionId, sorenessReport) {
     sorenessUpdatedAt: serverTimestamp(),
   });
   dbLog("saveSessionSoreness", "완료");
+}
+
+export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
+  const uid = requireUid();
+  const ref = doc(db, "members", memberId, "sessions", sessionId, "memberFeedback", uid);
+  const snap = await getDoc(ref);
+  const payload = clean({
+    sorenessLevel: feedback.sorenessLevel || "없음",
+    sorenessBodyPart: feedback.sorenessBodyPart || "기타",
+    rpe: Number(feedback.rpe),
+    memo: feedback.memo || "",
+    source: "memberApp",
+    updatedAt: serverTimestamp(),
+    ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
+  });
+  await setDoc(ref, payload, { merge: true });
+  return { id: uid, ...feedback, source: "memberApp" };
 }
 
 export async function publishSession(memberId, sessionId) {

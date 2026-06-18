@@ -185,6 +185,41 @@ export async function cleanupMemberAppEmailIdentity(memberId, canonicalEmail = "
   return { id: memberId, ...patch, previousEmail: undefined, memberUidUnlinkReason: undefined, memberUidUnlinkedAt: undefined };
 }
 
+export async function prepareMemberAppEmailRelink(memberId, nextEmail) {
+  const uid = requireUid();
+  const email = (nextEmail || "").trim().toLowerCase();
+  if (!email) throw new Error("새 회원앱 이메일이 필요합니다.");
+  const memberRef = doc(db, "members", memberId);
+  const snap = await getDoc(memberRef);
+  if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
+  const data = snap.data();
+  if (data.trainerUid !== uid) throw new Error("권한이 없습니다.");
+
+  const previousMemberUid = data.memberUid || "";
+  const patch = {
+    email,
+    memberAppAccountEmail: email,
+    memberAppInviteEmail: email,
+    previousEmail: data.email || "",
+    memberUidPrevious: previousMemberUid,
+    memberUid: deleteField(),
+    memberUidUnlinkReason: "admin-member-email-relink",
+    memberUidUnlinkedAt: serverTimestamp(),
+    memberAppAccountStatus: "email-changed-reinvite-required",
+    memberAppLastInviteLog: {
+      ok: false,
+      code: "EMAIL_CHANGED_REINVITE_REQUIRED",
+      previousUid: previousMemberUid || null,
+      email,
+      at: new Date().toISOString(),
+    },
+    updatedAt: serverTimestamp(),
+  };
+  await updateDoc(memberRef, patch);
+  dbLog("prepareMemberAppEmailRelink", `members/${memberId} email=${email} previousUid=${previousMemberUid}`);
+  return { id: memberId, email, memberAppAccountEmail: email, memberAppInviteEmail: email, previousEmail: data.email || "", memberUid: "", memberUidPrevious: previousMemberUid, memberAppAccountStatus: "email-changed-reinvite-required", memberAppLastInviteLog: patch.memberAppLastInviteLog };
+}
+
 export function buildMemberIdentityDiagnostics(members = [], currentMember = null, authUid = auth.currentUser?.uid || null) {
   const normalize = value => (value || "").trim().toLowerCase();
   const summarize = m => ({ id: m.id, name: m.name || "", email: normalize(m.email), memberUid: m.memberUid || "" });

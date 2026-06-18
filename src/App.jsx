@@ -8,6 +8,7 @@ import {
 import { auth, firebaseConfig } from "./firebase-config";
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
+  setPersistence, browserLocalPersistence, browserSessionPersistence,
 } from "firebase/auth";
 import {
   getMembers, addMember, updateMember, deleteMember,
@@ -16,7 +17,7 @@ import {
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments,
   migrateAddTrainerUid, migrateNormalizeMemberEmails, getPublishedSessions, getMemberAppProfile, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
-  getMemberOnboarding, saveMemberOnboarding, cleanupMemberAppEmailIdentity, buildMemberIdentityDiagnostics,
+  getMemberOnboarding, saveMemberOnboarding, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -761,9 +762,22 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
 const MEMBER_COLORS = { background:"#FFFFFF", pageSoft:"#F6F7F9", card:"#FFFFFF", cardSoft:"#F1F3F6", textPrimary:"#20242A", textSecondary:"#8B949E", border:"#E8ECF1", accentBlue:"#2F73F6", accentPurple:"#8B5CF6", positiveGreen:"#16C784", danger:"#FF5A5F" };
 const ONBOARDING_GOALS=["운동 기초 다지기","다이어트 성공","근육 키우기","특정 부위 집중하기","건강한 습관 만들기"];
 const ONBOARDING_FOCUS=["벌크업","상체 프레임 넓히기","대표알 어깨 만들기","다이어트 초집중","선명한 복근","뱃살 옆구리살 빼기","탄탄한 가슴 근육","굵은 팔뚝 만들기","하체 강화"];
+const DEFAULT_ADMIN_EMAIL = "teogym12@gmail.com";
+const DEFAULT_MEMBER_TEST_EMAIL = "teogym12.member@gmail.com";
+function normalizeEmail(value){ return (value || "").trim().toLowerCase(); }
+function MemberEmailAdminWarning({email}){
+  const memberEmail = normalizeEmail(email);
+  const adminEmail = normalizeEmail(auth.currentUser?.email) || DEFAULT_ADMIN_EMAIL;
+  const sameAsAdmin = !!memberEmail && !!adminEmail && memberEmail === adminEmail;
+  return <div style={{marginTop:7,padding:9,borderRadius:8,background:sameAsAdmin?"rgba(255,107,107,.10)":"rgba(94,234,212,.06)",border:`1px solid ${sameAsAdmin?"rgba(255,107,107,.28)":"rgba(94,234,212,.16)"}`}}>
+    <Mo c={sameAsAdmin?"#ff9f9f":"#94a3b8"} s={10} style={{lineHeight:1.55}}>
+      {sameAsAdmin ? "관리자 계정 이메일과 회원앱 이메일이 같습니다. 같은 이메일을 사용하면 비밀번호가 함께 변경될 수 있으므로 별도 회원 이메일을 사용해주세요." : `회원전용 앱 테스트/대표 운동기록 계정은 관리자 이메일(${adminEmail})과 분리해 ${DEFAULT_MEMBER_TEST_EMAIL} 또는 별도 회원 이메일을 사용해주세요.`}
+    </Mo>
+  </div>;
+}
 function MemberLanding({ onLogin, loading, error }) {
-  const [email,setEmail]=useState(""); const [pw,setPw]=useState("");
-  return <div className="member-login"><style>{CSS+MEMBER_CSS}</style><div className="login-phone"><div className="login-brand"><div className="login-logo">TEO GYM</div><h1>나만의 PT 기록을<br/>가장 쉽게 확인하세요</h1><p>대표님과 함께 만든 변화를 한 곳에서</p></div><div className="login-form"><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="이메일" type="email"/><input value={pw} onChange={e=>setPw(e.target.value)} placeholder="비밀번호" type="password"/>{error&&<div className="member-error">{error}</div>}<button onClick={()=>onLogin(email,pw)} disabled={loading||!email||!pw}>{loading?"로그인 중...":"회원 앱 시작하기"}</button></div></div></div>;
+  const [email,setEmail]=useState(""); const [pw,setPw]=useState(""); const [keepLogin,setKeepLogin]=useState(true);
+  return <div className="member-login"><style>{CSS+MEMBER_CSS}</style><div className="login-phone"><div className="login-brand"><div className="login-logo">TEO GYM</div><h1>나만의 PT 기록을<br/>가장 쉽게 확인하세요</h1><p>대표님과 함께 만든 변화를 한 곳에서</p></div><div className="login-form"><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="이메일" type="email"/><input value={pw} onChange={e=>setPw(e.target.value)} placeholder="비밀번호" type="password"/><label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"#4b5563",margin:"2px 0 4px"}}><input type="checkbox" checked={keepLogin} onChange={e=>setKeepLogin(e.target.checked)} style={{width:16,height:16}}/> 로그인 유지</label><div style={{fontSize:11,color:"#8B949E",lineHeight:1.45}}>회원앱은 members.memberUid == auth.uid 기준으로 연결됩니다. 관리자 이메일(teogym12@gmail.com)과 다른 회원 이메일을 사용해주세요.</div>{error&&<div className="member-error">{error}</div>}<button onClick={()=>onLogin(email,pw,{keepLogin})} disabled={loading||!email||!pw}>{loading?"로그인 중...":"회원 앱 시작하기"}</button></div></div></div>;
 }
 function isMemberDebugMode(){
   try{
@@ -902,8 +916,8 @@ function AdminMemberAppPanel({member,members=[],onAccountCreated}){
   const linkedEmail=(member?.memberAppAccountEmail||"").trim().toLowerCase();
   const emailChangedWithUid=!!member?.memberUid&&!!linkedEmail&&!!currentEmail&&linkedEmail!==currentEmail;
   const uidNeedsRelink=!member?.memberUid||member?.memberAppAccountStatus==="auth-exists-relink-required";
-  const cleanupTeoGym12=async()=>{setBusy(true); setMsg(""); try{const patch=await cleanupMemberAppEmailIdentity(memberId,"teogym12@gmail.com"); onAccountCreated?.({email:"teogym12@gmail.com",memberAppAccountEmail:"teogym12@gmail.com",memberAppInviteEmail:"teogym12@gmail.com",previousEmail:"",memberUidUnlinkReason:"",memberUidUnlinkedAt:"",memberAppLastInviteLog:patch.memberAppLastInviteLog||member?.memberAppLastInviteLog}); setMsg("대표 운동기록 회원 이메일 기준 정리 완료 · memberUid는 유지했습니다.");}catch(e){setMsg(`이메일 기준 정리 실패 · ${e?.message||String(e)}`);}finally{setBusy(false);}};
-  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"memberUid 없음 또는 수동 확인 필요":"memberUid 기준 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>참고: 현재 이메일과 과거 초대 이메일이 다르지만 memberUid가 있으면 재연결 경고 대상이 아닙니다. 과거 이메일: {linkedEmail}</div>}{duplicateEmailMembers.length>0&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>이미 다른 회원이 사용 중인 이메일입니다. 테스트 회원과 실제 회원 이메일이 겹치면 회원앱 연결이 꼬일 수 있습니다. ({duplicateEmailMembers.map(m=>m.name||m.id).join(" · ")})</div>}{duplicateUidMembers.length>0&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>같은 memberUid를 가진 다른 회원이 있습니다: {duplicateUidMembers.map(m=>m.name||m.id).join(" · ")}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",fontSize:10,color:"#94a3b8"}}><b style={{color:"#cbd5e1"}}>관리자 진단</b><br/>현재 회원 email/memberUid/Auth UID: {identityDiagnostics.current?.email||"-"} / {identityDiagnostics.current?.memberUid||"-"} / {identityDiagnostics.current?.authUid||"-"}<br/>현재 회원 memberUid == Auth UID: {identityDiagnostics.current?.memberUidMatchesAuthUid?"일치":"불일치 또는 관리자 Auth"}<br/>중복 email 그룹: {identityDiagnostics.duplicateEmails.length?identityDiagnostics.duplicateEmails.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}<br/>중복 memberUid 그룹: {identityDiagnostics.duplicateMemberUids.length?identityDiagnostics.duplicateMemberUids.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn><Btn ghost sm onClick={cleanupTeoGym12} disabled={busy} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>teogym12 기준 정리</Btn></div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>회원 UID 수동 연결</Mo><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>회원앱 로그인 오류 화면의 auth.uid를 복사해 붙여넣으면 members.memberUid에 직접 저장합니다.</div><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 붙여넣기" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
+  const cleanupTeoGym12=async()=>{const next=window.prompt("관리자 계정과 분리할 회원앱 이메일을 입력하세요.", DEFAULT_MEMBER_TEST_EMAIL); if(!next) return; setBusy(true); setMsg(""); try{const patch=await prepareMemberAppEmailRelink(memberId,next); onAccountCreated?.({email:patch.email,memberAppAccountEmail:patch.memberAppAccountEmail,memberAppInviteEmail:patch.memberAppInviteEmail,previousEmail:patch.previousEmail,memberUid:"",memberUidPrevious:patch.memberUidPrevious,memberAppAccountStatus:patch.memberAppAccountStatus,memberAppLastInviteLog:patch.memberAppLastInviteLog}); setMsg("회원앱 이메일 분리 완료 · 기존 UID 연결을 해제했습니다. 이제 회원앱 초대 보내기로 새 Firebase Auth 계정/UID를 연결해주세요.");}catch(e){setMsg(`회원앱 이메일 분리 실패 · ${e?.message||String(e)}`);}finally{setBusy(false);}};
+  return <div style={{marginTop:10,display:"grid",gap:8}}><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 초대</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>이메일: {member?.email||"회원 이메일 없음"}</div><div style={{fontSize:11,color:inviteStatus.color,marginTop:4}}>상태: {inviteStatus.label}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>auth UID: {member?.memberAppLastInviteLog?.uid||member?.memberUid||"없음"}</div><div style={{fontSize:11,color:"#cbd5e1",marginTop:4}}>members.memberUid: {member?.memberUid||"없음"}</div><div style={{fontSize:11,color:uidNeedsRelink?"#ff9f43":"#86efac",marginTop:4}}>UID 점검: {uidNeedsRelink?"memberUid 없음 또는 수동 확인 필요":"memberUid 기준 연결 상태 정상"}</div>{emailChangedWithUid&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>참고: 현재 이메일과 과거 초대 이메일이 다르지만 memberUid가 있으면 재연결 경고 대상이 아닙니다. 과거 이메일: {linkedEmail}</div>}{duplicateEmailMembers.length>0&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>이미 다른 회원이 사용 중인 이메일입니다. 테스트 회원과 실제 회원 이메일이 겹치면 회원앱 연결이 꼬일 수 있습니다. ({duplicateEmailMembers.map(m=>m.name||m.id).join(" · ")})</div>}{duplicateUidMembers.length>0&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:4}}>같은 memberUid를 가진 다른 회원이 있습니다: {duplicateUidMembers.map(m=>m.name||m.id).join(" · ")}</div>}<div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",fontSize:10,color:"#94a3b8"}}><b style={{color:"#cbd5e1"}}>관리자 진단</b><br/>현재 회원 email/memberUid/Auth UID: {identityDiagnostics.current?.email||"-"} / {identityDiagnostics.current?.memberUid||"-"} / {identityDiagnostics.current?.authUid||"-"}<br/>현재 회원 memberUid == Auth UID: {identityDiagnostics.current?.memberUidMatchesAuthUid?"일치":"불일치 또는 관리자 Auth"}<br/>중복 email 그룹: {identityDiagnostics.duplicateEmails.length?identityDiagnostics.duplicateEmails.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}<br/>중복 memberUid 그룹: {identityDiagnostics.duplicateMemberUids.length?identityDiagnostics.duplicateMemberUids.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn sm onClick={sendInvite} disabled={busy||!member?.email}>{busy?"처리 중...":"회원앱 초대 보내기"}</Btn><Btn ghost sm onClick={cleanupTeoGym12} disabled={busy} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 이메일 분리</Btn></div><div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>회원 UID 수동 연결</Mo><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>회원앱 로그인 오류 화면의 auth.uid를 복사해 붙여넣으면 members.memberUid에 직접 저장합니다.</div><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 붙여넣기" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{inviteLog.length>0&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:4}}>{inviteLog.map((l,i)=><div key={i} style={{fontSize:10,color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#a78bfa" s={9}>회원앱 온보딩</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{ob?.completedAt?`${ob.gender||"-"} · ${ob.birthYear||"-"}년생 · ${ob.heightCm||"-"}cm · ${ob.startingWeightKg||"-"}kg · ${ob.goal||"-"} · ${ob.weeklyWorkoutCount||"-"}`:"아직 완료 전"}</div>{ob?.focusAreas?.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>집중 부위: {ob.focusAreas.join(" · ")}</div>}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={9}>회원앱 최근 체크인</Mo>{ci.map(c=><div key={c.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{c.date||c.id} · {c.weight||"-"}kg · {c.condition||"-"} · 근육통 {c.soreness||"-"}</div>)}</div><div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo>{ms.map(m=><div key={m.id} style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>{m.message}</div>)}</div></div>
 }
 
 
@@ -1002,10 +1016,13 @@ export default function App() {
     loadMemberData(member.id);
   }
 
-  async function handleLogin(email, pw) {
+  async function handleLogin(email, pw, options = {}) {
     setLoading(true);
     setLoginErr("");
-    try { await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), pw); }
+    try {
+      await setPersistence(auth, memberMode ? (options.keepLogin === false ? browserSessionPersistence : browserLocalPersistence) : browserLocalPersistence);
+      await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), pw);
+    }
     catch(e) { const code=e?.code||""; setLoginErr(memberMode&&code==="auth/user-not-found" ? "회원 이메일은 저장되어 있지만 Firebase Authentication 계정이 없습니다. 대표에게 회원앱 초대 발송을 요청해주세요." : "로그인 실패: 이메일 또는 비밀번호를 확인해주세요."); }
     finally { setLoading(false); }
   }
@@ -2372,7 +2389,11 @@ function MemberForm({ initial, onSave, onBack }) {
       ? painParts.join(", ") + (painSituation ? ` (${painSituation})` : "")
       : painArea;
     const syncedGoal = primaryGoal || goal;
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
+    if (normalizedEmail && normalizedEmail === normalizeEmail(auth.currentUser?.email)) {
+      const ok = window.confirm("관리자 계정 이메일과 회원앱 이메일이 같습니다. 같은 이메일을 사용하면 비밀번호가 함께 변경될 수 있으므로 별도 회원 이메일을 사용해주세요. 그래도 저장할까요?");
+      if (!ok) return;
+    }
     onSave({
       name, phone, email: normalizedEmail, startDate, memo, totalSessions: sessions, ticketInfo,
       goal: syncedGoal, painArea: syncedPainArea,
@@ -2445,6 +2466,7 @@ function MemberForm({ initial, onSave, onBack }) {
                 <Field label="전화번호" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
               </div>
               <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
+              <MemberEmailAdminWarning email={email} />
               <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
                 <StepLabel label="성별" />
@@ -2775,6 +2797,7 @@ function MemberForm({ initial, onSave, onBack }) {
             </div>
             <div style={{marginTop:9}}>
               <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
+              <MemberEmailAdminWarning email={email} />
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginTop:9}}>
               <Field label="키 (cm)" value={height} onChange={setHeight} placeholder="예: 170" type="number" />

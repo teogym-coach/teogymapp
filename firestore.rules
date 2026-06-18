@@ -90,7 +90,7 @@ service cloud.firestore {
 
       match /bodyCheck/{docId} {
         allow read: if canAccessMember(memberId);
-        allow write: if isTrainerOfMember(memberId);
+        allow write: if canAccessMember(memberId);
       }
 
       match /assessments/{assessmentId} {
@@ -99,7 +99,7 @@ service cloud.firestore {
 
       match /nutrition/{docId} {
         allow read: if canAccessMember(memberId);
-        allow write: if isTrainerOfMember(memberId);
+        allow write: if canAccessMember(memberId);
       }
 
       match /memberOnboarding/{docId} {

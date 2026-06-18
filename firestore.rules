@@ -71,7 +71,11 @@ service cloud.firestore {
       match /sessions/{sessionId} {
         allow read: if isTrainerOfMember(memberId)
                     || (isMemberSelf(memberId) && resource.data.isPublished == true);
-        allow write: if isTrainerOfMember(memberId);
+        allow create, delete: if isTrainerOfMember(memberId);
+        allow update: if isTrainerOfMember(memberId)
+                      || (isMemberSelf(memberId)
+                          && resource.data.isPublished == true
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["sorenessReport", "sorenessUpdatedAt"]));
       }
 
       match /memberCheckins/{checkinId} {

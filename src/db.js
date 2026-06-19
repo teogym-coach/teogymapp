@@ -570,7 +570,7 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
         note: "회원앱 직접 입력",
       })),
       updatedAt: now,
-    });
+    }, { merge: true });
   }
 
   if (data.kcal !== undefined && data.kcal !== "") {

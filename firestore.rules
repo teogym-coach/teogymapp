@@ -84,7 +84,7 @@ service cloud.firestore {
                                 || (isMemberSelf(memberId)
                                     && feedbackUid == uid()
                                     && request.resource.data.source == "memberApp"
-                                    && request.resource.data.keys().hasOnly(["sorenessLevel", "sorenessBodyPart", "rpe", "memo", "createdAt", "updatedAt", "source"]));
+                                    && request.resource.data.keys().hasOnly(["sorenessLevel", "sorenessBodyPart", "sorenessBodyParts", "rpe", "memo", "createdAt", "updatedAt", "source"]));
           allow delete: if isTrainerOfMember(memberId);
         }
       }

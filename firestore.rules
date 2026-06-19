@@ -100,8 +100,8 @@ service cloud.firestore {
       }
 
       match /bodyCheck/{docId} {
-        allow read: if canAccessMember(memberId);
-        allow write: if canAccessMember(memberId);
+        allow read, create, update: if canAccessMember(memberId);
+        allow delete: if isTrainerOfMember(memberId);
       }
 
       match /assessments/{assessmentId} {

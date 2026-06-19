@@ -50,6 +50,38 @@ service cloud.firestore {
       return isTrainerOfMember(memberId) || isMemberSelf(memberId);
     }
 
+    function memberProfileUpdateKeysAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "height", "startWeight", "currentWeight", "workoutFrequency", "updatedAt"
+      ]);
+    }
+
+    function memberOnboardingProfileKeysAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
+        "startingWeightKg", "startWeight", "currentWeight", "weight", "updatedAt"
+      ]);
+    }
+
+    function memberOnboardingCreateKeysAllowed() {
+      return request.resource.data.keys().hasOnly([
+        "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
+        "startingWeightKg", "startWeight", "currentWeight", "weight", "updatedAt"
+      ]);
+    }
+
+    function bodyCheckWeightKeysAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "goal", "records", "inbody", "updatedAt"
+      ]);
+    }
+
+    function bodyCheckCreateKeysAllowed() {
+      return request.resource.data.keys().hasOnly([
+        "goal", "records", "inbody", "updatedAt"
+      ]);
+    }
+
     match /members/{memberId} {
 
       // get/list: 대표자 trainerUid 쿼리와 회원 본인 memberUid 쿼리 허용.
@@ -66,7 +98,7 @@ service cloud.firestore {
                       (resource.data.trainerUid == uid()
                         && request.resource.data.trainerUid == uid())
                       || (resource.data.memberUid == uid()
-                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["height", "startWeight", "currentWeight", "workoutFrequency", "updatedAt"]))
+                        && memberProfileUpdateKeysAllowed())
                     );
 
       allow delete: if isSignedIn()
@@ -104,7 +136,15 @@ service cloud.firestore {
       }
 
       match /bodyCheck/{docId} {
-        allow read, create, update: if canAccessMember(memberId);
+        allow read: if canAccessMember(memberId);
+        allow create: if isTrainerOfMember(memberId)
+                      || (isMemberSelf(memberId)
+                          && docId == "main"
+                          && bodyCheckCreateKeysAllowed());
+        allow update: if isTrainerOfMember(memberId)
+                      || (isMemberSelf(memberId)
+                          && docId == "main"
+                          && bodyCheckWeightKeysAllowed());
         allow delete: if isTrainerOfMember(memberId);
       }
 
@@ -118,7 +158,15 @@ service cloud.firestore {
       }
 
       match /memberOnboarding/{docId} {
-        allow read, create, update: if canAccessMember(memberId);
+        allow read: if canAccessMember(memberId);
+        allow create: if isTrainerOfMember(memberId)
+                      || (isMemberSelf(memberId)
+                          && docId == "main"
+                          && memberOnboardingCreateKeysAllowed());
+        allow update: if isTrainerOfMember(memberId)
+                      || (isMemberSelf(memberId)
+                          && docId == "main"
+                          && memberOnboardingProfileKeysAllowed());
         allow delete: if isTrainerOfMember(memberId);
       }
 

@@ -70,15 +70,15 @@ service cloud.firestore {
       ]);
     }
 
-    function bodyCheckWeightKeysAllowed() {
+    function bodyCheckProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        "goal", "records", "inbody", "updatedAt"
+        "records", "updatedAt", "currentWeight"
       ]);
     }
 
-    function bodyCheckCreateKeysAllowed() {
+    function bodyCheckProfileCreateKeysAllowed() {
       return request.resource.data.keys().hasOnly([
-        "goal", "records", "inbody", "updatedAt"
+        "records", "updatedAt", "currentWeight"
       ]);
     }
 
@@ -140,11 +140,11 @@ service cloud.firestore {
         allow create: if isTrainerOfMember(memberId)
                       || (isMemberSelf(memberId)
                           && docId == "main"
-                          && bodyCheckCreateKeysAllowed());
+                          && bodyCheckProfileCreateKeysAllowed());
         allow update: if isTrainerOfMember(memberId)
                       || (isMemberSelf(memberId)
                           && docId == "main"
-                          && bodyCheckWeightKeysAllowed());
+                          && bodyCheckProfileUpdateKeysAllowed());
         allow delete: if isTrainerOfMember(memberId);
       }
 

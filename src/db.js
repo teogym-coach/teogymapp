@@ -563,8 +563,9 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   if (startWeight !== null && (!Number.isFinite(startWeight) || startWeight <= 0)) throw new Error("시작 체중은 0보다 큰 숫자로 입력해주세요.");
   if (currentWeight !== null && (!Number.isFinite(currentWeight) || currentWeight <= 0)) throw new Error("현재 체중은 0보다 큰 숫자로 입력해주세요.");
 
-  const batch = writeBatch(db);
   const now = serverTimestamp();
+  const results = [];
+  const failures = [];
   const memberRef = doc(db, "members", memberId);
   const onboardingRef = doc(db, "members", memberId, "memberOnboarding", "main");
   const memberPatch = { updatedAt: now };
@@ -573,40 +574,49 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   if (startWeight !== null) { memberPatch.startWeight = startWeight; onboardingPatch.startingWeightKg = startWeight; }
   if (currentWeight !== null) { memberPatch.currentWeight = currentWeight; }
   if (workoutFrequency) { memberPatch.workoutFrequency = workoutFrequency; onboardingPatch.weeklyWorkoutCount = workoutFrequency; }
-  batch.update(memberRef, clean(memberPatch));
-  batch.set(onboardingRef, clean(onboardingPatch), { merge: true });
 
-  if (currentWeight !== null) {
-    const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
-    const snap = await getDoc(bodyRef);
-    const current = snap.exists() ? snap.data() : {};
-    const goal = { ...(current.goal || {}), currentWeight };
-    if (height !== null) goal.height = height;
-    batch.set(bodyRef, {
-      goal: clean(goal),
-      inbody: current.inbody || [],
-      records: clean(upsertRecordByDate(current.records || [], {
-        id: `member_profile_${today}`,
-        date: today,
-        weight: currentWeight,
-        note: "회원 프로필 현재 체중 보정",
-      })),
-      updatedAt: now,
-    }, { merge: true });
+  try {
+    await updateDoc(memberRef, clean(memberPatch));
+    results.push("프로필 기본정보 저장 성공");
+  } catch (e) {
+    console.error("[DB:saveMemberProfileFields] members write failed", { path: `members/${memberId}`, code: e?.code, message: e?.message, memberId });
+    failures.push(`프로필 기본정보 저장 실패: members 권한 오류 (${e?.message || String(e)})`);
   }
 
   try {
-    await batch.commit();
+    await setDoc(onboardingRef, clean(onboardingPatch), { merge: true });
+    results.push("온보딩 정보 저장 성공");
   } catch (e) {
-    const paths = [
-      `members/${memberId}`,
-      `members/${memberId}/memberOnboarding/main`,
-      ...(currentWeight !== null ? [`members/${memberId}/bodyCheck/main`] : []),
-    ];
-    console.error("[DB:saveMemberProfileFields] write failed", { paths, code: e?.code, message: e?.message, memberId });
-    throw new Error(`프로필 저장 실패 (${paths.join(" · ")}): ${e?.message || String(e)}`);
+    console.error("[DB:saveMemberProfileFields] memberOnboarding write failed", { path: `members/${memberId}/memberOnboarding/main`, code: e?.code, message: e?.message, memberId });
+    failures.push(`온보딩 정보 저장 실패: memberOnboarding/main 권한 오류 (${e?.message || String(e)})`);
   }
-  return { height, startWeight, currentWeight, workoutFrequency };
+
+  if (currentWeight !== null) {
+    try {
+      const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
+      const snap = await getDoc(bodyRef);
+      const current = snap.exists() ? snap.data() : {};
+      const records = clean(upsertRecordByDate(current.records || [], {
+        id: `member_${today}`,
+        date: today,
+        weight: currentWeight,
+        source: "memberProfile",
+      }));
+      await setDoc(bodyRef, { records, updatedAt: serverTimestamp() }, { merge: true });
+      results.push("체중 기록 저장 성공");
+    } catch (e) {
+      console.error("[DB:saveMemberProfileFields] bodyCheck write failed", { path: `members/${memberId}/bodyCheck/main`, code: e?.code, message: e?.message, memberId });
+      failures.push(`체중 기록 저장 실패: bodyCheck/main 권한 오류 (${e?.message || String(e)})`);
+    }
+  }
+
+  if (failures.length) {
+    const err = new Error([...results, ...failures].join("\n"));
+    err.profileSaveResults = results;
+    err.profileSaveFailures = failures;
+    throw err;
+  }
+  return { height, startWeight, currentWeight, workoutFrequency, messages: results };
 }
 
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {

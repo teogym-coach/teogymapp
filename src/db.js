@@ -102,7 +102,7 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
   result.bodyCheckRule = "trainerMatch OR memberUidMatch";
   result.memberCheckinsRule = "trainerMatch OR memberUidMatch";
   result.memberMessagesRule = "trainerMatch OR memberUidMatch";
-  result.memberOnboardingRule = "현재 firestore.rules의 wildcard 때문에 trainerMatch만 허용";
+  result.memberOnboardingRule = "trainerMatch OR memberUidMatch (허용된 프로필 필드만)";
   dbLog(fn, "Firestore Rules 평가(클라이언트 추정):", result);
   return result;
 }

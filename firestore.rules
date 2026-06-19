@@ -60,10 +60,14 @@ service cloud.firestore {
       allow create: if isSignedIn()
                     && request.resource.data.trainerUid == uid();
 
-      // 수정: 대표자만 전체 관리 가능하며 trainerUid 소유권은 유지해야 함
+      // 수정: 대표자는 전체 관리 가능하며, 회원 본인은 프로필 보정 필드만 수정 가능
       allow update: if isSignedIn()
-                    && resource.data.trainerUid == uid()
-                    && request.resource.data.trainerUid == uid();
+                    && (
+                      (resource.data.trainerUid == uid()
+                        && request.resource.data.trainerUid == uid())
+                      || (resource.data.memberUid == uid()
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["height", "startWeight", "currentWeight", "workoutFrequency", "updatedAt"]))
+                    );
 
       allow delete: if isSignedIn()
                     && resource.data.trainerUid == uid();

@@ -66,7 +66,7 @@ service cloud.firestore {
                       (resource.data.trainerUid == uid()
                         && request.resource.data.trainerUid == uid())
                       || (resource.data.memberUid == uid()
-                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["height", "startWeight", "currentWeight", "workoutFrequency", "updatedAt"]))
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["height", "startWeight", "currentWeight", "workoutFrequency", "goal", "targetWeight", "targetDate", "updatedAt"]))
                     );
 
       allow delete: if isSignedIn()

@@ -358,13 +358,17 @@ function publicSession(data = {}) {
 async function attachSessionMemberFeedback(memberId, sessions = []) {
   const uid = auth.currentUser?.uid || null;
   return Promise.all((sessions || []).map(async session => {
+    if (!uid) return session;
+    const path = `members/${memberId}/sessions/${session.id}/memberFeedback/${uid}`;
     try {
-      const feedbackSnap = await getDocs(collection(db, "members", memberId, "sessions", session.id, "memberFeedback"));
-      const feedbackList = feedbackSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const ownFeedback = uid ? feedbackList.find(f => f.id === uid) : null;
-      return { ...session, memberFeedback: ownFeedback || feedbackList[0] || null, memberFeedbackList: feedbackList };
+      // 회원앱 Rules는 본인 feedback 문서만 읽을 수 있으므로 컬렉션 list 대신
+      // 저장 경로와 동일한 문서 경로를 직접 읽습니다.
+      const feedbackRef = doc(db, "members", memberId, "sessions", session.id, "memberFeedback", uid);
+      const feedbackSnap = await getDoc(feedbackRef);
+      const memberFeedback = feedbackSnap.exists() ? { id: feedbackSnap.id, ...feedbackSnap.data() } : null;
+      return { ...session, memberFeedback, memberFeedbackList: memberFeedback ? [memberFeedback] : [] };
     } catch (e) {
-      console.warn("[DB:attachSessionMemberFeedback] read failed", { memberId, sessionId: session.id, code: e?.code, message: e?.message });
+      console.warn("[DB:attachSessionMemberFeedback] read failed", { path, memberId, sessionId: session.id, code: e?.code, message: e?.message });
       return session;
     }
   }));
@@ -591,7 +595,17 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     }, { merge: true });
   }
 
-  await batch.commit();
+  try {
+    await batch.commit();
+  } catch (e) {
+    const paths = [
+      `members/${memberId}`,
+      `members/${memberId}/memberOnboarding/main`,
+      ...(currentWeight !== null ? [`members/${memberId}/bodyCheck/main`] : []),
+    ];
+    console.error("[DB:saveMemberProfileFields] write failed", { paths, code: e?.code, message: e?.message, memberId });
+    throw new Error(`프로필 저장 실패 (${paths.join(" · ")}): ${e?.message || String(e)}`);
+  }
   return { height, startWeight, currentWeight, workoutFrequency };
 }
 

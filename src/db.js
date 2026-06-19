@@ -447,9 +447,15 @@ export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
   const uid = requireUid();
   const ref = doc(db, "members", memberId, "sessions", sessionId, "memberFeedback", uid);
   const snap = await getDoc(ref);
+  const rawParts = Array.isArray(feedback.sorenessBodyParts)
+    ? feedback.sorenessBodyParts
+    : (feedback.sorenessBodyPart ? [feedback.sorenessBodyPart] : []);
+  const sorenessBodyParts = [...new Set(rawParts.map(v => String(v || "").trim()).filter(Boolean))];
   const payload = clean({
     sorenessLevel: feedback.sorenessLevel || "없음",
-    sorenessBodyPart: feedback.sorenessBodyPart || "기타",
+    sorenessBodyParts,
+    // 하위 호환: 기존 관리자/리포트가 단일 필드를 읽어도 첫 번째 선택 부위를 표시합니다.
+    sorenessBodyPart: sorenessBodyParts[0] || "",
     rpe: Number(feedback.rpe),
     memo: feedback.memo || "",
     source: "memberApp",
@@ -457,7 +463,7 @@ export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
     ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
   });
   await setDoc(ref, payload, { merge: true });
-  return { id: uid, ...feedback, source: "memberApp" };
+  return { id: uid, ...feedback, sorenessBodyParts, sorenessBodyPart: sorenessBodyParts[0] || "", source: "memberApp" };
 }
 
 export async function publishSession(memberId, sessionId) {
@@ -546,8 +552,10 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   requireUid();
   const batch = writeBatch(db);
   const now = serverTimestamp();
+  const weightText = data.weight === undefined || data.weight === null ? "" : String(data.weight).trim().replace(",", ".");
+  const weight = weightText === "" ? null : Number(weightText);
 
-  if (data.weight !== undefined && data.weight !== "") {
+  if (weight !== null && Number.isFinite(weight) && weight > 0) {
     const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
     const snap = await getDoc(bodyRef);
     const current = snap.exists() ? snap.data() : {};
@@ -557,11 +565,11 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
       records: clean(upsertRecordByDate(current.records || [], {
         id: `member_${dateKey}`,
         date: dateKey,
-        weight: data.weight,
+        weight,
         note: "회원앱 직접 입력",
       })),
       updatedAt: now,
-    });
+    }, { merge: true });
   }
 
   if (data.kcal !== undefined && data.kcal !== "") {
@@ -589,6 +597,17 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   }
 
   await batch.commit();
+
+  if (weight !== null && Number.isFinite(weight) && weight > 0) {
+    const saved = await getDoc(doc(db, "members", memberId, "bodyCheck", "main"));
+    const d = saved.exists() ? saved.data() : {};
+    return {
+      goal: d.goal || {},
+      records: (d.records || []).map(r => ({ ...r })),
+      inbody: (d.inbody || []).map(r => ({ ...r })),
+    };
+  }
+  return null;
 }
 
 function upsertRecordByDate(records = [], rec = {}) {

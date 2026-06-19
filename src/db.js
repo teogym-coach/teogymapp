@@ -548,6 +548,53 @@ export async function saveBodyCheck(memberId, data) {
   }
 }
 
+export async function saveMemberProfileFields(memberId, data = {}) {
+  requireUid();
+  const today = new Date().toISOString().slice(0, 10);
+  const height = data.height === undefined || data.height === null || String(data.height).trim() === "" ? null : Number(String(data.height).trim());
+  const startWeight = data.startWeight === undefined || data.startWeight === null || String(data.startWeight).trim() === "" ? null : Number(String(data.startWeight).trim());
+  const currentWeight = data.currentWeight === undefined || data.currentWeight === null || String(data.currentWeight).trim() === "" ? null : Number(String(data.currentWeight).trim());
+  const workoutFrequency = String(data.workoutFrequency || "").trim();
+  if (height !== null && (!Number.isFinite(height) || height <= 0)) throw new Error("키는 0보다 큰 숫자로 입력해주세요.");
+  if (startWeight !== null && (!Number.isFinite(startWeight) || startWeight <= 0)) throw new Error("시작 체중은 0보다 큰 숫자로 입력해주세요.");
+  if (currentWeight !== null && (!Number.isFinite(currentWeight) || currentWeight <= 0)) throw new Error("현재 체중은 0보다 큰 숫자로 입력해주세요.");
+
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+  const memberRef = doc(db, "members", memberId);
+  const onboardingRef = doc(db, "members", memberId, "memberOnboarding", "main");
+  const memberPatch = { updatedAt: now };
+  const onboardingPatch = { updatedAt: now };
+  if (height !== null) { memberPatch.height = height; onboardingPatch.heightCm = height; }
+  if (startWeight !== null) { memberPatch.startWeight = startWeight; onboardingPatch.startingWeightKg = startWeight; }
+  if (currentWeight !== null) { memberPatch.currentWeight = currentWeight; }
+  if (workoutFrequency) { memberPatch.workoutFrequency = workoutFrequency; onboardingPatch.weeklyWorkoutCount = workoutFrequency; }
+  batch.update(memberRef, clean(memberPatch));
+  batch.set(onboardingRef, clean(onboardingPatch), { merge: true });
+
+  if (currentWeight !== null) {
+    const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
+    const snap = await getDoc(bodyRef);
+    const current = snap.exists() ? snap.data() : {};
+    const goal = { ...(current.goal || {}), currentWeight };
+    if (height !== null) goal.height = height;
+    batch.set(bodyRef, {
+      goal: clean(goal),
+      inbody: current.inbody || [],
+      records: clean(upsertRecordByDate(current.records || [], {
+        id: `member_profile_${today}`,
+        date: today,
+        weight: currentWeight,
+        note: "회원 프로필 현재 체중 보정",
+      })),
+      updatedAt: now,
+    }, { merge: true });
+  }
+
+  await batch.commit();
+  return { height, startWeight, currentWeight, workoutFrequency };
+}
+
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   requireUid();
   const batch = writeBatch(db);

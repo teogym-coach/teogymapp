@@ -1,4 +1,4 @@
-# PT Journal — Vercel 배포 가이드
+# TEO GYM — Vercel 배포 가이드
 
 ## 폴더 구조
 ```

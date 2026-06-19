@@ -568,16 +568,31 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   const failures = [];
   const memberRef = doc(db, "members", memberId);
   const onboardingRef = doc(db, "members", memberId, "memberOnboarding", "main");
-  const memberPatch = { updatedAt: now };
   const onboardingPatch = { updatedAt: now };
-  if (height !== null) { memberPatch.height = height; onboardingPatch.heightCm = height; }
-  if (startWeight !== null) { memberPatch.startWeight = startWeight; onboardingPatch.startingWeightKg = startWeight; }
-  if (currentWeight !== null) { memberPatch.currentWeight = currentWeight; }
-  if (workoutFrequency) { memberPatch.workoutFrequency = workoutFrequency; onboardingPatch.weeklyWorkoutCount = workoutFrequency; }
+  if (height !== null) { onboardingPatch.heightCm = height; }
+  if (startWeight !== null) { onboardingPatch.startingWeightKg = startWeight; }
+  if (workoutFrequency) { onboardingPatch.weeklyWorkoutCount = workoutFrequency; }
 
   try {
-    await updateDoc(memberRef, clean(memberPatch));
-    results.push("프로필 기본정보 저장 성공");
+    const memberSnap = await getDoc(memberRef);
+    if (!memberSnap.exists()) throw new Error("회원 문서를 찾을 수 없습니다.");
+
+    const currentMember = memberSnap.data() || {};
+    const memberPayload = {};
+    if (height !== null && currentMember.height !== height) memberPayload.height = height;
+    if (startWeight !== null && currentMember.startWeight !== startWeight) memberPayload.startWeight = startWeight;
+    if (currentWeight !== null && currentMember.currentWeight !== currentWeight) memberPayload.currentWeight = currentWeight;
+    if (workoutFrequency && currentMember.workoutFrequency !== workoutFrequency) memberPayload.workoutFrequency = workoutFrequency;
+
+    if (Object.keys(memberPayload).length) {
+      memberPayload.updatedAt = now;
+      console.log("[DB:saveMemberProfileFields] memberPayload", { path: `members/${memberId}`, memberPayload });
+      await updateDoc(memberRef, clean(memberPayload));
+      results.push("프로필 기본정보 저장 성공");
+    } else {
+      console.log("[DB:saveMemberProfileFields] memberPayload", { path: `members/${memberId}`, memberPayload: {}, skipped: "변경된 members 필드 없음" });
+      results.push("프로필 기본정보 변경 없음");
+    }
   } catch (e) {
     console.error("[DB:saveMemberProfileFields] members write failed", { path: `members/${memberId}`, code: e?.code, message: e?.message, memberId });
     failures.push(`프로필 기본정보 저장 실패: members 권한 오류 (${e?.message || String(e)})`);

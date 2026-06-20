@@ -1120,6 +1120,14 @@ export async function saveRoutineRecommendation(memberId, recommendationId, data
   return { id: ref.id, path, ...data, ...savedData };
 }
 
+export async function deleteRoutineRecommendation(memberId, recommendationId) {
+  await verifyMemberOwnership(memberId);
+  if (!recommendationId) throw new Error("삭제할 루틴 추천을 찾을 수 없습니다.");
+  const ref = doc(db, "members", memberId, "routineRecommendations", recommendationId);
+  await deleteDoc(ref);
+  return { id: recommendationId, path: `members/${memberId}/routineRecommendations/${recommendationId}` };
+}
+
 export async function getDailyConditioning({ memberId = null, publishedOnly = false } = {}) {
   requireUid();
   const read = async (colPath, scope) => {
@@ -1150,4 +1158,20 @@ export async function saveDailyConditioning(data, { memberId = null, publish = f
   const savedData = normalizeRecommendation(saved.data() || {});
   if (publish && !isPublishedData(savedData)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요.");
   return { id: date, path, ...data, ...savedData };
+}
+
+export async function deleteDailyConditioning(item, { memberId = null } = {}) {
+  requireUid();
+  const id = item?.id || item?.date;
+  if (!id) throw new Error("삭제할 컨디셔닝을 찾을 수 없습니다.");
+  const isMemberScoped = item?.scope === "member" || !!item?.memberId;
+  const targetMemberId = item?.memberId || memberId;
+  if (isMemberScoped) {
+    if (!targetMemberId) throw new Error("회원별 컨디셔닝 삭제에 필요한 회원 정보를 찾을 수 없습니다.");
+    await verifyMemberOwnership(targetMemberId);
+    await deleteDoc(doc(db, "members", targetMemberId, "dailyConditioning", id));
+    return { id, path: `members/${targetMemberId}/dailyConditioning/${id}` };
+  }
+  await deleteDoc(doc(db, "dailyConditioning", id));
+  return { id, path: `dailyConditioning/${id}` };
 }

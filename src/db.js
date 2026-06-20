@@ -1055,3 +1055,64 @@ export async function migrateAddTrainerUid() {
 
   return { count, skipped, errors };
 }
+
+
+// ════════════════════════════════════════════════════
+// 대표 루틴 추천 / 오늘의 컨디셔닝
+// ════════════════════════════════════════════════════
+function normalizeRecommendation(data = {}) {
+  const status = data.status === "published" ? "published" : "draft";
+  return { ...data, status, isPublished: status === "published", publishedAt: data.publishedAt || null };
+}
+
+export async function getRoutineRecommendations(memberId, { publishedOnly = false } = {}) {
+  requireUid();
+  const snap = await getDocs(collection(db, "members", memberId, "routineRecommendations"));
+  return snap.docs.map(d => ({ id: d.id, ...normalizeRecommendation(d.data()) }))
+    .filter(r => !publishedOnly || r.status === "published")
+    .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")) || String(b.createdAt?.seconds||0).localeCompare(String(a.createdAt?.seconds||0)));
+}
+
+export async function saveRoutineRecommendation(memberId, recommendationId, data, publish = false) {
+  await verifyMemberOwnership(memberId);
+  const ref = recommendationId ? doc(db, "members", memberId, "routineRecommendations", recommendationId) : doc(collection(db, "members", memberId, "routineRecommendations"));
+  const snap = recommendationId ? await getDoc(ref) : null;
+  const status = publish ? "published" : (data.status === "published" ? "published" : "draft");
+  const payload = clean({
+    date: data.date || new Date().toISOString().slice(0,10),
+    targetPart: data.targetPart || "",
+    exercises: Array.isArray(data.exercises) ? data.exercises : [],
+    coachComment: data.coachComment || "",
+    status,
+    isPublished: status === "published",
+    publishedAt: publish ? serverTimestamp() : (data.publishedAt || null),
+    updatedAt: serverTimestamp(),
+    ...(snap?.exists?.() ? {} : { createdAt: serverTimestamp() }),
+  });
+  await setDoc(ref, payload, { merge: true });
+  return { id: ref.id, ...data, status, isPublished: status === "published" };
+}
+
+export async function getDailyConditioning({ memberId = null, publishedOnly = false } = {}) {
+  requireUid();
+  const read = async (colPath, scope) => {
+    try { const snap = await getDocs(collection(db, ...colPath)); return snap.docs.map(d=>({ id:d.id, scope, ...d.data() })); }
+    catch(e){ console.warn("[DB:getDailyConditioning] read failed", scope, e?.code, e?.message); return []; }
+  };
+  const rows = [ ...(await read(["dailyConditioning"], "global")) ];
+  if (memberId) rows.push(...(await read(["members", memberId, "dailyConditioning"], "member")));
+  return rows.filter(r => !publishedOnly || r.status === "published").sort((a,b)=>String(b.date||b.id||"").localeCompare(String(a.date||a.id||"")));
+}
+
+export async function saveDailyConditioning(data, { memberId = null, publish = false } = {}) {
+  if (memberId) await verifyMemberOwnership(memberId); else requireUid();
+  const date = data.date || new Date().toISOString().slice(0,10);
+  const ref = memberId ? doc(db, "members", memberId, "dailyConditioning", date) : doc(db, "dailyConditioning", date);
+  const status = publish ? "published" : (data.status === "published" ? "published" : "draft");
+  await setDoc(ref, clean({
+    date, title: data.title || data.exerciseName || "오늘의 컨디셔닝", exerciseName: data.exerciseName || data.title || "",
+    description: data.description || "", sets: data.sets || "", reps: data.reps || "", duration: data.duration || "", caution: data.caution || "",
+    status, isPublished: status === "published", publishedAt: publish ? serverTimestamp() : (data.publishedAt || null), updatedAt: serverTimestamp(), createdAt: data.createdAt || serverTimestamp(),
+  }), { merge: true });
+  return { id: date, ...data, date, status };
+}

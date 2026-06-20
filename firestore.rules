@@ -158,6 +158,18 @@ service cloud.firestore {
         allow write: if canAccessMember(memberId);
       }
 
+      match /routineRecommendations/{recommendationId} {
+        allow read: if isTrainerOfMember(memberId)
+                    || (isMemberSelf(memberId) && resource.data.status == "published");
+        allow create, update, delete: if isTrainerOfMember(memberId);
+      }
+
+      match /dailyConditioning/{conditioningId} {
+        allow read: if isTrainerOfMember(memberId)
+                    || (isMemberSelf(memberId) && resource.data.status == "published");
+        allow create, update, delete: if isTrainerOfMember(memberId);
+      }
+
       match /memberOnboarding/{docId} {
         allow read: if canAccessMember(memberId);
         allow create: if isTrainerOfMember(memberId)
@@ -174,6 +186,11 @@ service cloud.firestore {
       match /{subCollection}/{docId} {
         allow read, write: if isTrainerOfMember(memberId);
       }
+    }
+
+    match /dailyConditioning/{conditioningId} {
+      allow read: if isSignedIn() && resource.data.status == "published";
+      allow create, update, delete: if isSignedIn();
     }
   }
 }

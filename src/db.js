@@ -1060,16 +1060,28 @@ export async function migrateAddTrainerUid() {
 // ════════════════════════════════════════════════════
 // 대표 루틴 추천 / 오늘의 컨디셔닝
 // ════════════════════════════════════════════════════
+function getKoreaDateString(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function isPublishedData(data = {}) {
+  return data.status === "published" || data.published === true || data.isPublished === true;
+}
+
 function normalizeRecommendation(data = {}) {
-  const status = data.status === "published" ? "published" : "draft";
-  return { ...data, status, isPublished: status === "published", publishedAt: data.publishedAt || null };
+  const status = isPublishedData(data) ? "published" : "draft";
+  return { ...data, status, published: status === "published", isPublished: status === "published", publishedAt: data.publishedAt || null };
 }
 
 export async function getRoutineRecommendations(memberId, { publishedOnly = false } = {}) {
   requireUid();
-  const snap = await getDocs(collection(db, "members", memberId, "routineRecommendations"));
-  return snap.docs.map(d => ({ id: d.id, ...normalizeRecommendation(d.data()) }))
-    .filter(r => !publishedOnly || r.status === "published")
+  const path = `members/${memberId}/routineRecommendations`;
+  const baseRef = collection(db, "members", memberId, "routineRecommendations");
+  const snap = await getDocs(publishedOnly ? query(baseRef, where("status", "==", "published")) : baseRef);
+  const result = snap.docs.map(d => ({ id: d.id, ...normalizeRecommendation(d.data()) }))
+    .filter(r => !publishedOnly || isPublishedData(r));
+  console.log("[memberApp:routineRecommendation:fetch]", path, result);
+  return result
     .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")) || String(b.createdAt?.seconds||0).localeCompare(String(a.createdAt?.seconds||0)));
 }
 
@@ -1079,40 +1091,55 @@ export async function saveRoutineRecommendation(memberId, recommendationId, data
   const snap = recommendationId ? await getDoc(ref) : null;
   const status = publish ? "published" : (data.status === "published" ? "published" : "draft");
   const payload = clean({
-    date: data.date || new Date().toISOString().slice(0,10),
+    date: data.date || getKoreaDateString(),
+    memberId,
+    trainerUid: auth.currentUser?.uid || "",
     targetPart: data.targetPart || "",
     exercises: Array.isArray(data.exercises) ? data.exercises : [],
     coachComment: data.coachComment || "",
     status,
+    published: status === "published",
     isPublished: status === "published",
     publishedAt: publish ? serverTimestamp() : (data.publishedAt || null),
     updatedAt: serverTimestamp(),
     ...(snap?.exists?.() ? {} : { createdAt: serverTimestamp() }),
   });
+  const path = `members/${memberId}/routineRecommendations/${ref.id}`;
+  console.log("[routineRecommendation:publish]", path, payload);
   await setDoc(ref, payload, { merge: true });
-  return { id: ref.id, ...data, status, isPublished: status === "published" };
+  const saved = await getDoc(ref);
+  const savedData = normalizeRecommendation(saved.data() || {});
+  if (publish && !isPublishedData(savedData)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요.");
+  return { id: ref.id, path, ...data, ...savedData };
 }
 
 export async function getDailyConditioning({ memberId = null, publishedOnly = false } = {}) {
   requireUid();
   const read = async (colPath, scope) => {
-    try { const snap = await getDocs(collection(db, ...colPath)); return snap.docs.map(d=>({ id:d.id, scope, ...d.data() })); }
+    try { const path = colPath.join("/"); const baseRef = collection(db, ...colPath); const snap = await getDocs(publishedOnly ? query(baseRef, where("status", "==", "published")) : baseRef); const result = snap.docs.map(d=>({ id:d.id, scope, ...normalizeRecommendation(d.data()) })); console.log("[memberApp:dailyConditioning:fetch]", path, result); return result; }
     catch(e){ console.warn("[DB:getDailyConditioning] read failed", scope, e?.code, e?.message); return []; }
   };
   const rows = [ ...(await read(["dailyConditioning"], "global")) ];
   if (memberId) rows.push(...(await read(["members", memberId, "dailyConditioning"], "member")));
-  return rows.filter(r => !publishedOnly || r.status === "published").sort((a,b)=>String(b.date||b.id||"").localeCompare(String(a.date||a.id||"")));
+  return rows.filter(r => !publishedOnly || isPublishedData(r)).sort((a,b)=>String(b.date||b.id||"").localeCompare(String(a.date||a.id||"")));
 }
 
 export async function saveDailyConditioning(data, { memberId = null, publish = false } = {}) {
   if (memberId) await verifyMemberOwnership(memberId); else requireUid();
-  const date = data.date || new Date().toISOString().slice(0,10);
+  const date = data.date || getKoreaDateString();
   const ref = memberId ? doc(db, "members", memberId, "dailyConditioning", date) : doc(db, "dailyConditioning", date);
   const status = publish ? "published" : (data.status === "published" ? "published" : "draft");
-  await setDoc(ref, clean({
-    date, title: data.title || data.exerciseName || "오늘의 컨디셔닝", exerciseName: data.exerciseName || data.title || "",
+  const payload = clean({
+    date, memberId: memberId || null, trainerUid: auth.currentUser?.uid || "", scope: memberId ? "member" : "global",
+    title: data.title || data.exerciseName || "오늘의 컨디셔닝", exerciseName: data.exerciseName || data.title || "",
     description: data.description || "", sets: data.sets || "", reps: data.reps || "", duration: data.duration || "", caution: data.caution || "",
-    status, isPublished: status === "published", publishedAt: publish ? serverTimestamp() : (data.publishedAt || null), updatedAt: serverTimestamp(), createdAt: data.createdAt || serverTimestamp(),
-  }), { merge: true });
-  return { id: date, ...data, date, status };
+    status, published: status === "published", isPublished: status === "published", publishedAt: publish ? serverTimestamp() : (data.publishedAt || null), updatedAt: serverTimestamp(), createdAt: data.createdAt || serverTimestamp(),
+  });
+  const path = memberId ? `members/${memberId}/dailyConditioning/${date}` : `dailyConditioning/${date}`;
+  console.log("[dailyConditioning:publish]", path, payload);
+  await setDoc(ref, payload, { merge: true });
+  const saved = await getDoc(ref);
+  const savedData = normalizeRecommendation(saved.data() || {});
+  if (publish && !isPublishedData(savedData)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요.");
+  return { id: date, path, ...data, ...savedData };
 }

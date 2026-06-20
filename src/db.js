@@ -1065,12 +1065,14 @@ function getKoreaDateString(date = new Date()) {
 }
 
 function isPublishedData(data = {}) {
-  return data.status === "published" || data.published === true || data.isPublished === true;
+  const sent = data.status === "published" || data.published === true || data.isPublished === true;
+  return sent && data.visible !== false && data.visibility !== "hidden";
 }
 
 function normalizeRecommendation(data = {}) {
-  const status = isPublishedData(data) ? "published" : "draft";
-  return { ...data, status, published: status === "published", isPublished: status === "published", publishedAt: data.publishedAt || null };
+  const sent = data.status === "published" || data.published === true || data.isPublished === true;
+  const visible = data.visible !== false && data.visibility !== "hidden";
+  return { ...data, status: sent ? "published" : "draft", visibility: visible ? "visible" : "hidden", visible, published: sent, isPublished: sent, publishedAt: data.publishedAt || null };
 }
 
 export async function getRoutineRecommendations(memberId, { publishedOnly = false } = {}) {
@@ -1094,7 +1096,12 @@ export async function saveRoutineRecommendation(memberId, recommendationId, data
     date: data.date || getKoreaDateString(),
     memberId,
     trainerUid: auth.currentUser?.uid || "",
-    targetPart: data.targetPart || "",
+    targetPart: data.targetPart || (Array.isArray(data.targetParts) ? data.targetParts.join(" + ") : ""),
+    targetParts: Array.isArray(data.targetParts) ? data.targetParts : (data.targetPart ? [data.targetPart] : []),
+    nextSessionPart: data.nextSessionPart || "",
+    nextSessionDate: data.nextSessionDate || "",
+    visibility: data.visibility === "hidden" || data.visible === false ? "hidden" : "visible",
+    visible: !(data.visibility === "hidden" || data.visible === false),
     exercises: Array.isArray(data.exercises) ? data.exercises : [],
     coachComment: data.coachComment || "",
     status,
@@ -1133,6 +1140,7 @@ export async function saveDailyConditioning(data, { memberId = null, publish = f
     date, memberId: memberId || null, trainerUid: auth.currentUser?.uid || "", scope: memberId ? "member" : "global",
     title: data.title || data.exerciseName || "오늘의 컨디셔닝", exerciseName: data.exerciseName || data.title || "",
     description: data.description || "", sets: data.sets || "", reps: data.reps || "", duration: data.duration || "", caution: data.caution || "",
+    visibility: data.visibility === "hidden" || data.visible === false ? "hidden" : "visible", visible: !(data.visibility === "hidden" || data.visible === false),
     status, published: status === "published", isPublished: status === "published", publishedAt: publish ? serverTimestamp() : (data.publishedAt || null), updatedAt: serverTimestamp(), createdAt: data.createdAt || serverTimestamp(),
   });
   const path = memberId ? `members/${memberId}/dailyConditioning/${date}` : `dailyConditioning/${date}`;

@@ -51,7 +51,8 @@ service cloud.firestore {
     }
 
     function isPublishedData(data) {
-      return data.status == "published" || data.published == true || data.isPublished == true;
+      return (data.status == "published" || data.published == true || data.isPublished == true)
+        && data.visible != false && data.visibility != "hidden";
     }
 
     function memberProfileUpdateKeysAllowed() {

@@ -50,6 +50,10 @@ service cloud.firestore {
       return isTrainerOfMember(memberId) || isMemberSelf(memberId);
     }
 
+    function isPublishedData(data) {
+      return data.status == "published" || data.published == true || data.isPublished == true;
+    }
+
     function memberProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         "workoutFrequency", "height", "startWeight", "currentWeight", "updatedAt"
@@ -160,13 +164,13 @@ service cloud.firestore {
 
       match /routineRecommendations/{recommendationId} {
         allow read: if isTrainerOfMember(memberId)
-                    || (isMemberSelf(memberId) && resource.data.status == "published");
+                    || (isMemberSelf(memberId) && isPublishedData(resource.data));
         allow create, update, delete: if isTrainerOfMember(memberId);
       }
 
       match /dailyConditioning/{conditioningId} {
         allow read: if isTrainerOfMember(memberId)
-                    || (isMemberSelf(memberId) && resource.data.status == "published");
+                    || (isMemberSelf(memberId) && isPublishedData(resource.data));
         allow create, update, delete: if isTrainerOfMember(memberId);
       }
 
@@ -189,8 +193,9 @@ service cloud.firestore {
     }
 
     match /dailyConditioning/{conditioningId} {
-      allow read: if isSignedIn() && resource.data.status == "published";
-      allow create, update, delete: if isSignedIn();
+      allow read: if isSignedIn() && isPublishedData(resource.data);
+      allow create, update: if isSignedIn() && request.resource.data.trainerUid == uid();
+      allow delete: if isSignedIn() && resource.data.trainerUid == uid();
     }
   }
 }

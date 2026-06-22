@@ -671,9 +671,9 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
       updatedAt: now,
     });
     batch.set(dateRef, {
-      ...(meta.dates?.[dateKey] || {}),
-      totalKcal: data.kcal,
-      memberInputKcal: data.kcal,
+      totalKcal: Number(data.kcal) || data.kcal,
+      memberInputKcal: Number(data.kcal) || data.kcal,
+      source: "member-app",
       updatedAt: now,
     }, { merge: true });
   }
@@ -801,8 +801,13 @@ export async function saveNutrition(memberId, data) {
       batch.set(dateRef, {
         meals:       clean(dayData.meals)       || {},
         supplements: clean(dayData.supplements) || [],
+        totalKcal:   clean(dayData.totalKcal),
+        memberInputKcal: clean(dayData.memberInputKcal),
+        kcal:        clean(dayData.kcal),
+        cal:         clean(dayData.cal),
+        source:      clean(dayData.source),
         updatedAt:   serverTimestamp(),
-      });
+      }, { merge: true });
     });
     await batch.commit();
     dbLog("saveNutrition", `완료: dates=${Object.keys(dates).length}일 logs=${(data.logs || []).length}개`);

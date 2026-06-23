@@ -57,21 +57,27 @@ service cloud.firestore {
 
     function memberProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        "workoutFrequency", "height", "startWeight", "currentWeight", "targetWeight", "targetWeightKg", "goalWeight", "memberAppLastLoginAt", "updatedAt"
+        "workoutFrequency", "height", "startWeight", "currentWeight", "targetWeightKg", "memberAppLastLoginAt", "updatedAt"
       ]);
     }
 
     function memberOnboardingProfileKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "gender", "birthYear", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
+        "completedAt", "weightHistoryMode", "calorieHistoryMode", "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
+        "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "goalWeight", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeightKg", "updatedAt"
       ]);
     }
 
     function memberOnboardingCreateKeysAllowed() {
       return request.resource.data.keys().hasOnly([
+        "gender", "birthYear", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
+        "completedAt", "weightHistoryMode", "calorieHistoryMode", "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
+        "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "goalWeight", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeightKg", "updatedAt"
       ]);
     }
 

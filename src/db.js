@@ -840,6 +840,14 @@ export async function linkMemberUidToCurrentUser(memberId, previousMemberUid = n
   dbLog("linkMemberUidToCurrentUser", `members/${memberId} -> ${uid}`);
 }
 
+export async function touchMemberAppLastLogin(memberId) {
+  requireUid();
+  await updateDoc(doc(db, "members", memberId), {
+    memberAppLastLoginAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function getMemberAppProfile() {
   const uid = requireUid();
   const authEmail = (auth.currentUser?.email || "").trim().toLowerCase();

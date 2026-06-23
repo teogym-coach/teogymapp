@@ -57,7 +57,7 @@ service cloud.firestore {
 
     function memberProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        "workoutFrequency", "height", "startWeight", "currentWeight", "updatedAt"
+        "workoutFrequency", "height", "startWeight", "currentWeight", "memberAppLastLoginAt", "updatedAt"
       ]);
     }
 

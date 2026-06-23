@@ -659,7 +659,7 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
     }, { merge: true });
   }
 
-  if (data.kcal !== undefined && data.kcal !== "") {
+  if (data.kcal !== undefined && String(data.kcal).trim() !== "") {
     const metaRef = doc(db, "members", memberId, "nutrition", "meta");
     const dateRef = doc(db, "members", memberId, "nutrition", dateKey);
     const metaSnap = await getDoc(metaRef);
@@ -678,7 +678,7 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
     }, { merge: true });
   }
 
-  if (data.steps !== undefined && data.steps !== "") {
+  if (data.steps !== undefined && String(data.steps).trim() !== "") {
     const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
     batch.set(checkRef, { steps: data.steps, date: dateKey, updatedAt: now, createdBy: auth.currentUser.uid }, { merge: true });
   }
@@ -902,8 +902,40 @@ export async function getMemberAppProfile() {
 
 export async function saveMemberCheckin(memberId, dateKey, data) {
   requireUid();
+  const payload = clean(data);
+  if (!Object.keys(payload).length) return { skipped: true };
   const ref = doc(db, "members", memberId, "memberCheckins", dateKey);
-  await setDoc(ref, { ...clean(data), date: dateKey, updatedAt: serverTimestamp(), createdBy: auth.currentUser.uid }, { merge: true });
+  await setDoc(ref, { ...payload, date: dateKey, updatedAt: serverTimestamp(), createdBy: auth.currentUser.uid }, { merge: true });
+  return { skipped: false };
+}
+
+export async function deleteMemberHealthRecord(memberId, dateKey) {
+  requireUid();
+  const batch = writeBatch(db);
+  const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
+  batch.delete(checkRef);
+
+  const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
+  const bodySnap = await getDoc(bodyRef);
+  if (bodySnap.exists()) {
+    const current = bodySnap.data() || {};
+    batch.set(bodyRef, {
+      records: clean((current.records || []).filter(r => r.date !== dateKey && r.id !== `member_${dateKey}`)),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  const metaRef = doc(db, "members", memberId, "nutrition", "meta");
+  const metaSnap = await getDoc(metaRef);
+  if (metaSnap.exists()) {
+    const meta = metaSnap.data() || {};
+    batch.set(metaRef, {
+      logs: clean((meta.logs || []).filter(r => r.date !== dateKey && r.id !== dateKey)),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+  batch.delete(doc(db, "members", memberId, "nutrition", dateKey));
+  await batch.commit();
 }
 
 export async function getMemberCheckins(memberId, max = 30) {

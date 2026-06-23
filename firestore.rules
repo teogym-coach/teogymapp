@@ -57,21 +57,21 @@ service cloud.firestore {
 
     function memberProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        "workoutFrequency", "height", "startWeight", "currentWeight", "memberAppLastLoginAt", "updatedAt"
+        "workoutFrequency", "height", "startWeight", "currentWeight", "targetWeight", "targetWeightKg", "goalWeight", "memberAppLastLoginAt", "updatedAt"
       ]);
     }
 
     function memberOnboardingProfileKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "goalWeight", "updatedAt"
       ]);
     }
 
     function memberOnboardingCreateKeysAllowed() {
       return request.resource.data.keys().hasOnly([
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "goalWeight", "updatedAt"
       ]);
     }
 
@@ -133,7 +133,7 @@ service cloud.firestore {
 
       match /memberCheckins/{checkinId} {
         allow read, create, update: if canAccessMember(memberId);
-        allow delete: if isTrainerOfMember(memberId);
+        allow delete: if canAccessMember(memberId);
       }
 
       match /memberMessages/{messageId} {

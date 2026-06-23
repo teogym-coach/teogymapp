@@ -64,14 +64,14 @@ service cloud.firestore {
     function memberOnboardingProfileKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeight", "weight", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "updatedAt"
       ]);
     }
 
     function memberOnboardingCreateKeysAllowed() {
       return request.resource.data.keys().hasOnly([
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeight", "weight", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeight", "weight", "targetWeightKg", "targetWeight", "updatedAt"
       ]);
     }
 

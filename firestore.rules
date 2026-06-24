@@ -57,7 +57,7 @@ service cloud.firestore {
 
     function memberProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        "workoutFrequency", "height", "startWeight", "currentWeight", "targetWeightKg", "memberAppLastLoginAt", "updatedAt"
+        "workoutFrequency", "weeklyWorkoutCount", "height", "startWeight", "currentWeight", "targetWeight", "targetWeightKg", "goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "memberAppLastLoginAt", "updatedAt"
       ]);
     }
 
@@ -67,7 +67,8 @@ service cloud.firestore {
         "completedAt", "weightHistoryMode", "calorieHistoryMode", "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
         "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeightKg", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
+        "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "updatedAt"
       ]);
     }
 
@@ -77,19 +78,20 @@ service cloud.firestore {
         "completedAt", "weightHistoryMode", "calorieHistoryMode", "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
         "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
-        "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeightKg", "updatedAt"
+        "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
+        "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "updatedAt"
       ]);
     }
 
     function bodyCheckProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        "records", "updatedAt", "currentWeight"
+        "records", "goal", "inbody", "updatedAt", "currentWeight"
       ]);
     }
 
     function bodyCheckProfileCreateKeysAllowed() {
       return request.resource.data.keys().hasOnly([
-        "records", "updatedAt", "currentWeight"
+        "records", "goal", "inbody", "updatedAt", "currentWeight"
       ]);
     }
 

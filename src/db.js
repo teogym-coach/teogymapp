@@ -1039,6 +1039,13 @@ export async function saveMemberOnboarding(memberId, data) {
   return { id: "main", ...data };
 }
 
+export async function resetMemberOnboarding(memberId) {
+  requireUid();
+  const ref = doc(db, "members", memberId, "memberOnboarding", "main");
+  await setDoc(ref, { completed: false, updatedAt: serverTimestamp() }, { merge: true });
+  return { id: "main", completed: false };
+}
+
 // ════════════════════════════════════════════════════
 // 마이그레이션 — 기존 회원 이메일 정규화 (1회 실행용)
 // ════════════════════════════════════════════════════

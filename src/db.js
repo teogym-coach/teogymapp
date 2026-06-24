@@ -107,6 +107,79 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
   return result;
 }
 
+
+// ════════════════════════════════════════════════════
+// 공지사항 (notices)
+// ════════════════════════════════════════════════════
+function sortNotices(rows){
+  return [...rows].sort((a,b)=>{
+    const at=v=>v?.toDate?.()?.getTime?.()||Date.parse(v)||0;
+    return at(b.createdAt)-at(a.createdAt);
+  });
+}
+
+export async function getNotices(){
+  const uid=requireUid();
+  const q=query(collection(db,"notices"),where("trainerUid","==",uid),orderBy("createdAt","desc"));
+  const snap=await getDocs(q);
+  return snap.docs.map(d=>({id:d.id,...d.data()}));
+}
+
+export async function saveNotice(data,id=null){
+  const uid=requireUid();
+  const payload=clean({
+    title:String(data.title||"").trim(),
+    content:String(data.content||"").trim(),
+    targetType:data.targetType==="member"?"member":"all",
+    targetMemberId:data.targetType==="member"?data.targetMemberId||"":"",
+    isImportant:!!data.isImportant,
+    isPublished:data.isPublished!==false,
+    createdBy:uid,
+    trainerUid:uid,
+    updatedAt:serverTimestamp(),
+  });
+  if(!payload.title) throw new Error("공지 제목을 입력해주세요.");
+  if(!payload.content) throw new Error("공지 내용을 입력해주세요.");
+  if(payload.targetType==="member"&&!payload.targetMemberId) throw new Error("개별 공지를 받을 회원을 선택해주세요.");
+  if(id){
+    const ref=doc(db,"notices",id);
+    const snap=await getDoc(ref);
+    if(!snap.exists()) throw new Error("공지를 찾을 수 없습니다.");
+    if(snap.data().trainerUid!==uid) throw new Error("권한이 없습니다.");
+    await updateDoc(ref,payload);
+    return {id,...snap.data(),...payload};
+  }
+  const ref=await addDoc(collection(db,"notices"),{...payload,createdAt:serverTimestamp()});
+  return {id:ref.id,...payload};
+}
+
+export async function deleteNotice(id){
+  const uid=requireUid();
+  const ref=doc(db,"notices",id);
+  const snap=await getDoc(ref);
+  if(!snap.exists()) return;
+  if(snap.data().trainerUid!==uid) throw new Error("권한이 없습니다.");
+  await deleteDoc(ref);
+}
+
+export async function getMemberNotices(memberId){
+  requireUid();
+  const allQ=query(collection(db,"notices"),where("isPublished","==",true),where("targetType","==","all"),orderBy("createdAt","desc"),limit(30));
+  const memberQ=query(collection(db,"notices"),where("isPublished","==",true),where("targetType","==","member"),where("targetMemberId","==",memberId),orderBy("createdAt","desc"),limit(30));
+  const [allSnap,memberSnap]=await Promise.all([getDocs(allQ),getDocs(memberQ)]);
+  const map=new Map();
+  [...allSnap.docs,...memberSnap.docs].forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
+  const rows=sortNotices([...map.values()]);
+  const readsSnap=await getDocs(collection(db,"members",memberId,"noticeReads"));
+  const readIds=new Set(readsSnap.docs.map(d=>d.id));
+  return rows.map(n=>({...n,isRead:readIds.has(n.id)}));
+}
+
+export async function markNoticeRead(memberId,noticeId){
+  requireUid();
+  await setDoc(doc(db,"members",memberId,"noticeReads",noticeId),{noticeId,readAt:serverTimestamp()},{merge:true});
+}
+
 // ════════════════════════════════════════════════════
 // 회원 (members)
 // ════════════════════════════════════════════════════

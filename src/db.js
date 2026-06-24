@@ -555,23 +555,31 @@ export async function saveBodyCheck(memberId, data) {
 export async function saveMemberProfileFields(memberId, data = {}) {
   requireUid();
   const today = new Date().toISOString().slice(0, 10);
-  const height = data.height === undefined || data.height === null || String(data.height).trim() === "" ? null : Number(String(data.height).trim());
-  const startWeight = data.startWeight === undefined || data.startWeight === null || String(data.startWeight).trim() === "" ? null : Number(String(data.startWeight).trim());
-  const currentWeight = data.currentWeight === undefined || data.currentWeight === null || String(data.currentWeight).trim() === "" ? null : Number(String(data.currentWeight).trim());
-  const workoutFrequency = String(data.workoutFrequency || "").trim();
-  if (height !== null && (!Number.isFinite(height) || height <= 0)) throw new Error("키는 0보다 큰 숫자로 입력해주세요.");
-  if (startWeight !== null && (!Number.isFinite(startWeight) || startWeight <= 0)) throw new Error("시작 체중은 0보다 큰 숫자로 입력해주세요.");
-  if (currentWeight !== null && (!Number.isFinite(currentWeight) || currentWeight <= 0)) throw new Error("현재 체중은 0보다 큰 숫자로 입력해주세요.");
-
   const now = serverTimestamp();
+  const hasInput = (key) => Object.prototype.hasOwnProperty.call(data, key);
+  const stringValue = (value) => value === undefined || value === null ? "" : String(value).trim();
+  const optionalNumber = (value, label) => {
+    if (value === undefined || value === null || String(value).trim() === "") return null;
+    const valueNumber = Number(String(value).trim());
+    if (!Number.isFinite(valueNumber) || valueNumber <= 0) throw new Error(`${label} 0보다 큰 숫자로 입력해주세요.`);
+    return valueNumber;
+  };
+  const copyString = (target, key) => {
+    const next = stringValue(data[key]);
+    if (next) target[key] = next;
+  };
+
+  const height = hasInput("height") ? optionalNumber(data.height, "키는") : null;
+  const startWeight = hasInput("startWeight") ? optionalNumber(data.startWeight, "시작 체중은") : null;
+  const currentWeight = hasInput("currentWeight") ? optionalNumber(data.currentWeight, "현재 체중은") : null;
+  const targetWeightKg = hasInput("targetWeightKg") ? optionalNumber(data.targetWeightKg, "목표 체중은") : null;
+  const workoutFrequency = hasInput("workoutFrequency") ? stringValue(data.workoutFrequency) : "";
+  const weeklyWorkoutCount = hasInput("weeklyWorkoutCount") ? stringValue(data.weeklyWorkoutCount) : "";
+
   const results = [];
   const failures = [];
   const memberRef = doc(db, "members", memberId);
   const onboardingRef = doc(db, "members", memberId, "memberOnboarding", "main");
-  const onboardingPatch = { updatedAt: now };
-  if (height !== null) { onboardingPatch.heightCm = height; }
-  if (startWeight !== null) { onboardingPatch.startingWeightKg = startWeight; }
-  if (workoutFrequency) { onboardingPatch.weeklyWorkoutCount = workoutFrequency; }
 
   try {
     const memberSnap = await getDoc(memberRef);
@@ -582,15 +590,24 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     if (height !== null && currentMember.height !== height) memberPayload.height = height;
     if (startWeight !== null && currentMember.startWeight !== startWeight) memberPayload.startWeight = startWeight;
     if (currentWeight !== null && currentMember.currentWeight !== currentWeight) memberPayload.currentWeight = currentWeight;
+    if (targetWeightKg !== null) {
+      if (currentMember.targetWeightKg !== targetWeightKg) memberPayload.targetWeightKg = targetWeightKg;
+      if (currentMember.targetWeight !== targetWeightKg) memberPayload.targetWeight = targetWeightKg;
+    }
     if (workoutFrequency && currentMember.workoutFrequency !== workoutFrequency) memberPayload.workoutFrequency = workoutFrequency;
+    const effectiveWeeklyWorkoutCount = weeklyWorkoutCount || workoutFrequency;
+    if (effectiveWeeklyWorkoutCount && currentMember.weeklyWorkoutCount !== effectiveWeeklyWorkoutCount) memberPayload.weeklyWorkoutCount = effectiveWeeklyWorkoutCount;
+    ["goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate"].forEach((key) => {
+      if (hasInput(key) && currentMember[key] !== stringValue(data[key])) copyString(memberPayload, key);
+    });
 
     if (Object.keys(memberPayload).length) {
       memberPayload.updatedAt = now;
-      console.log("[DB:saveMemberProfileFields] memberPayload", { path: `members/${memberId}`, memberPayload });
+      console.log("[saveMemberProfile] memberPayload", { path: `members/${memberId}`, memberPayload });
       await updateDoc(memberRef, clean(memberPayload));
       results.push("프로필 기본정보 저장 성공");
     } else {
-      console.log("[DB:saveMemberProfileFields] memberPayload", { path: `members/${memberId}`, memberPayload: {}, skipped: "변경된 members 필드 없음" });
+      console.log("[saveMemberProfile] memberPayload", { path: `members/${memberId}`, memberPayload: {}, skipped: "변경된 members 필드 없음" });
       results.push("프로필 기본정보 변경 없음");
     }
   } catch (e) {
@@ -598,31 +615,57 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     failures.push(`프로필 기본정보 저장 실패: members 권한 오류 (${e?.message || String(e)})`);
   }
 
-  try {
-    await setDoc(onboardingRef, clean(onboardingPatch), { merge: true });
-    results.push("온보딩 정보 저장 성공");
-  } catch (e) {
-    console.error("[DB:saveMemberProfileFields] memberOnboarding write failed", { path: `members/${memberId}/memberOnboarding/main`, code: e?.code, message: e?.message, memberId });
-    failures.push(`온보딩 정보 저장 실패: memberOnboarding/main 권한 오류 (${e?.message || String(e)})`);
+  const onboardingPayload = {};
+  if (height !== null) onboardingPayload.heightCm = height;
+  if (startWeight !== null) onboardingPayload.startingWeightKg = startWeight;
+  if (currentWeight !== null) onboardingPayload.currentWeightKg = currentWeight;
+  if (targetWeightKg !== null) { onboardingPayload.targetWeightKg = targetWeightKg; onboardingPayload.targetWeight = targetWeightKg; }
+  if (workoutFrequency) onboardingPayload.weeklyWorkoutCount = workoutFrequency;
+  if (weeklyWorkoutCount) onboardingPayload.weeklyWorkoutCount = weeklyWorkoutCount;
+  ["targetPeriod", "targetPeriodCustom", "goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate"].forEach((key) => {
+    if (hasInput(key)) copyString(onboardingPayload, key);
+  });
+
+  if (Object.keys(onboardingPayload).length) {
+    try {
+      onboardingPayload.updatedAt = now;
+      console.log("[saveMemberProfile] onboardingPayload", { path: `members/${memberId}/memberOnboarding/main`, onboardingPayload });
+      await setDoc(onboardingRef, clean(onboardingPayload), { merge: true });
+      results.push("온보딩 정보 저장 성공");
+    } catch (e) {
+      console.error("[DB:saveMemberProfileFields] memberOnboarding write failed", { path: `members/${memberId}/memberOnboarding/main`, code: e?.code, message: e?.message, memberId });
+      failures.push(`온보딩 정보 저장 실패: memberOnboarding/main 권한 오류 (${e?.message || String(e)})`);
+    }
+  } else {
+    console.log("[saveMemberProfile] onboardingPayload", { path: `members/${memberId}/memberOnboarding/main`, onboardingPayload: {}, skipped: "변경된 memberOnboarding 필드 없음" });
   }
 
-  if (currentWeight !== null) {
+  const bodyCheckPayload = {};
+  if (currentWeight !== null) { bodyCheckPayload.currentWeight = currentWeight; bodyCheckPayload.weight = currentWeight; }
+  if (targetWeightKg !== null) { bodyCheckPayload.targetWeightKg = targetWeightKg; bodyCheckPayload.targetWeight = targetWeightKg; }
+  if (Object.keys(bodyCheckPayload).length) {
     try {
       const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
       const snap = await getDoc(bodyRef);
       const current = snap.exists() ? snap.data() : {};
-      const records = clean(upsertRecordByDate(current.records || [], {
-        id: `member_${today}`,
-        date: today,
-        weight: currentWeight,
-        source: "memberProfile",
-      }));
-      await setDoc(bodyRef, { records, updatedAt: serverTimestamp() }, { merge: true });
+      if (currentWeight !== null) {
+        bodyCheckPayload.records = clean(upsertRecordByDate(current.records || [], {
+          id: `member_${today}`,
+          date: today,
+          weight: currentWeight,
+          source: "memberProfile",
+        }));
+      }
+      bodyCheckPayload.updatedAt = serverTimestamp();
+      console.log("[saveMemberProfile] bodyCheckPayload", { path: `members/${memberId}/bodyCheck/main`, bodyCheckPayload });
+      await setDoc(bodyRef, clean(bodyCheckPayload), { merge: true });
       results.push("체중 기록 저장 성공");
     } catch (e) {
       console.error("[DB:saveMemberProfileFields] bodyCheck write failed", { path: `members/${memberId}/bodyCheck/main`, code: e?.code, message: e?.message, memberId });
       failures.push(`체중 기록 저장 실패: bodyCheck/main 권한 오류 (${e?.message || String(e)})`);
     }
+  } else {
+    console.log("[saveMemberProfile] bodyCheckPayload", { path: `members/${memberId}/bodyCheck/main`, bodyCheckPayload: {}, skipped: "변경된 bodyCheck 필드 없음" });
   }
 
   if (failures.length) {
@@ -631,7 +674,7 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     err.profileSaveFailures = failures;
     throw err;
   }
-  return { height, startWeight, currentWeight, workoutFrequency, messages: results };
+  return { height, startWeight, currentWeight, targetWeightKg, workoutFrequency, weeklyWorkoutCount, messages: results };
 }
 
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {

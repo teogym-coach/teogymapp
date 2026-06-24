@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════
-//  TEO GYM — Firestore 보안 규칙 v6
+//  TEO GYM — Firestore 보안 규칙 v7
 //
 //  회원앱 원칙:
 //    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터 접근

@@ -284,6 +284,18 @@ async function verifyMemberOwnership(memberId) {
   return uid;
 }
 
+async function verifyMemberProfileAccess(memberId) {
+  const uid = requireUid();
+  const snap = await getDoc(doc(db, "members", memberId));
+  if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
+  const data = snap.data() || {};
+  if (data.trainerUid !== uid && data.memberUid !== uid) {
+    console.error(`[DB] 회원앱 권한 위반: memberId=${memberId} trainerUid=${data.trainerUid} memberUid=${data.memberUid} myUid=${uid}`);
+    throw new Error("이 회원에 대한 권한이 없습니다.");
+  }
+  return uid;
+}
+
 // ════════════════════════════════════════════════════
 // 수업 일지 (sessions)
 // ════════════════════════════════════════════════════
@@ -527,7 +539,7 @@ export async function getBodyCheck(memberId) {
 
 export async function saveBodyCheck(memberId, data) {
   try {
-    await verifyMemberOwnership(memberId);
+    await verifyMemberProfileAccess(memberId);
     dbLog("saveBodyCheck", `memberId=${memberId}`);
     const ref     = doc(db, "members", memberId, "bodyCheck", "main");
     const payload = {
@@ -1032,11 +1044,36 @@ export async function getMemberOnboarding(memberId) {
   }
 }
 
+const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
+  "gender", "birthYear", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
+  "completed", "completedAt", "weightHistoryMode", "calorieHistoryMode",
+  "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
+  "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
+  "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
+  "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight",
+  "targetWeight", "targetWeightKg", "targetPeriod", "targetPeriodCustom",
+  "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
+]);
+
+function sanitizeMemberOnboardingPayload(data = {}) {
+  const payload = {};
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (!MEMBER_ONBOARDING_WRITABLE_FIELDS.has(key) || value === undefined) return;
+    if (key === "focusAreas") {
+      payload.focusAreas = Array.isArray(value) ? value.map(v => String(v).trim()).filter(Boolean) : [];
+      return;
+    }
+    payload[key] = value;
+  });
+  return clean(payload) || {};
+}
+
 export async function saveMemberOnboarding(memberId, data) {
   requireUid();
   const ref = doc(db, "members", memberId, "memberOnboarding", "main");
-  await setDoc(ref, { ...clean(data), updatedAt: serverTimestamp() }, { merge: true });
-  return { id: "main", ...data };
+  const payload = sanitizeMemberOnboardingPayload(data);
+  await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+  return { id: "main", ...payload };
 }
 
 export async function resetMemberOnboarding(memberId) {

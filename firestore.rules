@@ -95,6 +95,11 @@ service cloud.firestore {
       ]);
     }
 
+    function isTargetMemberSelf(targetMemberId) {
+      return exists(/databases/$(database)/documents/members/$(targetMemberId))
+        && get(/databases/$(database)/documents/members/$(targetMemberId)).data.memberUid == uid();
+    }
+
     match /members/{memberId} {
 
       // get/list: 대표자 trainerUid 쿼리와 회원 본인 memberUid 쿼리 허용.
@@ -219,10 +224,9 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource.data.trainerUid == uid()
           || (resource.data.isPublished == true
-        && (resource.data.targetType == "all"
-          || (resource.data.targetType == "member"
-            && exists(/databases/$(database)/documents/members/$(resource.data.targetMemberId))
-            && get(/databases/$(database)/documents/members/$(resource.data.targetMemberId)).data.memberUid == uid())));
+            && (resource.data.targetType == "all"
+              || (resource.data.targetType == "member"
+                && isTargetMemberSelf(resource.data.targetMemberId)))));
       allow create: if isSignedIn() && request.resource.data.trainerUid == uid() && request.resource.data.createdBy == uid();
       allow update: if isSignedIn() && resource.data.trainerUid == uid() && request.resource.data.trainerUid == uid();
       allow delete: if isSignedIn() && resource.data.trainerUid == uid();

@@ -149,6 +149,14 @@ service cloud.firestore {
         allow delete: if isTrainerOfMember(memberId);
       }
 
+      match /noticeReads/{noticeId} {
+        allow read: if canAccessMember(memberId);
+        allow create, update: if isMemberSelf(memberId)
+          && request.resource.data.noticeId == noticeId
+          && request.resource.data.keys().hasOnly(["noticeId", "readAt"]);
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
       match /bodyCheck/{docId} {
         allow read: if canAccessMember(memberId);
         allow create: if isTrainerOfMember(memberId)
@@ -204,6 +212,19 @@ service cloud.firestore {
     match /dailyConditioning/{conditioningId} {
       allow read: if isSignedIn() && isPublishedData(resource.data);
       allow create, update: if isSignedIn() && request.resource.data.trainerUid == uid();
+      allow delete: if isSignedIn() && resource.data.trainerUid == uid();
+    }
+
+    match /notices/{noticeId} {
+      allow read: if isSignedIn()
+        && (resource.data.trainerUid == uid()
+          || (resource.data.isPublished == true
+        && (resource.data.targetType == "all"
+          || (resource.data.targetType == "member"
+            && exists(/databases/$(database)/documents/members/$(resource.data.targetMemberId))
+            && get(/databases/$(database)/documents/members/$(resource.data.targetMemberId)).data.memberUid == uid())));
+      allow create: if isSignedIn() && request.resource.data.trainerUid == uid() && request.resource.data.createdBy == uid();
+      allow update: if isSignedIn() && resource.data.trainerUid == uid() && request.resource.data.trainerUid == uid();
       allow delete: if isSignedIn() && resource.data.trainerUid == uid();
     }
   }

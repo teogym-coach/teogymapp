@@ -208,8 +208,14 @@ export async function getMembers() {
     orderBy("createdAt", "desc")
   );
   const snap = await getDocs(q);
-  dbLog("getMembers", `결과: ${snap.docs.length}명`);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  dbLog("getMembers", `결과: ${rows.length}명 (trainerUid 일치)`);
+  return rows.map(m => ({
+    ...m,
+    isActive: m.isActive !== false,
+    memberStatus: m.memberStatus || m.status || (m.isActive === false ? "inactive" : "active"),
+    trainerUid: m.trainerUid || uid,
+  }));
 }
 
 export async function addMember(data) {

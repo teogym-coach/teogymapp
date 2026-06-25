@@ -181,8 +181,13 @@ export async function getMemberNotices(memberId){
   const map=new Map();
   [...allSnap.docs,...memberSnap.docs].forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
   const rows=sortNotices([...map.values()]).slice(0,30);
-  const readsSnap=await getDocs(collection(db,"members",memberId,"noticeReads"));
-  const readIds=new Set(readsSnap.docs.map(d=>d.id));
+  let readIds=new Set();
+  try {
+    const readsSnap=await getDocs(collection(db,"members",memberId,"noticeReads"));
+    readIds=new Set(readsSnap.docs.map(d=>d.id));
+  } catch(e) {
+    console.warn("[DB:getMemberNotices] noticeReads read failed", { memberId, code:e?.code, message:e?.message });
+  }
   return rows.map(n=>({...n,isRead:readIds.has(n.id)}));
 }
 
@@ -671,6 +676,9 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   const targetWeightKg = hasInput("targetWeightKg") ? optionalNumber(data.targetWeightKg, "목표 체중은") : null;
   const workoutFrequency = hasInput("workoutFrequency") ? stringValue(data.workoutFrequency) : "";
   const weeklyWorkoutCount = hasInput("weeklyWorkoutCount") ? stringValue(data.weeklyWorkoutCount) : "";
+  const birthYear = hasInput("birthYear") ? stringValue(data.birthYear) : "";
+  const birthMonth = hasInput("birthMonth") ? stringValue(data.birthMonth) : "";
+  const birthYearMonth = hasInput("birthYearMonth") ? stringValue(data.birthYearMonth) : (birthYear && birthMonth ? `${birthYear}-${String(birthMonth).padStart(2, "0")}` : "");
 
   const results = [];
   const failures = [];
@@ -690,6 +698,10 @@ export async function saveMemberProfileFields(memberId, data = {}) {
       if (currentMember.targetWeightKg !== targetWeightKg) memberPayload.targetWeightKg = targetWeightKg;
       if (currentMember.targetWeight !== targetWeightKg) memberPayload.targetWeight = targetWeightKg;
     }
+    if (birthYear && currentMember.birthYear !== birthYear) memberPayload.birthYear = birthYear;
+    if (birthMonth && currentMember.birthMonth !== birthMonth) memberPayload.birthMonth = birthMonth;
+    if (birthYearMonth && currentMember.birthYearMonth !== birthYearMonth) memberPayload.birthYearMonth = birthYearMonth;
+    if (birthYearMonth) memberPayload.birthSource = "memberProfile";
     if (workoutFrequency && currentMember.workoutFrequency !== workoutFrequency) memberPayload.workoutFrequency = workoutFrequency;
     const effectiveWeeklyWorkoutCount = weeklyWorkoutCount || workoutFrequency;
     if (effectiveWeeklyWorkoutCount && currentMember.weeklyWorkoutCount !== effectiveWeeklyWorkoutCount) memberPayload.weeklyWorkoutCount = effectiveWeeklyWorkoutCount;
@@ -716,6 +728,9 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   if (startWeight !== null) onboardingPayload.startingWeightKg = startWeight;
   if (currentWeight !== null) onboardingPayload.currentWeightKg = currentWeight;
   if (targetWeightKg !== null) { onboardingPayload.targetWeightKg = targetWeightKg; onboardingPayload.targetWeight = targetWeightKg; }
+  if (birthYear) onboardingPayload.birthYear = birthYear;
+  if (birthMonth) onboardingPayload.birthMonth = birthMonth;
+  if (birthYearMonth) onboardingPayload.birthYearMonth = birthYearMonth;
   if (workoutFrequency) onboardingPayload.weeklyWorkoutCount = workoutFrequency;
   if (weeklyWorkoutCount) onboardingPayload.weeklyWorkoutCount = weeklyWorkoutCount;
   ["targetPeriod", "targetPeriodCustom", "goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate"].forEach((key) => {
@@ -1129,7 +1144,7 @@ export async function getMemberOnboarding(memberId) {
 }
 
 const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
-  "gender", "birthYear", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
+  "gender", "birthYear", "birthMonth", "birthYearMonth", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
   "completed", "completedAt", "weightHistoryMode", "calorieHistoryMode",
   "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
   "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",

@@ -120,9 +120,9 @@ function sortNotices(rows){
 
 export async function getNotices(){
   const uid=requireUid();
-  const q=query(collection(db,"notices"),where("trainerUid","==",uid),orderBy("createdAt","desc"));
+  const q=query(collection(db,"notices"),where("trainerUid","==",uid));
   const snap=await getDocs(q);
-  return snap.docs.map(d=>({id:d.id,...d.data()}));
+  return sortNotices(snap.docs.map(d=>({id:d.id,...d.data()})));
 }
 
 export async function saveNotice(data,id=null){
@@ -164,12 +164,12 @@ export async function deleteNotice(id){
 
 export async function getMemberNotices(memberId){
   requireUid();
-  const allQ=query(collection(db,"notices"),where("isPublished","==",true),where("targetType","==","all"),orderBy("createdAt","desc"),limit(30));
-  const memberQ=query(collection(db,"notices"),where("isPublished","==",true),where("targetType","==","member"),where("targetMemberId","==",memberId),orderBy("createdAt","desc"),limit(30));
+  const allQ=query(collection(db,"notices"),where("isPublished","==",true),where("targetType","==","all"),limit(50));
+  const memberQ=query(collection(db,"notices"),where("isPublished","==",true),where("targetType","==","member"),where("targetMemberId","==",memberId),limit(50));
   const [allSnap,memberSnap]=await Promise.all([getDocs(allQ),getDocs(memberQ)]);
   const map=new Map();
   [...allSnap.docs,...memberSnap.docs].forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
-  const rows=sortNotices([...map.values()]);
+  const rows=sortNotices([...map.values()]).slice(0,30);
   const readsSnap=await getDocs(collection(db,"members",memberId,"noticeReads"));
   const readIds=new Set(readsSnap.docs.map(d=>d.id));
   return rows.map(n=>({...n,isRead:readIds.has(n.id)}));

@@ -153,7 +153,29 @@ function upsertBodyRecord(records = [], rec = {}) {
 
 function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightReps"}; }
 function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
-function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimPrimary:"",stimSecondary:"",stimNote:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
+function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimMemo:"",stimPrimary:"",stimSecondary:"",stimNote:"",nextPlan:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
+
+const STIM_RATING_OPTIONS = [
+  { value:1, label:"없음", summary:"자극 없음" },
+  { value:2, label:"애매함", summary:"애매함" },
+  { value:3, label:"약함", summary:"약함" },
+  { value:4, label:"중간", summary:"중간" },
+  { value:5, label:"강함", summary:"강함" },
+];
+const NEXT_PLAN_OPTIONS = [
+  { value:"same", label:"그대로 진행" },
+  { value:"weightUp", label:"중량 증가" },
+  { value:"repsUp", label:"반복 증가" },
+  { value:"changeExercise", label:"운동 변경" },
+  { value:"excludePain", label:"통증으로 제외" },
+];
+function stimRatingLabel(value) {
+  const n = Number(value);
+  return STIM_RATING_OPTIONS.find(x => x.value === n)?.label || "";
+}
+function nextPlanLabel(value) {
+  return NEXT_PLAN_OPTIONS.find(x => x.value === value)?.label || "";
+}
 
 // ── 기능성 운동 카테고리/부위/도구 상수 ─────────────────────────────────────
 const FUNC_CATEGORIES = [
@@ -978,7 +1000,7 @@ function EditableInfo({editing,l,children}){return editing?<div className="info 
 function getMemberExerciseSection(ex){const text=[ex.section,ex.category,ex.type,ex.exerciseType,ex.movementPurpose,ex.funcCategory,ex.muscleTop,ex.name].map(v=>String(v||"").toLowerCase()).join(" "); if(/warm|워밍|준비운동|오픈북|월 슬라이드|호흡 리셋/.test(text))return "움직임 준비"; if(/conditioning|컨디셔닝/.test(text))return "컨디셔닝"; if(/correct|교정|움직임교정|조직이완|가동성|호흡|밸런스/.test(text))return "교정운동"; if(isFuncEx(ex))return "움직임 준비"; return "웨이트 트레이닝";}
 function formatMemberSetDose(st){const parts=[]; const w=toPositiveNumber(st.weight); const r=toPositiveNumber(st.reps); const rawD=st.durationSec??st.duration??st.time??st.sec??st.seconds; const d=toPositiveNumber(rawD); if(w)parts.push(`${w}kg`); if(r)parts.push(`${r}회`); if(d)parts.push(d>=60&&d%60===0?`${d/60}분`:`${d}초`); return parts.join(" × ")||"";}
 function formatAssistExerciseDose(ex){const valid=(ex.sets||[]).map(formatMemberSetDose).filter(Boolean); if(!valid.length)return ""; if(valid.length===1)return valid[0]; const unique=[...new Set(valid)]; return unique.length===1?`${valid.length}세트 · ${unique[0]}`:valid.map((v,i)=>`${i+1}세트 · ${v}`).join(" · ");}
-function ExerciseReportSection({title,items,weight=false}){if(!items.length)return null; return <section className={weight?"exercise-report-section weight":"exercise-report-section assist"}><h3>{title}</h3>{items.map((e,i)=><div key={`${title}-${i}`} className={weight?"exercise-report":"assist-exercise-report"}><b>{e.name||e.movementPurpose||"운동"}</b>{weight?<div className="set-table">{(e.sets||[]).map((x,j)=>{const w=toPositiveNumber(x.weight); const r=toPositiveNumber(x.reps); const rawD=x.durationSec??x.duration??x.time??x.sec??x.seconds; const d=toPositiveNumber(rawD); if(!w&&!r&&!d)return null; return <span key={j}><strong>{j+1}세트</strong>{w?<i>{w}kg</i>:null}{r?<i>{r}회</i>:null}{!r&&d?<i>{d>=60&&d%60===0?`${d/60}분`:`${d}초`}</i>:null}</span>})}</div>:<p>{formatAssistExerciseDose(e)}</p>}{e.feedback&&<em>대표 코멘트: {e.feedback}</em>}{e.memo&&<em>{e.memo}</em>}</div>)}</section>}
+function ExerciseReportSection({title,items,weight=false}){if(!items.length)return null; return <section className={weight?"exercise-report-section weight":"exercise-report-section assist"}><h3>{title}</h3>{items.map((e,i)=><div key={`${title}-${i}`} className={weight?"exercise-report":"assist-exercise-report"}><b>{e.name||e.movementPurpose||"운동"}</b>{weight?<div className="set-table">{(e.sets||[]).map((x,j)=>{const w=toPositiveNumber(x.weight); const r=toPositiveNumber(x.reps); const rawD=x.durationSec??x.duration??x.time??x.sec??x.seconds; const d=toPositiveNumber(rawD); if(!w&&!r&&!d)return null; return <span key={j}><strong>{j+1}세트</strong>{w?<i>{w}kg</i>:null}{r?<i>{r}회</i>:null}{!r&&d?<i>{d>=60&&d%60===0?`${d/60}분`:`${d}초`}</i>:null}</span>})}</div>:<p>{formatAssistExerciseDose(e)}</p>}{e.feedback&&<em>대표 코멘트: {e.feedback}</em>}{e.stimRating&&<em>자극도: {stimRatingLabel(e.stimRating)}</em>}{e.stimMemo&&<em>대표 메모: {e.stimMemo}</em>}{e.memo&&<em>{e.memo}</em>}</div>)}</section>}
 function SessionMini({s}){const groups={"움직임 준비":[],"교정운동":[],"컨디셔닝":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>groups[getMemberExerciseSection(e)]?.push(e)); return <div className="session-mini"><ExerciseReportSection title="움직임 준비" items={groups["움직임 준비"]}/><ExerciseReportSection title="교정운동" items={groups["교정운동"]}/><ExerciseReportSection title="컨디셔닝" items={groups["컨디셔닝"]}/><ExerciseReportSection title="웨이트 트레이닝" items={groups["웨이트 트레이닝"]} weight/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
 function SorenessRecorder({s,onSave}){const [open,setOpen]=useState(false); const [d,setD]=useState(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}); useEffect(()=>setD(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}),[s.id,s.sorenessReport]); if(!open)return <button className="ghost compact" onClick={()=>setOpen(true)}>{s.sorenessReport?'근육통 기록 수정':'근육통 기록'}</button>; const save=()=>onSave?.(s.id,{...d,updatedBy:'member',updatedAt:new Date().toISOString()}); return <div className="soreness-form"><h3>근육통 기록</h3><input value={d.part} onChange={e=>setD({...d,part:e.target.value})} placeholder="근육통 부위"/><select value={d.level} onChange={e=>setD({...d,level:e.target.value})}>{['없음','약함','보통','강함','매우 강함'].map(x=><option key={x}>{x}</option>)}</select><select value={d.timing} onChange={e=>setD({...d,timing:e.target.value})}>{['당일','다음날','다다음날'].map(x=><option key={x}>{x}</option>)}</select><textarea value={d.memo} onChange={e=>setD({...d,memo:e.target.value})} placeholder="메모"/><button className="primary compact" onClick={save}>저장</button></div>}
 const MEMBER_CSS=`
@@ -5047,18 +5069,20 @@ function updateEx(ei, key, val) {
                     )}
 
                     {/* 이전 자극도 참고 (트레이너 전용) */}
-                    {(rec.stimRating || rec.stimPrimary || rec.stimNote) && (
+                    {(rec.stimRating || rec.stimMemo || rec.stimPrimary || rec.stimNote || rec.nextPlan) && (
                       <div style={{marginBottom:6,padding:"5px 8px",borderRadius:6,
                         background:"rgba(129,140,248,.07)",border:"1px solid rgba(129,140,248,.18)"}}>
                         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                           <Mo c="#818cf8" s={8} style={{fontWeight:700}}>이전 자극도</Mo>
                           {rec.stimRating && (
                             <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,
-                              color:"#a5b4fc",fontWeight:800}}>{rec.stimRating}/5</span>
+                              color:"#a5b4fc",fontWeight:800}}>{stimRatingLabel(rec.stimRating)}</span>
                           )}
                           {rec.stimPrimary && <Mo c="#a5b4fc" s={8}>주: {rec.stimPrimary}</Mo>}
                           {rec.stimSecondary && <Mo c="#94a3b8" s={8}>보조: {rec.stimSecondary}</Mo>}
+                          {rec.nextPlan && <Mo c="#ffd166" s={8}>다음 수업: {nextPlanLabel(rec.nextPlan)}</Mo>}
                         </div>
+                        {rec.stimMemo && <Mo c="#a5b4fc" s={8} style={{display:"block",marginTop:2}}>대표 메모: {rec.stimMemo}</Mo>}
                         {rec.stimNote && <Mo c="#64748b" s={8} style={{display:"block",marginTop:2}}>📝 {rec.stimNote}</Mo>}
                       </div>
                     )}
@@ -5501,50 +5525,68 @@ function updateEx(ei, key, val) {
               background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.12)"}} onFocus={()=>setActiveCardIdx(ei)}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
                 <Mo c="#818cf8" s={8} style={{fontWeight:700,flexShrink:0}}>🎯 자극도</Mo>
-                {ex.stimRating && (
-                  <Mo c="#a5b4fc" s={8}>{["","😑 자극 없음","😐 미약","🙂 보통","😊 좋음","🔥 최고"][ex.stimRating]}</Mo>
-                )}
+                {ex.stimRating && <Mo c="#a5b4fc" s={8}>{stimRatingLabel(ex.stimRating)}</Mo>}
                 <Mo c="#3a3a5a" s={7} style={{marginLeft:"auto",flexShrink:0}}>트레이너 전용</Mo>
               </div>
-              <div style={{display:"flex",gap:4,marginBottom:6}}>
-                {[1,2,3,4,5].map(n=>{
-                  const active = ex.stimRating===n;
-                  const cols=["","#64748b","#94a3b8","#5EEAD4","#22c55e","#ef4444"];
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:4,marginBottom:6}}>
+                {STIM_RATING_OPTIONS.map(opt=>{
+                  const active = Number(ex.stimRating)===opt.value;
+                  const cols={1:"#64748b",2:"#94a3b8",3:"#5EEAD4",4:"#22c55e",5:"#ef4444"};
+                  const col=cols[opt.value];
                   return (
-                    <button key={n} onClick={()=>updateEx(ei,"stimRating",active?null:n)}
-                      style={{flex:1,height:30,borderRadius:6,border:"1px solid",fontSize:13,
-                        borderColor:active?cols[n]:"rgba(255,255,255,0.08)",
-                        background:active?cols[n]+"22":"transparent",
-                        color:active?cols[n]:"#3a3a5a",fontWeight:800,cursor:"pointer"}}>
-                      {n}
+                    <button key={opt.value} onClick={()=>updateEx(ei,"stimRating",active?null:opt.value)}
+                      style={{minHeight:30,borderRadius:6,border:"1px solid",fontSize:11,
+                        borderColor:active?col:"rgba(255,255,255,0.08)",
+                        background:active?col+"22":"transparent",
+                        color:active?col:"#64748b",fontWeight:800,cursor:"pointer",padding:"0 4px"}}>
+                      {opt.label}
                     </button>
                   );
                 })}
               </div>
-              <div style={{display:"flex",gap:5}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <input value={ex.stimPrimary||""} onChange={e=>updateEx(ei,"stimPrimary",e.target.value)}
-                    placeholder="주 자극 부위" style={{fontSize:13,padding:"5px 8px",color:"#a5b4fc"}} />
-                </div>
-                <div style={{flex:1,minWidth:0}}>
-                  <input value={ex.stimSecondary||""} onChange={e=>updateEx(ei,"stimSecondary",e.target.value)}
-                    placeholder="보조 자극 부위" style={{fontSize:13,padding:"5px 8px",color:"#94a3b8"}} />
+              <input value={ex.stimMemo||""} onChange={e=>updateEx(ei,"stimMemo",e.target.value)}
+                placeholder="대표 메모 · 왼쪽 어깨 불편 / 승모 개입 / 다음 수업 중량 증가 등"
+                style={{fontSize:13,padding:"6px 8px",color:"#c4b5fd",marginBottom:6}} />
+              <div style={{marginBottom:6}}>
+                <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>다음 수업 추천</Mo>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {NEXT_PLAN_OPTIONS.map(opt=>{
+                    const active=ex.nextPlan===opt.value;
+                    return <button key={opt.value} type="button" onClick={()=>updateEx(ei,"nextPlan",active?"":opt.value)}
+                      style={{fontSize:10,padding:"4px 8px",borderRadius:999,border:"1px solid",cursor:"pointer",
+                        borderColor:active?"rgba(94,234,212,.55)":"rgba(255,255,255,.08)",
+                        background:active?"rgba(94,234,212,.14)":"rgba(255,255,255,.02)",
+                        color:active?"#5EEAD4":"#64748b",fontWeight:active?800:600}}>{opt.label}</button>;
+                  })}
                 </div>
               </div>
-              <div style={{marginTop:4}}>
-                <input value={ex.stimNote||""} onChange={e=>updateEx(ei,"stimNote",e.target.value)}
-                  placeholder="자극 메모 (보상 패턴, 큐잉 메모 등)" style={{fontSize:13,padding:"5px 8px",color:"#94a3b8"}} />
-              </div>
+              <details open={!!(ex.stimPrimary||ex.stimSecondary||ex.stimNote)} style={{borderTop:"1px solid rgba(255,255,255,.06)",paddingTop:6}}>
+                <summary style={{cursor:"pointer",fontSize:10,fontWeight:800,color:"#818cf8",listStyle:"none"}}>상세 기록</summary>
+                <div style={{display:"flex",gap:5,marginTop:6}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <input value={ex.stimPrimary||""} onChange={e=>updateEx(ei,"stimPrimary",e.target.value)}
+                      placeholder="주 자극 부위" style={{fontSize:13,padding:"5px 8px",color:"#a5b4fc"}} />
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <input value={ex.stimSecondary||""} onChange={e=>updateEx(ei,"stimSecondary",e.target.value)}
+                      placeholder="보조 자극 부위" style={{fontSize:13,padding:"5px 8px",color:"#94a3b8"}} />
+                  </div>
+                </div>
+                <div style={{marginTop:4}}>
+                  <input value={ex.stimNote||""} onChange={e=>updateEx(ei,"stimNote",e.target.value)}
+                    placeholder="자극 메모 (보상 패턴, 큐잉 메모 등)" style={{fontSize:13,padding:"5px 8px",color:"#94a3b8"}} />
+                </div>
+              </details>
             </div>
           </div>
         );})}
         <div style={{display:"flex",gap:8,marginTop:10}}>
-          <button onClick={() => setExercises(prev=>[...prev, {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""}])}
+          <button onClick={() => setExercises(prev=>[...prev, mkEx()])}
             style={{flex:1,padding:"9px 0",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:8,
               background:"transparent",color:"#64748b",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             + 마지막에 추가
           </button>
-          <button onClick={() => setExercises(prev=>[{name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:""},...prev])}
+          <button onClick={() => setExercises(prev=>[mkEx(),...prev])}
             style={{flex:1,padding:"9px 0",border:"1px dashed rgba(94,234,212,.3)",borderRadius:8,
               background:"rgba(94,234,212,.05)",color:"#5EEAD4",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             ↑ 맨 위에 추가
@@ -6169,7 +6211,7 @@ function getStimHistory(sessions, exName) {
         history.push({
           date: sess.date||"", sessionNo: sess.sessionNo||"",
           stimRating: ex.stimRating, stimPrimary: ex.stimPrimary||"",
-          stimSecondary: ex.stimSecondary||"", stimNote: ex.stimNote||"",
+          stimSecondary: ex.stimSecondary||"", stimNote: ex.stimNote||"", stimMemo: ex.stimMemo||"", nextPlan: ex.nextPlan||"",
           rpe: ex.rpe, feedback: ex.feedback||"",
         });
       }
@@ -6357,7 +6399,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
   })();
 
   // 운동별 자극도 (관리자 전용 표시)
-  const stimExs = exercises.filter(e => e.stimRating || e.stimPrimary || e.stimNote);
+  const stimExs = exercises.filter(e => e.stimRating || e.stimMemo || e.stimPrimary || e.stimNote || e.nextPlan);
 
   async function handleSaveImage() {
     const el = document.getElementById("report-card-capture");
@@ -6690,11 +6732,13 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                           <Mo c="#94a3b8" s={10} style={{fontWeight:700}}>{ex.name}</Mo>
                           {ex.stimRating && (
                             <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,
-                              color:"#a5b4fc",fontWeight:800}}>{ex.stimRating}/5</span>
+                              color:"#a5b4fc",fontWeight:800}}>{stimRatingLabel(ex.stimRating)}</span>
                           )}
                           {ex.stimPrimary && <Mo c="#818cf8" s={8}>주: {ex.stimPrimary}</Mo>}
                           {ex.stimSecondary && <Mo c="#64748b" s={8}>보조: {ex.stimSecondary}</Mo>}
+                          {ex.nextPlan && <Mo c="#ffd166" s={8}>다음 수업: {nextPlanLabel(ex.nextPlan)}</Mo>}
                         </div>
+                        {ex.stimMemo && <Mo c="#a5b4fc" s={8} style={{display:"block",marginTop:2}}>대표 메모: {ex.stimMemo}</Mo>}
                         {ex.stimNote && <Mo c="#475569" s={8} style={{display:"block",marginTop:2}}>📝 {ex.stimNote}</Mo>}
                       </div>
                     ))}

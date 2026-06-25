@@ -383,7 +383,7 @@ async function verifyMemberProfileAccess(memberId) {
 // ════════════════════════════════════════════════════
 // 수업 일지 (sessions)
 // ════════════════════════════════════════════════════
-const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "movementPurpose", "funcCategory", "funcBodyPart", "funcTool", "isFavorite", "favorite", "isRecommended", "recommended", "memberAppRecommended"]);
+const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "movementPurpose", "funcCategory", "funcBodyPart", "funcTool", "isFavorite", "favorite", "isRecommended", "recommended", "memberAppRecommended", "stimRating", "stimMemo"]);
 
 function normalizeSessionForRead(data = {}) {
   const isPublished = data.isPublished === true;

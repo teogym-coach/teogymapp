@@ -923,7 +923,7 @@ function MemberOnboarding({profile,body,existing,onDone}){const today=new Date()
 function Choices({vals,cur,onPick,multi}){return <div className="choices">{vals.map(v=><button key={v} onClick={()=>onPick(v)} className={(multi?cur.includes(v):cur===v)?"sel":""}>{v}</button>)}</div>}
 function SelectLine({label,value,opts,onChange}){return <div className="form-line"><label>{label}</label><select value={value} onChange={e=>onChange(e.target.value)}>{opts.map(o=><option key={o}>{o}</option>)}</select></div>}
 function InputLine({label,value,onChange,type="text"}){return <div className="form-line"><label>{label}</label><input type={type} value={value||""} onChange={e=>onChange(e.target.value)}/></div>}
-function NoticeCard({notices=[],onOpen,onAll}){const unread=notices.filter(n=>!n.isRead).length; const latest=notices[0]; if(!latest)return null; return <section className={`notice-card ${latest.isImportant?"important":""}`} onClick={()=>onOpen?.(latest)}><span>{unread?`📢 새로운 공지 ${unread}건`:latest.isImportant?"📌 중요 공지":"📢 공지사항"}</span><b>{latest.title}</b><button type="button" onClick={e=>{e.stopPropagation();onAll?.();}}>전체보기</button></section>}
+function NoticeCard({notices=[],onOpen,onAll}){const unread=notices.filter(n=>!n.isRead).length; const featured=notices.find(n=>n.isImportant)||notices[0]; if(!featured)return null; return <section className={`notice-card ${featured.isImportant?"important":""}`} onClick={()=>onOpen?.(featured)}><span>{unread?`📢 새로운 공지 ${unread}건`:featured.isImportant?"📌 중요 공지":"📢 공지사항"}</span><b>{featured.title}</b><button type="button" onClick={e=>{e.stopPropagation();onAll?.();}}>전체보기</button></section>}
 function MemberHome(p){const done=p.sessions.length; const pct=p.totalReg?Math.min(100,Math.round(done/p.totalReg*100)):0; return <><h1>안녕하세요 {p.profile.name}님</h1><p className="sub">대표님이 관리하는 변화 리포트입니다 · 오늘 상태도 건강관리 탭에서 기록하세요</p><div className="hero-card pt-progress"><b>대표님과 함께한 수업</b><strong>{done}회</strong>{p.totalReg?<><em>PT 진행률 {pct}% · 남은 PT {p.remaining}회</em><i><small style={{width:`${pct}%`}}/></i></>:<em>누적 수업 기록이 쌓이고 있어요</em>}</div><NoticeCard notices={p.notices} onOpen={p.openNotice} onAll={()=>p.setTab("profile")}/><div className="grid2 top-metrics"><ChangeReportMetric startW={p.startW} curW={p.curW}/><GoalMetric goal={p.onboarding.goal||"꾸준한 변화"}/><GoalWeightForecastCard {...p}/><NextWorkoutMetric profile={p.profile}/></div><ReviewRoutine {...p}/><DailyConditioningCard items={p.dailyConditioning}/></>}
 function MemberWorkout({sessions,saveFeedback}){return <><h1>수업일지</h1><p className="sub">대표님이 공개한 수업 결과 리포트입니다.</p>{sessions.slice().reverse().map(s=><MCard key={s.id} title={`${s.date} · ${formatTypes(s.selectedTypes||s.type)||'운동'}`}><MemberFeedbackForm s={s} onSave={saveFeedback}/><SessionMini s={s}/></MCard>)}</>}
 function MemberHealth(p){return <><h1>건강관리</h1><p className="sub">입력한 체중·칼로리·걸음수는 관리자 건강관리 허브와 같은 데이터를 사용합니다</p><div className="grid2"><Metric t="체중" v={`${p.curW}kg`}/><Metric t="칼로리" v={p.recentKcal}/><Metric t="걸음수" v={p.steps}/><Metric t="목표" v={p.onboarding.goal}/></div><MCard title="오늘 건강 기록"><InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/><InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/><InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/><InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/><SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} onChange={v=>p.setForm({...p.form,condition:v})}/><PainInput form={p.form} setForm={p.setForm}/><button className="primary" onClick={p.saveCheck} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":"저장"}</button></MCard><RecentHealthRecords checkins={p.checkins} body={p.body} nutrition={p.nutrition} onDelete={p.deleteHealthRecord}/></>}
@@ -3748,7 +3748,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     if (isOwner(member)) {
       return [mkEx()];
     }
-    // 회원 수업 기록: 기능 카드 2개로 시작
+    // 회원 수업 기록: 기능 카드 1개로 시작
     const mkFuncEx = () => ({
       ...mkEx(),
       equipment: "기능",
@@ -3756,7 +3756,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       muscleSub: "기능",
       sets: [{ weight:"", reps:"", durationSec:"", volume:0, recordType:"function" }],
     });
-    return [mkFuncEx(), mkFuncEx()];
+    return [mkFuncEx()];
   });
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
@@ -5562,23 +5562,6 @@ function updateEx(ei, key, val) {
                   })}
                 </div>
               </div>
-              <details open={!!(ex.stimPrimary||ex.stimSecondary||ex.stimNote)} style={{borderTop:"1px solid rgba(255,255,255,.06)",paddingTop:6}}>
-                <summary style={{cursor:"pointer",fontSize:10,fontWeight:800,color:"#818cf8",listStyle:"none"}}>상세 기록</summary>
-                <div style={{display:"flex",gap:5,marginTop:6}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <input value={ex.stimPrimary||""} onChange={e=>updateEx(ei,"stimPrimary",e.target.value)}
-                      placeholder="주 자극 부위" style={{fontSize:13,padding:"5px 8px",color:"#a5b4fc"}} />
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <input value={ex.stimSecondary||""} onChange={e=>updateEx(ei,"stimSecondary",e.target.value)}
-                      placeholder="보조 자극 부위" style={{fontSize:13,padding:"5px 8px",color:"#94a3b8"}} />
-                  </div>
-                </div>
-                <div style={{marginTop:4}}>
-                  <input value={ex.stimNote||""} onChange={e=>updateEx(ei,"stimNote",e.target.value)}
-                    placeholder="자극 메모 (보상 패턴, 큐잉 메모 등)" style={{fontSize:13,padding:"5px 8px",color:"#94a3b8"}} />
-                </div>
-              </details>
             </div>
           </div>
         );})}

@@ -4313,8 +4313,8 @@ function updateEx(ei, key, val) {
     removeDraft(draftKey);
     setDraftStatus("");
 
-    // 2:1 수업: 회원2 먼저 독립 저장 (회원1 저장보다 먼저 실행)
-    if (sessionType === "2:1" && member2 && onSave2) {
+    // 2:1 수업 신규 저장 시에만 회원2 함께 생성 (수정 시에는 현재 회원 session만 독립 처리)
+    if (!isEdit && sessionType === "2:1" && member2 && onSave2) {
       // 회원2 exercises 생성 — m2.sets 개별 데이터 우선 사용
       const exM2 = cleanExercises.map(e => {
         const { m2, ...rest } = e;

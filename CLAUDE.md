@@ -38,7 +38,7 @@ npm run regression # Static regression checks — run after every change
 3. `npm run build` 실행 (가능하면 `npm run regression`도 실행)
 4. `git commit` 및 `git push`
 5. Vercel 배포 확인
-6. 최종 결과 요약 + ntfy 알림 1회 전송 (모든 단계 완료 후에만)
+6. 최종 결과 요약
 
 **사전 승인이 필요한 경우만 예외**: 큰 구조 변경, 데이터 구조 변경, Firebase 구조 변경 등 프로젝트 전체에 영향을 주는 작업. 일반적인 UI 개선 · 버그 수정 · 기능 개선은 중간 승인 없이 바로 진행한다.
 

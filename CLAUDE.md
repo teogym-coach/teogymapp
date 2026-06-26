@@ -31,6 +31,11 @@ npm run regression # Static regression checks — run after every change
 
 ## Work Order
 
-분석 → 원인 → 해결방법 → 수정 → 빌드 → 회귀 테스트 → 수정 내용 요약
+1. 관련 코드와 데이터 흐름 분석
+2. 별도 승인 없이 바로 수정 진행
+3. `npm run build` 실행 (가능하면 `npm run regression`도 실행)
+4. 수정한 파일 · 변경 이유 · 테스트 결과 요약 보고
+
+**사전 승인이 필요한 경우만 예외**: 큰 구조 변경, 데이터 구조 변경, Firebase 구조 변경 등 프로젝트 전체에 영향을 주는 작업. 일반적인 UI 개선 · 버그 수정 · 기능 개선은 중간 승인 없이 바로 진행한다.
 
 설명은 짧고 명확하게.

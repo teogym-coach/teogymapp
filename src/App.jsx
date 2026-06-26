@@ -1387,27 +1387,34 @@ export default function App() {
       const m2 = members.find(m => m.id === payload2.memberId);
       if (!m2) { showToast("회원2를 찾을 수 없습니다","err"); return; }
 
-      // 회원2의 최신 회차 계산 (회원1 세션과 독립)
       const m2Sessions = await getSessions(m2.id);
-      const m2SessionNo = m2Sessions.length > 0
-        ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0) + 1
-        : 1;
-
       const now = new Date().toISOString();
-      // payload2에서 회원1 관련 필드를 완전히 덮어씀
-      const safePayload2 = {
-        ...payload2,
-        memberId:    m2.id,       // 반드시 회원2 ID
-        memberName:  m2.name,     // 반드시 회원2 이름
-        sessionNo:   m2SessionNo, // 회원2 독립 회차
-        createdAt:   now,
-        updatedAt:   now,
-        // exercises는 payload2에서 이미 회원2 전용으로 생성됨
-      };
-      await addSession(m2.id, safePayload2);  // 반드시 m2.id 경로에 저장
+      const safeBase = { ...payload2, memberId: m2.id, memberName: m2.name, updatedAt: now };
+
+      if (editSess?.id) {
+        // 수정 모드: B회원의 기존 세션을 날짜 + linkedMemberId로 찾아 update
+        const m2EditSess = m2Sessions.find(s =>
+          s.date === editSess.date &&
+          (s.linkedMemberId === member?.id || s.linkedMemberId === editSess.memberId)
+        );
+        if (m2EditSess?.id) {
+          await updateSession(m2.id, m2EditSess.id, safeBase);
+        } else {
+          // fallback: 기존 세션을 찾지 못하면 신규 생성
+          const m2SessionNo = m2Sessions.length > 0 ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0) + 1 : 1;
+          await addSession(m2.id, { ...safeBase, sessionNo: m2SessionNo, createdAt: now });
+        }
+      } else {
+        // 신규 저장
+        const m2SessionNo = m2Sessions.length > 0
+          ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0) + 1
+          : 1;
+        await addSession(m2.id, { ...safeBase, sessionNo: m2SessionNo, createdAt: now });
+      }
+
       const newSess2 = await getSessions(m2.id);
       setSessionsMap(prev => ({...prev, [m2.id]: newSess2}));
-      showToast(`${m2.name} 기록 저장 완료 ✓`);
+      showToast(`${m2.name} 기록 ${editSess?.id ? "수정" : "저장"} 완료 ✓`);
     } catch(e) { showToast("회원2 저장 실패: "+e.message, "err"); }
   }
   async function handleSaveSession(d) {

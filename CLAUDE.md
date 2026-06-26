@@ -14,6 +14,7 @@ npm run regression # Static regression checks — run after every change
 ## Project
 
 관리자 웹앱 + 회원 전용 웹앱 (Create React App PWA, Firebase Auth + Firestore)
+두 앱은 같은 Firebase 데이터(회원, 수업일지, 운동기록, 건강관리)를 공유하는 연동 구조다.
 
 ## Principles
 
@@ -21,13 +22,14 @@ npm run regression # Static regression checks — run after every change
 - 수정 전 반드시 원인 분석
 - 기존 기능 절대 손상 금지
 - Firebase 데이터 손실 금지
+- Firebase 데이터 구조·저장 경로 변경은 반드시 사전 설명 후 승인받고 진행
 - 모바일 UI 우선
 - 관련 없는 코드 수정 금지
 - Git은 필요한 파일만 수정
 - 기존 함수와 로직을 최대한 재사용하고 중복 구현 금지
-- 큰 구조 변경이나 데이터 구조 변경은 먼저 설명 후 승인받고 진행
-- 수정 후 반드시 `npm run build`와 `npm run regression`을 실행하고 결과를 보고
-- 작업 완료 후 수정한 파일과 변경 이유를 간단히 요약
+- 한쪽 앱 UI를 수정할 때도 데이터 연동 흐름을 함께 확인한다
+- "영향 없게"는 데이터 연동을 끊으라는 뜻이 아니라 의도하지 않은 기능 손상·데이터 손실을 막으라는 의미다
+- 수정 후 반드시 `npm run build`와 `npm run regression`을 실행하고 결과를 보고 · 작업 완료 후 수정한 파일과 변경 이유를 간단히 요약
 
 ## Work Order
 

@@ -1602,7 +1602,7 @@ export default function App() {
         {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={member} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
 
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} />}
@@ -3649,7 +3649,7 @@ function DailyConditioningAdminScreen({member,onBack,showToast}){const today=get
 // ════════════════════════════════════════════
 // HUB
 // ════════════════════════════════════════════
-function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, loading, setScreen, onEdit, onMemberPatch }) {
+function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, loading, setScreen, onEdit, onMemberPatch, onEditSession }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -3681,6 +3681,15 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
       await updateMember(member.id, patch);
       onMemberPatch(patch);
     } catch(e) { console.error(e); } finally { setPtSaving(false); }
+  };
+  const handleOpenLastSession = () => {
+    if (!sessions.length) { alert("수정할 수업일지가 없습니다."); return; }
+    const sorted = [...sessions].sort((a,b)=>{
+      const diff = (Number(b.sessionNo)||0)-(Number(a.sessionNo)||0);
+      if (diff!==0) return diff;
+      return String(b.date||"").localeCompare(String(a.date||""));
+    });
+    onEditSession(sorted[0]);
   };
 
   // ── 수업 진행 ────────────────────────────────────────────
@@ -3800,7 +3809,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
 
       {/* ═══════════════════════════════════════ HEADER ═══ */}
       <div style={{background:"#0f1626",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:"14px 16px",marginBottom:10}}>
-        {/* Row 1: 아이콘 + 이름 + [기록] 버튼 */}
+        {/* Row 1: 아이콘 + 이름 + 빠른버튼 */}
         <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:11,flex:1,minWidth:0}}>
             <div style={{width:44,height:44,borderRadius:12,
@@ -3808,7 +3817,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
               border:"1px solid rgba(94,234,212,.25)",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💪</div>
             <div style={{minWidth:0}}>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"#fff",letterSpacing:"-.3px"}}>{member.name}</div>
+              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"#fff",letterSpacing:"-.3px"}}>{member.name}</span>
+                {member.goal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(129,140,248,.15)",color:"#a5b4fc",fontWeight:700,border:"1px solid rgba(129,140,248,.28)"}}>{member.goal}</span>}
+              </div>
               <div style={{display:"flex",gap:5,marginTop:3,flexWrap:"wrap"}}>
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
                   color:member.memberUid?"#86efac":"#fbbf24",
@@ -3819,13 +3831,31 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
               <Mo c="#475569" s={9} style={{display:"block",marginTop:2}}>{member.email||"-"}</Mo>
             </div>
           </div>
-          <button onClick={()=>setScreen("session")} style={{
-            background:"linear-gradient(135deg,rgba(94,234,212,.2),rgba(94,234,212,.08))",
-            border:"1.5px solid rgba(94,234,212,.5)",borderRadius:12,
-            padding:"10px 18px",cursor:"pointer",flexShrink:0,
-            fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:15,color:"#5EEAD4",
-            whiteSpace:"nowrap",letterSpacing:"-.3px"
-          }}>기록</button>
+          {/* 수업 운영 빠른 버튼 */}
+          <div style={{display:"flex",gap:4,flexShrink:0}}>
+            <button onClick={()=>setScreen("session")} style={{
+              background:"linear-gradient(135deg,rgba(94,234,212,.2),rgba(94,234,212,.08))",
+              border:"1.5px solid rgba(94,234,212,.5)",borderRadius:10,
+              padding:"9px 13px",cursor:"pointer",
+              fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:13,color:"#5EEAD4",
+              whiteSpace:"nowrap"
+            }}>기록</button>
+            <button onClick={()=>setScreen("history")} style={{
+              background:"rgba(124,111,255,.1)",
+              border:"1.5px solid rgba(124,111,255,.35)",borderRadius:10,
+              padding:"9px 13px",cursor:"pointer",
+              fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:13,color:"#a78bfa",
+              whiteSpace:"nowrap"
+            }}>일지</button>
+            <button onClick={handleOpenLastSession} disabled={!sessions.length} style={{
+              background:sessions.length?"rgba(255,209,102,.1)":"rgba(255,255,255,.04)",
+              border:`1.5px solid ${sessions.length?"rgba(255,209,102,.4)":"rgba(255,255,255,.1)"}`,borderRadius:10,
+              padding:"9px 13px",cursor:sessions.length?"pointer":"default",
+              fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:13,
+              color:sessions.length?"#ffd166":"#3a4a5a",
+              whiteSpace:"nowrap"
+            }}>최근</button>
+          </div>
         </div>
         {/* Row 2: 액션 버튼 */}
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
@@ -3882,11 +3912,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
           </div>
         )}
 
-        {/* 목표 + 다음 PT 계획 태그 */}
-        {!loading&&(member.goal||last?.nextPlan)&&(
+        {/* 다음 PT 계획 태그 (운동 목표는 이름 옆으로 이동) */}
+        {!loading&&last?.nextPlan&&(
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-            {member.goal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:6,background:"rgba(129,140,248,.1)",color:"#a5b4fc"}}>🎯 {member.goal}</span>}
-            {last?.nextPlan&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:6,background:"rgba(94,234,212,.08)",color:"#5EEAD4"}}>다음 PT: {last.nextPlan}</span>}
+            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:6,background:"rgba(94,234,212,.08)",color:"#5EEAD4"}}>다음 PT: {last.nextPlan}</span>
           </div>
         )}
 

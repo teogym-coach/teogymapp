@@ -3651,352 +3651,367 @@ function DailyConditioningAdminScreen({member,onBack,showToast}){const today=get
 // ════════════════════════════════════════════
 function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, loading, setScreen, onEdit, onMemberPatch }) {
   const isCorr = false;
-
-  const totalVol = sessions.reduce((s,ss) => s+(ss.totalVolume||0), 0);
-  const last     = sessions.length > 0 ? sessions[sessions.length-1] : null;
-  // 체중 히스토리 단일화: bodyData.records만 그래프 + 통계 공통 소스로 사용
-  const wData = getBodyWeightRecords(bodyData)
-    .map(r => ({ name:String(r.date).slice(5), w:r.weight, date:r.date }));
   const isMyself = isOwner(member);
-  const t = (수업, 운동) => isMyself ? 운동 : 수업; // 대표님 전용 텍스트 헬퍼
+  const t = (수업, 운동) => isMyself ? 운동 : 수업;
+  const totalVol = sessions.reduce((s,ss) => s+(ss.totalVolume||0), 0);
+  const last = sessions.length > 0 ? sessions[sessions.length-1] : null;
+  const wData = getBodyWeightRecords(bodyData).map(r => ({ name:String(r.date).slice(5), w:r.weight, date:r.date }));
   const [showMemberAppManagement, setShowMemberAppManagement] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showMemo, setShowMemo] = useState(false);
 
-  const menus = [
-    // ── 핵심: 수업 중 가장 자주 사용 ───────────────────
-    {icon:"✏️",label:t("수업 기록","운동 기록"),  desc:t("오늘 수업 입력","오늘 운동 입력"),    sc:"session",    c:"#5EEAD4"},
-    {icon:"📅",label:t("히스토리","운동일지"),    desc:t("전체 수업 · 수정 · 삭제","전체 운동 · 수정 · 삭제"), sc:"history", c:"#7c6fff"},
-    {icon:"🏥",label:"건강관리 허브",    desc:"체중·칼로리·걸음수·영양관리 통합", sc:"healthhub", c:"#00cec9"},
-    {icon:"📨",label:"루틴 추천",   desc:"회원앱으로 대표 루틴 전송", sc:"routine_recommend", c:"#5EEAD4"},
-    {icon:"🧘",label:"오늘의 컨디셔닝", desc:"매일 기능 운동 관리", sc:"daily_conditioning", c:"#22c55e"},
-    {icon:"🔥",label:"대사 추정 분석",  desc:"유산소·체중·운동량 종합 분석", sc:"metabolism",  c:"#f97316"},
-    // ── 분석·설계 ──────────────────────────────────────
-    {icon:"💪",label:"근력 분석",      desc:"1RM·5RM·10RM 예측 분석",     sc:"strength",   c:"#ef4444"},
-    {icon:"🤖",label:"AI 루틴 추천",   desc:t("수업기록 기반 다음 루틴","운동기록 기반 다음 루틴"), sc:"ai_routine", c:"#a29bfe"},
-    {icon:"🎯",label:"목표 관리",      desc:"목표 설정 + AI 분석 리포트",  sc:"goal_manage",c:"#818cf8"},
-    // ── 기록·분석 보조 ────────────────────────────────
-    {icon:"📊",label:"유입 분석",        desc:"방문 경로·AI 검색 통계",   sc:"referral",    c:"#a29bfe"},
-    {icon:"📚",label:"운동 라이브러리",  desc:"부위별 운동 기록",           sc:"library",     c:"#00bfff"},
-    {icon:"📈",label:"루틴 분석",      desc:"RPE·근육통·볼륨 반응 분석",  sc:"analysis",   c:"#7c6fff"},
-    {icon:"📊",label:"블록 피드백",    desc:"부위/기구별 볼륨 분석",      sc:"feedback",   c:"#ffd166"},
-    {icon:"💢",label:"근육통 기록",    desc:"부위별 근육통 0~5 기록",     sc:"soreness",   c:"#ff9f43"},
-    // ── 보조 관리 ─────────────────────────────────────
-    {icon:"📋",label:"평가 기록",      desc:"체형·기능·인체도 평가",      sc:"assessment", c:"#a29bfe"},
-  ];
+  // ── 수업 진행 ────────────────────────────────────────────
+  const totalReg = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
+  const usedCount = sessions.length;
+  const remaining = totalReg > 0 ? Math.max(0, totalReg - usedCount) : null;
+
+  // ── 체중 변화 ─────────────────────────────────────────────
+  const wEntries = wData.map(d => ({ date:d.date, weight:d.w }));
+  const wFirst = wEntries[0]?.weight || null;
+  const wLast = wEntries.length ? wEntries[wEntries.length-1].weight : null;
+  const wDiff = (wFirst && wLast && wFirst!==wLast) ? Math.round((wLast-wFirst)*10)/10 : null;
+  const _todayD = new Date();
+  const _7dAgo = new Date(_todayD); _7dAgo.setDate(_7dAgo.getDate()-7);
+  const _30dAgo = new Date(_todayD); _30dAgo.setDate(_30dAgo.getDate()-30);
+  const _7dAgoStr = _7dAgo.toISOString().slice(0,10);
+  const _30dAgoStr = _30dAgo.toISOString().slice(0,10);
+  const _w7Start = wEntries.filter(e=>e.date<=_7dAgoStr).slice(-1)[0]?.weight || null;
+  const _w30Start = wEntries.filter(e=>e.date<=_30dAgoStr).slice(-1)[0]?.weight || null;
+  const wDiff7d = (wLast && _w7Start) ? Math.round((wLast-_w7Start)*10)/10 : null;
+  const wDiff30d = (wLast && _w30Start) ? Math.round((wLast-_w30Start)*10)/10 : null;
+  const tw = parseFloat(bodyData?.goal?.targetWeight) || null;
+  const toGoal = (wLast && tw) ? Math.round((tw-wLast)*10)/10 : null;
+
+  // ── 최근 통증 ─────────────────────────────────────────────
+  const recentPain = (() => {
+    for (let i=sessions.length-1;i>=0;i--) {
+      const pr = sessions[i].painRecord;
+      if (pr?.before?.part) return pr.before.part;
+      if (pr?.after?.part) return pr.after.part;
+      const pa = sessions[i].painArea || member.painArea;
+      if (pa) return pa;
+    }
+    return null;
+  })();
+
+  // ── 컨디션 ───────────────────────────────────────────────
+  const condSlice = sessions.slice(-3).map(s=>s.condition).filter(Boolean);
+  const condMap = {"매우 좋음":5,"좋음":4,"보통":3,"나쁨":2,"매우 나쁨":1};
+  const condAvg = condSlice.length ? condSlice.reduce((a,c)=>a+(condMap[c]||3),0)/condSlice.length : null;
+  const condLabel = condAvg===null ? null
+    : condAvg>=4.2?"컨디션 양호":condAvg>=3.2?"회복 중":condAvg>=2.2?"피로도 높음":"컨디션 저조";
+  const condColor = condAvg===null?"#54546a":condAvg>=4.2?"#22c55e":condAvg>=3.2?"#5EEAD4":condAvg>=2.2?"#f59e0b":"#ef4444";
+
+  // ── 운동 강도 + RPE ──────────────────────────────────────
+  const intLabel = last?.intensity || null;
+  const intColor = {
+    "최고 강도":"#ef4444","높음":"#f97316","고강도":"#ef4444",
+    "중강도":"#ffd166","낮음":"#22c55e","저강도":"#22c55e","매우 낮음":"#5EEAD4"
+  }[intLabel] || "#54546a";
+  const recentVols = sessions.slice(-3).map(s=>s.totalVolume||0).filter(v=>v>0);
+  const volTrend = recentVols.length>=2
+    ? (recentVols[recentVols.length-1]>recentVols[recentVols.length-2]?"볼륨 증가":"볼륨 감소") : null;
+  const rpeArr = sessions.slice(-5).flatMap(s=>(s.exercises||[]).flatMap(e=>(e.sets||[]).map(r=>parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>=7)));
+  const rpeAvg = rpeArr.length ? (rpeArr.reduce((a,b)=>a+b,0)/rpeArr.length).toFixed(1) : null;
+  const rpeColor = rpeAvg===null?"#54546a":parseFloat(rpeAvg)>=9?"#ef4444":parseFloat(rpeAvg)>=8?"#f97316":parseFloat(rpeAvg)>=7?"#ffd166":"#5EEAD4";
+  const fatigueSignal = (() => {
+    if (sessions.length < 3) return null;
+    const recent = sessions.slice(-3);
+    const lowCond = recent.filter(s=>s.condition==="하").length;
+    if (lowCond >= 2) return {text:"피로 누적 가능성", color:"#ef4444"};
+    const vols = recent.map(s=>s.totalVolume||0);
+    if (vols[2]<vols[1]&&vols[1]<vols[0]) return {text:"회복 우선 권장", color:"#f97316"};
+    const rpeRecent = sessions.slice(-2).flatMap(s=>(s.exercises||[]).flatMap(e=>(e.sets||[]).map(r=>parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>=7)));
+    if (rpeRecent.length>=2&&rpeRecent[rpeRecent.length-1]>8.5) return {text:"강도 조절 필요", color:"#ffd166"};
+    if (vols[2]>vols[1]&&vols[1]>vols[0]) return {text:"적응도 향상 가능성", color:"#22c55e"};
+    return null;
+  })();
+
+  // ── 나이 ─────────────────────────────────────────────────
+  const age = member.birthYear ? (new Date().getFullYear() - parseInt(member.birthYear) + 1) : null;
+
+  // ── 스타일 헬퍼 ──────────────────────────────────────────
+  const secCard = (c) => ({
+    background:"#111827", border:"1px solid rgba(255,255,255,.07)",
+    borderLeft:`3px solid ${c}55`, borderRadius:14,
+    padding:"14px 16px", marginBottom:12
+  });
+  const menuBtn = (icon, label, desc, sc, rgb) => (
+    <button onClick={()=>setScreen(sc)} style={{
+      background:`rgba(${rgb},.06)`, border:`1px solid rgba(${rgb},.18)`,
+      borderRadius:11, padding:"12px 11px", textAlign:"left",
+      cursor:"pointer", width:"100%"
+    }}>
+      <div style={{fontSize:18,marginBottom:5}}>{icon}</div>
+      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:11,color:`rgb(${rgb})`,marginBottom:1}}>{label}</div>
+      <Mo c="#3a4a5a" s={8}>{desc}</Mo>
+    </button>
+  );
+  const wBadge = (v, label) => v!==null ? (
+    <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
+      background:v<0?"rgba(94,234,212,.12)":v>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
+      color:v<0?"#5EEAD4":v>0?"#f97316":"#64748b"}}>
+      {label} {v>0?"+":""}{v}kg
+    </span>
+  ) : null;
 
   return (
     <div>
-      <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"14px",marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+      <style>{`
+        .hub-qbtn{transition:all .15s ease;}.hub-qbtn:hover{filter:brightness(1.12);}
+        .hub-sbadge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;font-family:'DM Mono',monospace;font-size:9px;font-weight:800;margin-right:6px;}
+        @media(max-width:540px){.hub-2col{grid-template-columns:1fr 1fr!important;}.hub-3col{grid-template-columns:1fr 1fr!important;}}
+      `}</style>
+
+      {/* ═══════════════════════════════════════ HEADER ═══ */}
+      <div style={{background:"#0f1626",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:"16px",marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
           <div style={{display:"flex",alignItems:"center",gap:11}}>
-            <div style={{width:44,height:44,borderRadius:11,background:"rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
-              "💪"
-            </div>
+            <div style={{width:48,height:48,borderRadius:13,
+              background:"linear-gradient(135deg,rgba(94,234,212,.18),rgba(94,234,212,.05))",
+              border:"1px solid rgba(94,234,212,.25)",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>💪</div>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"#fff"}}>{member.name}</div>
-              <Mo c="#54546a" s={9}>등록일: {member.startDate || "-"}</Mo>
-              <Mo c="#cbd5e1" s={10} style={{display:"block",marginTop:2}}>이메일: {member.email||"-"}</Mo>
-              <Mo c={member.memberUid?"#86efac":"#fbbf24"} s={10} style={{display:"block",marginTop:2}}>회원앱: {getMemberAppStatus(member)}</Mo>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"#fff",letterSpacing:"-.3px"}}>{member.name}</div>
+              <div style={{display:"flex",gap:5,marginTop:4,flexWrap:"wrap"}}>
+                {member.gender&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",background:"rgba(94,234,212,.1)",padding:"1px 6px",borderRadius:4}}>{member.gender}</span>}
+                {age&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",background:"rgba(255,255,255,.06)",padding:"1px 6px",borderRadius:4}}>{age}세</span>}
+                {member.height&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",background:"rgba(255,255,255,.06)",padding:"1px 6px",borderRadius:4}}>{member.height}cm</span>}
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
+                  color:member.memberUid?"#86efac":"#fbbf24",
+                  background:member.memberUid?"rgba(134,239,172,.1)":"rgba(251,191,36,.1)",
+                  padding:"1px 6px",borderRadius:4}}>{getMemberAppStatus(member)}</span>
+              </div>
+              <Mo c="#475569" s={9} style={{display:"block",marginTop:3}}>{member.email||"-"} · {member.startDate||"-"}</Mo>
             </div>
           </div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-            <Btn ghost sm onClick={() => setScreen("members")}>← 목록</Btn>
+            <Btn ghost sm onClick={()=>setScreen("members")}>← 목록</Btn>
             <Btn ghost sm onClick={onEdit} style={{color:"#7c6fff",borderColor:"#7c6fff33"}}>수정</Btn>
-            <AdminMemberAppInviteButton member={member} onAccountCreated={onMemberPatch} />
-            <Btn ghost sm onClick={() => setShowMemberAppManagement(v => !v)} style={{color:"#93c5fd",borderColor:"rgba(96,165,250,.28)"}}>회원앱 관리 {showMemberAppManagement?"▲":"▼"}</Btn>
           </div>
         </div>
-        {member.painArea && (
-          <div style={{marginTop:9,padding:"7px 10px",background:"rgba(255,107,107,.06)",borderRadius:6,fontSize:11,color:"#ff9f43",borderLeft:"2px solid #ff9f4344"}}>
-            🩺 {member.painArea}
+
+        {/* 핵심 지표 스트립 */}
+        {!loading&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(86px,1fr))",gap:8,marginBottom:10}}>
+            <div style={{background:"rgba(94,234,212,.07)",border:"1px solid rgba(94,234,212,.14)",borderRadius:10,padding:"8px 10px"}}>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#5EEAD4",letterSpacing:".1em",display:"block"}}>{t("수업진행","운동진행")}</span>
+              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#5EEAD4",display:"block",lineHeight:1.1,marginTop:2}}>
+                {usedCount}<span style={{fontSize:10,fontWeight:500,color:"#3a4a5a"}}>{totalReg>0?` / ${totalReg}`:""}</span>
+              </span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a4a5a"}}>{remaining!==null?`${remaining}회 남음`:"수업"}</span>
+            </div>
+            {wLast?(
+              <div style={{background:"rgba(255,255,255,.03)",borderRadius:10,padding:"8px 10px"}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#475569",letterSpacing:".1em",display:"block"}}>체중</span>
+                <div style={{display:"flex",alignItems:"baseline",gap:3,marginTop:2}}>
+                  <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#fff",lineHeight:1.1}}>{wLast}</span>
+                  <span style={{fontSize:10,color:"#475569"}}>kg</span>
+                </div>
+                {wDiff7d!==null?<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:wDiff7d<0?"#5EEAD4":wDiff7d>0?"#f97316":"#475569"}}>7일 {wDiff7d>0?"+":""}{wDiff7d}kg</span>
+                  :tw?<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#475569"}}>목표 {tw}kg</span>:null}
+              </div>
+            ):(
+              <div style={{background:"rgba(255,255,255,.03)",borderRadius:10,padding:"8px 10px"}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#475569",letterSpacing:".1em",display:"block"}}>체중</span>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a4a5a",display:"block",marginTop:6}}>기록없음</span>
+              </div>
+            )}
+            <div style={{background:recentPain?"rgba(239,68,68,.06)":"rgba(34,197,94,.04)",border:`1px solid ${recentPain?"rgba(239,68,68,.18)":"rgba(34,197,94,.1)"}`,borderRadius:10,padding:"8px 10px"}}>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:recentPain?"#f87171":"#475569",letterSpacing:".1em",display:"block"}}>통증</span>
+              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:recentPain?"#f87171":"#22c55e",display:"block",marginTop:4,lineHeight:1.3}}>{recentPain||"없음"}</span>
+            </div>
+            {condLabel&&(
+              <div style={{background:"rgba(255,255,255,.03)",borderRadius:10,padding:"8px 10px"}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#475569",letterSpacing:".1em",display:"block"}}>컨디션</span>
+                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:condColor,display:"block",marginTop:4}}>{condLabel}</span>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a4a5a"}}>최근 {condSlice.length}회</span>
+              </div>
+            )}
+            {rpeAvg&&(
+              <div style={{background:"rgba(255,255,255,.03)",borderRadius:10,padding:"8px 10px"}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#475569",letterSpacing:".1em",display:"block"}}>평균 RPE</span>
+                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:rpeColor,display:"block",lineHeight:1.1,marginTop:2}}>{rpeAvg}</span>
+                {fatigueSignal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:fatigueSignal.color}}>{fatigueSignal.text}</span>}
+              </div>
+            )}
           </div>
         )}
-        {member.memo && <div style={{marginTop:8,padding:"9px 12px",background:"rgba(255,209,102,.08)",borderRadius:8,fontSize:12,lineHeight:1.55,color:"#f8d98a",border:"1px solid rgba(255,209,102,.14)",borderLeft:"3px solid rgba(255,209,102,.55)"}}>📝 {member.memo}</div>}
+
+        {/* 목표 + 다음 PT 계획 태그 */}
+        {!loading&&(member.goal||last?.nextPlan)&&(
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+            {member.goal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:6,background:"rgba(129,140,248,.1)",color:"#a5b4fc"}}>🎯 {member.goal}</span>}
+            {last?.nextPlan&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:6,background:"rgba(94,234,212,.08)",color:"#5EEAD4"}}>다음 PT: {last.nextPlan}</span>}
+          </div>
+        )}
+
+        {/* 고정 통증 메모 */}
+        {member.painArea&&!recentPain&&<div style={{marginBottom:8,padding:"6px 10px",background:"rgba(255,107,107,.06)",borderRadius:6,fontSize:11,color:"#ff9f43",borderLeft:"2px solid #ff9f4344"}}>🩺 {member.painArea}</div>}
+
+        {/* 트레이너 메모 (접기/펼치기) */}
+        {member.memo&&(
+          <div style={{marginBottom:8}}>
+            <button onClick={()=>setShowMemo(v=>!v)} style={{width:"100%",background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.14)",borderRadius:8,padding:"6px 10px",textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:10,color:"#f8d98a"}}>📝 {showMemo?"메모 닫기":"메모 보기"} — {member.memo.slice(0,38)}{member.memo.length>38?"…":""}</span>
+              <span style={{color:"#54546a",fontSize:10}}>{showMemo?"▲":"▼"}</span>
+            </button>
+            {showMemo&&<div style={{marginTop:4,padding:"9px 12px",background:"rgba(255,209,102,.06)",borderRadius:8,fontSize:12,lineHeight:1.6,color:"#f8d98a",border:"1px solid rgba(255,209,102,.12)"}}>{member.memo}</div>}
+          </div>
+        )}
+
+        {/* 회원앱 관리 */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <AdminMemberAppInviteButton member={member} onAccountCreated={onMemberPatch} />
+          <Btn ghost sm onClick={()=>setShowMemberAppManagement(v=>!v)} style={{color:"#93c5fd",borderColor:"rgba(96,165,250,.28)"}}>회원앱 관리 {showMemberAppManagement?"▲":"▼"}</Btn>
+        </div>
         <AdminMemberAppPanel member={member} members={allMembers} onAccountCreated={onMemberPatch} showManagement={showMemberAppManagement} />
       </div>
-      {!loading && (() => {
-        // ── 데이터 추출 ───────────────────────────────────────
-        // 1. 수업 진행
-        const totalReg  = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
-        const usedCount = sessions.length;
-        const remaining = totalReg > 0 ? Math.max(0, totalReg - usedCount) : null;
 
-        // 2. 체중 변화 — wData (함수 상단에서 통합 계산됨)
-        const _wEntries = wData.map(d => ({ date: d.date, weight: d.w }));
-        const wArr   = _wEntries.map(e => e.weight);
-        const wFirst = wArr[0] || null;
-        const wLast  = wArr[wArr.length-1] || null;
-        const wDiff  = (wFirst && wLast && wFirst!==wLast) ? Math.round((wLast-wFirst)*10)/10 : null;
-        // 7일/30일 변화 계산
-        const _todayD   = new Date();
-        const _7dAgo    = new Date(_todayD); _7dAgo.setDate(_7dAgo.getDate()-7);
-        const _30dAgo   = new Date(_todayD); _30dAgo.setDate(_30dAgo.getDate()-30);
-        const _7dAgoStr  = _7dAgo.toISOString().slice(0,10);
-        const _30dAgoStr = _30dAgo.toISOString().slice(0,10);
-        const _w7Start  = _wEntries.filter(e=>e.date<=_7dAgoStr).slice(-1)[0]?.weight || null;
-        const _w30Start = _wEntries.filter(e=>e.date<=_30dAgoStr).slice(-1)[0]?.weight || null;
-        const wDiff7d   = (wLast && _w7Start)  ? Math.round((wLast - _w7Start)*10)/10  : null;
-        const wDiff30d  = (wLast && _w30Start) ? Math.round((wLast - _w30Start)*10)/10 : null;
-
-        // 3. 최근 통증 부위 (가장 최근 세션의 painRecord)
-        const recentPain = (() => {
-          for (let i=sessions.length-1;i>=0;i--) {
-            const pr = sessions[i].painRecord;
-            if (pr?.before?.part) return pr.before.part;
-            if (pr?.after?.part)  return pr.after.part;
-            const pa = sessions[i].painArea || member.painArea;
-            if (pa) return pa;
-          }
-          return null;
-        })();
-
-        // 4. 컨디션 변화 (최근 3세션 condition 필드)
-        const condSlice = sessions.slice(-3).map(s=>s.condition).filter(Boolean);
-        const condMap = {"매우 좋음":5,"좋음":4,"보통":3,"나쁨":2,"매우 나쁨":1};
-        const condAvg = condSlice.length
-          ? condSlice.reduce((a,c)=>a+(condMap[c]||3),0)/condSlice.length : null;
-        const condLabel = condAvg === null ? null
-          : condAvg >= 4.2 ? "컨디션 양호"
-          : condAvg >= 3.2 ? "회복 중"
-          : condAvg >= 2.2 ? "피로도 높음"
-          : "컨디션 저조";
-        const condColor = condAvg === null ? "#54546a"
-          : condAvg >= 4.2 ? "#22c55e" : condAvg >= 3.2 ? "#5EEAD4" : condAvg >= 2.2 ? "#f59e0b" : "#ef4444";
-
-        // 5. 최근 운동 강도 + RPE
-        const lastSess = sessions.length > 0 ? sessions[sessions.length-1] : null;
-        const intLabel = lastSess?.intensity || null;
-        const intColor = {
-          "최고 강도":"#ef4444","높음":"#f97316","고강도":"#ef4444",
-          "중강도":"#ffd166","낮음":"#22c55e","저강도":"#22c55e","매우 낮음":"#5EEAD4"
-        }[intLabel] || "#54546a";
-        const recentVols = sessions.slice(-3).map(s=>s.totalVolume||0).filter(v=>v>0);
-        const volTrend = recentVols.length >= 2
-          ? (recentVols[recentVols.length-1] > recentVols[recentVols.length-2] ? "볼륨 증가" : "볼륨 감소")
-          : null;
-
-        // 6. RPE 평균 — RPE 7 이상 세트(실제 훈련 세트)만 계산
-        const rpeArr = sessions.slice(-5).flatMap(s =>
-          (s.exercises||[]).flatMap(e =>
-            (e.sets||[])
-              .map(r => parseFloat(r.rpe))
-              .filter(v => !isNaN(v) && v >= 7) // 워밍업(RPE<7) 제외
-          )
-        );
-        const rpeAvg = rpeArr.length > 0
-          ? (rpeArr.reduce((a,b)=>a+b,0) / rpeArr.length).toFixed(1)
-          : null;
-        const rpeColor = rpeAvg === null ? "#54546a"
-          : parseFloat(rpeAvg) >= 9   ? "#ef4444"
-          : parseFloat(rpeAvg) >= 8   ? "#f97316"
-          : parseFloat(rpeAvg) >= 7   ? "#ffd166"
-          : "#5EEAD4";
-
-        // 7. 피로 누적 자동 해석
-        const fatigueSignal = (() => {
-          if (sessions.length < 3) return null;
-          const recent = sessions.slice(-3);
-          // 컨디션 하 2회 이상
-          const lowCond = recent.filter(s => s.condition === "하").length;
-          if (lowCond >= 2) return { text:"피로 누적 가능성", color:"#ef4444" };
-          // 최근 볼륨 2회 연속 감소
-          const vols = recent.map(s=>s.totalVolume||0);
-          if (vols[2] < vols[1] && vols[1] < vols[0]) return { text:"회복 우선 권장", color:"#f97316" };
-          // RPE 상승 추세 (최근 2세션)
-          const rpeRecent = sessions.slice(-2).flatMap(s =>
-            (s.exercises||[]).flatMap(e => (e.sets||[]).map(r=>parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>=7))
-          );
-          if (rpeRecent.length >= 2 && rpeRecent[rpeRecent.length-1] > 8.5) return { text:"강도 조절 필요", color:"#ffd166" };
-          // 볼륨 증가 추세
-          if (vols[2] > vols[1] && vols[1] > vols[0]) return { text:"적응도 향상 가능성", color:"#22c55e" };
-          return null;
-        })();
-
-        // ── 공통 스타일 ───────────────────────────────────────
-        const card = (extra={}) => ({
-          background:"#0c1523",borderRadius:10,padding:"10px 13px",
-          border:"1px solid rgba(255,255,255,0.07)",
-          display:"flex",flexDirection:"column",justifyContent:"space-between",
-          minHeight:72, ...extra
-        });
-        const lbl = {fontFamily:"'DM Mono',monospace",fontSize:7,color:"#3a4a5a",
-          letterSpacing:".08em",marginBottom:3,display:"block"};
-        const big = (color="#5EEAD4",size=18) => ({
-          fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:size,
-          color,display:"block",lineHeight:1.2,marginBottom:2
-        });
-        const sm = {fontSize:8,color:"#3a4a60",display:"block",lineHeight:1.5};
-
-        return (
-          <>
-            <style>{`
-              .hub-dash { display:flex; gap:8px; margin-bottom:14px; flex-wrap:nowrap; }
-              @media(max-width:540px){ .hub-dash { flex-wrap:wrap; } .hub-dash > * { flex:1 1 calc(50% - 4px)!important; min-width:0!important; } }
-            `}</style>
-            <div className="hub-dash">
-              {/* 1. 수업 진행 — narrow */}
-              <div style={card({flex:"0 0 auto",minWidth:70})}>
-                <span style={lbl}>{t("수업진행","운동진행")}</span>
-                <span style={big("#5EEAD4",22)}>
-                  {usedCount}
-                  <span style={{fontSize:10,fontWeight:500,color:"#3a4a5a"}}>{totalReg>0?` / ${totalReg}`:""}</span>
-                </span>
-                <span style={sm}>{remaining!==null ? `${remaining}회 남음` : "—회"}</span>
-              </div>
-
-              {/* 2. 체중 현황 카드 */}
-              {(() => {
-                const tw = parseFloat(bodyData?.goal?.targetWeight) || null;
-                // toGoal = 목표 - 현재 (음수=감량 필요, 양수=증량 필요)
-                const toGoal = (wLast && tw) ? Math.round((tw - wLast)*10)/10 : null;
-                return (
-                  <div style={{...card({flex:"2 1 160px"}), padding:"10px 13px"}}>
-                    <span style={lbl}>체중 현황</span>
-                    {wLast ? (
-                      <>
-                        <div style={{display:"flex",alignItems:"baseline",gap:4,margin:"4px 0"}}>
-                          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#fff"}}>{wLast}</span>
-                          <span style={{fontSize:10,color:"#54546a"}}>kg</span>
-                        </div>
-                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                          {wDiff7d!==null && (
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                              background:wDiff7d<0?"rgba(94,234,212,.12)":wDiff7d>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
-                              color:wDiff7d<0?"#5EEAD4":wDiff7d>0?"#f97316":"#64748b"}}>
-                              7일 {wDiff7d>0?"+":""}{wDiff7d}kg
-                            </span>
-                          )}
-                          {wDiff30d!==null && (
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                              background:wDiff30d<0?"rgba(94,234,212,.12)":wDiff30d>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
-                              color:wDiff30d<0?"#5EEAD4":wDiff30d>0?"#f97316":"#64748b"}}>
-                              30일 {wDiff30d>0?"+":""}{wDiff30d}kg
-                            </span>
-                          )}
-                          {wDiff!==null && (
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                              background:wDiff<0?"rgba(94,234,212,.12)":wDiff>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
-                              color:wDiff<0?"#5EEAD4":wDiff>0?"#f97316":"#64748b"}}>
-                              시작 {wDiff>0?"+":""}{wDiff.toFixed(1)}kg
-                            </span>
-                          )}
-                          {toGoal!==null && (
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
-                              background:toGoal<0?"rgba(94,234,212,.12)":toGoal>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
-                              color:toGoal<0?"#5EEAD4":toGoal>0?"#f97316":"#64748b"}}>
-                              목표 {toGoal>0?"+":""}{toGoal}kg
-                            </span>
-                          )}
-                          {!wDiff7d && !wDiff30d && !wDiff && (
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a4a5a"}}>추가 기록 시 변화 표시</span>
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <span style={big("#3a4a5a",16)}>—</span>
-                        <span style={sm}>기록 없음</span>
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* 3. 최근 통증 부위 — wide */}
-              <div style={card({flex:"1.5 1 110px",borderColor:recentPain?"rgba(239,68,68,.2)":"rgba(255,255,255,0.07)",background:recentPain?"rgba(239,68,68,.04)":"#0c1523"})}>
-                <span style={{...lbl,color:recentPain?"#f87171":"#3a4a5a"}}>통증 부위</span>
-                <span style={big(recentPain?"#f87171":"#3a4a5a",13)}>
-                  {recentPain || "기록 없음"}
-                </span>
-                <span style={sm}>{recentPain?"최근 기록 기준":""}</span>
-              </div>
-
-              {/* 4. 컨디션 변화 — medium */}
-              <div style={card({flex:"1 1 90px"})}>
-                <span style={lbl}>컨디션</span>
-                <span style={big(condColor,13)}>{condLabel||"—"}</span>
-                <span style={sm}>{condSlice.length>0?`최근 ${condSlice.length}회 기준`:""}</span>
-              </div>
-
-              {/* 5. 최근 운동 강도 — medium */}
-              <div style={card({flex:"1 1 90px"})}>
-                <span style={lbl}>최근 강도</span>
-                <span style={big(intColor,13)}>{intLabel||"—"}</span>
-                <span style={{...sm,color:volTrend?"#5EEAD4":"#3a4a5a"}}>{volTrend||lastSess?.date||""}</span>
-              </div>
-
-              {/* 6. RPE 평균 — narrow */}
-              <div style={card({flex:"0 0 auto",minWidth:72})}>
-                <span style={lbl}>평균 RPE</span>
-                <span style={big(rpeColor,20)}>{rpeAvg||"—"}</span>
-                <span style={{...(sm), color: fatigueSignal?.color||"#3a4a5a"}}>
-                  {fatigueSignal?.text || "최근 5회 (RPE7↑)"}
-                </span>
-              </div>
-            </div>
-
-          </>
-        );
-      })()}
-
-      {/* AI 초기 분석 리포트 버튼 */}
-      {member.survey?.surveyDone && (
-        <button onClick={()=>setScreen("consultReport")}
-          style={{width:"100%",marginBottom:12,padding:"11px 14px",borderRadius:10,cursor:"pointer",
-            background:"rgba(94,234,212,.07)",border:"1px solid rgba(94,234,212,.18)",
-            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:16}}>🤖</span>
-            <div style={{textAlign:"left"}}>
-              <Mo c="#5EEAD4" s={11} style={{fontWeight:700,display:"block"}}>AI 초기 분석 리포트</Mo>
-              <Mo c="#64748b" s={9}>상담 설문 기반 · {t("수업 방향 가이드","운동 방향 가이드")}</Mo>
-            </div>
+      {/* ═════════════════════════════ TODAY CHECKPOINT ═══ */}
+      {!loading&&(condLabel||recentPain||intLabel||rpeAvg||volTrend||fatigueSignal)&&(
+        <div style={{background:"rgba(255,209,102,.04)",border:"1px solid rgba(255,209,102,.12)",borderLeft:"3px solid rgba(255,209,102,.5)",borderRadius:12,padding:"11px 14px",marginBottom:12}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#ffd166",letterSpacing:".12em",marginBottom:8,fontWeight:700}}>오늘 체크포인트</div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {condLabel&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:`${condColor}18`,color:condColor}}>{condLabel}</span>}
+            {recentPain&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(239,68,68,.12)",color:"#f87171"}}>🩺 {recentPain}</span>}
+            {intLabel&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(255,255,255,.05)",color:intColor}}>{intLabel}</span>}
+            {rpeAvg&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(255,255,255,.05)",color:rpeColor}}>RPE {rpeAvg}</span>}
+            {wDiff7d!==null&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(255,255,255,.05)",color:wDiff7d<0?"#5EEAD4":wDiff7d>0?"#f97316":"#475569"}}>7일 {wDiff7d>0?"+":""}{wDiff7d}kg</span>}
+            {volTrend&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(94,234,212,.08)",color:"#5EEAD4"}}>{volTrend}</span>}
+            {fatigueSignal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(255,255,255,.05)",color:fatigueSignal.color}}>{fatigueSignal.text}</span>}
           </div>
-          <Mo c="#5EEAD4" s={12}>→</Mo>
-        </button>
-      )}
-
-      {wData.length >= 2 && (
-        <Card title="⚖️ 체중 변화" style={{marginBottom:14}}>
-          <ResponsiveContainer width="100%" height={130}>
-            <LineChart data={wData} margin={{top:6,right:14,left:-18,bottom:0}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} />
-              <YAxis domain={["auto","auto"]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} unit="kg" />
-              <Tooltip contentStyle={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11}} formatter={v => [v+" kg","체중"]} />
-              <Line type="monotone" dataKey="w" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="체중(kg)" />
-            </LineChart>
-          </ResponsiveContainer>
-          {(() => {
-            const diff = (wData[wData.length-1].w - wData[0].w).toFixed(1);
-            const col  = diff < 0 ? "#5EEAD4" : diff > 0 ? "#ff6b6b" : "#54546a";
-            const txt  = diff < 0 ? "▼"+Math.abs(diff) : diff > 0 ? "▲"+diff : "변화없음";
-            return <div style={{textAlign:"center",marginTop:4,fontFamily:"'DM Mono',monospace",fontSize:10,color:col}}>{txt} kg (시작 대비)</div>;
-          })()}
-        </Card>
-      )}
-
-      {last && (
-        <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"11px 13px",marginBottom:14}}>
-          <Mo c="#54546a" s={9} style={{marginBottom:4}}>{t("최근 수업","최근 운동")} — {last.date} · {last.sessionNo}{t("회차","회차")}</Mo>
-          <div style={{display:"flex",justifyContent:"space-between"}}>
-            <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13}}>{formatTypes(last.selectedTypes || last.type) || "웨이트"}</span>
-            <Mo c="#5EEAD4" s={12}>{(last.totalVolume||0).toLocaleString()} kg</Mo>
-            <PartVolBadges exercises={last.exercises} style={{marginTop:4}} />
-          </div>
-          {last.trainerComment && <div style={{marginTop:4,fontSize:11,color:"#54546a",fontStyle:"italic"}}>{last.trainerComment}</div>}
+          {last?.trainerComment&&<div style={{marginTop:8,fontSize:10,color:"#94a3b8",fontStyle:"italic",lineHeight:1.5,borderTop:"1px solid rgba(255,255,255,.06)",paddingTop:7}}>💬 {last.trainerComment}</div>}
         </div>
       )}
 
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        {menus.map(m => (
-          <button key={m.sc} onClick={() => setScreen(m.sc)}
-            style={{background:"#111827",border:"1px solid "+m.c+"28",borderRadius:11,
-              padding:"15px 13px",textAlign:"left",cursor:"pointer",color:"#ddddf0",width:"100%"}}>
-            <div style={{fontSize:22,marginBottom:8}}>{m.icon}</div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:m.c,marginBottom:2}}>{m.label}</div>
-            <Mo c="#54546a" s={10}>{m.desc}</Mo>
+      {/* ═════════════════════════════ QUICK ACTIONS ═══ */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        {[
+          {icon:"✏️",label:t("수업 기록","운동 기록"),desc:t("오늘 수업 입력","오늘 운동 입력"),sc:"session",rgb:"94,234,212"},
+          {icon:"📅",label:t("히스토리","운동일지"),desc:t("전체 수업 · 수정","전체 운동 · 수정"),sc:"history",rgb:"124,111,255"},
+          {icon:"🏥",label:"건강관리 허브",desc:"체중·칼로리·영양 통합",sc:"healthhub",rgb:"0,206,201"},
+          {icon:"📨",label:"루틴 추천",desc:"회원앱으로 루틴 전송",sc:"routine_recommend",rgb:"94,234,212"},
+        ].map(m=>(
+          <button key={m.sc} onClick={()=>setScreen(m.sc)} className="hub-qbtn" style={{
+            background:`linear-gradient(135deg,rgba(${m.rgb},.1) 0%,rgba(${m.rgb},.04) 100%)`,
+            border:`1.5px solid rgba(${m.rgb},.22)`,borderRadius:14,padding:"17px 14px",
+            textAlign:"left",cursor:"pointer",color:"#ddddf0",width:"100%"
+          }}>
+            <div style={{fontSize:26,marginBottom:9}}>{m.icon}</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:`rgb(${m.rgb})`,marginBottom:3}}>{m.label}</div>
+            <Mo c="#54546a" s={9}>{m.desc}</Mo>
           </button>
         ))}
+      </div>
+
+      {/* ═════════════════════════════ A. 수업 관리 ═══ */}
+      <div style={secCard("#5EEAD4")}>
+        <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:12}}>
+          <span className="hub-sbadge" style={{background:"rgba(94,234,212,.15)",color:"#5EEAD4"}}>A</span>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:700,color:"#5EEAD4",letterSpacing:".1em"}}>수업 관리</span>
+        </div>
+        {!loading&&last&&(
+          <div style={{background:"rgba(255,255,255,.03)",borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1px solid rgba(255,255,255,.06)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <Mo c="#475569" s={8}>{t("최근 수업","최근 운동")} · {last.date} · {last.sessionNo}{t("회차","회차")}</Mo>
+              <Mo c="#5EEAD4" s={12} style={{fontWeight:700}}>{(last.totalVolume||0).toLocaleString()} kg</Mo>
+            </div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"#e2e8f0"}}>{formatTypes(last.selectedTypes||last.type)||"웨이트"}</div>
+            <PartVolBadges exercises={last.exercises} style={{marginTop:4}} />
+            {last.trainerComment&&<Mo c="#475569" s={10} style={{marginTop:4,fontStyle:"italic"}}>{last.trainerComment}</Mo>}
+          </div>
+        )}
+        {!loading&&!last&&<Mo c="#3a4a5a" s={9} style={{padding:"8px 0 12px"}}>{t("수업 기록이 없습니다.","운동 기록이 없습니다.")}</Mo>}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}} className="hub-2col">
+          {menuBtn("🧘","오늘의 컨디셔닝","매일 기능 운동 관리","daily_conditioning","34,197,94")}
+          {menuBtn("🤖","AI 루틴 추천",t("수업기록 기반 루틴","운동기록 기반 루틴"),"ai_routine","162,155,254")}
+        </div>
+      </div>
+
+      {/* ═════════════════════════════ B. 건강 관리 ═══ */}
+      <div style={secCard("#22d3ee")}>
+        <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:12}}>
+          <span className="hub-sbadge" style={{background:"rgba(34,211,238,.15)",color:"#22d3ee"}}>B</span>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:700,color:"#22d3ee",letterSpacing:".1em"}}>건강 관리</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:wData.length>=2?10:0}} className="hub-2col">
+          {menuBtn("💢","근육통 기록","부위별 근육통 0~5","soreness","255,159,67")}
+          {menuBtn("🏥","건강관리 허브","체중·칼로리·영양","healthhub","0,206,201")}
+        </div>
+        {!loading&&wData.length>=2&&(
+          <div style={{background:"rgba(255,255,255,.02)",borderRadius:10,padding:"10px 8px",border:"1px solid rgba(255,255,255,.05)"}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#475569",marginBottom:6,paddingLeft:4,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+              ⚖️ 체중 변화
+              {wBadge(wDiff7d,"7일")}
+              {wBadge(wDiff30d,"30일")}
+              {wBadge(wDiff,"시작")}
+              {toGoal!==null&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,background:"rgba(124,111,255,.12)",color:"#7c6fff"}}>목표 {toGoal>0?"+":""}{toGoal}kg</span>}
+            </div>
+            <ResponsiveContainer width="100%" height={120}>
+              <LineChart data={wData} margin={{top:4,right:12,left:-20,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
+                <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:7,fill:"#475569"}}/>
+                <YAxis domain={["auto","auto"]} tick={{fontFamily:"'DM Mono',monospace",fontSize:7,fill:"#475569"}} unit="kg"/>
+                <Tooltip contentStyle={{background:"#111827",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11}} formatter={v=>[v+" kg","체중"]}/>
+                <Line type="monotone" dataKey="w" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="체중(kg)"/>
+              </LineChart>
+            </ResponsiveContainer>
+            {(()=>{const diff=(wData[wData.length-1].w-wData[0].w).toFixed(1);const col=diff<0?"#5EEAD4":diff>0?"#ff6b6b":"#54546a";const txt=diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"변화없음";return<div style={{textAlign:"center",marginTop:2,fontFamily:"'DM Mono',monospace",fontSize:10,color:col}}>{txt} kg (시작 대비)</div>;})()}
+          </div>
+        )}
+      </div>
+
+      {/* ═════════════════════════ C. 분석 (접기/펼치기) ═══ */}
+      <div style={secCard("#7c6fff")}>
+        <button onClick={()=>setShowAnalysis(v=>!v)} style={{width:"100%",background:"transparent",border:"none",cursor:"pointer",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:showAnalysis?12:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:7}}>
+            <span className="hub-sbadge" style={{background:"rgba(124,111,255,.18)",color:"#7c6fff"}}>C</span>
+            <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:700,color:"#7c6fff",letterSpacing:".1em"}}>분석 도구</span>
+            {!showAnalysis&&<Mo c="#3a4a5a" s={8}>근력·루틴·대사·평가</Mo>}
+          </div>
+          <span style={{color:"#54546a",fontSize:10,display:"inline-block",transition:"transform .2s",transform:showAnalysis?"rotate(180deg)":"none"}}>▼</span>
+        </button>
+        {showAnalysis&&(
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}} className="hub-3col">
+              {menuBtn("💪","근력 분석","1RM·5RM·10RM 예측","strength","239,68,68")}
+              {menuBtn("📈","루틴 분석","RPE·볼륨 반응 분석","analysis","124,111,255")}
+              {menuBtn("📊","블록 피드백","부위/기구별 볼륨","feedback","255,209,102")}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}} className="hub-3col">
+              {menuBtn("🔥","대사 추정 분석","유산소·체중 분석","metabolism","249,115,22")}
+              {menuBtn("📋","평가 기록","체형·기능·인체도","assessment","162,155,254")}
+              {menuBtn("📚","운동 라이브러리","부위별 운동 기록","library","0,191,255")}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}} className="hub-2col">
+              {menuBtn("📊","유입 분석","방문 경로·AI 검색 통계","referral","162,155,254")}
+              {member.survey?.surveyDone&&(
+                <button onClick={()=>setScreen("consultReport")} style={{background:"rgba(94,234,212,.07)",border:"1px solid rgba(94,234,212,.18)",borderRadius:11,padding:"12px 11px",textAlign:"left",cursor:"pointer",width:"100%"}}>
+                  <div style={{fontSize:18,marginBottom:5}}>🤖</div>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:11,color:"#5EEAD4",marginBottom:1}}>AI 초기 분석 리포트</div>
+                  <Mo c="#3a4a5a" s={8}>{t("수업 방향 가이드","운동 방향 가이드")}</Mo>
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ═════════════════════════════ D. 회원 관리 ═══ */}
+      <div style={secCard("#818cf8")}>
+        <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:12}}>
+          <span className="hub-sbadge" style={{background:"rgba(129,140,248,.15)",color:"#818cf8"}}>D</span>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:700,color:"#818cf8",letterSpacing:".1em"}}>회원 관리</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}} className="hub-2col">
+          {menuBtn("🎯","목표 관리","목표 설정 + AI 분석","goal_manage","129,140,248")}
+          <button onClick={onEdit} style={{background:"rgba(124,111,255,.06)",border:"1px solid rgba(124,111,255,.18)",borderRadius:11,padding:"12px 11px",textAlign:"left",cursor:"pointer",width:"100%"}}>
+            <div style={{fontSize:18,marginBottom:5}}>✏️</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:11,color:"#7c6fff",marginBottom:1}}>회원 정보 수정</div>
+            <Mo c="#3a4a5a" s={8}>기본 정보 · 목표 편집</Mo>
+          </button>
+        </div>
       </div>
     </div>
   );

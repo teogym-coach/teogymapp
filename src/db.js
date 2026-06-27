@@ -128,14 +128,20 @@ export async function getNotices(){
 export async function saveNotice(data,id=null){
   const uid=requireUid();
   const targetType=data.targetType==="member"?"member":"all";
-  const targetMemberId=targetType==="member"?String(data.targetMemberId||"").trim():"";
-  const targetMemberName=targetType==="member"?String(data.targetMemberName||"").trim():"";
+  const rawIds=targetType==="member"?(Array.isArray(data.targetMemberIds)&&data.targetMemberIds.length?data.targetMemberIds:data.targetMemberId?[String(data.targetMemberId).trim()]:[]):[];
+  const targetMemberIds=rawIds.map(x=>String(x).trim()).filter(Boolean);
+  const rawNames=targetType==="member"?(Array.isArray(data.targetMemberNames)?data.targetMemberNames.map(x=>String(x).trim()).filter(Boolean):[]):[];
+  const targetMemberNames=rawNames;
+  const targetMemberId=targetType==="member"?String(targetMemberIds[0]||"").trim():"";
+  const targetMemberName=targetType==="member"?String(targetMemberNames[0]||data.targetMemberName||"").trim():"";
   const payload=clean({
     title:String(data.title||"").trim(),
     content:String(data.content||"").trim(),
     targetType,
     targetMemberId,
     targetMemberName,
+    targetMemberIds,
+    targetMemberNames,
     isImportant:!!data.isImportant,
     isPublished:data.isPublished!==false,
     createdBy:uid,
@@ -144,7 +150,7 @@ export async function saveNotice(data,id=null){
   });
   if(!payload.title) throw new Error("공지 제목을 입력해주세요.");
   if(!payload.content) throw new Error("공지 내용을 입력해주세요.");
-  if(payload.targetType==="member"&&!payload.targetMemberId) throw new Error("특정 회원 공지는 회원을 선택해야 합니다.");
+  if(payload.targetType==="member"&&!payload.targetMemberId) throw new Error("특정 회원 공지는 회원을 1명 이상 선택해야 합니다.");
   if(id){
     const ref=doc(db,"notices",id);
     const snap=await getDoc(ref);
@@ -180,6 +186,16 @@ export async function getMemberNotices(memberId){
   const [allSnap,memberSnap]=await Promise.all([getDocs(allQ),getDocs(memberQ)]);
   const map=new Map();
   [...allSnap.docs,...memberSnap.docs].forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
+  // 다중 회원 공지 조회 (targetMemberIds array-contains)
+  try {
+    const multiQ=trainerUid
+      ? query(base,where("trainerUid","==",trainerUid),where("isPublished","==",true),where("targetMemberIds","array-contains",memberId),limit(50))
+      : query(base,where("isPublished","==",true),where("targetMemberIds","array-contains",memberId),limit(50));
+    const multiSnap=await getDocs(multiQ);
+    multiSnap.docs.forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
+  } catch(e) {
+    console.warn("[DB:getMemberNotices] targetMemberIds query failed (index may not exist)", { memberId, code:e?.code, message:e?.message });
+  }
   const rows=sortNotices([...map.values()]).slice(0,30);
   let readIds=new Set();
   try {

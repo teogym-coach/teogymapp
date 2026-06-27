@@ -1655,6 +1655,7 @@ function isNoticeEligibleMember(m){
   if(!m) return false;
   if(m.deleted===true||m.isDeleted===true||m.archived===true) return false;
   if(m.isActive===false) return false;
+  if(["deleted","archived","inactive"].includes(noticeMemberStatus(m))) return false;
   const rawStatus=noticeMemberStatus(m);
   const memberStatus=String(m.memberStatus||"").trim().toLowerCase();
   const activeStatuses=["active","pt","pt_active","in_progress","progress","진행","진행중","pt진행","pt 진행중"];
@@ -1664,28 +1665,324 @@ function isNoticeEligibleMember(m){
   if(rawStatus) return activeStatuses.includes(rawStatus)||rawStatus.includes("진행");
   return m.totalSessions||m.remainingSessions||m.startDate||m.memberUid||m.email;
 }
-function NoticeAdminScreen({members=[],onBack,showToast}){const empty={title:"",content:"",targetType:"all",targetMemberId:"",targetMemberName:"",isImportant:false,isPublished:true}; const [rows,setRows]=useState([]),[form,setForm]=useState(empty),[editing,setEditing]=useState(null),[saving,setSaving]=useState(false); const eligibleMembers=useMemo(()=>members.filter(isNoticeEligibleMember),[members]); const selectedMember=eligibleMembers.find(m=>m.id===form.targetMemberId)||members.find(m=>m.id===form.targetMemberId); const refresh=useCallback(()=>getNotices().then(setRows).catch(e=>showToast?.(e.message||"공지 조회 실패","err")),[showToast]); useEffect(()=>{refresh();},[refresh]); const set=(k,v)=>setForm(f=>({...f,[k]:v,...(k==="targetType"&&v!=="member"?{targetMemberId:"",targetMemberName:""}:{}),...(k==="targetMemberId"?{targetMemberName:getNoticeMemberDisplay(eligibleMembers.find(m=>m.id===v)||members.find(m=>m.id===v)||{})}:{} )})); const edit=n=>{setEditing(n.id);setForm({title:n.title||"",content:n.content||"",targetType:n.targetType||"all",targetMemberId:n.targetMemberId||"",targetMemberName:n.targetMemberName||"",isImportant:!!n.isImportant,isPublished:n.isPublished!==false});}; const save=async()=>{setSaving(true);try{const payload={...form,targetMemberName:form.targetType==="member"?getNoticeMemberDisplay(selectedMember)||form.targetMemberName:""}; await saveNotice(payload,editing);showToast?.(editing?"공지를 수정했습니다.":"공지를 작성했습니다.");setForm(empty);setEditing(null);refresh();}catch(e){showToast?.(e.message||"공지 저장 실패","err");}finally{setSaving(false);}}; const remove=async(n)=>{if(!window.confirm("공지를 삭제할까요?"))return;try{await deleteNotice(n.id);showToast?.("공지를 삭제했습니다.");refresh();}catch(e){showToast?.(e.message||"삭제 실패","err");}}; return <div><SH title="📢 공지사항 관리" sub="회원앱 홈/프로필 공지 노출" right={<Btn ghost sm onClick={onBack}>← 홈</Btn>}/><Card title={editing?"공지 수정":"공지 작성"}><div style={{display:"grid",gap:10}}><Field label="제목" value={form.title} onChange={v=>set("title",v)}/><TextArea label="내용" value={form.content} onChange={v=>set("content",v)}/><SelectLine label="공지 대상" value={form.targetType} opts={["all","member"]} onChange={v=>set("targetType",v)}/>{form.targetType==="member"&&<div className="form-line"><label>특정 회원</label><select value={form.targetMemberId} onChange={e=>set("targetMemberId",e.target.value)}><option value="">회원 선택</option>{eligibleMembers.map(m=><option key={m.id} value={m.id}>{getNoticeMemberDisplay(m)}</option>)}</select>{!eligibleMembers.length&&<Mo c="#fbbf24" s={9}>선택 가능한 회원이 없습니다.</Mo>}</div>}<SelectLine label="중요 공지 여부" value={form.isImportant?"중요":"일반"} opts={["일반","중요"]} onChange={v=>set("isImportant",v==="중요")}/><SelectLine label="게시 상태" value={form.isPublished?"게시":"숨김"} opts={["게시","숨김"]} onChange={v=>set("isPublished",v==="게시")}/><Btn disabled={saving} onClick={save}>{saving?"저장 중...":editing?"수정 저장":"공지 게시/저장"}</Btn>{editing&&<Btn ghost onClick={()=>{setEditing(null);setForm(empty);}}>취소</Btn>}</div></Card><Card title="공지 목록">{rows.length?rows.map(n=><div key={n.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><div><Mo c="#fff" s={11}>{n.isImportant?"📌 ":""}{n.title}</Mo><Mo c="#64748b" s={9}>{n.targetType==="member"?`개별 · ${n.targetMemberName||getNoticeMemberDisplay(members.find(m=>m.id===n.targetMemberId))||n.targetMemberId}`:"전체 회원"} · {n.isPublished?"게시":"숨김"} · {formatCompactDate(n.createdAt)}</Mo></div><div style={{display:"flex",gap:6}}><Btn ghost sm onClick={()=>edit(n)}>수정</Btn><Btn ghost sm onClick={()=>saveNotice({...n,isPublished:!n.isPublished},n.id).then(refresh)}>{n.isPublished?"숨김":"게시"}</Btn><Btn ghost sm onClick={()=>remove(n)} style={{color:"#f87171"}}>삭제</Btn></div></div>):<Mo c="#64748b" s={9}>등록된 공지가 없습니다.</Mo>}</Card></div>}
+function NoticeAdminScreen({ members=[], onBack, showToast }) {
+  const empty = { title:"", content:"", targetType:"all", targetMemberIds:[], isImportant:false, isPublished:true };
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState(empty);
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+
+  const eligibleMembers = useMemo(() => members.filter(isNoticeEligibleMember), [members]);
+  const sortedEligible = useMemo(() => [...eligibleMembers].sort((a,b) => (a.name||"").localeCompare(b.name||"")), [eligibleMembers]);
+
+  const filteredMembers = useMemo(() => {
+    if (!memberSearch.trim()) return sortedEligible;
+    const q = memberSearch.trim().toLowerCase();
+    return sortedEligible.filter(m => {
+      const name = (m.name || m.displayName || "").toLowerCase();
+      const email = (m.email || "").toLowerCase();
+      return name.includes(q) || email.includes(q) || matchSearch(m.name || m.displayName || "", memberSearch);
+    });
+  }, [sortedEligible, memberSearch]);
+
+  const selectedMembers = useMemo(() =>
+    form.targetMemberIds.map(id => eligibleMembers.find(m=>m.id===id) || members.find(m=>m.id===id)).filter(Boolean),
+    [form.targetMemberIds, eligibleMembers, members]
+  );
+
+  const refresh = useCallback(() => getNotices().then(setRows).catch(e => showToast?.(e.message||"공지 조회 실패","err")), [showToast]);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const setField = (k, v) => setForm(f => ({
+    ...f, [k]: v,
+    ...(k === "targetType" && v === "all" ? { targetMemberIds: [] } : {}),
+  }));
+
+  const toggleMember = (id) => setForm(f => ({
+    ...f,
+    targetMemberIds: f.targetMemberIds.includes(id)
+      ? f.targetMemberIds.filter(x => x !== id)
+      : [...f.targetMemberIds, id],
+  }));
+
+  const selectAll = () => setForm(f => ({ ...f, targetMemberIds: eligibleMembers.map(m=>m.id) }));
+  const clearAll  = () => setForm(f => ({ ...f, targetMemberIds: [] }));
+  const selectRecent = () => {
+    const sorted = [...eligibleMembers].sort((a,b) => ((b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)));
+    setForm(f => ({ ...f, targetMemberIds: sorted.slice(0,5).map(m=>m.id) }));
+  };
+
+  const edit = (n) => {
+    setEditing(n.id);
+    const ids = n.targetMemberIds?.length ? n.targetMemberIds : (n.targetMemberId ? [n.targetMemberId] : []);
+    setForm({ title:n.title||"", content:n.content||"", targetType:n.targetType||"all", targetMemberIds:ids, isImportant:!!n.isImportant, isPublished:n.isPublished!==false });
+    setMemberSearch("");
+  };
+
+  const cancelEdit = () => { setEditing(null); setForm(empty); setMemberSearch(""); };
+
+  const save = async () => {
+    if (!form.title.trim()) return showToast?.("공지 제목을 입력해주세요.", "err");
+    if (!form.content.trim()) return showToast?.("공지 내용을 입력해주세요.", "err");
+    if (form.targetType === "member" && form.targetMemberIds.length === 0) return showToast?.("공지 받을 회원을 1명 이상 선택해주세요.", "err");
+    setSaving(true);
+    try {
+      const memberIds = form.targetType === "member" ? form.targetMemberIds : [];
+      const memberNames = memberIds.map(id => {
+        const m = eligibleMembers.find(x=>x.id===id) || members.find(x=>x.id===id);
+        return getNoticeMemberDisplay(m||{});
+      });
+      await saveNotice({
+        title: form.title, content: form.content, targetType: form.targetType,
+        targetMemberId: memberIds[0]||"", targetMemberName: memberNames[0]||"",
+        targetMemberIds: memberIds, targetMemberNames: memberNames,
+        isImportant: form.isImportant, isPublished: form.isPublished,
+      }, editing);
+      showToast?.(editing ? "공지를 수정했습니다." : "공지를 게시했습니다.");
+      setForm(empty); setEditing(null); setMemberSearch("");
+      refresh();
+    } catch(e) {
+      showToast?.(e.message||"공지 저장 실패", "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (n) => {
+    if (!window.confirm("공지를 삭제할까요?")) return;
+    try { await deleteNotice(n.id); showToast?.("공지를 삭제했습니다."); refresh(); }
+    catch(e) { showToast?.(e.message||"삭제 실패","err"); }
+  };
+
+  const targetSummary = form.targetType === "all"
+    ? "전체 회원에게 공지"
+    : form.targetMemberIds.length === 0
+    ? "회원 미선택"
+    : `특정 회원 ${form.targetMemberIds.length}명에게 공지`;
+
+  const chipBg  = "rgba(94,234,212,.1)";
+  const chipBdr = "rgba(94,234,212,.2)";
+
+  return (
+    <div>
+      <SH title="📢 공지사항 관리" sub="회원앱 홈/프로필 공지 노출" right={<Btn ghost sm onClick={onBack}>← 홈</Btn>} />
+
+      <Card title={editing ? "✏️ 공지 수정" : "📝 공지 작성"} style={{marginBottom:12}}>
+        <div style={{display:"grid",gap:12}}>
+          <Field label="제목" value={form.title} onChange={v=>setField("title",v)} placeholder="공지 제목을 입력하세요" />
+          <TextArea label="내용" value={form.content} onChange={v=>setField("content",v)} placeholder="공지 내용을 입력하세요" />
+
+          {/* 공지 대상 선택 */}
+          <div>
+            <label style={{display:"block",marginBottom:8,fontSize:12,color:"#94a3b8",fontWeight:700}}>공지 대상</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom: form.targetType==="member"?12:0}}>
+              {[["all","전체 회원"],["member","특정 회원"]].map(([v,l]) => (
+                <button key={v} onClick={() => setField("targetType", v)} style={{
+                  padding:"10px 8px",borderRadius:9,fontSize:13,fontWeight:800,cursor:"pointer",
+                  border: form.targetType===v ? "1px solid #5EEAD4" : "1px solid rgba(255,255,255,.08)",
+                  background: form.targetType===v ? "rgba(94,234,212,.12)" : "transparent",
+                  color: form.targetType===v ? "#5EEAD4" : "#64748b",
+                  transition:"all .15s",
+                }}>{l}</button>
+              ))}
+            </div>
+
+            {form.targetType === "member" && (
+              <div style={{background:"rgba(0,0,0,.2)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,padding:12}}>
+                {/* 검색창 */}
+                <input type="text" value={memberSearch} onChange={e=>setMemberSearch(e.target.value)}
+                  placeholder="이름 또는 이메일 검색..."
+                  style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:7,padding:"8px 10px",color:"#e2e8f0",fontSize:12,outline:"none",marginBottom:8}} />
+
+                {/* 빠른 선택 버튼 */}
+                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                  {[["전체 선택",selectAll],["선택 해제",clearAll],["최근 등록 5명",selectRecent]].map(([label,fn]) => (
+                    <button key={label} onClick={fn} style={{padding:"4px 9px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(255,255,255,.1)",background:"transparent",color:"#94a3b8",transition:"all .12s"}}>{label}</button>
+                  ))}
+                </div>
+
+                {/* 회원 목록 */}
+                <div style={{maxHeight:220,overflowY:"auto",marginBottom: selectedMembers.length?8:0}}>
+                  {filteredMembers.length === 0 && (
+                    <Mo c="#64748b" s={10} style={{display:"block",padding:"10px 0",textAlign:"center"}}>
+                      {memberSearch ? "검색 결과가 없습니다." : "선택 가능한 회원이 없습니다."}
+                    </Mo>
+                  )}
+                  {filteredMembers.map(m => {
+                    const checked = form.targetMemberIds.includes(m.id);
+                    return (
+                      <div key={m.id} onClick={() => toggleMember(m.id)} style={{
+                        display:"flex",alignItems:"center",gap:10,padding:"8px 6px",
+                        borderRadius:7,cursor:"pointer",marginBottom:2,
+                        background: checked ? "rgba(94,234,212,.07)" : "transparent",
+                        border:"1px solid " + (checked ? "rgba(94,234,212,.18)" : "transparent"),
+                        transition:"all .12s",
+                      }}>
+                        <div style={{
+                          width:16,height:16,borderRadius:4,flexShrink:0,
+                          border:"1.5px solid " + (checked ? "#5EEAD4" : "rgba(255,255,255,.2)"),
+                          background: checked ? "#5EEAD4" : "transparent",
+                          display:"flex",alignItems:"center",justifyContent:"center",
+                          fontSize:10,color:"#0B1120",fontWeight:900,transition:"all .12s",
+                        }}>{checked ? "✓" : ""}</div>
+                        <div style={{flex:1,overflow:"hidden"}}>
+                          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {m.name||m.displayName||"이름 없음"}
+                          </div>
+                          {(m.email||m.goal) && (
+                            <Mo c="#475569" s={9} style={{display:"block",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.email||m.goal}</Mo>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 선택된 회원 칩 */}
+                {selectedMembers.length > 0 && (
+                  <div style={{borderTop:"1px solid rgba(255,255,255,.06)",paddingTop:10}}>
+                    <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>선택된 회원 {selectedMembers.length}명</Mo>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {selectedMembers.map(m => (
+                        <span key={m.id} style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:chipBg,border:"1px solid "+chipBdr,color:"#5EEAD4"}}>
+                          {m.name||m.displayName||"이름 없음"}
+                          <span onClick={e=>{e.stopPropagation();toggleMember(m.id);}} style={{cursor:"pointer",opacity:.7,fontSize:11,lineHeight:1}}>✕</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 중요/게시 */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <SelectLine label="중요 공지 여부" value={form.isImportant?"중요":"일반"} opts={["일반","중요"]} onChange={v=>setField("isImportant",v==="중요")} />
+            <SelectLine label="게시 상태" value={form.isPublished?"게시":"숨김"} opts={["게시","숨김"]} onChange={v=>setField("isPublished",v==="게시")} />
+          </div>
+
+          {/* 저장 전 요약 */}
+          <div style={{background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.1)",borderRadius:8,padding:"9px 12px"}}>
+            <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>
+              {form.isPublished ? "📢 " : "👁️ 숨김 저장 · "}
+              {form.isImportant ? "📌 중요 공지 · " : ""}
+              {targetSummary}
+            </Mo>
+          </div>
+
+          <div style={{display:"flex",gap:8}}>
+            <Btn full disabled={saving} onClick={save}>{saving?"저장 중...":editing?"수정 저장":"공지 게시/저장"}</Btn>
+            {editing && <Btn ghost onClick={cancelEdit}>취소</Btn>}
+          </div>
+        </div>
+      </Card>
+
+      {/* 공지 목록 */}
+      <Card title="공지 목록">
+        {rows.length ? rows.map(n => {
+          const memberCount = n.targetMemberIds?.length || (n.targetMemberId ? 1 : 0);
+          const targetLabel = n.targetType === "member"
+            ? (memberCount > 1
+              ? `특정 회원 ${memberCount}명`
+              : n.targetMemberName || getNoticeMemberDisplay(members.find(m=>m.id===n.targetMemberId)) || "특정 회원")
+            : "전체 회원";
+          return (
+            <div key={n.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,padding:"11px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}}>
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                  {n.isImportant && <span style={{fontSize:9,background:"rgba(255,200,80,.12)",border:"1px solid rgba(255,200,80,.22)",color:"#ffd166",padding:"1px 5px",borderRadius:4,fontWeight:800}}>📌 중요</span>}
+                  {!n.isPublished && <span style={{fontSize:9,background:"rgba(100,116,139,.12)",border:"1px solid rgba(100,116,139,.18)",color:"#64748b",padding:"1px 5px",borderRadius:4,fontWeight:800}}>숨김</span>}
+                  <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{n.title}</Mo>
+                </div>
+                <Mo c="#475569" s={9}>{targetLabel} · {formatCompactDate(n.createdAt)}</Mo>
+              </div>
+              <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"flex-start"}}>
+                <Btn ghost sm onClick={()=>edit(n)}>수정</Btn>
+                <Btn ghost sm onClick={()=>saveNotice({...n,isPublished:!n.isPublished},n.id).then(refresh)}>{n.isPublished?"숨김":"게시"}</Btn>
+                <Btn ghost sm onClick={()=>remove(n)} style={{color:"#f87171"}}>삭제</Btn>
+              </div>
+            </div>
+          );
+        }) : <Mo c="#64748b" s={10} style={{display:"block",padding:"12px 0",textAlign:"center"}}>등록된 공지가 없습니다.</Mo>}
+      </Card>
+    </div>
+  );
+}
+function HomeMenuCard({ icon, title, desc, accentColor, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width:"100%", padding:"18px 20px", borderRadius:14, cursor:"pointer",
+        border:`1px solid rgba(${accentColor},.22)`,
+        background: hovered
+          ? `linear-gradient(135deg,rgba(${accentColor},.1),rgba(${accentColor},.04))`
+          : `linear-gradient(135deg,rgba(${accentColor},.06),rgba(0,0,0,0))`,
+        color:"#fff", display:"flex", alignItems:"center", gap:16, textAlign:"left",
+        transition:"all .18s ease",
+        boxShadow: hovered ? `0 4px 24px rgba(${accentColor},.12)` : "none",
+      }}>
+      <div style={{
+        width:50, height:50, borderRadius:13, flexShrink:0,
+        background:`rgba(${accentColor},.12)`,
+        border:`1px solid rgba(${accentColor},.2)`,
+        display:"flex", alignItems:"center", justifyContent:"center", fontSize:22,
+        transition:"transform .18s ease",
+        transform: hovered ? "scale(1.06)" : "scale(1)",
+      }}>{icon}</div>
+      <div style={{flex:1}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"#e2e8f0",marginBottom:4,letterSpacing:"-.2px"}}>{title}</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#475569",lineHeight:1.5}}>{desc}</div>
+      </div>
+      <span style={{color:`rgba(${accentColor},.5)`,fontSize:18,fontWeight:300}}>›</span>
+    </button>
+  );
+}
+
 function HomeScreen({ setScreen, loadMembers }) {
   return (
-    <div style={{textAlign:"center",paddingTop:52}}>
-      <div style={{fontSize:52,marginBottom:12}}>🏋️</div>
-      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:27,color:"#fff",letterSpacing:"-1px",marginBottom:5}}>TEO GYM</div>
-      <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginBottom:44,letterSpacing:".12em"}}>SESSION TRACKER</div>
-      <div style={{maxWidth:320,margin:"0 auto"}}>
-        <button onClick={() => { loadMembers(); setScreen("members"); }}
-          style={{width:"100%",padding:"18px 20px",borderRadius:13,border:"1px solid rgba(255,255,255,0.08)",
-            background:"#111827",color:"#fff",display:"flex",alignItems:"center",gap:14,textAlign:"left"}}>
-          <div style={{width:44,height:44,borderRadius:11,background:"rgba(0,229,160,.12)",
-            display:"flex",alignItems:"center",justifyContent:"center",fontSize:21}}>👥</div>
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,marginBottom:3}}>회원 관리</div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a"}}>등록 · 수업기록 · 분석</div>
+    <div style={{paddingTop:32,paddingBottom:24}}>
+      {/* 브랜드 헤더 */}
+      <div style={{textAlign:"center",marginBottom:40}}>
+        <div style={{
+          display:"inline-flex",alignItems:"center",gap:12,
+          background:"linear-gradient(135deg,rgba(94,234,212,.1),rgba(124,111,255,.07))",
+          border:"1px solid rgba(94,234,212,.18)",
+          borderRadius:18,padding:"14px 22px",marginBottom:16,
+        }}>
+          <span style={{fontSize:30}}>🏋️</span>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:24,color:"#fff",letterSpacing:"-0.8px",lineHeight:1.1}}>TEO GYM</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",letterSpacing:".15em",marginTop:3}}>ADMIN SYSTEM</div>
           </div>
-        </button>
-        <button onClick={() => setScreen("notices")}
-          style={{width:"100%",marginTop:12,padding:"18px 20px",borderRadius:13,border:"1px solid rgba(94,234,212,.22)",background:"#0B1120",color:"#fff",display:"flex",alignItems:"center",gap:14,textAlign:"left"}}>
-          <div style={{width:44,height:44,borderRadius:11,background:"rgba(94,234,212,.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:21}}>📢</div><div><b>공지사항 관리</b><Mo c="#64748b" s={9}>작성 · 수정 · 게시/숨김</Mo></div>
-        </button>
+        </div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#475569",letterSpacing:".04em"}}>기록으로 관리하는 PT 시스템</div>
+      </div>
+
+      {/* 메뉴 카드 */}
+      <div style={{display:"grid",gap:10,maxWidth:480,margin:"0 auto"}}>
+        <HomeMenuCard
+          icon="👥" title="회원 관리"
+          desc="등록 · 수업일지 · 운동기록 · 분석"
+          accentColor="0,229,160"
+          onClick={() => { loadMembers(); setScreen("members"); }}
+        />
+        <HomeMenuCard
+          icon="📢" title="공지사항 관리"
+          desc="작성 · 수정 · 게시/숨김 · 회원별 공지"
+          accentColor="94,234,212"
+          onClick={() => setScreen("notices")}
+        />
+      </div>
+
+      {/* 하단 서명 */}
+      <div style={{textAlign:"center",marginTop:40}}>
+        <Mo c="#1e293b" s={9} style={{letterSpacing:".08em"}}>TEO GYM · PT MANAGEMENT</Mo>
       </div>
     </div>
   );

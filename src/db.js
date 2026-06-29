@@ -700,6 +700,7 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   const weeklyWorkoutCount = hasInput("weeklyWorkoutCount") ? stringValue(data.weeklyWorkoutCount) : "";
   const birthYear = hasInput("birthYear") ? stringValue(data.birthYear) : "";
   const birthMonth = hasInput("birthMonth") ? stringValue(data.birthMonth) : "";
+  const birthDay = hasInput("birthDay") ? stringValue(data.birthDay) : "";
   const birthYearMonth = hasInput("birthYearMonth") ? stringValue(data.birthYearMonth) : (birthYear && birthMonth ? `${birthYear}-${String(birthMonth).padStart(2, "0")}` : "");
 
   const results = [];
@@ -722,6 +723,7 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     }
     if (birthYear && currentMember.birthYear !== birthYear) memberPayload.birthYear = birthYear;
     if (birthMonth && currentMember.birthMonth !== birthMonth) memberPayload.birthMonth = birthMonth;
+    if (birthDay && currentMember.birthDay !== birthDay) memberPayload.birthDay = birthDay;
     if (birthYearMonth && currentMember.birthYearMonth !== birthYearMonth) memberPayload.birthYearMonth = birthYearMonth;
     if (birthYearMonth) memberPayload.birthSource = "memberProfile";
     if (workoutFrequency && currentMember.workoutFrequency !== workoutFrequency) memberPayload.workoutFrequency = workoutFrequency;
@@ -752,6 +754,7 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   if (targetWeightKg !== null) { onboardingPayload.targetWeightKg = targetWeightKg; onboardingPayload.targetWeight = targetWeightKg; }
   if (birthYear) onboardingPayload.birthYear = birthYear;
   if (birthMonth) onboardingPayload.birthMonth = birthMonth;
+  if (birthDay) onboardingPayload.birthDay = birthDay;
   if (birthYearMonth) onboardingPayload.birthYearMonth = birthYearMonth;
   if (workoutFrequency) onboardingPayload.weeklyWorkoutCount = workoutFrequency;
   if (weeklyWorkoutCount) onboardingPayload.weeklyWorkoutCount = weeklyWorkoutCount;
@@ -1166,7 +1169,7 @@ export async function getMemberOnboarding(memberId) {
 }
 
 const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
-  "gender", "birthYear", "birthMonth", "birthYearMonth", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
+  "gender", "birthYear", "birthMonth", "birthDay", "birthYearMonth", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
   "completed", "completedAt", "weightHistoryMode", "calorieHistoryMode",
   "weightHistoryModeStartedAt", "calorieHistoryModeStartedAt",
   "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",

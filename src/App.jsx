@@ -1409,7 +1409,7 @@ export default function App() {
   }
 
   async function handleSendPairSession(aSession) {
-    // 나눠서 전송: A 2:1 세션에서 B 세션 생성 + A/B 동시 공개
+    // 나눠서 기록: A 2:1 세션에서 A/B 개인 수업일지 생성 (회원앱 공개는 각 일지에서 별도 전송)
     if (!aSession?.id || !aSession?.memberBId) {
       showToast("B 회원 정보가 없습니다", "err");
       return;
@@ -1438,8 +1438,8 @@ export default function App() {
         condition: aSession.condition,
         selectedTypes: aSession.selectedTypes,
         type: aSession.type,
-        isPublished: true,
-        status: "published",
+        isPublished: false,
+        status: "draft",
       };
       await sendPairSession(member?.id, aSession.id, bMember.id, bSessionData);
       await refreshSessionsForMember(member.id);
@@ -1462,7 +1462,7 @@ export default function App() {
         await updateSession(member.id, editSess.id, payload);
         showToast("수업 수정 완료 ✓");
         // ── 2:1 A→B 동기화: A의 2:1 세션 수정 시 B 세션에 반영
-        if (editSess.pairStatus === "sent" && editSess.pairSessionId && editSess.memberBId) {
+        if (["sent","recorded"].includes(editSess.pairStatus) && editSess.pairSessionId && editSess.memberBId) {
           try {
             await updateSession(editSess.memberBId, editSess.pairSessionId, {
               exercises: d.memberBExercises || [],
@@ -1550,6 +1550,19 @@ export default function App() {
       setScreen("hub");
     } catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
+  }
+
+  function resumeDraft2_1(memberId, draftSession) {
+    const m = members.find(x => x.id === memberId);
+    if (!m) { showToast("회원을 찾을 수 없습니다", "err"); return; }
+    setMember(m);
+    setSessions(sessionsMap[memberId] || []);
+    setBodyData(null);
+    setNutritionData(null);
+    setMemberPrivateData(null);
+    setEditSess(draftSession);
+    setScreen("session");
+    loadMemberData(memberId);
   }
 
   async function refreshSessionsForMember(memberId) {
@@ -1658,7 +1671,7 @@ export default function App() {
           width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))"}}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} />}
-        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
+        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
@@ -2078,7 +2091,7 @@ const isOwner = (m) => {
   return false; // 이름 기반 판별 제거 — 마이그레이션 후에는 isOwner/role 필드만 사용
 };
 
-function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange }) {
+function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange, onResumeDraft2_1 }) {
   const today = new Date().toISOString().split("T")[0];
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
@@ -2207,6 +2220,11 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
   });
 
   const ownerMember = members.find(m => isOwner(m));
+  const draftPair2_1 = Object.entries(sessionsMap).flatMap(([memberId, sessions]) =>
+    (sessions || [])
+      .filter(s => s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId)
+      .map(s => ({ ...s, _memberId: memberId }))
+  ).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   return (
     <div>
@@ -2237,6 +2255,33 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
             </div>
           </div>
           <Mo c="#5EEAD4" s={13}>→</Mo>
+        </div>
+      )}
+
+      {/* 작성 중인 2:1 수업 이어쓰기 */}
+      {draftPair2_1.length > 0 && (
+        <div style={{marginBottom:12,padding:"10px 13px",borderRadius:10,
+          background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.2)"}}>
+          <Mo c="#ffd166" s={9} style={{display:"block",marginBottom:6,fontWeight:800}}>🟠 작성 중인 2:1 수업</Mo>
+          {draftPair2_1.map((s, i) => {
+            const aMember = members.find(m => m.id === s._memberId);
+            if (!aMember) return null;
+            return (
+              <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                paddingTop:i>0?7:0,marginTop:i>0?7:0,
+                borderTop:i>0?"1px solid rgba(255,209,102,.12)":"none"}}>
+                <div>
+                  <Mo c="#fff" s={11} style={{fontWeight:700}}>{aMember.name} + {s.memberBName}</Mo>
+                  <Mo c="#64748b" s={9}>{s.date} · {s.sessionNo}회차</Mo>
+                </div>
+                <button onClick={() => onResumeDraft2_1?.(s._memberId, s)}
+                  style={{padding:"5px 12px",borderRadius:6,border:"1px solid rgba(255,209,102,.4)",
+                    background:"rgba(255,209,102,.1)",color:"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+                  이어쓰기
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -2376,6 +2421,21 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>💢 통증관리</span>
                       )}
+                      {!isEnded && (() => {
+                        const draftSess = (sessionsMap[m.id] || []).find(s =>
+                          s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId
+                        );
+                        if (!draftSess) return null;
+                        return (
+                          <button
+                            onClick={e => { e.stopPropagation(); onResumeDraft2_1?.(m.id, draftSess); }}
+                            style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                              background:"rgba(255,209,102,.2)",color:"#ffd166",fontWeight:700,
+                              border:"1px solid rgba(255,209,102,.3)",cursor:"pointer"}}>
+                            🟠 2:1 작성중{draftSess.memberBName ? ` · ${m.name}+${draftSess.memberBName}` : ""}
+                          </button>
+                        );
+                      })()}
                     </div>
                     {/* 서브 정보 */}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
@@ -4836,9 +4896,10 @@ function updateEx(ei, key, val) {
       payload.memberBName = member2.name;
       payload.memberBExercises = exM2;
       payload.memberBComment = trainerComment2;
-      // 기존 pairStatus/pairSessionId 보존 (sent 상태 덮어쓰기 방지)
-      payload.pairStatus = editData?.pairStatus || "draft";
+      // 기존 pairStatus/pairSessionId 보존 (recorded/sent 상태 덮어쓰기 방지)
+      payload.pairStatus = ["recorded","sent"].includes(editData?.pairStatus) ? editData.pairStatus : "draft";
       payload.pairSessionId = editData?.pairSessionId || null;
+      payload.pairRecordedAt = editData?.pairRecordedAt || null;
     }
 
     // 회원1(A) 저장 — 2:1이든 1:1이든 항상 A는 onSave로 저장
@@ -5791,6 +5852,11 @@ function updateEx(ei, key, val) {
                     next[si] = {...next[si], [field]:val};
                     return {...x, m2:{...prevM2, sets:next}};
                   }));
+                  const addM2Set = () => setExercises(prev => prev.map((x,i) => {
+                    if (i!==ei) return x;
+                    const prevM2 = x.m2||{};
+                    return {...x, m2:{...prevM2, sets:[...(prevM2.sets||[]),{weight:"",reps:"",durationSec:""}]}};
+                  }));
                   // 공통값 복사: 회원1 sets의 값을 회원2 sets에 덮어씀
                   const applyShared = (field) => setExercises(prev => prev.map((x,i)=>{
                     if (i!==ei) return x;
@@ -5887,6 +5953,12 @@ function updateEx(ei, key, val) {
                                 border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#ddddf0"}} />
                           </div>
                         ))}
+                        {/* B회원 세트 추가 */}
+                        <button onClick={addM2Set}
+                          style={{width:"100%",marginTop:4,padding:"5px",border:"1px dashed rgba(162,155,254,.25)",
+                            borderRadius:5,background:"none",color:"#7070a0",fontSize:9,fontWeight:700,cursor:"pointer"}}>
+                          + {member2?.name} 세트 추가
+                        </button>
                         {/* RPE + 메모 */}
                         <div style={{display:"flex",gap:5,marginTop:4,alignItems:"center"}}>
                           <Mo c="#64748b" s={8}>RPE</Mo>
@@ -6466,6 +6538,8 @@ function ExNameList({ exercises }) {
 function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   const [reportSession, setReportSession] = useState(null);
+  const [confirmPair, setConfirmPair] = useState(null);
+  const [splitting, setSplitting] = useState(false);
   const [cardMode, setCardMode] = useState("simple");
   const [sortMode, setSortMode] = useState("no"); // 기본: 회차별 내림차순
   const [filterPart, setFilterPart] = useState(null);
@@ -6503,25 +6577,75 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
     ? [...new Set(sessions.flatMap(s=>Array.isArray(s.exercises)?s.exercises.map(e=>e&&e.muscleTop).filter(Boolean):[]))]
     : [];
 
+  // 나눠서 기록 확인 모달
+  const PairConfirmModal = confirmPair ? (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",
+      alignItems:"center",justifyContent:"center",zIndex:9999,padding:"0 16px"}}
+      onClick={e => e.target === e.currentTarget && !splitting && setConfirmPair(null)}>
+      <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.1)",
+        borderRadius:16,padding:"24px 20px",maxWidth:380,width:"100%"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"#fff",marginBottom:6}}>
+          나눠서 기록
+        </div>
+        <Mo c="#54546a" s={10} style={{display:"block",marginBottom:14,lineHeight:1.8}}>
+          2:1 수업 기록을 회원별 개인 일지로 나눠서 기록하시겠습니까?<br/>
+          회원앱 공개는 각 회원 일지에서 별도로 전송해야 합니다.
+        </Mo>
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)"}}>
+            <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700}}>{confirmPair.memberName || member?.name}</Mo>
+            <Mo c="#64748b" s={9}>{(confirmPair.exercises || []).length}개 종목</Mo>
+          </div>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.18)"}}>
+            <Mo c="#a29bfe" s={9} style={{display:"block",fontWeight:700}}>{confirmPair.memberBName}</Mo>
+            <Mo c="#64748b" s={9}>{(confirmPair.memberBExercises || []).length}개 종목</Mo>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button disabled={splitting} onClick={() => setConfirmPair(null)}
+            style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.1)",
+              background:"transparent",color:"#64748b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+            취소
+          </button>
+          <button disabled={splitting} onClick={async () => {
+            setSplitting(true);
+            try { await onSendPair?.(confirmPair); setConfirmPair(null); }
+            finally { setSplitting(false); }
+          }} style={{flex:2,padding:"10px",borderRadius:8,border:"none",
+            background:"linear-gradient(135deg,#a29bfe,#7c6fff)",
+            color:"#fff",fontSize:12,fontWeight:800,cursor:splitting?"not-allowed":"pointer",
+            opacity:splitting?0.7:1}}>
+            {splitting ? "처리중..." : "나눠서 기록"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (reportSession) {
     return (
-      <SessionReportModal
-        s={reportSession}
-        member={member}
-        sessions={sessions}
-        bodyData={bodyData}
-        cardMode={cardMode}
-        setCardMode={setCardMode}
-        onClose={() => setReportSession(null)}
-        onEdit={() => { onEdit(reportSession); setReportSession(null); }}
-        onPublish={async () => { await onPublish?.(reportSession); setReportSession(null); }}
-        onUnpublish={async () => { await onUnpublish?.(reportSession); setReportSession(null); }}
-        onSendPair={async () => { await onSendPair?.(reportSession); setReportSession(null); }}
-      />
+      <>
+        {PairConfirmModal}
+        <SessionReportModal
+          s={reportSession}
+          member={member}
+          sessions={sessions}
+          bodyData={bodyData}
+          cardMode={cardMode}
+          setCardMode={setCardMode}
+          onClose={() => setReportSession(null)}
+          onEdit={() => { onEdit(reportSession); setReportSession(null); }}
+          onPublish={async () => { await onPublish?.(reportSession); setReportSession(null); }}
+          onUnpublish={async () => { await onUnpublish?.(reportSession); setReportSession(null); }}
+          onSendPair={() => { setConfirmPair(reportSession); setReportSession(null); }}
+        />
+      </>
     );
   }
 
   return (
+    <>
+    {PairConfirmModal}
     <div>
       <SH title={isOwner(member)?"📅 운동일지":"📅 히스토리"} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
 
@@ -6684,12 +6808,18 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                 })()}
                 <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end"}}
                   onClick={e => e.stopPropagation()}>
-                  {s.sessionType === "2:1" && s.memberBId && s.pairStatus !== "sent" && !s.isPublished && (
-                    <button onClick={() => onSendPair?.(s)}
+                  {s.sessionType === "2:1" && s.memberBId && !["recorded","sent"].includes(s.pairStatus) && !s.isPublished && (
+                    <button onClick={() => setConfirmPair(s)}
                       style={{background:"rgba(162,155,254,.1)",border:"1px solid rgba(162,155,254,.3)",borderRadius:5,
                         color:"#a29bfe",fontSize:10,fontWeight:800,padding:"5px 12px"}}>
-                      나눠서 전송
+                      나눠서 기록
                     </button>
+                  )}
+                  {s.sessionType === "2:1" && ["recorded","sent"].includes(s.pairStatus) && (
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"3px 7px",borderRadius:3,
+                      background:"rgba(0,229,160,.1)",color:"#5EEAD4",fontWeight:700}}>
+                      ✅ 기록 완료{s.pairRecordedAt ? ` · ${String((s.pairRecordedAt?.toDate ? s.pairRecordedAt.toDate() : s.pairRecordedAt) || "").slice(0,16).replace("T"," ")}` : ""}
+                    </span>
                   )}
                   <button onClick={() => onEdit(s)}
                     style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:5,
@@ -6704,6 +6834,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -6957,10 +7088,10 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
           <span style={{fontSize:10,fontWeight:800,color:isPublished?"#5EEAD4":"#ffd166",padding:"5px 8px",borderRadius:7,background:isPublished?"rgba(94,234,212,.10)":"rgba(255,209,102,.10)",border:"1px solid "+(isPublished?"rgba(94,234,212,.22)":"rgba(255,209,102,.22)")}}>{statusLabel}</span>
           {isPublished ? (
             <Btn ghost sm onClick={onUnpublish}>공개 취소</Btn>
-          ) : s.sessionType === "2:1" && s.memberBId && s.pairStatus !== "sent" ? (
+          ) : s.sessionType === "2:1" && s.memberBId && !["recorded","sent"].includes(s.pairStatus) ? (
             <button onClick={onSendPair}
               style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#a29bfe,#7c6fff)",color:"#fff",fontSize:10,fontWeight:800}}>
-              나눠서 전송
+              나눠서 기록
             </button>
           ) : (
             <button onClick={onPublish}

@@ -676,14 +676,12 @@ export async function sendPairSession(aMemberId, aSessionId, bMemberId, bSession
   dbLog("sendPairSession", `A=${aMemberId}/${aSessionId} → B=${bMemberId}`);
   const bRef = await addDoc(
     collection(db, "members", bMemberId, "sessions"),
-    { ...clean(withSessionDefaults(bSessionData)), createdAt: serverTimestamp() }
+    { ...clean(withSessionDefaults(bSessionData)), isPublished: false, status: "draft", createdAt: serverTimestamp() }
   );
   await updateDoc(doc(db, "members", aMemberId, "sessions", aSessionId), {
-    pairStatus: "sent",
+    pairStatus: "recorded",
     pairSessionId: bRef.id,
-    isPublished: true,
-    status: "published",
-    publishedAt: serverTimestamp(),
+    pairRecordedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
   dbLog("sendPairSession", `완료 bSessionId=${bRef.id}`);

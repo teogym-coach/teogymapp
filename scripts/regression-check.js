@@ -61,7 +61,7 @@ const checks = [
     membersBlockFlat.includes('allow create: if isSignedIn() && request.resource.data.trainerUid == uid()')
   ],
   ['2:1 수업 수정 시 pairSessionId 기반 동기화',
-    app.includes('editSess.pairStatus === "sent"') &&
+    app.includes('["sent","recorded"].includes(editSess.pairStatus)') &&
     app.includes('editSess.pairSessionId') &&
     app.includes('editSess.memberBId')
   ],
@@ -243,23 +243,25 @@ const checks = [
 
   // ── 2:1 페어 세션 체크 ──
   ['2:1 pairStatus draft 저장 (신규/수정 시 초안 유지)',
-    app.includes("payload.pairStatus = editData?.pairStatus || \"draft\"")
+    app.includes('["recorded","sent"].includes(editData?.pairStatus)') &&
+    app.includes('"draft"')
   ],
-  ['나눠서 전송 전 B세션 미생성 (sendPairSession db 함수 존재)',
+  ['나눠서 기록 후 B세션 isPublished=false',
     db.includes('export async function sendPairSession') &&
-    db.includes('pairStatus: "sent"')
+    db.includes('isPublished: false') &&
+    db.includes('status: "draft"')
   ],
-  ['나눠서 전송 후 A isPublished=true (sendPairSession)',
-    db.includes('isPublished: true') &&
-    db.includes('pairStatus: "sent"')
+  ['나눠서 기록 후 A pairStatus=recorded (공개 아님)',
+    db.includes('pairStatus: "recorded"') &&
+    db.includes('pairRecordedAt: serverTimestamp()')
   ],
-  ['나눠서 전송 후 B isPublished=true (bSessionData)',
-    app.includes('isPublished: true') &&
-    app.includes('status: "published"') &&
+  ['나눠서 기록 후 B isPublished=false (bSessionData)',
+    app.includes('isPublished: false') &&
+    app.includes('status: "draft"') &&
     app.includes('bSessionData')
   ],
-  ['A→B 동기화 (pairStatus=sent 시 B 세션 업데이트)',
-    app.includes('editSess.pairStatus === "sent"') &&
+  ['A→B 동기화 (recorded/sent 상태 모두 지원)',
+    app.includes('["sent","recorded"].includes(editSess.pairStatus)') &&
     app.includes('memberBExercises') &&
     app.includes('memberBComment')
   ],
@@ -276,10 +278,31 @@ const checks = [
     app.includes("sessionType === \"2:1\" && member2") &&
     !app.includes('onSave2(payload2)')
   ],
-  ['나눠서 전송 버튼 UI (HistoryScreen + SessionReportModal)',
-    app.includes('나눠서 전송') &&
+  ['나눠서 기록 버튼 UI (확인 모달 + HistoryScreen + SessionReportModal)',
+    app.includes('나눠서 기록') &&
     app.includes('onSendPair') &&
-    app.includes('pairStatus !== "sent"')
+    app.includes('confirmPair') &&
+    app.includes('splitting')
+  ],
+  ['pairStatus draft인 2:1 수업 이어쓰기 표시',
+    app.includes('resumeDraft2_1') &&
+    app.includes('draftPair2_1') &&
+    app.includes('이어쓰기')
+  ],
+  ['회원 카드 2:1 작성중 배지',
+    app.includes('2:1 작성중') &&
+    app.includes('onResumeDraft2_1')
+  ],
+  ['나눠서 기록 후 기록 완료 배지',
+    app.includes('기록 완료') &&
+    app.includes('pairRecordedAt')
+  ],
+  ['B회원 세트 추가 버튼 (m2 블록)',
+    app.includes('addM2Set') &&
+    app.includes('세트 추가')
+  ],
+  ['pairRecordedAt 저장 (db.js)',
+    db.includes('pairRecordedAt: serverTimestamp()')
   ],
 ];
 

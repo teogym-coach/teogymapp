@@ -189,6 +189,32 @@ const checks = [
     })()
   ],
 
+  // ── ErrorBoundary 체크 ──
+  ['ErrorBoundary 파일 존재 및 componentDidCatch 구현',
+    (() => {
+      try {
+        const eb = require('fs').readFileSync(require('path').join(require('path').resolve(__dirname,'..'), 'src', 'ErrorBoundary.jsx'), 'utf8');
+        return eb.includes('componentDidCatch') && eb.includes('getDerivedStateFromError') && eb.includes('handleReload');
+      } catch { return false; }
+    })()
+  ],
+  ['index.js에서 ErrorBoundary로 App 감싸기',
+    (() => {
+      try {
+        const idx = require('fs').readFileSync(require('path').join(require('path').resolve(__dirname,'..'), 'src', 'index.js'), 'utf8');
+        return idx.includes('<ErrorBoundary>') && idx.includes('import ErrorBoundary');
+      } catch { return false; }
+    })()
+  ],
+  ['manifest.json start_url 경로 정확성 (/?app=member)',
+    (() => {
+      try {
+        const m = require('fs').readFileSync(require('path').join(require('path').resolve(__dirname,'..'), 'public', 'manifest.json'), 'utf8');
+        return m.includes('"start_url": "/?app=member"') && !m.includes('/member?app=member');
+      } catch { return false; }
+    })()
+  ],
+
   // ── 성능 최적화 체크 ──
   ['회원 목록 세션 요약 getRecentSessions(5) 사용 (전량 로드 방지)',
     app.includes('getRecentSessions(m.id, 5)') &&

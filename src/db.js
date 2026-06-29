@@ -176,6 +176,7 @@ export async function getMemberNotices(memberId){
   requireUid();
   const memberSnapForTrainer=await getDoc(doc(db,"members",memberId));
   const trainerUid=memberSnapForTrainer.exists()?memberSnapForTrainer.data().trainerUid:"";
+  if(!trainerUid) { console.warn("[DB:getMemberNotices] trainerUid 없음 — 공지 조회 중단:", memberId); return []; }
   const base=collection(db,"notices");
   const allQ=trainerUid
     ? query(base,where("trainerUid","==",trainerUid),where("isPublished","==",true),where("targetType","==","all"),limit(50))
@@ -367,17 +368,29 @@ export async function deleteMember(id) {
   const snap = await getDoc(doc(db, "members", id));
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
-  const [sessSnap, nutSnap, bcSnap, assSnap] = await Promise.all([
+  const [sessSnap, nutSnap, bcSnap, assSnap, obSnap, ciSnap, msgSnap, rrSnap, dcSnap, nrSnap] = await Promise.all([
     getDocs(collection(db, "members", id, "sessions")),
     getDocs(collection(db, "members", id, "nutrition")),
     getDocs(collection(db, "members", id, "bodyCheck")),
     getDocs(collection(db, "members", id, "assessments")),
+    getDocs(collection(db, "members", id, "memberOnboarding")),
+    getDocs(collection(db, "members", id, "memberCheckins")),
+    getDocs(collection(db, "members", id, "memberMessages")),
+    getDocs(collection(db, "members", id, "routineRecommendations")),
+    getDocs(collection(db, "members", id, "dailyConditioning")),
+    getDocs(collection(db, "members", id, "noticeReads")),
   ]);
   await Promise.all([
     ...sessSnap.docs.map(d => deleteDoc(d.ref)),
     ...nutSnap.docs.map(d => deleteDoc(d.ref)),
     ...bcSnap.docs.map(d => deleteDoc(d.ref)),
     ...assSnap.docs.map(d => deleteDoc(d.ref)),
+    ...obSnap.docs.map(d => deleteDoc(d.ref)),
+    ...ciSnap.docs.map(d => deleteDoc(d.ref)),
+    ...msgSnap.docs.map(d => deleteDoc(d.ref)),
+    ...rrSnap.docs.map(d => deleteDoc(d.ref)),
+    ...dcSnap.docs.map(d => deleteDoc(d.ref)),
+    ...nrSnap.docs.map(d => deleteDoc(d.ref)),
     deleteDoc(doc(db, "members", id)),
   ]);
   dbLog("deleteMember", "완료");

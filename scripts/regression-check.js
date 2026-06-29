@@ -188,6 +188,30 @@ const checks = [
       } catch { return false; }
     })()
   ],
+
+  // ── 성능 최적화 체크 ──
+  ['회원 목록 세션 요약 getRecentSessions(5) 사용 (전량 로드 방지)',
+    app.includes('getRecentSessions(m.id, 5)') &&
+    db.includes('export async function getRecentSessions')
+  ],
+  ['getRecentSessions: limit(5) + orderBy(sessionNo desc) 적용',
+    (() => {
+      const fn = db.slice(
+        db.indexOf('export async function getRecentSessions'),
+        db.indexOf('// ════════════════════════════════════════════════════\n// private 마이그레이션')
+      );
+      return fn.includes('orderBy("sessionNo", "desc")') && fn.includes('limit(n)');
+    })()
+  ],
+  ['MemberApp 초기 읽기 병렬화 (Promise.all)',
+    (() => {
+      const memberAppStart = app.indexOf('function MemberApp(');
+      const memberAppEnd = app.indexOf('export default function App()');
+      const memberApp = app.slice(memberAppStart, memberAppEnd);
+      return memberApp.includes('Promise.all([readStep("2"') ||
+             memberApp.includes('await Promise.all([readStep');
+    })()
+  ],
 ];
 
 let failed = 0;

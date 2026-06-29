@@ -562,6 +562,19 @@ export async function getSessions(memberId) {
   return attachSessionMemberFeedback(memberId, sessions);
 }
 
+// 회원 목록 카드 표시용 — 최근 n개만 읽어 Firestore read 절약
+// getSessions(전량)과 달리 memberFeedback 없이 기본 정보만 반환
+export async function getRecentSessions(memberId, n = 5) {
+  requireUid();
+  const q = query(
+    collection(db, "members", memberId, "sessions"),
+    orderBy("sessionNo", "desc"),
+    limit(n)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map(d => ({ id: d.id, ...normalizeSessionForRead(d.data()) }));
+}
+
 export async function getPublishedSessions(memberId) {
   requireUid();
   const path = `members/${memberId}/sessions`;

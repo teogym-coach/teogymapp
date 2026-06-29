@@ -68,6 +68,61 @@ const checks = [
     app.includes('app=member') &&
     app.includes('isOwner !== true')
   ],
+
+  // ── private 서브컬렉션 보안 분리 체크 ──
+  ['memo·ticketInfo private 서브컬렉션 저장 (주문서 제외)',
+    db.includes('members", memberId, "private", "admin"') &&
+    db.includes('export async function getMemberPrivate') &&
+    db.includes('saveMemberPrivateFields')
+  ],
+  ['addMember: memo·ticketInfo 주문서 미포함',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function addMember'), db.indexOf('export async function updateMember'));
+      return fn.includes('const { memo, ticketInfo, ...publicData } = data') &&
+             fn.includes('saveMemberPrivateFields') &&
+             !fn.includes('"memo"') && !fn.includes("memo,\n");
+    })()
+  ],
+  ['updateMember: memo·ticketInfo 주문서에서 제거 (deleteField)',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function updateMember'), db.indexOf('export async function cleanupMemberAppEmailIdentity'));
+      return fn.includes("'memo' in before") &&
+             fn.includes('deleteField()') &&
+             fn.includes('saveMemberPrivateFields');
+    })()
+  ],
+  ['관리자앱 private 데이터 로드 (loadMemberData)',
+    app.includes('getMemberPrivate(memberId)') &&
+    app.includes('setMemberPrivateData(priv)') &&
+    app.includes('setMemberPrivateData(null)')
+  ],
+  ['HubScreen·MemberForm private 데이터 merge 전달',
+    app.includes('...member, ...(memberPrivateData || {})') &&
+    app.includes('MemberForm initial={{...member')
+  ],
+  ['Firestore catch-all private 접근 차단 (isTrainerOfMember)',
+    firestoreRules.includes('match /{subCollection}/{docId}') &&
+    firestoreRules.includes('allow read, write: if isTrainerOfMember(memberId)')
+  ],
+  ['MemberApp 컴포넌트 내 getMemberPrivate 미사용',
+    (() => {
+      const memberAppSection = app.slice(
+        app.indexOf('function MemberApp('),
+        app.indexOf('export default function App()')
+      );
+      return !memberAppSection.includes('getMemberPrivate');
+    })()
+  ],
+  ['published=false 세션 회원앱 미노출',
+    firestoreRules.includes('isMemberSelf(memberId) && resource.data.isPublished == true') &&
+    db.includes('getPublishedSessions') &&
+    db.includes('where("isPublished", "==", true)')
+  ],
+  ['회원 URL memberId 조작 불가 (memberUid 쿼리 고정)',
+    memberProfileFn.includes('where("memberUid", "==", uid)') &&
+    !app.includes('memberId = params.get("memberId")') &&
+    !app.includes('memberId = searchParams.get')
+  ],
 ];
 
 let failed = 0;

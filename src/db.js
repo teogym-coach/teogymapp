@@ -235,15 +235,36 @@ export async function getMembers() {
   }));
 }
 
+// ── 관리자 전용 private 서브컬렉션 (회원이 읽을 수 없음) ──────────────────
+// Firestore catch-all 규칙: members/{id}/* → isTrainerOfMember 만 허용
+// 따라서 members/{id}/private/admin 은 회원 Firebase SDK 직접 접근 차단됨
+
+export async function getMemberPrivate(memberId) {
+  const snap = await getDoc(doc(db, "members", memberId, "private", "admin"));
+  if (!snap.exists()) return {};
+  return snap.data();
+}
+
+async function saveMemberPrivateFields(memberId, privatePayload) {
+  if (Object.keys(privatePayload).length === 0) return;
+  const privateRef = doc(db, "members", memberId, "private", "admin");
+  await setDoc(privateRef, { ...privatePayload, updatedAt: serverTimestamp() }, { merge: true });
+}
+
 export async function addMember(data) {
   const uid = requireUid();
   dbLog("addMember", data.name);
+  // memo/ticketInfo → private 서브컬렉션으로 분리 (회원이 members 주문서에서 읽지 못하게)
+  const { memo, ticketInfo, ...publicData } = data;
   const payload = {
-    ...clean(normalizeMemberData(data)),
+    ...clean(normalizeMemberData(publicData)),
     trainerUid: uid,
     createdAt:  serverTimestamp(),
   };
   const ref = await addDoc(collection(db, "members"), payload);
+  if (memo || ticketInfo) {
+    await saveMemberPrivateFields(ref.id, clean({ memo, ticketInfo }));
+  }
   dbLog("addMember", `생성 완료: ${ref.id} (회원앱은 members.memberUid 직접 조회)`);
   return { id: ref.id, ...data, trainerUid: uid };
 }
@@ -251,19 +272,34 @@ export async function addMember(data) {
 export async function updateMember(id, data) {
   const uid = requireUid();
   dbLog("updateMember", id);
-  const snap = await getDoc(doc(db, "members", id));
+  const memberRef = doc(db, "members", id);
+  const snap = await getDoc(memberRef);
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   const before = snap.data();
   if (before.trainerUid !== uid) throw new Error("권한이 없습니다.");
-  const normalized = clean(normalizeMemberData(data));
+
+  // memo/ticketInfo → private 서브컬렉션으로 분리
+  const { memo, ticketInfo, ...publicData } = data;
+  const normalized = clean(normalizeMemberData(publicData));
+  const hasPrivate = 'memo' in data || 'ticketInfo' in data;
+
   // Spark 회원앱 로그인은 email이 아니라 members.memberUid == auth.uid를 기준으로 한다.
   // 따라서 표시용 이메일이 바뀌어도 이미 연결된 memberUid를 자동 해제하지 않는다.
-  const memberRef = doc(db, "members", id);
-  await updateDoc(memberRef, {
-    ...normalized,
-    trainerUid: uid,
-    updatedAt:  serverTimestamp(),
-  });
+  const mainUpdate = { ...normalized, trainerUid: uid, updatedAt: serverTimestamp() };
+
+  // 기존에 주문서에 남아있는 민감 필드 제거 (1회성 마이그레이션)
+  if ('memo' in before) mainUpdate.memo = deleteField();
+  if ('ticketInfo' in before) mainUpdate.ticketInfo = deleteField();
+
+  await updateDoc(memberRef, mainUpdate);
+
+  // private 서브컬렉션 저장
+  if (hasPrivate) {
+    const privatePayload = {};
+    if ('memo' in data) privatePayload.memo = memo ?? "";
+    if ('ticketInfo' in data) privatePayload.ticketInfo = ticketInfo ?? "";
+    await saveMemberPrivateFields(id, privatePayload);
+  }
   dbLog("updateMember", "완료");
 }
 

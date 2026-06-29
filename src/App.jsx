@@ -17,7 +17,7 @@ import {
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments,
-  migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
+  migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
 } from "./db";
 
@@ -1155,6 +1155,7 @@ export default function App() {
   const [loading,  setLoading]  = useState(false);
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
+  const [memberPrivateData, setMemberPrivateData] = useState(null);
   const memberMode = isMemberMode();
 
   function showToast(msg, type) {
@@ -1211,15 +1212,17 @@ export default function App() {
   async function loadMemberData(memberId) {
     console.log("[TEO GYM] loadMemberData:", memberId);
     try {
-      const [ss, bc, nt] = await Promise.all([
+      const [ss, bc, nt, priv] = await Promise.all([
         getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
+        getMemberPrivate(memberId).catch(() => ({})),
       ]);
       console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
       setSessions(ss);
       setBodyData(bc);
       setNutritionData(nt);
+      setMemberPrivateData(priv);
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -1232,6 +1235,7 @@ export default function App() {
     setSessions([]);
     setBodyData(null);
     setNutritionData(null);
+    setMemberPrivateData(null);
     setScreen("hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
@@ -1340,8 +1344,15 @@ export default function App() {
     setLoading(true);
     try {
       await updateMember(member.id, d);
-      const u = {...member,...d};
+      // private 필드(memo, ticketInfo)는 memberPrivateData 상태로 관리
+      const { memo, ticketInfo, ...publicD } = d;
+      const u = {...member, ...publicD};
       setMember(u);
+      setMemberPrivateData(prev => ({
+        ...(prev || {}),
+        ...('memo' in d && { memo: memo ?? "" }),
+        ...('ticketInfo' in d && { ticketInfo: ticketInfo ?? "" }),
+      }));
       // survey.weight 수정 시 bodyData.goal.currentWeight 동기화
       const sv = d.survey || {};
       if (sv.weight && bodyData) {
@@ -1612,8 +1623,8 @@ export default function App() {
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} />}
         {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
-        {screen==="editMember" && member && <MemberForm initial={member} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={member} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
+        {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
 
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} />}

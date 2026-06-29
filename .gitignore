@@ -5,3 +5,5 @@ build/
 .DS_Store
 .vercel
 .env*
+backups/
+scripts/serviceAccount.json

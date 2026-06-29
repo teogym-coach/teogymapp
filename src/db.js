@@ -1483,3 +1483,29 @@ export async function deleteDailyConditioning(item, { memberId = null } = {}) {
   await deleteDoc(doc(db, "dailyConditioning", id));
   return { id, path: `dailyConditioning/${id}` };
 }
+
+// ════════════════════════════════════════════════════
+// private 마이그레이션 점검 (읽기 전용, 콘솔 출력)
+// ════════════════════════════════════════════════════
+export async function checkPrivateMigrationStatus() {
+  const uid = requireUid();
+  const STALE_FIELDS = ["memo", "ticketInfo", "trainerOnlyNote"];
+  const q = query(collection(db, "members"), where("trainerUid", "==", uid));
+  const snap = await getDocs(q);
+  const stale = [];
+  for (const d of snap.docs) {
+    const data = d.data();
+    const found = STALE_FIELDS.filter(f => f in data && data[f] !== undefined && data[f] !== null && data[f] !== "");
+    if (found.length > 0) stale.push({ id: d.id, name: data.name || "(이름없음)", fields: found });
+  }
+  console.group("[TEO GYM] Private 마이그레이션 점검");
+  if (stale.length === 0) {
+    console.log(`✅ 전체 ${snap.docs.length}명 회원 — 민감 필드 마이그레이션 완료`);
+  } else {
+    console.warn(`⚠️  ${stale.length}/${snap.docs.length}명 회원 문서에 민감 필드 잔류:`);
+    stale.forEach(m => console.warn(`  · ${m.name} (${m.id}): ${m.fields.join(", ")}`));
+    console.warn("→ 관리자앱에서 해당 회원 [수정 → 저장]하면 자동 마이그레이션됩니다.");
+  }
+  console.groupEnd();
+  return { total: snap.docs.length, staleCount: stale.length, stale };
+}

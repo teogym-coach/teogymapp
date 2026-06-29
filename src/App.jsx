@@ -19,6 +19,7 @@ import {
   getAssessments, saveAssessment, saveAssessments,
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
+  checkPrivateMigrationStatus,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -1170,14 +1171,19 @@ export default function App() {
   }, []);
 
   // 회원앱 계정이 관리자 URL로 접근 시 자동 리디렉션 (isOwner·트레이너는 제외)
+  // 관리자로 확인된 경우 private 마이그레이션 상태를 콘솔에 출력한다
   useEffect(() => {
     if (!user || memberMode) return;
     getMemberAppProfile().then(profile => {
       if (profile && profile.isOwner !== true && profile.role !== "owner") {
         try { localStorage.setItem("teogymAppMode", "member"); } catch {}
         window.location.replace("/?app=member");
+      } else {
+        checkPrivateMigrationStatus().catch(() => {});
       }
-    }).catch(() => {});
+    }).catch(() => {
+      checkPrivateMigrationStatus().catch(() => {});
+    });
   }, [user, memberMode]);
 
   const loadMembers = useCallback(async () => {

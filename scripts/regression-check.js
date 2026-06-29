@@ -141,6 +141,53 @@ const checks = [
       return fn.includes('limit(500)');
     })()
   ],
+
+  // ── 회원 앱 플로우 체크 ──
+  ['회원앱 로그인 후 getMemberAppProfile로 프로필 조회',
+    db.includes('export async function getMemberAppProfile') &&
+    app.includes('getMemberAppProfile()')
+  ],
+  ['회원앱 수업일지 isPublished 필터 적용',
+    db.includes('export async function getPublishedSessions') &&
+    db.includes('where("isPublished", "==", true)')
+  ],
+  ['회원앱 온보딩/프로필 저장 함수 존재',
+    db.includes('export async function saveMemberOnboarding') &&
+    db.includes('export async function saveMemberProfileFields')
+  ],
+  ['회원앱 건강 기록 저장 함수 존재',
+    db.includes('export async function saveMemberHealthInputs')
+  ],
+  ['회원앱 체크인 저장 함수 존재',
+    db.includes('export async function saveMemberCheckin')
+  ],
+  ['회원앱 루틴 추천 조회 함수 존재',
+    db.includes('export async function getRoutineRecommendations')
+  ],
+  ['회원앱 공지사항 조회 함수 존재 (getMemberNotices)',
+    db.includes('export async function getMemberNotices')
+  ],
+  ['관리자앱 로그아웃 (signOut) 구현',
+    app.includes('signOut(auth)') || app.includes('signOut(')
+  ],
+
+  // ── 운영 안정화 체크 ──
+  ['private 마이그레이션 점검 함수 존재 (checkPrivateMigrationStatus)',
+    db.includes('export async function checkPrivateMigrationStatus') &&
+    db.includes('STALE_FIELDS')
+  ],
+  ['관리자 로그인 시 private 마이그레이션 점검 호출',
+    app.includes('checkPrivateMigrationStatus') &&
+    app.includes('checkPrivateMigrationStatus().catch')
+  ],
+  ['Sentry DSN 없을 때 안전 fallback (조건부 초기화)',
+    (() => {
+      try {
+        const idx = require('fs').readFileSync(require('path').join(require('path').resolve(__dirname,'..'), 'src', 'index.js'), 'utf8');
+        return idx.includes('REACT_APP_SENTRY_DSN') && idx.includes('if (dsn)');
+      } catch { return false; }
+    })()
+  ],
 ];
 
 let failed = 0;

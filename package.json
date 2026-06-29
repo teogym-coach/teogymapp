@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@sentry/react": "^10.62.0",
+    "firebase": "^10.12.2",
+    "html2canvas": "^1.4.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
     "recharts": "^2.12.7",
-    "firebase": "^10.12.2",
-    "web-vitals": "^3.5.2",
-    "html2canvas": "^1.4.1"
+    "web-vitals": "^3.5.2"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -19,10 +20,20 @@
     "regression": "node scripts/regression-check.js"
   },
   "eslintConfig": {
-    "extends": ["react-app"]
+    "extends": [
+      "react-app"
+    ]
   },
   "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }

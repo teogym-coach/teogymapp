@@ -670,6 +670,26 @@ export async function publishSession(memberId, sessionId) {
   dbLog("publishSession", "완료");
 }
 
+export async function sendPairSession(aMemberId, aSessionId, bMemberId, bSessionData) {
+  await verifyMemberOwnership(aMemberId);
+  await verifyMemberOwnership(bMemberId);
+  dbLog("sendPairSession", `A=${aMemberId}/${aSessionId} → B=${bMemberId}`);
+  const bRef = await addDoc(
+    collection(db, "members", bMemberId, "sessions"),
+    { ...clean(withSessionDefaults(bSessionData)), createdAt: serverTimestamp() }
+  );
+  await updateDoc(doc(db, "members", aMemberId, "sessions", aSessionId), {
+    pairStatus: "sent",
+    pairSessionId: bRef.id,
+    isPublished: true,
+    status: "published",
+    publishedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  dbLog("sendPairSession", `완료 bSessionId=${bRef.id}`);
+  return { bSessionId: bRef.id };
+}
+
 export async function unpublishSession(memberId, sessionId, nextStatus = "completed") {
   await verifyMemberOwnership(memberId);
   dbLog("unpublishSession", `memberId=${memberId} sessionId=${sessionId}`);

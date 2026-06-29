@@ -19,7 +19,7 @@ import {
   getAssessments, saveAssessment, saveAssessments,
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
-  checkPrivateMigrationStatus, getRecentSessions,
+  checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -1408,42 +1408,49 @@ export default function App() {
     } catch {}
   }
 
-  async function handleSaveSession2(payload2) {
-    // 2:1 수업 회원2 독립 저장 — 반드시 payload2.memberId 기준으로만 저장
-    if (!payload2?.memberId) { console.warn("[TEO GYM] handleSaveSession2: memberId 없음"); return; }
+  async function handleSendPairSession(aSession) {
+    // 나눠서 전송: A 2:1 세션에서 B 세션 생성 + A/B 동시 공개
+    if (!aSession?.id || !aSession?.memberBId) {
+      showToast("B 회원 정보가 없습니다", "err");
+      return;
+    }
+    const bMember = members.find(m => m.id === aSession.memberBId);
+    if (!bMember) { showToast("B 회원을 찾을 수 없습니다", "err"); return; }
+    setLoading(true);
     try {
-      const m2 = members.find(m => m.id === payload2.memberId);
-      if (!m2) { showToast("회원2를 찾을 수 없습니다","err"); return; }
-
-      const m2Sessions = await getSessions(m2.id);
-      const now = new Date().toISOString();
-      const safeBase = { ...payload2, memberId: m2.id, memberName: m2.name, updatedAt: now };
-
-      if (editSess?.id) {
-        // 수정 모드: B회원의 기존 세션을 날짜 + linkedMemberId로 찾아 update
-        const m2EditSess = m2Sessions.find(s =>
-          s.date === editSess.date &&
-          (s.linkedMemberId === member?.id || s.linkedMemberId === editSess.memberId)
-        );
-        if (m2EditSess?.id) {
-          await updateSession(m2.id, m2EditSess.id, safeBase);
-        } else {
-          // fallback: 기존 세션을 찾지 못하면 신규 생성
-          const m2SessionNo = m2Sessions.length > 0 ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0) + 1 : 1;
-          await addSession(m2.id, { ...safeBase, sessionNo: m2SessionNo, createdAt: now });
-        }
-      } else {
-        // 신규 저장
-        const m2SessionNo = m2Sessions.length > 0
-          ? Number(m2Sessions[m2Sessions.length-1].sessionNo||0) + 1
-          : 1;
-        await addSession(m2.id, { ...safeBase, sessionNo: m2SessionNo, createdAt: now });
-      }
-
-      const newSess2 = await getSessions(m2.id);
-      setSessionsMap(prev => ({...prev, [m2.id]: newSess2}));
-      showToast(`${m2.name} 기록 ${editSess?.id ? "수정" : "저장"} 완료 ✓`);
-    } catch(e) { showToast("회원2 저장 실패: "+e.message, "err"); }
+      const bSessions = await getSessions(bMember.id);
+      const bSessionNo = bSessions.length > 0
+        ? Number(bSessions[bSessions.length - 1].sessionNo || 0) + 1 : 1;
+      const bExercises = aSession.memberBExercises || [];
+      const bSessionData = {
+        memberId: bMember.id,
+        memberName: bMember.name,
+        date: aSession.date,
+        sessionNo: bSessionNo,
+        sessionType: "2:1",
+        linkedMemberId: member?.id,
+        pairMemberId: member?.id,
+        pairSessionId: aSession.id,
+        exercises: bExercises,
+        trainerComment: aSession.memberBComment || "",
+        totalVolume: bExercises.reduce((s, e) => s + exVol(e), 0),
+        intensity: aSession.intensity,
+        condition: aSession.condition,
+        selectedTypes: aSession.selectedTypes,
+        type: aSession.type,
+        isPublished: true,
+        status: "published",
+      };
+      await sendPairSession(member?.id, aSession.id, bMember.id, bSessionData);
+      await refreshSessionsForMember(member.id);
+      const bNewSessions = await getSessions(bMember.id);
+      setSessionsMap(prev => ({ ...prev, [bMember.id]: bNewSessions }));
+      showToast(`${bMember.name} 기록 전송 완료 ✓`);
+    } catch(e) {
+      showToast("전송 실패: " + e.message, "err");
+    } finally {
+      setLoading(false);
+    }
   }
   async function handleSaveSession(d) {
     console.log("[TEO GYM] handleSaveSession — memberId:", member?.id, "data:", d?.sessionNo);
@@ -1451,8 +1458,31 @@ export default function App() {
     try {
       const now = new Date().toISOString();
       const payload = { ...d, updatedAt: now };
-      if (editSess?.id) { await updateSession(member.id, editSess.id, payload); showToast("수업 수정 완료 ✓"); }
-      else              { await addSession(member.id, { ...payload, createdAt: now }); showToast("수업 저장 완료 ✓"); }
+      if (editSess?.id) {
+        await updateSession(member.id, editSess.id, payload);
+        showToast("수업 수정 완료 ✓");
+        // ── 2:1 A→B 동기화: A의 2:1 세션 수정 시 B 세션에 반영
+        if (editSess.pairStatus === "sent" && editSess.pairSessionId && editSess.memberBId) {
+          try {
+            await updateSession(editSess.memberBId, editSess.pairSessionId, {
+              exercises: d.memberBExercises || [],
+              trainerComment: d.memberBComment || "",
+            });
+          } catch(e) { console.warn("[TEO GYM] 2:1 B세션 동기화 실패:", e.message); }
+        }
+        // ── 2:1 B→A 역방향 동기화: B 세션 수정 시 A의 memberBExercises 반영
+        if (editSess.pairMemberId && editSess.pairSessionId && !editSess.memberBId) {
+          try {
+            await updateSession(editSess.pairMemberId, editSess.pairSessionId, {
+              memberBExercises: d.exercises || [],
+              memberBComment: d.trainerComment || "",
+            });
+          } catch(e) { console.warn("[TEO GYM] 2:1 A세션 역방향 동기화 실패:", e.message); }
+        }
+      } else {
+        await addSession(member.id, { ...payload, createdAt: now });
+        showToast("수업 저장 완료 ✓");
+      }
       setEditSess(null);
       const newSessions = await getSessions(member.id);
       setSessions(newSessions);
@@ -1632,9 +1662,9 @@ export default function App() {
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
-        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} onSave2={handleSaveSession2} />}
+        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} />}
 
-        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="consultReport" && member && (
@@ -4190,14 +4220,14 @@ function removeDraft(key) {
 }
 
 function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
-  allMembers=[], onSave2=null }) {
+  allMembers=[] }) {
   const isCorr = false;
   const isEdit = !!(editData?.id);
   const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
 
   // ── 수업 형태 & 2:1 멤버 ────────────────────────────────────────────
   const [sessionType, setSessionType] = useState(editData?.sessionType || "1:1");
-  const [member2Id,   setMember2Id]   = useState(editData?.linkedMemberId || "");
+  const [member2Id,   setMember2Id]   = useState(editData?.memberBId || editData?.linkedMemberId || "");
   const [showM2Picker, setShowM2Picker] = useState(false);
   const member2 = allMembers.find(m => m.id === member2Id) || null;
 
@@ -4218,7 +4248,16 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [exercises,      setExercises]      = useState(() => {
     if (editData?.exercises) {
       // 기존 저장 기록 열기: 저장된 내용 그대로
-      return editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+      const baseExs = editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+      // 2:1 세션 편집: B회원 운동 데이터(memberBExercises) → m2 필드로 복원
+      if (editData.sessionType === "2:1" && Array.isArray(editData.memberBExercises) && editData.memberBExercises.length > 0) {
+        return baseExs.map((e, i) => {
+          const bEx = editData.memberBExercises[i];
+          if (!bEx) return e;
+          return { ...e, m2: { sets: bEx.sets || [], rpe: bEx.sets?.[0]?.rpe, note: bEx.feedback || "" } };
+        });
+      }
+      return baseExs;
     }
     // 대표님 운동 기록: 빈 운동 종목 1개로 시작 (기능 운동 기본 생성 안 함)
     if (isOwner(member)) {
@@ -4237,7 +4276,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
   const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
-  const [trainerComment2, setTrainerComment2] = useState(editData?.trainerComment2 || "");
+  const [trainerComment2, setTrainerComment2] = useState(editData?.trainerComment2 || editData?.memberBComment || "");
   // 대표님 전용 내부 메모 (회원 카드에 절대 미노출)
   const [trainerOnlyNote, setTrainerOnlyNote] = useState(editData?.trainerOnlyNote || "");
   // 유산소 기록
@@ -4772,12 +4811,11 @@ function updateEx(ei, key, val) {
     removeDraft(draftKey);
     setDraftStatus("");
 
-    // 2:1 수업 신규 저장 시에만 회원2 함께 생성 (수정 시에는 현재 회원 session만 독립 처리)
-    if (!isEdit && sessionType === "2:1" && member2 && onSave2) {
-      // 회원2 exercises 생성 — m2.sets 개별 데이터 우선 사용
+    // ── 2:1 수업: B회원 운동 데이터를 A 세션 payload에 포함 (나눠서 전송 시 B 세션 생성)
+    if (sessionType === "2:1" && member2) {
       const exM2 = cleanExercises.map(e => {
         const { m2, ...rest } = e;
-        if (!m2) return {...rest};  // m2 필드 반드시 제거
+        if (!m2) return {...rest};
         const m2SetsRaw = m2.sets || [];
         const merged = (rest.sets||[]).map((s, si) => ({
           ...s,
@@ -4793,13 +4831,18 @@ function updateEx(ei, key, val) {
         }));
         return { ...rest, sets: merged, feedback: m2.note || rest.feedback };
       });
-      // 회원2 전용 payload — 회원2 memberId, 회원2 이름, 회원2 exercises만 포함
-      const payload2 = buildPayload({ targetMember: member2, comment: trainerComment2, exList: exM2, isM2: true });
-      onSave2(payload2);  // handleSaveSession2(payload2) → addSession(m2.id, payload2)
+      // B 데이터를 A payload에 포함 — 나눠서 전송 전까지 B 세션은 생성되지 않음
+      payload.memberBId = member2.id;
+      payload.memberBName = member2.name;
+      payload.memberBExercises = exM2;
+      payload.memberBComment = trainerComment2;
+      // 기존 pairStatus/pairSessionId 보존 (sent 상태 덮어쓰기 방지)
+      payload.pairStatus = editData?.pairStatus || "draft";
+      payload.pairSessionId = editData?.pairSessionId || null;
     }
 
-    // 회원1 저장 (2:1이든 1:1이든 항상 회원1은 onSave로 저장)
-    onSave(payload);;
+    // 회원1(A) 저장 — 2:1이든 1:1이든 항상 A는 onSave로 저장
+    onSave(payload);
   }
 
   function handleSaveTop() { handleSave(); }
@@ -6420,7 +6463,7 @@ function ExNameList({ exercises }) {
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, onPublish, onUnpublish, member }) {
+function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   const [reportSession, setReportSession] = useState(null);
   const [cardMode, setCardMode] = useState("simple");
@@ -6473,6 +6516,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
         onEdit={() => { onEdit(reportSession); setReportSession(null); }}
         onPublish={async () => { await onPublish?.(reportSession); setReportSession(null); }}
         onUnpublish={async () => { await onUnpublish?.(reportSession); setReportSession(null); }}
+        onSendPair={async () => { await onSendPair?.(reportSession); setReportSession(null); }}
       />
     );
   }
@@ -6640,6 +6684,13 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                 })()}
                 <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end"}}
                   onClick={e => e.stopPropagation()}>
+                  {s.sessionType === "2:1" && s.memberBId && s.pairStatus !== "sent" && !s.isPublished && (
+                    <button onClick={() => onSendPair?.(s)}
+                      style={{background:"rgba(162,155,254,.1)",border:"1px solid rgba(162,155,254,.3)",borderRadius:5,
+                        color:"#a29bfe",fontSize:10,fontWeight:800,padding:"5px 12px"}}>
+                      나눠서 전송
+                    </button>
+                  )}
                   <button onClick={() => onEdit(s)}
                     style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:5,
                       color:"#7c6fff",fontSize:10,fontWeight:700,padding:"5px 12px"}}>수정</button>
@@ -6820,7 +6871,7 @@ function PartVolBadges({ exercises, style={} }) {
   );
 }
 
-function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit, onPublish, onUnpublish }) {
+function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit, onPublish, onUnpublish, onSendPair }) {
   const [saving, setSaving] = useState(false);
 
   // 세션 데이터에서 필드 추출
@@ -6906,6 +6957,11 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
           <span style={{fontSize:10,fontWeight:800,color:isPublished?"#5EEAD4":"#ffd166",padding:"5px 8px",borderRadius:7,background:isPublished?"rgba(94,234,212,.10)":"rgba(255,209,102,.10)",border:"1px solid "+(isPublished?"rgba(94,234,212,.22)":"rgba(255,209,102,.22)")}}>{statusLabel}</span>
           {isPublished ? (
             <Btn ghost sm onClick={onUnpublish}>공개 취소</Btn>
+          ) : s.sessionType === "2:1" && s.memberBId && s.pairStatus !== "sent" ? (
+            <button onClick={onSendPair}
+              style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#a29bfe,#7c6fff)",color:"#fff",fontSize:10,fontWeight:800}}>
+              나눠서 전송
+            </button>
           ) : (
             <button onClick={onPublish}
               style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#a29bfe,#7c6fff)",color:"#fff",fontSize:10,fontWeight:800}}>

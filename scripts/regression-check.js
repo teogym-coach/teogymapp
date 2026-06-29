@@ -27,7 +27,7 @@ const checks = [
   ['체중 그래프 표시', app.includes('getBodyWeightRecords') && app.includes('<LineChart') && app.includes('dataKey="weight"')],
   ['회원 대시보드 표시', app.includes('function MemberHome') && app.includes('변화 리포트') && app.includes('현재 목표') && app.includes('오늘의 운동 가이드')],
   ['최근 수정 정렬', app.includes('sortMode') && app.includes('updatedAt')],
-  ['2:1 수업 저장', app.includes('handleSaveSession2') && app.includes('payload2.memberId') && app.includes('member2')],
+  ['2:1 수업 저장', app.includes('handleSendPairSession') && app.includes('sendPairSession') && app.includes('member2')],
   ['Firebase 저장 구조', db.includes('collection(db, "members", memberId, "sessions")') && db.includes('doc(db, "members", memberId, "bodyCheck", "main")') && db.includes('doc(db, "members", memberId, "memberOnboarding", "main")')],
   ['회원앱 체중 저장 bodyCheck upsert', db.includes('export async function saveMemberHealthInputs') && db.includes('doc(db, "members", memberId, "bodyCheck", "main")') && db.includes('upsertRecordByDate(current.records || []') && db.includes('{ merge: true }')],
   ['Firestore Rules bodyCheck 회원 create/update/read 허용', firestoreRules.includes('match /bodyCheck/{docId}') && firestoreRules.includes('bodyCheckProfileCreateKeysAllowed') && firestoreRules.includes('bodyCheckProfileUpdateKeysAllowed') && firestoreRules.includes('docId == "main"')],
@@ -60,8 +60,10 @@ const checks = [
   ['members 생성 시 trainerUid 본인 설정 필수',
     membersBlockFlat.includes('allow create: if isSignedIn() && request.resource.data.trainerUid == uid()')
   ],
-  ['2:1 수업 수정 시 현재 회원만 변경',
-    app.includes('!isEdit && sessionType === "2:1" && member2 && onSave2')
+  ['2:1 수업 수정 시 pairSessionId 기반 동기화',
+    app.includes('editSess.pairStatus === "sent"') &&
+    app.includes('editSess.pairSessionId') &&
+    app.includes('editSess.memberBId')
   ],
   ['관리자 URL 회원 자동 리디렉션',
     app.includes('getMemberAppProfile().then(profile') &&
@@ -237,6 +239,47 @@ const checks = [
       return memberApp.includes('Promise.all([readStep("2"') ||
              memberApp.includes('await Promise.all([readStep');
     })()
+  ],
+
+  // ── 2:1 페어 세션 체크 ──
+  ['2:1 pairStatus draft 저장 (신규/수정 시 초안 유지)',
+    app.includes("payload.pairStatus = editData?.pairStatus || \"draft\"")
+  ],
+  ['나눠서 전송 전 B세션 미생성 (sendPairSession db 함수 존재)',
+    db.includes('export async function sendPairSession') &&
+    db.includes('pairStatus: "sent"')
+  ],
+  ['나눠서 전송 후 A isPublished=true (sendPairSession)',
+    db.includes('isPublished: true') &&
+    db.includes('pairStatus: "sent"')
+  ],
+  ['나눠서 전송 후 B isPublished=true (bSessionData)',
+    app.includes('isPublished: true') &&
+    app.includes('status: "published"') &&
+    app.includes('bSessionData')
+  ],
+  ['A→B 동기화 (pairStatus=sent 시 B 세션 업데이트)',
+    app.includes('editSess.pairStatus === "sent"') &&
+    app.includes('memberBExercises') &&
+    app.includes('memberBComment')
+  ],
+  ['B→A 역방향 동기화 (pairMemberId 기반)',
+    app.includes('editSess.pairMemberId') &&
+    app.includes('memberBExercises: d.exercises') &&
+    app.includes('memberBComment: d.trainerComment')
+  ],
+  ['A/B 기록 혼용 방지 (memberBId 구분 저장)',
+    app.includes('payload.memberBId = member2.id') &&
+    app.includes('payload.memberBExercises = exM2')
+  ],
+  ['1:1 기록 영향 없음 (2:1 조건부 처리)',
+    app.includes("sessionType === \"2:1\" && member2") &&
+    !app.includes('onSave2(payload2)')
+  ],
+  ['나눠서 전송 버튼 UI (HistoryScreen + SessionReportModal)',
+    app.includes('나눠서 전송') &&
+    app.includes('onSendPair') &&
+    app.includes('pairStatus !== "sent"')
   ],
 ];
 

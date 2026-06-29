@@ -8,6 +8,15 @@ const firestoreRules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8
 const functionsIndex = fs.readFileSync(path.join(root, 'functions', 'index.js'), 'utf8');
 
 const memberProfileFn = db.slice(db.indexOf('export async function getMemberAppProfile'), db.indexOf('export async function saveMemberCheckin'));
+const memberUpdateFn = firestoreRules.slice(
+  firestoreRules.indexOf('function memberProfileUpdateKeysAllowed()'),
+  firestoreRules.indexOf('function memberOnboardingProfileKeysAllowed()')
+);
+const membersBlock = firestoreRules.slice(
+  firestoreRules.indexOf('match /members/{memberId}'),
+  firestoreRules.indexOf('match /dailyConditioning/')
+);
+const membersBlockFlat = membersBlock.replace(/\s+/g, ' ');
 
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
@@ -28,6 +37,37 @@ const checks = [
   ['createMemberAppIndexForMember Cloud Function 제거', !functionsIndex.includes('exports.createMemberAppIndexForMember') && !functionsIndex.includes('memberAppIndex/{')],
   ['공지 대상 회원 엄격 필터 제거', app.includes('function isNoticeEligibleMember(m)') && !app.includes('m.remainingSessions==null') && !app.includes('status!=="active"') && app.includes('["deleted","archived","inactive"].includes(noticeMemberStatus(m))')],
   ['개별 공지 저장/회원앱 조회', db.includes('targetType=data.targetType==="member"?"member":"all"') && db.includes('targetMemberId=targetType==="member"') && db.includes('targetMemberName=targetType==="member"') && db.includes('where("targetType","==","member"),where("targetMemberId","==",memberId)')],
+
+  // ── 보안 체크 ──
+  ['회원 자기수정 금지 필드(isOwner·role·memberUid·trainerUid)',
+    !memberUpdateFn.includes('"isOwner"') &&
+    !memberUpdateFn.includes('"role"') &&
+    !memberUpdateFn.includes('"memberUid"') &&
+    !memberUpdateFn.includes('"trainerUid"') &&
+    !memberUpdateFn.includes('"name"')
+  ],
+  ['회원 수정 가능 생년월일 필드 포함(birthYear·birthMonth·birthDay)',
+    memberUpdateFn.includes('"birthYear"') &&
+    memberUpdateFn.includes('"birthMonth"') &&
+    memberUpdateFn.includes('"birthDay"')
+  ],
+  ['세션 생성·삭제 관리자 전용',
+    firestoreRules.includes('allow create, delete: if isTrainerOfMember(memberId)')
+  ],
+  ['회원 세션 수정 sorenessReport만 허용',
+    firestoreRules.includes('affectedKeys().hasOnly(["sorenessReport", "sorenessUpdatedAt"])')
+  ],
+  ['members 생성 시 trainerUid 본인 설정 필수',
+    membersBlockFlat.includes('allow create: if isSignedIn() && request.resource.data.trainerUid == uid()')
+  ],
+  ['2:1 수업 수정 시 현재 회원만 변경',
+    app.includes('!isEdit && sessionType === "2:1" && member2 && onSave2')
+  ],
+  ['관리자 URL 회원 자동 리디렉션',
+    app.includes('getMemberAppProfile().then(profile') &&
+    app.includes('app=member') &&
+    app.includes('isOwner !== true')
+  ],
 ];
 
 let failed = 0;

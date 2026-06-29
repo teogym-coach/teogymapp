@@ -1168,6 +1168,17 @@ export default function App() {
     return unsub;
   }, []);
 
+  // 회원앱 계정이 관리자 URL로 접근 시 자동 리디렉션 (isOwner·트레이너는 제외)
+  useEffect(() => {
+    if (!user || memberMode) return;
+    getMemberAppProfile().then(profile => {
+      if (profile && profile.isOwner !== true && profile.role !== "owner") {
+        try { localStorage.setItem("teogymAppMode", "member"); } catch {}
+        window.location.replace("/?app=member");
+      }
+    }).catch(() => {});
+  }, [user, memberMode]);
+
   const loadMembers = useCallback(async () => {
     setLoading(true);
     try {

@@ -404,7 +404,7 @@ export async function deleteMember(id) {
   const snap = await getDoc(doc(db, "members", id));
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
-  const [sessSnap, nutSnap, bcSnap, assSnap, obSnap, ciSnap, msgSnap, rrSnap, dcSnap, nrSnap] = await Promise.all([
+  const [sessSnap, nutSnap, bcSnap, assSnap, obSnap, ciSnap, msgSnap, rrSnap, dcSnap, nrSnap, privSnap] = await Promise.all([
     getDocs(collection(db, "members", id, "sessions")),
     getDocs(collection(db, "members", id, "nutrition")),
     getDocs(collection(db, "members", id, "bodyCheck")),
@@ -415,6 +415,7 @@ export async function deleteMember(id) {
     getDocs(collection(db, "members", id, "routineRecommendations")),
     getDocs(collection(db, "members", id, "dailyConditioning")),
     getDocs(collection(db, "members", id, "noticeReads")),
+    getDocs(collection(db, "members", id, "private")),
   ]);
   await Promise.all([
     ...sessSnap.docs.map(d => deleteDoc(d.ref)),
@@ -427,6 +428,7 @@ export async function deleteMember(id) {
     ...rrSnap.docs.map(d => deleteDoc(d.ref)),
     ...dcSnap.docs.map(d => deleteDoc(d.ref)),
     ...nrSnap.docs.map(d => deleteDoc(d.ref)),
+    ...privSnap.docs.map(d => deleteDoc(d.ref)),
     deleteDoc(doc(db, "members", id)),
   ]);
   dbLog("deleteMember", "완료");
@@ -551,7 +553,8 @@ export async function getSessions(memberId) {
   dbLog("getSessions", `memberId=${memberId}`);
   const q    = query(
     collection(db, "members", memberId, "sessions"),
-    orderBy("sessionNo", "asc")
+    orderBy("sessionNo", "asc"),
+    limit(500)
   );
   const snap = await getDocs(q);
   dbLog("getSessions", `결과: ${snap.docs.length}개`);

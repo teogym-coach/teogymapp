@@ -123,6 +123,24 @@ const checks = [
     !app.includes('memberId = params.get("memberId")') &&
     !app.includes('memberId = searchParams.get')
   ],
+  ['deleteMember: private 서브컬렉션 삭제 포함',
+    (() => {
+      const delFn = db.slice(
+        db.indexOf('export async function deleteMember'),
+        db.indexOf('export async function verifyMemberOwnership')
+      );
+      return delFn.includes('"private"') && delFn.includes('privSnap.docs.map(d => deleteDoc(d.ref))');
+    })()
+  ],
+  ['getSessions: limit(500) 안전 상한선 적용',
+    (() => {
+      const fn = db.slice(
+        db.indexOf('export async function getSessions'),
+        db.indexOf('export async function getPublishedSessions')
+      );
+      return fn.includes('limit(500)');
+    })()
+  ],
 ];
 
 let failed = 0;

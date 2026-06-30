@@ -425,14 +425,41 @@ const checks = [
     firestoreRules.includes('allow create: if isMemberSelf(memberId)') &&
     firestoreRules.includes('allow update: if false')
   ],
-  ['출석 기능: AttendanceCard 컴포넌트 존재',
+  ['운동 체크: AttendanceCard 컴포넌트 — 운동 체크 문구',
     app.includes('function AttendanceCard({attendance') &&
-    app.includes('출석하기') &&
-    app.includes('이번 달 출석')
+    app.includes('오늘 운동 체크') &&
+    app.includes('오늘 운동 완료') &&
+    app.includes('이번 달 운동')
   ],
-  ['출석 기능: AttendanceCalendar 컴포넌트 존재 (건강관리 탭)',
-    app.includes('function AttendanceCalendar({attendance') &&
-    app.includes('출석 캘린더')
+  ['운동 체크: 캘린더 미표시 (건강관리 탭에서 제거)',
+    !app.includes('function AttendanceCalendar(') &&
+    !app.includes('AttendanceCalendar attendance=')
+  ],
+  ['운동 체크: 중복 방지 문구',
+    app.includes('이미 운동 체크가 완료되었습니다')
+  ],
+  ['운동 체크: 출석 게임화 문구 미포함',
+    !app.includes('연속 출석') &&
+    !app.includes('출석 목표') &&
+    !app.includes('출석 달성률') &&
+    !app.includes('출석 랭킹')
+  ],
+  ['운동 체크: 긍정 피드백 문구 존재',
+    app.includes('꾸준히 기록이 쌓이고 있어요') &&
+    app.includes('좋은 습관이 만들어지고 있어요')
+  ],
+  ['출석 기능: saveAttendance 함수 존재 (db.js)',
+    db.includes('export async function saveAttendance(memberId, dateKey)') &&
+    db.includes('duplicate: true') &&
+    db.includes('source: "memberApp"')
+  ],
+  ['출석 기능: getAttendanceRecent 함수 존재 (db.js)',
+    db.includes('export async function getAttendanceRecent(memberId')
+  ],
+  ['출석 기능: Firestore Rules attendance 본인만 write',
+    firestoreRules.includes('match /attendance/{dateId}') &&
+    firestoreRules.includes('allow create: if isMemberSelf(memberId)') &&
+    firestoreRules.includes('allow update: if false')
   ],
   ['출석 기능: 중복 출석 방지 (duplicate check)',
     db.includes('if (snap.exists()) return { duplicate: true }')
@@ -448,9 +475,12 @@ const checks = [
     app.includes('NoticeCard notices={p.notices}') &&
     app.includes('function NoticeCard({notices=[]')
   ],
-  ['관리자 출석 확인: HubScreen 출석 현황 섹션',
+  ['관리자 운동 빈도: HubScreen 이번달/7일/30일 표시',
     app.includes('hubAttendance') &&
-    app.includes('getAttendanceRecent(member.id')
+    app.includes('운동 빈도') &&
+    app.includes('최근 7일') &&
+    app.includes('최근 30일') &&
+    app.includes('대사 추정·식단 분석 참고용')
   ],
 ];
 

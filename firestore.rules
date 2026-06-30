@@ -156,6 +156,13 @@ service cloud.firestore {
         allow delete: if isTrainerOfMember(memberId);
       }
 
+      match /readSessions/{sessionId} {
+        allow read: if isTrainerOfMember(memberId) || isMemberSelf(memberId);
+        allow create, update: if isMemberSelf(memberId)
+                              && request.resource.data.keys().hasOnly(["readAt"]);
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
       match /noticeReads/{noticeId} {
         allow read: if canAccessMember(memberId);
         allow create, update: if isMemberSelf(memberId)

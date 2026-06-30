@@ -305,6 +305,46 @@ const checks = [
   ['pairRecordedAt 저장 (db.js)',
     db.includes('pairRecordedAt: serverTimestamp()')
   ],
+  // ── 읽지 않은 수업일지 배지 ──
+  ['unread 배지: published + unread 세션 있으면 배지 표시 (nav-badge)',
+    app.includes('nav-badge') &&
+    app.includes('unreadCount') &&
+    app.includes('k==="workout"&&unreadCount>0')
+  ],
+  ['unread 배지: unreadCount 3개 계산 (SESSION_UNREAD_CUTOFF 기준)',
+    app.includes('SESSION_UNREAD_CUTOFF') &&
+    app.includes('readSessionIds.has(s.id)') &&
+    db.includes('SESSION_UNREAD_CUTOFF = "2026-06-30"')
+  ],
+  ['unread 배지: 수업일지 탭 진입 시 읽음 처리 (useEffect + markedRef)',
+    app.includes('markedRef=useRef(false)') &&
+    app.includes('markedRef.current=true') &&
+    app.includes('markSessionsAsRead(ids)')
+  ],
+  ['unread 배지: 카드 펼칠 때 개별 읽음 처리 (toggleSess)',
+    app.includes('markSessionsAsRead([s.id])')
+  ],
+  ['unread 배지: 읽음 처리 후 상태 업데이트 (setReadSessionIds)',
+    app.includes('setReadSessionIds') &&
+    app.includes('markSessionsRead(profile.id,newIds)')
+  ],
+  ['unread 배지: 다른 회원 수업일지 포함 안 됨 (getPublishedSessions memberId 격리)',
+    db.includes('collection(db, "members", memberId, "sessions")') &&
+    db.includes('where("isPublished", "==", true)')
+  ],
+  ['unread 배지: unpublished 세션 제외 (isPublished 조건)',
+    app.includes('s.isPublished&&!readSessionIds.has(s.id)')
+  ],
+  ['unread 배지: Firestore Rules readSessions 본인만 write 가능',
+    firestoreRules.includes('match /readSessions/{sessionId}') &&
+    firestoreRules.includes('isMemberSelf(memberId)') &&
+    firestoreRules.includes('keys().hasOnly(["readAt"])')
+  ],
+  ['unread 배지: 관리자앱 publishSession 로직 영향 없음',
+    db.includes('export async function publishSession') &&
+    db.includes('export async function getReadSessionIds') &&
+    db.includes('export async function markSessionsRead')
+  ],
 ];
 
 let failed = 0;

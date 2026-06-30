@@ -905,6 +905,36 @@ export async function saveFcmToken(memberId, token) {
   });
 }
 
+// 수업일지 읽음 처리 기준일 — 이 날짜 이전 isPublished 세션은 자동 read 처리
+export const SESSION_UNREAD_CUTOFF = "2026-06-30";
+
+export async function getReadSessionIds(memberId) {
+  if (!memberId) return new Set();
+  try {
+    const snap = await getDocs(collection(db, "members", memberId, "readSessions"));
+    return new Set(snap.docs.map(d => d.id));
+  } catch (e) {
+    console.warn("[DB:getReadSessionIds]", e?.code || e?.message || e);
+    return new Set();
+  }
+}
+
+export async function markSessionsRead(memberId, sessionIds) {
+  if (!memberId || !sessionIds?.length) return;
+  try {
+    const toMark = sessionIds.filter(Boolean);
+    if (!toMark.length) return;
+    const batch = writeBatch(db);
+    const now = serverTimestamp();
+    toMark.forEach(id => {
+      batch.set(doc(db, "members", memberId, "readSessions", id), { readAt: now }, { merge: true });
+    });
+    await batch.commit();
+  } catch (e) {
+    console.warn("[DB:markSessionsRead]", e?.code || e?.message || e);
+  }
+}
+
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   requireUid();
   const batch = writeBatch(db);

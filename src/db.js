@@ -1614,7 +1614,9 @@ export async function savePairSession(data, id = null) {
     memberBName: data.memberBName || "",
     date: data.date || new Date().toISOString().slice(0, 10),
     status: data.status || "draft",
-    teamStatus: data.teamStatus || "active",
+    // 업데이트 시 teamStatus 미제공이면 undefined → clean()이 제거 → Firestore 기존값 유지
+    // 신규 생성 시 기본값 "active"는 addDoc 블록에서 별도 설정
+    teamStatus: data.teamStatus || undefined,
     splitDone: data.splitDone || false,
     splitAt: data.splitAt || null,
     exercises: data.exercises || [],
@@ -1631,11 +1633,12 @@ export async function savePairSession(data, id = null) {
     await updateDoc(ref, payload);
     return { id, ...snap.data(), ...payload };
   }
+  const newPayload = { ...payload, teamStatus: data.teamStatus || "active" };
   const ref = await addDoc(collection(db, "pairSessions"), {
-    ...payload,
+    ...newPayload,
     createdAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload };
+  return { id: ref.id, ...newPayload };
 }
 
 export async function deletePairSession(id) {

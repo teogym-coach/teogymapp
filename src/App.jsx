@@ -1664,9 +1664,16 @@ export default function App() {
   }
 
   async function handleSplitPairSession(pairSession) {
-    const mA = members.find(m => m.id === pairSession.memberAId);
-    const mB = members.find(m => m.id === pairSession.memberBId);
-    if (!mA || !mB) { showToast("회원 정보를 찾을 수 없습니다", "err"); return; }
+    // ID 검색 → 이름 검색(trim) 순서로 폴백. 기존 데이터 memberAId가 빈 문자열인 경우 대응.
+    const findMember = (id, name) => {
+      if (id) { const byId = members.find(m => m.id === id); if (byId) return byId; }
+      if (name) { const t = name.trim(); return members.find(m => (m.name||"").trim() === t) || null; }
+      return null;
+    };
+    const mA = findMember(pairSession.memberAId, pairSession.memberAName);
+    const mB = findMember(pairSession.memberBId, pairSession.memberBName);
+    if (!mA) { showToast(`${pairSession.memberAName || "A회원"} 회원 정보를 찾을 수 없습니다`, "err"); return; }
+    if (!mB) { showToast(`${pairSession.memberBName || "B회원"} 회원 정보를 찾을 수 없습니다`, "err"); return; }
     setLoading(true);
     try {
       const ssA = await getSessions(mA.id);
@@ -7234,8 +7241,15 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
 function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, showToast, loading }) {
   const isEdit = !!(editData?.id);
 
-  const [memberAId, setMemberAId] = useState(editData?.memberAId || "");
-  const [memberBId, setMemberBId] = useState(editData?.memberBId || "");
+  // ID가 없으면 이름으로 자동 복원 (기존 데이터 memberAId 누락 대응)
+  const resolveIdByName = (id, name) => {
+    if (id) return id;
+    if (!name) return "";
+    const t = name.trim();
+    return members.find(m => (m.name||"").trim() === t)?.id || "";
+  };
+  const [memberAId, setMemberAId] = useState(() => resolveIdByName(editData?.memberAId, editData?.memberAName));
+  const [memberBId, setMemberBId] = useState(() => resolveIdByName(editData?.memberBId, editData?.memberBName));
   const [memberSearch, setMemberSearch] = useState("");
 
   const memberA = members.find(m=>m.id===memberAId)||null;

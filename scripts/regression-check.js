@@ -271,6 +271,23 @@ const checks = [
     app.includes('splitDone') &&
     app.includes('pairSourceId')
   ],
+  ['2:1 나눠서 기록: ID→이름 폴백 (memberAId 누락 대응)',
+    app.includes('const findMember = (id, name) =>') &&
+    app.includes('const mA = findMember(pairSession.memberAId, pairSession.memberAName)') &&
+    app.includes('const mB = findMember(pairSession.memberBId, pairSession.memberBName)')
+  ],
+  ['2:1 나눠서 기록: 구체적 에러 메시지 (회원별)',
+    app.includes('pairSession.memberAName || "A회원"') &&
+    app.includes('pairSession.memberBName || "B회원"')
+  ],
+  ['2:1 폼: memberAId 이름 자동 복원 (resolveIdByName)',
+    app.includes('const resolveIdByName = (id, name) =>') &&
+    app.includes('useState(() => resolveIdByName(editData?.memberAId, editData?.memberAName)')
+  ],
+  ['2:1 teamStatus: 업데이트 시 Firestore 기존값 보존',
+    db.includes('teamStatus: data.teamStatus || undefined') &&
+    db.includes('teamStatus: data.teamStatus || "active"')
+  ],
   ['A/B 기록 혼용 방지 (memberBId 구분 저장)',
     app.includes('payload.memberBId = member2.id') &&
     app.includes('payload.memberBExercises = exM2')

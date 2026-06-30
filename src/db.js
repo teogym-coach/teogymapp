@@ -985,6 +985,10 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   }
 
   await batch.commit();
+  // 회원 입력 타임스탬프 갱신 (관리자앱 NEW 배지용)
+  try {
+    await updateDoc(doc(db, "members", memberId), { memberLastInputAt: serverTimestamp() });
+  } catch {}
 }
 
 function upsertRecordByDate(records = [], rec = {}) {
@@ -1207,6 +1211,10 @@ export async function saveMemberCheckin(memberId, dateKey, data) {
   if (!Object.keys(payload).length) return { skipped: true };
   const ref = doc(db, "members", memberId, "memberCheckins", dateKey);
   await setDoc(ref, { ...payload, date: dateKey, updatedAt: serverTimestamp(), createdBy: auth.currentUser.uid }, { merge: true });
+  // 회원 입력 타임스탬프 갱신 (관리자앱 NEW 배지용)
+  try {
+    await updateDoc(doc(db, "members", memberId), { memberLastInputAt: serverTimestamp() });
+  } catch {}
   return { skipped: false };
 }
 

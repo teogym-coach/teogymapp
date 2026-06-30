@@ -347,6 +347,28 @@ const FUNC_BODY_KEYWORD_MAP = [
   { keys:["족저근막","plantar"], body:"족저근막" },
 ];
 
+// 관리자앱 NEW 배지 읽음 상태 (localStorage)
+const ADMIN_INPUT_READ_KEY = "tg_admin_input_read_v1";
+function loadAdminInputRead() {
+  try { return JSON.parse(localStorage.getItem(ADMIN_INPUT_READ_KEY)||"{}"); } catch { return {}; }
+}
+function saveAdminInputRead(data) {
+  try { localStorage.setItem(ADMIN_INPUT_READ_KEY, JSON.stringify(data)); } catch {}
+}
+function markAdminInputRead(memberId) {
+  const data = loadAdminInputRead();
+  data[memberId] = new Date().toISOString();
+  saveAdminInputRead(data);
+}
+function hasNewMemberInput(m) {
+  if (!m?.memberLastInputAt) return false;
+  const readAt = loadAdminInputRead()[m.id];
+  const lastMs = m.memberLastInputAt?.toMillis?.() || (m.memberLastInputAt?.seconds ? m.memberLastInputAt.seconds * 1000 : 0);
+  if (!lastMs) return false;
+  if (!readAt) return true;
+  return lastMs > new Date(readAt).getTime();
+}
+
 // 학습 데이터 (localStorage)
 const FUNC_LEARN_KEY = "tg_func_ex_learn_v1";
 function loadFuncLearn() {
@@ -2729,6 +2751,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
               (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
             );
             const isBirthday = isTodayBirthday(m);
+            const isNewInput = hasNewMemberInput(m);
 
             const status    = mStatus(m);
             const isEnded   = status === "ended";
@@ -2750,7 +2773,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                   padding:"11px 13px", display:"flex", alignItems:"center", justifyContent:"space-between",
                   opacity: isEnded ? 0.65 : 1, transition:"opacity .15s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",flex:1,minWidth:0}}
-                  onClick={()=>onSelect(m)}>
+                  onClick={()=>{markAdminInputRead(m.id);onSelect(m);}}>
                   {/* 아이콘 */}
                   <div style={{width:38,height:38,borderRadius:10,flexShrink:0,
                     background: isEnded ? "rgba(255,255,255,0.05)"
@@ -2802,6 +2825,10 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                       {isBirthday && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,182,193,.2)",color:"#f472b6",fontWeight:700}}>🎂 생일</span>
+                      )}
+                      {isNewInput && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(239,68,68,.2)",color:"#EF4444",fontWeight:700}}>🔴 NEW 입력</span>
                       )}
                       {!isEnded && (() => {
                         const draftSess = (sessionsMap[m.id] || []).find(s =>

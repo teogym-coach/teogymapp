@@ -392,6 +392,25 @@ const checks = [
     app.includes('오늘 생일') &&
     app.includes('filtered.filter(m => isTodayBirthday(m))')
   ],
+  // ── NEW 배지 (회원 입력 알림) ──
+  ['NEW 배지: memberLastInputAt Firestore Rules 허용',
+    firestoreRules.includes('"memberLastInputAt"')
+  ],
+  ['NEW 배지: saveMemberCheckin이 memberLastInputAt 갱신',
+    db.includes('memberLastInputAt: serverTimestamp()')
+  ],
+  ['NEW 배지: hasNewMemberInput + ADMIN_INPUT_READ_KEY',
+    app.includes('ADMIN_INPUT_READ_KEY') &&
+    app.includes('function hasNewMemberInput(m)') &&
+    app.includes('markAdminInputRead')
+  ],
+  ['NEW 배지: 회원 카드에 🔴 NEW 입력 배지 표시',
+    app.includes('isNewInput = hasNewMemberInput(m)') &&
+    app.includes('🔴 NEW 입력')
+  ],
+  ['NEW 배지: 카드 클릭 시 읽음 처리',
+    app.includes('markAdminInputRead(m.id);onSelect(m)')
+  ],
 ];
 
 let failed = 0;

@@ -59,7 +59,8 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         "workoutFrequency", "weeklyWorkoutCount", "height", "startWeight", "currentWeight", "targetWeight", "targetWeightKg", "goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "memberAppLastLoginAt", "updatedAt",
         "birthYear", "birthMonth", "birthDay", "birthYearMonth", "birthSource",
-        "fcmToken", "fcmTokenUpdatedAt"
+        "fcmToken", "fcmTokenUpdatedAt",
+        "memberLastInputAt"
       ]);
     }
 

@@ -7097,34 +7097,60 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
 
             {/* 피드백 A/B */}
             {[{who:"A",label:memberA?.name||"A",color:"#ffd166",borderColor:"rgba(255,209,102,.15)",key:"feedbackA"},
-              {who:"B",label:memberB?.name||"B",color:"#a29bfe",borderColor:"rgba(162,155,254,.15)",key:"feedbackB"}].map(({who,label,color,borderColor,key})=>(
+              {who:"B",label:memberB?.name||"B",color:"#a29bfe",borderColor:"rgba(162,155,254,.15)",key:"feedbackB"}].map(({who,label,color,borderColor,key})=>{
+              const curRpe = Number(ex[key]?.rpe)||0;
+              const curStim = ex[key]?.stimRating||null;
+              return (
               <div key={who} style={{marginBottom:6,padding:"7px 9px",borderRadius:6,
                 border:`1px solid ${borderColor}`,background:"rgba(255,255,255,.02)"}}>
-                <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:5}}>{label} 피드백</Mo>
-                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                  <Mo c="#54546a" s={8}>RPE</Mo>
-                  <input type="number" min="1" max="10" placeholder="—"
-                    value={ex[key]?.rpe||""}
-                    disabled={isSplitDone}
-                    onChange={e=>updateFeedback(ei,who,"rpe",e.target.value)}
-                    style={{width:36,textAlign:"center",height:26,padding:"0 3px",fontSize:11,
-                      borderRadius:4,border:`1px solid ${borderColor}`,background:"#0c1523",color}} />
-                  <Mo c="#54546a" s={8}>자극도</Mo>
-                  {[1,2,3,4,5].map(n=>(
-                    <button key={n} onClick={()=>!isSplitDone&&updateFeedback(ei,who,"stimRating",ex[key]?.stimRating===n?null:n)}
-                      style={{width:22,height:22,borderRadius:4,border:`1px solid ${ex[key]?.stimRating===n?color:"rgba(255,255,255,.06)"}`,
-                        background:ex[key]?.stimRating===n?color+"22":"none",
-                        color:ex[key]?.stimRating===n?color:"#54546a",fontSize:9,fontWeight:800,cursor:"pointer",padding:0}}>{n}</button>
-                  ))}
+                <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:6}}>{label} 피드백</Mo>
+                {/* RPE 1~10 버튼 */}
+                <div style={{marginBottom:5}}>
+                  <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>RPE</Mo>
+                  <div style={{display:"flex",gap:2}}>
+                    {[1,2,3,4,5,6,7,8,9,10].map(n=>{
+                      const sel = curRpe===n;
+                      return (
+                        <button key={n} onClick={()=>!isSplitDone&&updateFeedback(ei,who,"rpe",sel?"":n)}
+                          style={{flex:1,height:28,borderRadius:4,padding:0,cursor:"pointer",
+                            border:`1px solid ${sel?color:"rgba(255,255,255,.08)"}`,
+                            background:sel?color+"28":"#0c1523",
+                            color:sel?color:"#3a3a5e",fontSize:10,fontWeight:sel?900:600,lineHeight:1}}>
+                          {n}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+                {/* 자극도 버튼 */}
+                <div style={{marginBottom:5}}>
+                  <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>자극도</Mo>
+                  <div style={{display:"flex",gap:2}}>
+                    {["없음","애매함","약함","중간","강함"].map(v=>{
+                      const sel = curStim===v;
+                      return (
+                        <button key={v} onClick={()=>!isSplitDone&&updateFeedback(ei,who,"stimRating",sel?null:v)}
+                          style={{flex:1,height:28,borderRadius:4,padding:"0 2px",cursor:"pointer",
+                            border:`1px solid ${sel?color:"rgba(255,255,255,.08)"}`,
+                            background:sel?color+"28":"#0c1523",
+                            color:sel?color:"#3a3a5e",fontSize:9,fontWeight:sel?900:600,
+                            whiteSpace:"nowrap",lineHeight:1}}>
+                          {v}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 메모 */}
                 <input placeholder="메모" value={ex[key]?.note||""}
                   disabled={isSplitDone}
                   onChange={e=>updateFeedback(ei,who,"note",e.target.value)}
-                  style={{width:"100%",marginTop:5,padding:"5px 8px",borderRadius:5,
+                  style={{width:"100%",padding:"5px 8px",borderRadius:5,
                     border:`1px solid ${borderColor}`,background:"#0c1523",
                     color:"#ddddf0",fontSize:10,boxSizing:"border-box"}} />
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}

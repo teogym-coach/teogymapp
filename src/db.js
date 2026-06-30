@@ -1546,14 +1546,15 @@ export async function checkPrivateMigrationStatus() {
 // ════════════════════════════════════════════════════
 export async function getPairSessions() {
   const uid = requireUid();
+  // orderBy 제거: (trainerUid + updatedAt) 복합 인덱스 불필요, 클라이언트 정렬
   const q = query(
     collection(db, "pairSessions"),
     where("trainerUid", "==", uid),
-    orderBy("updatedAt", "desc"),
-    limit(100)
+    limit(200)
   );
   const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  return rows.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
 }
 
 export async function savePairSession(data, id = null) {

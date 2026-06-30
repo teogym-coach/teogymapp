@@ -1540,3 +1540,87 @@ export async function checkPrivateMigrationStatus() {
   console.groupEnd();
   return { total: snap.docs.length, staleCount: stale.length, stale };
 }
+
+// ════════════════════════════════════════════════════
+// 2:1 수업 원본 (pairSessions)
+// ════════════════════════════════════════════════════
+export async function getPairSessions() {
+  const uid = requireUid();
+  const q = query(
+    collection(db, "pairSessions"),
+    where("trainerUid", "==", uid),
+    orderBy("updatedAt", "desc"),
+    limit(100)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function savePairSession(data, id = null) {
+  const uid = requireUid();
+  const payload = clean({
+    trainerUid: uid,
+    memberAId: data.memberAId || "",
+    memberAName: data.memberAName || "",
+    memberBId: data.memberBId || "",
+    memberBName: data.memberBName || "",
+    date: data.date || new Date().toISOString().slice(0, 10),
+    status: data.status || "draft",
+    splitDone: data.splitDone || false,
+    splitAt: data.splitAt || null,
+    exercises: data.exercises || [],
+    trainerCommentA: data.trainerCommentA || "",
+    trainerCommentB: data.trainerCommentB || "",
+    intensity: data.intensity || "중강도",
+    updatedAt: serverTimestamp(),
+  });
+  if (id) {
+    const ref = doc(db, "pairSessions", id);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("2:1 수업을 찾을 수 없습니다.");
+    if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
+    await updateDoc(ref, payload);
+    return { id, ...snap.data(), ...payload };
+  }
+  const ref = await addDoc(collection(db, "pairSessions"), {
+    ...payload,
+    createdAt: serverTimestamp(),
+  });
+  return { id: ref.id, ...payload };
+}
+
+export async function deletePairSession(id) {
+  const uid = requireUid();
+  const ref = doc(db, "pairSessions", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
+  await deleteDoc(ref);
+}
+
+export async function splitPairSession(pairSessionId, memberASessionData, memberBSessionData) {
+  const uid = requireUid();
+  const pairRef = doc(db, "pairSessions", pairSessionId);
+  const pairSnap = await getDoc(pairRef);
+  if (!pairSnap.exists()) throw new Error("2:1 수업을 찾을 수 없습니다.");
+  const pairData = pairSnap.data();
+  if (pairData.trainerUid !== uid) throw new Error("권한이 없습니다.");
+
+  const aRef = await addDoc(
+    collection(db, "members", memberASessionData.memberId, "sessions"),
+    { ...clean(withSessionDefaults(memberASessionData)), createdAt: serverTimestamp() }
+  );
+  const bRef = await addDoc(
+    collection(db, "members", memberBSessionData.memberId, "sessions"),
+    { ...clean(withSessionDefaults(memberBSessionData)), createdAt: serverTimestamp() }
+  );
+  await updateDoc(pairRef, {
+    splitDone: true,
+    splitAt: serverTimestamp(),
+    status: "completed",
+    aSessionId: aRef.id,
+    bSessionId: bRef.id,
+    updatedAt: serverTimestamp(),
+  });
+  return { aSessionId: aRef.id, bSessionId: bRef.id };
+}

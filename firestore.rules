@@ -232,5 +232,12 @@ service cloud.firestore {
       allow update: if isSignedIn() && resource.data.trainerUid == uid() && request.resource.data.trainerUid == uid();
       allow delete: if isSignedIn() && resource.data.trainerUid == uid();
     }
+
+    match /pairSessions/{pairSessionId} {
+      allow read: if isSignedIn() && resource.data.trainerUid == uid();
+      allow create: if isSignedIn() && request.resource.data.trainerUid == uid();
+      allow update: if isSignedIn() && resource.data.trainerUid == uid();
+      allow delete: if isSignedIn() && resource.data.trainerUid == uid();
+    }
   }
 }

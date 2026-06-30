@@ -60,10 +60,10 @@ const checks = [
   ['members 생성 시 trainerUid 본인 설정 필수',
     membersBlockFlat.includes('allow create: if isSignedIn() && request.resource.data.trainerUid == uid()')
   ],
-  ['2:1 수업 수정 시 pairSessionId 기반 동기화',
-    app.includes('["sent","recorded"].includes(editSess.pairStatus)') &&
-    app.includes('editSess.pairSessionId') &&
-    app.includes('editSess.memberBId')
+  ['2:1 pairSessions 컬렉션 기반 독립 수업 관리',
+    app.includes('pairSessions') &&
+    app.includes('getPairSessions') &&
+    app.includes('splitPairSession')
   ],
   ['관리자 URL 회원 자동 리디렉션',
     app.includes('getMemberAppProfile().then(profile') &&
@@ -260,15 +260,16 @@ const checks = [
     app.includes('status: "draft"') &&
     app.includes('bSessionData')
   ],
-  ['A→B 동기화 (recorded/sent 상태 모두 지원)',
-    app.includes('["sent","recorded"].includes(editSess.pairStatus)') &&
-    app.includes('memberBExercises') &&
-    app.includes('memberBComment')
+  ['2:1 A/B 독립 세트 구조 (setsA/setsB)',
+    app.includes('setsA') &&
+    app.includes('setsB') &&
+    app.includes('feedbackA') &&
+    app.includes('feedbackB')
   ],
-  ['B→A 역방향 동기화 (pairMemberId 기반)',
-    app.includes('editSess.pairMemberId') &&
-    app.includes('memberBExercises: d.exercises') &&
-    app.includes('memberBComment: d.trainerComment')
+  ['2:1 나눠서 기록 - 개인 세션 분리 생성',
+    app.includes('handleSplitPairSession') &&
+    app.includes('splitDone') &&
+    app.includes('pairSourceId')
   ],
   ['A/B 기록 혼용 방지 (memberBId 구분 저장)',
     app.includes('payload.memberBId = member2.id') &&
@@ -284,9 +285,9 @@ const checks = [
     app.includes('confirmPair') &&
     app.includes('splitting')
   ],
-  ['pairStatus draft인 2:1 수업 이어쓰기 표시',
-    app.includes('resumeDraft2_1') &&
-    app.includes('draftPair2_1') &&
+  ['2:1 수업 목록 및 이어쓰기 (PairSessionListScreen)',
+    app.includes('PairSessionListScreen') &&
+    app.includes('onPair21') &&
     app.includes('이어쓰기')
   ],
   ['회원 카드 2:1 작성중 배지',

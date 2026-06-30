@@ -20,6 +20,7 @@ import {
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
   checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
+  getPairSessions, savePairSession, deletePairSession, splitPairSession,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -1157,6 +1158,8 @@ export default function App() {
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
   const [memberPrivateData, setMemberPrivateData] = useState(null);
+  const [pairSessions, setPairSessions] = useState([]);
+  const [editPairSession, setEditPairSession] = useState(null);
   const memberMode = isMemberMode();
 
   function showToast(msg, type) {
@@ -1214,6 +1217,14 @@ export default function App() {
     finally { setLoading(false); }
   }, []);
 
+  const loadPairSessions = useCallback(async () => {
+    try {
+      const ps = await getPairSessions();
+      setPairSessions(ps);
+    } catch(e) {
+      console.warn("[TEO GYM] pairSessions load failed:", e.message);
+    }
+  }, []);
 
   // 회원별 데이터 전체 로드 (memberId 기준)
   async function loadMemberData(memberId) {
@@ -1461,24 +1472,6 @@ export default function App() {
       if (editSess?.id) {
         await updateSession(member.id, editSess.id, payload);
         showToast("수업 수정 완료 ✓");
-        // ── 2:1 A→B 동기화: A의 2:1 세션 수정 시 B 세션에 반영
-        if (["sent","recorded"].includes(editSess.pairStatus) && editSess.pairSessionId && editSess.memberBId) {
-          try {
-            await updateSession(editSess.memberBId, editSess.pairSessionId, {
-              exercises: d.memberBExercises || [],
-              trainerComment: d.memberBComment || "",
-            });
-          } catch(e) { console.warn("[TEO GYM] 2:1 B세션 동기화 실패:", e.message); }
-        }
-        // ── 2:1 B→A 역방향 동기화: B 세션 수정 시 A의 memberBExercises 반영
-        if (editSess.pairMemberId && editSess.pairSessionId && !editSess.memberBId) {
-          try {
-            await updateSession(editSess.pairMemberId, editSess.pairSessionId, {
-              memberBExercises: d.exercises || [],
-              memberBComment: d.trainerComment || "",
-            });
-          } catch(e) { console.warn("[TEO GYM] 2:1 A세션 역방향 동기화 실패:", e.message); }
-        }
       } else {
         await addSession(member.id, { ...payload, createdAt: now });
         showToast("수업 저장 완료 ✓");
@@ -1602,6 +1595,102 @@ export default function App() {
     finally { setLoading(false); }
   }
 
+  async function handleSavePairSession(data, id = null) {
+    setLoading(true);
+    try {
+      const saved = await savePairSession(data, id);
+      await loadPairSessions();
+      showToast(id ? "2:1 수업 저장 완료 ✓" : "2:1 수업 생성 완료 ✓");
+      return saved;
+    } catch(e) {
+      showToast(e.message || "저장 실패", "err");
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeletePairSession(id) {
+    if (!window.confirm("이 2:1 수업을 삭제할까요?")) return;
+    setLoading(true);
+    try {
+      await deletePairSession(id);
+      await loadPairSessions();
+      showToast("삭제 완료");
+    } catch(e) {
+      showToast(e.message, "err");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSplitPairSession(pairSession) {
+    const mA = members.find(m => m.id === pairSession.memberAId);
+    const mB = members.find(m => m.id === pairSession.memberBId);
+    if (!mA || !mB) { showToast("회원 정보를 찾을 수 없습니다", "err"); return; }
+    setLoading(true);
+    try {
+      const ssA = await getSessions(mA.id);
+      const ssB = await getSessions(mB.id);
+      const noA = ssA.length > 0 ? Number(ssA[ssA.length-1].sessionNo||0)+1 : 1;
+      const noB = ssB.length > 0 ? Number(ssB[ssB.length-1].sessionNo||0)+1 : 1;
+
+      const exToA = (pairSession.exercises||[]).map(ex => ({
+        name: ex.name, muscleTop: ex.muscleTop, muscleSub: ex.muscleSub,
+        equipment: ex.equipment, sets: ex.setsA || [],
+        feedback: ex.feedbackA?.note || "",
+        stimRating: ex.feedbackA?.stimRating || null,
+        rpe: ex.feedbackA?.rpe || "",
+      }));
+      const exToB = (pairSession.exercises||[]).map(ex => ({
+        name: ex.name, muscleTop: ex.muscleTop, muscleSub: ex.muscleSub,
+        equipment: ex.equipment, sets: ex.setsB || [],
+        feedback: ex.feedbackB?.note || "",
+        stimRating: ex.feedbackB?.stimRating || null,
+        rpe: ex.feedbackB?.rpe || "",
+      }));
+
+      const calcVol = (exList) => exList.reduce((s,e)=>{
+        return s + (e.sets||[]).reduce((ss,r)=>{
+          return ss + Math.round((parseFloat(r.weight)||0)*(parseInt(r.reps)||0)*10)/10;
+        },0);
+      },0);
+
+      const aData = {
+        memberId: mA.id, memberName: mA.name,
+        date: pairSession.date, sessionNo: noA,
+        sessionType: "2:1", pairSourceId: pairSession.id,
+        exercises: exToA, trainerComment: pairSession.trainerCommentA || "",
+        intensity: pairSession.intensity || "중강도",
+        totalVolume: calcVol(exToA),
+        isPublished: false, status: "draft",
+      };
+      const bData = {
+        memberId: mB.id, memberName: mB.name,
+        date: pairSession.date, sessionNo: noB,
+        sessionType: "2:1", pairSourceId: pairSession.id,
+        exercises: exToB, trainerComment: pairSession.trainerCommentB || "",
+        intensity: pairSession.intensity || "중강도",
+        totalVolume: calcVol(exToB),
+        isPublished: false, status: "draft",
+      };
+
+      await splitPairSession(pairSession.id, aData, bData);
+      const [newPss, newSsA, newSsB] = await Promise.all([
+        getPairSessions(),
+        getSessions(mA.id),
+        getSessions(mB.id),
+      ]);
+      setPairSessions(newPss);
+      setSessionsMap(prev => ({...prev, [mA.id]: newSsA, [mB.id]: newSsB}));
+      showToast(`${mA.name} + ${mB.name} 개인 기록 생성 완료 ✓`);
+    } catch(e) {
+      showToast("나눠서 기록 실패: " + e.message, "err");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // 로딩 중 (auth 초기화)
   if (user === undefined) return (
     <div style={{minHeight:"100vh",background:"#0B1120",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1671,12 +1760,14 @@ export default function App() {
           width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))"}}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} />}
-        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} />}
+        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} />}
 
+        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>setScreen("members")} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} />}
+        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
@@ -2091,7 +2182,7 @@ const isOwner = (m) => {
   return false; // 이름 기반 판별 제거 — 마이그레이션 후에는 isOwner/role 필드만 사용
 };
 
-function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange, onResumeDraft2_1 }) {
+function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21 }) {
   const today = new Date().toISOString().split("T")[0];
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
@@ -2220,11 +2311,6 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
   });
 
   const ownerMember = members.find(m => isOwner(m));
-  const draftPair2_1 = Object.entries(sessionsMap).flatMap(([memberId, sessions]) =>
-    (sessions || [])
-      .filter(s => s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId)
-      .map(s => ({ ...s, _memberId: memberId }))
-  ).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   return (
     <div>
@@ -2237,6 +2323,24 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
           </div>
         }
       />
+
+      {/* 2:1 전용 메뉴 */}
+      <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
+        background:"linear-gradient(135deg,rgba(255,209,102,.1),rgba(255,107,107,.06))",
+        border:"1px solid rgba(255,209,102,.25)",
+        display:"flex",alignItems:"center",justifyContent:"space-between",
+        cursor:"pointer"}}
+        onClick={onPair21}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:9,background:"rgba(255,209,102,.2)",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업</div>
+            <Mo c="#64748b" s={10}>2인 동시 수업 전용 기록</Mo>
+          </div>
+        </div>
+        <Mo c="#ffd166" s={13}>→</Mo>
+      </div>
 
       {/* 대표님 전용 운동 기록 버튼 */}
       {ownerMember && (
@@ -2255,33 +2359,6 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
             </div>
           </div>
           <Mo c="#5EEAD4" s={13}>→</Mo>
-        </div>
-      )}
-
-      {/* 작성 중인 2:1 수업 이어쓰기 */}
-      {draftPair2_1.length > 0 && (
-        <div style={{marginBottom:12,padding:"10px 13px",borderRadius:10,
-          background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.2)"}}>
-          <Mo c="#ffd166" s={9} style={{display:"block",marginBottom:6,fontWeight:800}}>🟠 작성 중인 2:1 수업</Mo>
-          {draftPair2_1.map((s, i) => {
-            const aMember = members.find(m => m.id === s._memberId);
-            if (!aMember) return null;
-            return (
-              <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                paddingTop:i>0?7:0,marginTop:i>0?7:0,
-                borderTop:i>0?"1px solid rgba(255,209,102,.12)":"none"}}>
-                <div>
-                  <Mo c="#fff" s={11} style={{fontWeight:700}}>{aMember.name} + {s.memberBName}</Mo>
-                  <Mo c="#64748b" s={9}>{s.date} · {s.sessionNo}회차</Mo>
-                </div>
-                <button onClick={() => onResumeDraft2_1?.(s._memberId, s)}
-                  style={{padding:"5px 12px",borderRadius:6,border:"1px solid rgba(255,209,102,.4)",
-                    background:"rgba(255,209,102,.1)",color:"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
-                  이어쓰기
-                </button>
-              </div>
-            );
-          })}
         </div>
       )}
 
@@ -6530,6 +6607,600 @@ function ExNameList({ exercises }) {
             background:"transparent",color:"#54546a",cursor:"pointer"}}>
           접기
         </button>
+      )}
+    </div>
+  );
+}
+
+function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, onAdd, onEdit, onDelete, onSplit, onRefresh, showToast }) {
+  const [confirmSplit, setConfirmSplit] = useState(null);
+  const [splitting, setSplitting] = useState(false);
+
+  const drafts    = pairSessions.filter(ps => !ps.splitDone).sort((a,b)=>(b.updatedAt?.seconds||0)-(a.updatedAt?.seconds||0));
+  const completed = pairSessions.filter(ps => ps.splitDone).sort((a,b)=>(b.splitAt?.seconds||b.updatedAt?.seconds||0)-(a.splitAt?.seconds||a.updatedAt?.seconds||0));
+
+  const fmtDate = (ps) => {
+    const d = ps.updatedAt?.toDate ? ps.updatedAt.toDate() : (ps.updatedAt ? new Date(ps.updatedAt) : null);
+    if (!d) return ps.date || "";
+    const now = new Date();
+    const diff = (now - d) / 60000;
+    if (diff < 60) return `${Math.round(diff)}분 전`;
+    if (diff < 1440) return `${Math.round(diff/60)}시간 전`;
+    return ps.date || d.toISOString().slice(0,10);
+  };
+
+  const PsCard = ({ps}) => (
+    <div style={{background:"#111827",border:`1px solid ${ps.splitDone?"rgba(94,234,212,.2)":"rgba(255,209,102,.25)"}`,
+      borderRadius:10,padding:"12px 13px",marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+        <div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#e2e8f0"}}>
+            {ps.memberAName} + {ps.memberBName}
+          </div>
+          <Mo c="#54546a" s={9}>{ps.date} · {fmtDate(ps)}</Mo>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+          {ps.splitDone
+            ? <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:9,fontWeight:800}}>기록완료</span>
+            : <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(255,209,102,.12)",color:"#ffd166",fontSize:9,fontWeight:800}}>작성중</span>
+          }
+          {ps.splitDone && <Mo c="#54546a" s={8}>회원기록 생성완료</Mo>}
+        </div>
+      </div>
+      <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>
+        종목 {(ps.exercises||[]).length}개 · {ps.intensity||"중강도"}
+      </Mo>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <button onClick={()=>onEdit(ps)}
+          style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${ps.splitDone?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
+            background:ps.splitDone?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
+            color:ps.splitDone?"#54546a":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+          {ps.splitDone?"보기":"이어쓰기"}
+        </button>
+        {!ps.splitDone && (
+          <button onClick={()=>setConfirmSplit(ps)}
+            style={{flex:1,padding:"7px 10px",borderRadius:7,border:"1px solid rgba(94,234,212,.4)",
+              background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+            나눠서 기록
+          </button>
+        )}
+        <button onClick={()=>onDelete(ps.id)}
+          style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,107,107,.2)",
+            background:"none",color:"#ff6b6b",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+          삭제
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <SH title="⚡ 2:1 수업" sub={`${pairSessions.length}개`}
+        right={<div style={{display:"flex",gap:6}}>
+          <Btn ghost sm onClick={onRefresh}>↻</Btn>
+          <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
+          <Btn sm onClick={onAdd}>+ 2:1 추가</Btn>
+        </div>} />
+
+      {confirmSplit && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
+          background:"rgba(0,0,0,.75)",padding:20}} onClick={e=>e.target===e.currentTarget&&!splitting&&setConfirmSplit(null)}>
+          <div style={{background:"#111827",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",
+            border:"1px solid rgba(94,234,212,.3)"}}>
+            <Mo c="#e2e8f0" s={14} style={{display:"block",textAlign:"center",fontWeight:800,marginBottom:10}}>나눠서 기록</Mo>
+            <Mo c="#94a3b8" s={11} style={{display:"block",textAlign:"center",lineHeight:1.7,marginBottom:16}}>
+              2:1 원본을 기준으로<br/>
+              <b style={{color:"#5EEAD4"}}>{confirmSplit.memberAName}</b> + <b style={{color:"#a29bfe"}}>{confirmSplit.memberBName}</b><br/>
+              개인 수업일지를 각각 생성합니다.<br/>
+              <span style={{color:"#64748b",fontSize:10}}>원본은 계속 보관됩니다.</span>
+            </Mo>
+            <div style={{display:"flex",gap:8}}>
+              <button disabled={splitting} onClick={()=>setConfirmSplit(null)}
+                style={{flex:1,padding:11,borderRadius:9,border:"1px solid rgba(255,255,255,.1)",
+                  background:"transparent",color:"#64748b",fontSize:13,cursor:"pointer"}}>취소</button>
+              <button disabled={splitting} onClick={async()=>{
+                setSplitting(true);
+                try { await onSplit(confirmSplit); setConfirmSplit(null); }
+                catch(e){ showToast(e.message,"err"); }
+                finally { setSplitting(false); }
+              }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontWeight:800,fontSize:13}}>
+                {splitting?"처리 중...":"나눠서 기록"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pairSessions.length === 0 && !loading && (
+        <div style={{textAlign:"center",padding:"40px 20px"}}>
+          <div style={{fontSize:40,marginBottom:12}}>⚡</div>
+          <Mo c="#e2e8f0" s={14} style={{display:"block",fontWeight:700,marginBottom:6}}>2:1 수업 기록이 없습니다</Mo>
+          <Mo c="#54546a" s={11} style={{display:"block",marginBottom:20,lineHeight:1.6}}>
+            "+ 2:1 추가" 버튼으로<br/>새 2:1 수업을 시작하세요
+          </Mo>
+          <Btn onClick={onAdd}>+ 2:1 추가</Btn>
+        </div>
+      )}
+
+      {drafts.length > 0 && (
+        <div style={{marginBottom:16}}>
+          <Mo c="#ffd166" s={9} style={{display:"block",fontWeight:800,marginBottom:8,letterSpacing:.5}}>작성 중</Mo>
+          {drafts.map(ps=><PsCard key={ps.id} ps={ps}/>)}
+        </div>
+      )}
+
+      {completed.length > 0 && (
+        <div>
+          <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:800,marginBottom:8,letterSpacing:.5}}>기록 완료</Mo>
+          {completed.map(ps=><PsCard key={ps.id} ps={ps}/>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, showToast, loading }) {
+  const isEdit = !!(editData?.id);
+
+  const [memberAId, setMemberAId] = useState(editData?.memberAId || "");
+  const [memberBId, setMemberBId] = useState(editData?.memberBId || "");
+  const [memberSearch, setMemberSearch] = useState("");
+
+  const memberA = members.find(m=>m.id===memberAId)||null;
+  const memberB = members.find(m=>m.id===memberBId)||null;
+
+  const [date, setDate] = useState(editData?.date||new Date().toISOString().slice(0,10));
+  const [intensity, setIntensity] = useState(editData?.intensity||"중강도");
+  const [trainerCommentA, setTrainerCommentA] = useState(editData?.trainerCommentA||"");
+  const [trainerCommentB, setTrainerCommentB] = useState(editData?.trainerCommentB||"");
+  const [saving, setSaving] = useState(false);
+  const [confirmSplit, setConfirmSplit] = useState(false);
+
+  const mkPairSet = () => ({weight:"", reps:"", durationSec:""});
+  const mkPairEx = () => ({
+    name:"", muscleTop:"가슴", muscleSub:"윗가슴", equipment:"바벨",
+    setsA: [mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet()],
+    setsB: [mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet()],
+    feedbackA:{rpe:"",stimRating:null,note:""},
+    feedbackB:{rpe:"",stimRating:null,note:""},
+  });
+
+  const [exercises, setExercises] = useState(() => {
+    if (editData?.exercises?.length > 0) return editData.exercises;
+    return [mkPairEx()];
+  });
+
+  const saveTimerRef = useRef(null);
+  const [saveStatus, setSaveStatus] = useState("");
+
+  useEffect(() => {
+    if (!memberAId || !memberBId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      setSaveStatus("저장 중...");
+      try {
+        await onSave({
+          memberAId, memberAName: memberA?.name||"",
+          memberBId, memberBName: memberB?.name||"",
+          date, intensity, exercises, trainerCommentA, trainerCommentB,
+          status: "draft",
+        });
+        const now = new Date();
+        setSaveStatus(`저장됨 ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`);
+      } catch(e) {
+        setSaveStatus("저장 실패");
+      }
+    }, 2000);
+    return () => clearTimeout(saveTimerRef.current);
+  }, [memberAId, memberBId, date, intensity, exercises, trainerCommentA, trainerCommentB]);
+
+  const addEx = () => setExercises(prev=>[...prev, mkPairEx()]);
+  const removeEx = (ei) => {
+    if (exercises.length <= 1) { showToast("최소 1개 종목이 필요합니다"); return; }
+    setExercises(prev=>prev.filter((_,i)=>i!==ei));
+  };
+  const moveEx = (from, to) => {
+    if (to<0||to>=exercises.length) return;
+    setExercises(prev=>{ const n=[...prev]; const [m]=n.splice(from,1); n.splice(to,0,m); return n; });
+  };
+  const updateEx = (ei, field, val) => setExercises(prev=>prev.map((e,i)=>i===ei?{...e,[field]:val}:e));
+  const updateFeedback = (ei, who, field, val) => setExercises(prev=>prev.map((e,i)=>{
+    if(i!==ei)return e;
+    const key = who==="A"?"feedbackA":"feedbackB";
+    return {...e, [key]:{...(e[key]||{}), [field]:val}};
+  }));
+
+  const addSet = (ei, who) => setExercises(prev=>prev.map((e,i)=>{
+    if(i!==ei)return e;
+    const key = who==="A"?"setsA":"setsB";
+    return {...e, [key]:[...(e[key]||[]),mkPairSet()]};
+  }));
+  const removeSet = (ei, who, si) => setExercises(prev=>prev.map((e,i)=>{
+    if(i!==ei)return e;
+    const key = who==="A"?"setsA":"setsB";
+    const sets = e[key]||[];
+    if(sets.length<=1){showToast("최소 1세트 유지");return e;}
+    return {...e, [key]:sets.filter((_,j)=>j!==si)};
+  }));
+  const updateSet = (ei, who, si, field, val) => setExercises(prev=>prev.map((e,i)=>{
+    if(i!==ei)return e;
+    const key = who==="A"?"setsA":"setsB";
+    const sets = [...(e[key]||[])];
+    sets[si]={...sets[si],[field]:val};
+    return {...e,[key]:sets};
+  }));
+
+  const handleManualSave = async () => {
+    if (!memberAId || !memberBId) { showToast("A, B 회원을 모두 선택하세요","err"); return; }
+    setSaving(true);
+    try {
+      await onSave({
+        memberAId, memberAName: memberA?.name||"",
+        memberBId, memberBName: memberB?.name||"",
+        date, intensity, exercises, trainerCommentA, trainerCommentB,
+        status: "draft",
+      });
+      showToast("저장 완료 ✓");
+    } catch(e){ showToast(e.message||"저장 실패","err"); }
+    finally { setSaving(false); }
+  };
+
+  // A 회원 선택 화면
+  if (!memberAId) {
+    const filtered = members.filter(m=>!m.isOwner).filter(m=>
+      !memberSearch || m.name.includes(memberSearch)
+    );
+    return (
+      <div>
+        <SH title="2:1 새 수업" sub="A 회원 선택"
+          right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+        <Mo c="#ffd166" s={11} style={{display:"block",fontWeight:800,marginBottom:10}}>A 회원 선택</Mo>
+        <input value={memberSearch} onChange={e=>setMemberSearch(e.target.value)}
+          placeholder="이름 검색"
+          style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.08)",
+            background:"#111827",color:"#ddddf0",fontSize:13,boxSizing:"border-box",marginBottom:8}} />
+        {filtered.map(m=>(
+          <div key={m.id} onClick={()=>{setMemberAId(m.id);setMemberSearch("");}}
+            style={{padding:"11px 13px",borderRadius:8,border:"1px solid rgba(255,255,255,.06)",
+              background:"#111827",marginBottom:6,cursor:"pointer",
+              display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:32,height:32,borderRadius:8,background:"rgba(255,209,102,.15)",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:"#ffd166"}}>
+              {(m.name||"?")[0]}
+            </div>
+            <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{m.name}</Mo>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // B 회원 선택 화면
+  if (!memberBId) {
+    const filtered = members.filter(m=>!m.isOwner&&m.id!==memberAId).filter(m=>
+      !memberSearch || m.name.includes(memberSearch)
+    );
+    return (
+      <div>
+        <SH title="2:1 새 수업" sub="B 회원 선택"
+          right={<Btn ghost sm onClick={()=>{setMemberAId("");setMemberSearch("");}}>← 뒤로</Btn>} />
+        <div style={{marginBottom:10,padding:"10px 13px",borderRadius:8,
+          background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.2)"}}>
+          <Mo c="#ffd166" s={9}>A 회원: <b>{memberA?.name}</b></Mo>
+        </div>
+        <Mo c="#a29bfe" s={11} style={{display:"block",fontWeight:800,marginBottom:10}}>B 회원 선택</Mo>
+        <input value={memberSearch} onChange={e=>setMemberSearch(e.target.value)}
+          placeholder="이름 검색"
+          style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.08)",
+            background:"#111827",color:"#ddddf0",fontSize:13,boxSizing:"border-box",marginBottom:8}} />
+        {filtered.map(m=>(
+          <div key={m.id} onClick={()=>{setMemberBId(m.id);setMemberSearch("");}}
+            style={{padding:"11px 13px",borderRadius:8,border:"1px solid rgba(255,255,255,.06)",
+              background:"#111827",marginBottom:6,cursor:"pointer",
+              display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:32,height:32,borderRadius:8,background:"rgba(162,155,254,.15)",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:"#a29bfe"}}>
+              {(m.name||"?")[0]}
+            </div>
+            <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{m.name}</Mo>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const isSplitDone = editData?.splitDone;
+
+  return (
+    <div>
+      <SH title={isEdit?"2:1 수업 기록":"새 2:1 수업"}
+        sub={memberA&&memberB?`${memberA.name} + ${memberB.name}`:""}
+        right={
+          <div style={{display:"flex",gap:6}}>
+            {saveStatus && <Mo c="#54546a" s={8} style={{alignSelf:"center"}}>{saveStatus}</Mo>}
+            <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
+          </div>
+        } />
+
+      {/* 기본 정보 */}
+      <div style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,
+        padding:"12px 13px",marginBottom:10}}>
+        <div style={{display:"flex",gap:10,marginBottom:8,alignItems:"center"}}>
+          <div style={{flex:1}}>
+            <Mo c="#ffd166" s={9} style={{display:"block",marginBottom:4,fontWeight:700}}>A 회원</Mo>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>
+              {memberA?.name||"-"}
+            </div>
+          </div>
+          <Mo c="#54546a" s={14}>+</Mo>
+          <div style={{flex:1,textAlign:"right"}}>
+            <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:4,fontWeight:700}}>B 회원</Mo>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#a29bfe"}}>
+              {memberB?.name||"-"}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <div style={{flex:1}}>
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
+            <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+              disabled={isSplitDone}
+              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+          </div>
+          <div style={{flex:1}}>
+            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>강도</Mo>
+            <select value={intensity} onChange={e=>setIntensity(e.target.value)}
+              disabled={isSplitDone}
+              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}}>
+              {["저강도","중강도","고강도"].map(v=><option key={v}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {isSplitDone && (
+        <div style={{padding:"10px 13px",borderRadius:8,background:"rgba(94,234,212,.06)",
+          border:"1px solid rgba(94,234,212,.2)",marginBottom:10}}>
+          <Mo c="#5EEAD4" s={10} style={{fontWeight:800}}>✅ 나눠서 기록 완료 — 개인 기록이 생성되었습니다</Mo>
+          <Mo c="#54546a" s={9} style={{display:"block",marginTop:3}}>2:1 원본은 계속 조회·수정 가능합니다</Mo>
+        </div>
+      )}
+
+      {/* 운동 목록 */}
+      {exercises.map((ex, ei) => {
+        const setsA = ex.setsA||[];
+        const setsB = ex.setsB||[];
+        const maxSets = Math.max(setsA.length, setsB.length);
+        return (
+          <div key={ei} style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",
+            borderRadius:10,padding:"12px 13px",marginBottom:10}}>
+            {/* 운동명 + 순서 버튼 */}
+            <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0||isSplitDone}
+                  style={{padding:"2px 6px",borderRadius:4,border:"1px solid rgba(255,255,255,.08)",
+                    background:"none",color:ei===0?"#1e2a3a":"#54546a",fontSize:10,cursor:"pointer",lineHeight:1}}>▲</button>
+                <button onClick={()=>moveEx(ei,ei+1)} disabled={ei===exercises.length-1||isSplitDone}
+                  style={{padding:"2px 6px",borderRadius:4,border:"1px solid rgba(255,255,255,.08)",
+                    background:"none",color:ei===exercises.length-1?"#1e2a3a":"#54546a",fontSize:10,cursor:"pointer",lineHeight:1}}>▼</button>
+              </div>
+              <input value={ex.name} onChange={e=>updateEx(ei,"name",e.target.value)}
+                disabled={isSplitDone}
+                placeholder={`운동 ${ei+1}`}
+                style={{flex:1,padding:"8px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,.1)",
+                  background:"#0c1523",color:"#e2e8f0",fontSize:13,fontWeight:700}} />
+              {!isSplitDone && (
+                <button onClick={()=>removeEx(ei)}
+                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,107,107,.2)",
+                    background:"none",color:"#ff6b6b",fontSize:11,cursor:"pointer"}}>✕</button>
+              )}
+            </div>
+
+            {/* 근육/장비 */}
+            <div style={{display:"flex",gap:6,marginBottom:8}}>
+              <select value={ex.muscleTop||"가슴"} onChange={e=>updateEx(ei,"muscleTop",e.target.value)}
+                disabled={isSplitDone}
+                style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,.06)",
+                  background:"#0c1523",color:"#94a3b8",fontSize:10,boxSizing:"border-box"}}>
+                {["가슴","등","어깨","팔-이두근","팔-삼두근","하체","복근","코어","기능","기타"].map(v=><option key={v}>{v}</option>)}
+              </select>
+              <select value={ex.equipment||"바벨"} onChange={e=>updateEx(ei,"equipment",e.target.value)}
+                disabled={isSplitDone}
+                style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,.06)",
+                  background:"#0c1523",color:"#94a3b8",fontSize:10,boxSizing:"border-box"}}>
+                {["바벨","덤벨","케이블","머신","맨몸","기능"].map(v=><option key={v}>{v}</option>)}
+              </select>
+            </div>
+
+            {/* 좌우 헤더 */}
+            <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:4}}>
+              <div/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3,borderRadius:5,
+                padding:"4px 6px",background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.15)"}}>
+                <Mo c="#ffd166" s={8} style={{textAlign:"center",fontWeight:800}}>{memberA?.name||"A"}</Mo>
+                <Mo c="#ffd166" s={7} style={{textAlign:"center"}}>중량/횟수</Mo>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3,borderRadius:5,
+                padding:"4px 6px",background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.15)"}}>
+                <Mo c="#a29bfe" s={8} style={{textAlign:"center",fontWeight:800}}>{memberB?.name||"B"}</Mo>
+                <Mo c="#a29bfe" s={7} style={{textAlign:"center"}}>중량/횟수</Mo>
+              </div>
+            </div>
+
+            {/* 세트 행 */}
+            {Array.from({length:maxSets}).map((_,si)=>{
+              const rA = setsA[si]||{};
+              const rB = setsB[si]||{};
+              return (
+                <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:4,alignItems:"center"}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",
+                    background:"#0c1523",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    {si+1}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
+                    <input type="number" placeholder="kg" value={rA.weight||""}
+                      disabled={isSplitDone}
+                      onChange={e=>updateSet(ei,"A",si,"weight",e.target.value)}
+                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
+                        borderRadius:4,border:"1px solid rgba(255,209,102,.2)",background:"#0c1523",color:"#ffd166"}} />
+                    <input type="number" placeholder="회" value={rA.reps||""}
+                      disabled={isSplitDone}
+                      onChange={e=>updateSet(ei,"A",si,"reps",e.target.value)}
+                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
+                        borderRadius:4,border:"1px solid rgba(255,209,102,.15)",background:"#0c1523",color:"#ffd166"}} />
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
+                    <input type="number" placeholder="kg" value={rB.weight||""}
+                      disabled={isSplitDone}
+                      onChange={e=>updateSet(ei,"B",si,"weight",e.target.value)}
+                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
+                        borderRadius:4,border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
+                    <input type="number" placeholder="회" value={rB.reps||""}
+                      disabled={isSplitDone}
+                      onChange={e=>updateSet(ei,"B",si,"reps",e.target.value)}
+                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
+                        borderRadius:4,border:"1px solid rgba(162,155,254,.15)",background:"#0c1523",color:"#a29bfe"}} />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 세트 추가/삭제 */}
+            {!isSplitDone && (
+              <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:8}}>
+                <div/>
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>addSet(ei,"A")}
+                    style={{flex:1,padding:"5px",border:"1px dashed rgba(255,209,102,.25)",borderRadius:4,
+                      background:"none",color:"#ffd166",fontSize:9,fontWeight:700,cursor:"pointer"}}>
+                    +A세트
+                  </button>
+                  {setsA.length>1&&<button onClick={()=>removeSet(ei,"A",setsA.length-1)}
+                    style={{padding:"5px 7px",border:"1px solid rgba(255,107,107,.2)",borderRadius:4,
+                      background:"none",color:"#ff6b6b",fontSize:9,cursor:"pointer"}}>−</button>}
+                </div>
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>addSet(ei,"B")}
+                    style={{flex:1,padding:"5px",border:"1px dashed rgba(162,155,254,.25)",borderRadius:4,
+                      background:"none",color:"#a29bfe",fontSize:9,fontWeight:700,cursor:"pointer"}}>
+                    +B세트
+                  </button>
+                  {setsB.length>1&&<button onClick={()=>removeSet(ei,"B",setsB.length-1)}
+                    style={{padding:"5px 7px",border:"1px solid rgba(255,107,107,.2)",borderRadius:4,
+                      background:"none",color:"#ff6b6b",fontSize:9,cursor:"pointer"}}>−</button>}
+                </div>
+              </div>
+            )}
+
+            {/* 피드백 A/B */}
+            {[{who:"A",label:memberA?.name||"A",color:"#ffd166",borderColor:"rgba(255,209,102,.15)",key:"feedbackA"},
+              {who:"B",label:memberB?.name||"B",color:"#a29bfe",borderColor:"rgba(162,155,254,.15)",key:"feedbackB"}].map(({who,label,color,borderColor,key})=>(
+              <div key={who} style={{marginBottom:6,padding:"7px 9px",borderRadius:6,
+                border:`1px solid ${borderColor}`,background:"rgba(255,255,255,.02)"}}>
+                <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:5}}>{label} 피드백</Mo>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                  <Mo c="#54546a" s={8}>RPE</Mo>
+                  <input type="number" min="1" max="10" placeholder="—"
+                    value={ex[key]?.rpe||""}
+                    disabled={isSplitDone}
+                    onChange={e=>updateFeedback(ei,who,"rpe",e.target.value)}
+                    style={{width:36,textAlign:"center",height:26,padding:"0 3px",fontSize:11,
+                      borderRadius:4,border:`1px solid ${borderColor}`,background:"#0c1523",color}} />
+                  <Mo c="#54546a" s={8}>자극도</Mo>
+                  {[1,2,3,4,5].map(n=>(
+                    <button key={n} onClick={()=>!isSplitDone&&updateFeedback(ei,who,"stimRating",ex[key]?.stimRating===n?null:n)}
+                      style={{width:22,height:22,borderRadius:4,border:`1px solid ${ex[key]?.stimRating===n?color:"rgba(255,255,255,.06)"}`,
+                        background:ex[key]?.stimRating===n?color+"22":"none",
+                        color:ex[key]?.stimRating===n?color:"#54546a",fontSize:9,fontWeight:800,cursor:"pointer",padding:0}}>{n}</button>
+                  ))}
+                </div>
+                <input placeholder="메모" value={ex[key]?.note||""}
+                  disabled={isSplitDone}
+                  onChange={e=>updateFeedback(ei,who,"note",e.target.value)}
+                  style={{width:"100%",marginTop:5,padding:"5px 8px",borderRadius:5,
+                    border:`1px solid ${borderColor}`,background:"#0c1523",
+                    color:"#ddddf0",fontSize:10,boxSizing:"border-box"}} />
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {/* 운동 추가 */}
+      {!isSplitDone && (
+        <button onClick={addEx}
+          style={{width:"100%",padding:"12px",border:"1px dashed rgba(255,255,255,.1)",borderRadius:10,
+            background:"none",color:"#54546a",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+          + 운동 추가
+        </button>
+      )}
+
+      {/* 트레이너 코멘트 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        {[{who:"A",label:memberA?.name||"A",color:"#ffd166",val:trainerCommentA,set:setTrainerCommentA},
+          {who:"B",label:memberB?.name||"B",color:"#a29bfe",val:trainerCommentB,set:setTrainerCommentB}].map(({who,label,color,val,set})=>(
+          <div key={who}>
+            <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:3}}>{label} 코멘트</Mo>
+            <textarea value={val} onChange={e=>set(e.target.value)} disabled={isSplitDone}
+              placeholder={`${label} 트레이너 코멘트`}
+              rows={3}
+              style={{width:"100%",padding:"8px",borderRadius:7,border:`1px solid ${color}22`,
+                background:"#0c1523",color:"#ddddf0",fontSize:11,boxSizing:"border-box",resize:"vertical"}} />
+          </div>
+        ))}
+      </div>
+
+      {/* 저장 + 나눠서 기록 */}
+      {!isSplitDone && (
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <button onClick={handleManualSave} disabled={saving}
+            style={{flex:1,padding:"13px",borderRadius:9,border:"1px solid rgba(255,209,102,.4)",
+              background:"rgba(255,209,102,.08)",color:"#ffd166",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+            {saving?"저장 중...":"💾 저장"}
+          </button>
+          {isEdit && (
+            <button onClick={()=>setConfirmSplit(true)}
+              style={{flex:1,padding:"13px",borderRadius:9,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:13,fontWeight:800}}>
+              나눠서 기록
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 나눠서 기록 확인 모달 */}
+      {confirmSplit && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
+          background:"rgba(0,0,0,.75)",padding:20}} onClick={e=>e.target===e.currentTarget&&setConfirmSplit(false)}>
+          <div style={{background:"#111827",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",
+            border:"1px solid rgba(94,234,212,.3)"}}>
+            <Mo c="#e2e8f0" s={14} style={{display:"block",textAlign:"center",fontWeight:800,marginBottom:10}}>나눠서 기록</Mo>
+            <Mo c="#94a3b8" s={11} style={{display:"block",textAlign:"center",lineHeight:1.7,marginBottom:16}}>
+              2:1 원본을 기준으로<br/>
+              <b style={{color:"#ffd166"}}>{memberA?.name}</b> + <b style={{color:"#a29bfe"}}>{memberB?.name}</b><br/>
+              개인 수업일지를 각각 생성합니다.<br/>
+              <span style={{color:"#64748b",fontSize:10}}>2:1 원본은 계속 보관됩니다.</span>
+            </Mo>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setConfirmSplit(false)}
+                style={{flex:1,padding:11,borderRadius:9,border:"1px solid rgba(255,255,255,.1)",
+                  background:"transparent",color:"#64748b",fontSize:13,cursor:"pointer"}}>취소</button>
+              <button onClick={async()=>{
+                setConfirmSplit(false);
+                try {
+                  await handleManualSave();
+                  await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name} : null);
+                } catch(e){ showToast(e.message||"실패","err"); }
+              }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontWeight:800,fontSize:13}}>
+                나눠서 기록
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

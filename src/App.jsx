@@ -1827,6 +1827,7 @@ function noticeMemberStatus(m){return String(m?.status||"").trim().toLowerCase()
 function getNoticeMemberDisplay(m){return [m?.name||m?.displayName||m?.memberName||"이름 없음",m?.email||m?.goal||m?.programType||m?.phone||""].filter(Boolean).join(" · ");}
 function isNoticeEligibleMember(m){
   if(!m) return false;
+  if(m.isOwner===true||m.role==="owner") return true; // 대표님은 항상 공지 대상 포함
   if(m.deleted===true||m.isDeleted===true||m.archived===true) return false;
   if(m.isActive===false) return false;
   if(["deleted","archived","inactive"].includes(noticeMemberStatus(m))) return false;
@@ -1856,7 +1857,8 @@ function NoticeAdminScreen({ members=[], onBack, showToast }) {
     return sortedEligible.filter(m => {
       const name = (m.name || m.displayName || "").toLowerCase();
       const email = (m.email || "").toLowerCase();
-      return name.includes(q) || email.includes(q) || matchSearch(m.name || m.displayName || "", memberSearch);
+      const ownerAlias = (m.isOwner || m.role === "owner") ? "teo 대표님 owner" : "";
+      return name.includes(q) || email.includes(q) || ownerAlias.includes(q) || matchSearch(m.name || m.displayName || "", memberSearch);
     });
   }, [sortedEligible, memberSearch]);
 
@@ -2498,11 +2500,19 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     return { lastDate, lastMuscle, remaining, daysSince, usedCount };
   }
 
+  function isTodayBirthday(m) {
+    const bm = Number(m.birthMonth), bd = Number(m.birthDay);
+    if (!bm || !bd) return false;
+    const now = new Date();
+    return now.getMonth() + 1 === bm && now.getDate() === bd;
+  }
+
   // 필터
   const FILTERS = [
     {key:"active",  label:"진행중",   color:"#5EEAD4"},
     {key:"paused",  label:"휴식중",   color:"#ffd166"},
     {key:"ended",   label:"종료회원", color:"#64748b"},
+    {key:"consult", label:"상담",     color:"#a78bfa"},
     {key:"all",     label:"전체",     color:"#94a3b8"},
     {key:"today",   label:"오늘 수업",color:"#5EEAD4"},
     {key:"7days",   label:"7일 미방문",color:"#ff9f43"},
@@ -2541,6 +2551,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
     }
     if (filter === "7days")   return meta.daysSince !== null && meta.daysSince > 7;
     if (filter === "14days")  return meta.daysSince !== null && meta.daysSince > 14;
+    if (filter === "consult") return (m.status||"").includes("상담") || (m.programType||"").includes("상담");
     if (filter === "diet")    return (m.goal||"").includes("다이어트") || (m.goal||"").includes("감량");
     if (filter === "bulk")    return (m.goal||"").includes("벌크") || (m.goal||"").includes("증량") || (m.goal||"").includes("근육");
     return true;
@@ -2593,24 +2604,6 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
         }
       />
 
-      {/* 2:1 전용 메뉴 */}
-      <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
-        background:"linear-gradient(135deg,rgba(255,209,102,.1),rgba(255,107,107,.06))",
-        border:"1px solid rgba(255,209,102,.25)",
-        display:"flex",alignItems:"center",justifyContent:"space-between",
-        cursor:"pointer"}}
-        onClick={onPair21}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:36,height:36,borderRadius:9,background:"rgba(255,209,102,.2)",
-            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업</div>
-            <Mo c="#64748b" s={10}>2인 동시 수업 전용 기록</Mo>
-          </div>
-        </div>
-        <Mo c="#ffd166" s={13}>→</Mo>
-      </div>
-
       {/* 대표님 전용 운동 기록 버튼 */}
       {ownerMember && (
         <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
@@ -2659,8 +2652,10 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
         ))}
         <div style={{flexShrink:0,position:"relative",marginLeft:"auto"}}>
           <button onClick={()=>setShowSort(v=>!v)}
-            style={{padding:"5px 10px",borderRadius:14,border:"1px solid rgba(255,255,255,0.08)",cursor:"pointer",
-              background:showSort?"rgba(255,255,255,0.08)":"transparent",color:"#54546a",fontSize:11,fontWeight:700}}>
+            style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
+              borderColor:sortBy==="recent"?"#5EEAD4":"rgba(255,255,255,0.08)",
+              background:showSort?"rgba(255,255,255,0.08)":"transparent",
+              color:sortBy==="recent"?"#5EEAD4":"#54546a",fontSize:11,fontWeight:700}}>
             ⇅ {SORTS.find(s=>s.key===sortBy)?.label}
           </button>
           {showSort && (
@@ -2677,6 +2672,42 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
             </div>
           )}
         </div>
+      </div>
+
+      {/* 오늘 생일인 회원 요약 */}
+      {(() => {
+        const bdays = filtered.filter(m => isTodayBirthday(m));
+        if (!bdays.length) return null;
+        return (
+          <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
+            background:"rgba(244,114,182,.07)",border:"1px solid rgba(244,114,182,.22)"}}>
+            <div style={{fontWeight:800,fontSize:12,color:"#f472b6",marginBottom:4}}>🎂 오늘 생일</div>
+            {bdays.map(m => (
+              <div key={m.id} style={{fontSize:11,color:"#ddddf0",cursor:"pointer",padding:"2px 0"}}
+                onClick={()=>onSelect(m)}>
+                {m.name}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* 2:1 전용 메뉴 */}
+      <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
+        background:"linear-gradient(135deg,rgba(255,209,102,.1),rgba(255,107,107,.06))",
+        border:"1px solid rgba(255,209,102,.25)",
+        display:"flex",alignItems:"center",justifyContent:"space-between",
+        cursor:"pointer"}}
+        onClick={onPair21}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:9,background:"rgba(255,209,102,.2)",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업</div>
+            <Mo c="#64748b" s={10}>2인 동시 수업 전용 기록</Mo>
+          </div>
+        </div>
+        <Mo c="#ffd166" s={13}>→</Mo>
       </div>
 
       {/* 회원 목록 */}
@@ -2697,6 +2728,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
             const isPainMgmt = recentSess3.some(s=>
               (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
             );
+            const isBirthday = isTodayBirthday(m);
 
             const status    = mStatus(m);
             const isEnded   = status === "ended";
@@ -2766,6 +2798,10 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
                       {!isEnded && isPainMgmt && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>💢 통증관리</span>
+                      )}
+                      {isBirthday && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(255,182,193,.2)",color:"#f472b6",fontWeight:700}}>🎂 생일</span>
                       )}
                       {!isEnded && (() => {
                         const draftSess = (sessionsMap[m.id] || []).find(s =>
@@ -4802,6 +4838,13 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
 // 운동 이름 → 부위/세부부위 자동 추천 매핑
 // ════════════════════════════════════════════
 const EX_MUSCLE_SUGGEST = [
+  // ── 사용자 지정 우선순위 ────────────────────
+  { keys:["덤벨 벤치프레스","db 벤치프레스"],                                           top:"가슴", sub:"가운데 가슴" },
+  { keys:["덤벨 플라이","db 플라이"],                                                    top:"가슴", sub:"가운데 가슴" },
+  { keys:["케이블 프론트 프레스"],                                                       top:"어깨", sub:"전면"       },
+  { keys:["리어델트 머신","rear delt machine"],                                           top:"어깨", sub:"후면"       },
+  { keys:["업라이트 로우","upright row"],                                                 top:"어깨", sub:"전면·측면"  },
+  { keys:["사이드 래터럴 레이즈","side lateral raise","래터럴 레이즈"],                   top:"어깨", sub:"측면"       },
   // ── 가슴 ──────────────────────────────────
   { keys:["벤치프레스","bench press","바벨 벤치"],      top:"가슴", sub:"대흉근 전체" },
   { keys:["인클라인 벤치","incline bench","윗가슴"],    top:"가슴", sub:"윗가슴"     },
@@ -4929,12 +4972,45 @@ function clearEquipLearn(name) {
   saveEquipLearn(data);
 }
 
+// 근육 부위 학습 데이터 — localStorage 기반, 3회 이상 선택 시 자동 적용
+const MUSCLE_LEARN_KEY = "tg_muscle_learn_v1";
+function loadMuscleLearn() {
+  try { return JSON.parse(localStorage.getItem(MUSCLE_LEARN_KEY)||"{}"); } catch { return {}; }
+}
+function saveMuscleLearn(data) {
+  try { localStorage.setItem(MUSCLE_LEARN_KEY, JSON.stringify(data)); } catch {}
+}
+function recordMuscleLearn(name, top, sub) {
+  if (!name || !top || !sub) return;
+  const key = normalizeExName(name);
+  if (!key || key.length < 2) return;
+  const data = loadMuscleLearn();
+  if (!data[key]) data[key] = { combos: {} };
+  const combo = `${top}||${sub}`;
+  data[key].combos[combo] = (data[key].combos[combo] || 0) + 1;
+  data[key].updatedAt = new Date().toISOString();
+  saveMuscleLearn(data);
+}
+function getLearnedMuscle(name) {
+  const key = normalizeExName(name);
+  if (!key || key.length < 2) return null;
+  const data = loadMuscleLearn();
+  const rec = data[key];
+  if (!rec?.combos) return null;
+  const best = Object.entries(rec.combos).filter(([,c]) => c >= 3).sort((a,b) => b[1]-a[1])[0];
+  if (!best) return null;
+  const [top, sub] = best[0].split("||");
+  return { top, sub };
+}
+
 // 통합 추천: 학습값 > 키워드 자동 매핑 순
 function suggestEquipment(name) {
   return getLearnedEquipment(name) || getAutoEquipmentByName(name);
 }
 
 function suggestMuscle(name) {
+  const learned = getLearnedMuscle(name);
+  if (learned) return learned;
   if (!name || name.trim().length < 2) return null;
   const lower = name.toLowerCase().replace(/[_\-]/g, " ");
   for (const rule of EX_MUSCLE_SUGGEST) {
@@ -5093,6 +5169,7 @@ function updateEx(ei, key, val) {
         u.muscleSub = mSubs(val)[0] || "";
         u._muscleManual = true; // 수동 수정됨
         u._autoSuggest  = false;
+        if (ex.name) recordMuscleLearn(ex.name, val, mSubs(val)[0] || "");
         // 기능 ↔ 일반 전환 시 세트 형식 변환
         const wasFunc = ex.muscleTop === "기능" || (ex.equipment === "맨몸" && ex.muscleTop === "코어");
         const isFunc  = val === "기능" || (ex.equipment === "맨몸" && val === "코어");
@@ -5110,7 +5187,10 @@ function updateEx(ei, key, val) {
         }
       }
       // muscleSub 수동 변경 감지
-      if (key === "muscleSub") { u._muscleManual = true; u._autoSuggest = false; }
+      if (key === "muscleSub") {
+        u._muscleManual = true; u._autoSuggest = false;
+        if (ex.name && ex.muscleTop) recordMuscleLearn(ex.name, ex.muscleTop, val);
+      }
       // funcCategory / funcBodyPart / funcTool 수동 변경 → _funcManual 플래그
       if (key === "funcCategory" || key === "funcBodyPart" || key === "funcTool") {
         u._funcManual = true;

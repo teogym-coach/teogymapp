@@ -345,6 +345,53 @@ const checks = [
     db.includes('export async function getReadSessionIds') &&
     db.includes('export async function markSessionsRead')
   ],
+  // ── 관리자앱 UX 개선 (2026-06) ──
+  ['레이아웃: 대표님 운동기록이 2:1 수업보다 앞에 위치',
+    (() => {
+      const ownerIdx = app.indexOf('대표님 전용 운동 기록 버튼');
+      const pairIdx  = app.indexOf('2:1 전용 메뉴');
+      return ownerIdx > 0 && pairIdx > 0 && ownerIdx < pairIdx;
+    })()
+  ],
+  ['필터: 상담 필터 존재',
+    app.includes('"consult"') && app.includes('label:"상담"') && app.includes('color:"#a78bfa"')
+  ],
+  ['공지: owner(TEO/대표님) 검색 가능',
+    app.includes('isOwner === true || m.role === "owner"') &&
+    app.includes('teo 대표님 owner') &&
+    app.includes('ownerAlias')
+  ],
+  ['운동 자동 분류: 덤벨 벤치프레스 → 가슴/가운데 가슴',
+    app.includes('"덤벨 벤치프레스"') && app.includes('sub:"가운데 가슴"')
+  ],
+  ['운동 자동 분류: 업라이트 로우 → 어깨/전면·측면',
+    app.includes('"업라이트 로우"') && (app.includes('sub:"전면·측면"') || app.includes("sub:'전면·측면'"))
+  ],
+  ['운동 자동 분류: 사이드 래터럴 레이즈 추가',
+    app.includes('"사이드 래터럴 레이즈"')
+  ],
+  ['근육 부위 자동 학습: MUSCLE_LEARN_KEY + threshold 3',
+    app.includes('MUSCLE_LEARN_KEY') &&
+    app.includes('recordMuscleLearn') &&
+    app.includes('getLearnedMuscle') &&
+    app.includes('c >= 3')
+  ],
+  ['근육 부위 자동 학습: suggestMuscle이 학습값 우선 사용',
+    app.includes('const learned = getLearnedMuscle(name)') &&
+    app.includes('if (learned) return learned;')
+  ],
+  ['생일 배지: isTodayBirthday 함수 존재',
+    app.includes('function isTodayBirthday(m)') &&
+    app.includes('now.getMonth() + 1 === bm && now.getDate() === bd')
+  ],
+  ['생일 배지: 회원 카드에 🎂 생일 배지 표시',
+    app.includes('isBirthday = isTodayBirthday(m)') &&
+    app.includes('🎂 생일')
+  ],
+  ['생일 배지: 오늘 생일 요약 섹션 존재',
+    app.includes('오늘 생일') &&
+    app.includes('filtered.filter(m => isTodayBirthday(m))')
+  ],
 ];
 
 let failed = 0;

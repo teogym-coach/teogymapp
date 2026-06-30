@@ -1664,10 +1664,15 @@ export default function App() {
   }
 
   async function handleSplitPairSession(pairSession) {
+    // members 상태가 비어 있는 경우(Home→pair21 직접 진입) DB에서 즉시 로드
+    let memberList = members;
+    if (!memberList.length) {
+      try { memberList = await getMembers(); setMembers(memberList); } catch(e) {}
+    }
     // ID 검색 → 이름 검색(trim) 순서로 폴백. 기존 데이터 memberAId가 빈 문자열인 경우 대응.
     const findMember = (id, name) => {
-      if (id) { const byId = members.find(m => m.id === id); if (byId) return byId; }
-      if (name) { const t = name.trim(); return members.find(m => (m.name||"").trim() === t) || null; }
+      if (id) { const byId = memberList.find(m => m.id === id); if (byId) return byId; }
+      if (name) { const t = name.trim(); return memberList.find(m => (m.name||"").trim() === t) || null; }
       return null;
     };
     const mA = findMember(pairSession.memberAId, pairSession.memberAName);
@@ -1818,7 +1823,7 @@ export default function App() {
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} />}
 
-        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>setScreen("members")} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
+        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
@@ -2248,7 +2253,7 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
   const navItems=[
     {label:"홈",          icon:icH,  act:true,  fn:null},
     {label:"회원 관리",    icon:icMb, act:false, fn:()=>{loadMembers();setScreen("members");}},
-    {label:"2:1 수업 관리",icon:icP2, act:false, fn:()=>{loadPairSessions&&loadPairSessions();setScreen("pair21");}},
+    {label:"2:1 수업 관리",icon:icP2, act:false, fn:()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}},
     {label:"수업 기록",    icon:icCl, act:false, fn:goCs},
     {label:"식단 관리",    icon:icDt, act:false, fn:goCs},
     {label:"분석 리포트",  icon:icBr, act:false, fn:goCs},
@@ -2347,7 +2352,7 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#F8FAFC",marginBottom:8}}>빠른 메뉴</div>
         <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:8,marginBottom:12}}>
           <HomeMenuCard svgIcon={qm} title="회원 관리" desc="회원 정보 등록 및 관리" onClick={()=>{loadMembers();setScreen("members");}} />
-          <HomeMenuCard svgIcon={qp} title="2:1 수업 관리" desc="2:1 수업 작성 및 관리" onClick={()=>{loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
+          <HomeMenuCard svgIcon={qp} title="2:1 수업 관리" desc="2:1 수업 작성 및 관리" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
           <HomeMenuCard svgIcon={qn} title="공지사항 관리" desc="공지 작성 및 관리" onClick={()=>setScreen("notices")} />
         </div>
 

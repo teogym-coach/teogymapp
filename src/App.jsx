@@ -21,7 +21,7 @@ import {
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
   checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
-  getPairSessions, savePairSession, deletePairSession, splitPairSession,
+  getPairSessions, savePairSession, deletePairSession, splitPairSession, updatePairSessionStatus,
   saveFcmToken,
   getReadSessionIds, markSessionsRead, SESSION_UNREAD_CUTOFF,
   saveAttendance, getAttendanceRecent,
@@ -1654,6 +1654,15 @@ export default function App() {
     }
   }
 
+  async function handlePairStatusChange(id, teamStatus) {
+    try {
+      await updatePairSessionStatus(id, teamStatus);
+      await loadPairSessions();
+      const label = {active:"진행중",paused:"휴식중",ended:"종료"}[teamStatus]||teamStatus;
+      showToast(`2:1 수업 상태 → ${label} ✓`);
+    } catch(e) { showToast(e.message, "err"); }
+  }
+
   async function handleSplitPairSession(pairSession) {
     const mA = members.find(m => m.id === pairSession.memberAId);
     const mB = members.find(m => m.id === pairSession.memberBId);
@@ -1796,13 +1805,13 @@ export default function App() {
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} />}
-        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} />}
+        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} />}
 
-        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>setScreen("members")} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} />}
+        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>setScreen("members")} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
@@ -2478,7 +2487,7 @@ const isOwner = (m) => {
   return false; // 이름 기반 판별 제거 — 마이그레이션 후에는 isOwner/role 필드만 사용
 };
 
-function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21 }) {
+function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {
   const today = new Date().toISOString().split("T")[0];
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
@@ -2717,23 +2726,25 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onRefre
         );
       })()}
 
-      {/* 2:1 전용 메뉴 */}
-      <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
-        background:"linear-gradient(135deg,rgba(255,209,102,.1),rgba(255,107,107,.06))",
-        border:"1px solid rgba(255,209,102,.25)",
-        display:"flex",alignItems:"center",justifyContent:"space-between",
-        cursor:"pointer"}}
-        onClick={onPair21}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:36,height:36,borderRadius:9,background:"rgba(255,209,102,.2)",
-            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업</div>
-            <Mo c="#64748b" s={10}>2인 동시 수업 전용 기록</Mo>
+      {/* 2:1 진입 카드 — 진행중 2:1이 1개 이상 있을 때, active/all 필터에서만 표시 */}
+      {(filter==="active"||filter==="all") && pairSessions.some(ps=>!ps.teamStatus||ps.teamStatus==="active") && (
+        <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
+          background:"linear-gradient(135deg,rgba(255,209,102,.1),rgba(255,107,107,.06))",
+          border:"1px solid rgba(255,209,102,.25)",
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          cursor:"pointer"}}
+          onClick={onPair21}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:36,height:36,borderRadius:9,background:"rgba(255,209,102,.2)",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
+            <div>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업 진행중</div>
+              <Mo c="#64748b" s={10}>{pairSessions.filter(ps=>!ps.teamStatus||ps.teamStatus==="active").length}팀 운영중 · 탭하여 관리</Mo>
+            </div>
           </div>
+          <Mo c="#ffd166" s={13}>→</Mo>
         </div>
-        <Mo c="#ffd166" s={13}>→</Mo>
-      </div>
+      )}
 
       {/* 회원 목록 */}
       {loading ? <Skel n={4} /> : filtered.length === 0 ? (
@@ -7018,12 +7029,36 @@ function ExNameList({ exercises }) {
   );
 }
 
-function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, onAdd, onEdit, onDelete, onSplit, onRefresh, showToast }) {
+function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, onAdd, onEdit, onDelete, onSplit, onRefresh, showToast, onStatusChange }) {
   const [confirmSplit, setConfirmSplit] = useState(null);
   const [splitting, setSplitting] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusMenuId, setStatusMenuId] = useState(null);
+  const [changingStatus, setChangingStatus] = useState(false);
 
-  const drafts    = pairSessions.filter(ps => !ps.splitDone).sort((a,b)=>(b.updatedAt?.seconds||0)-(a.updatedAt?.seconds||0));
-  const completed = pairSessions.filter(ps => ps.splitDone).sort((a,b)=>(b.splitAt?.seconds||b.updatedAt?.seconds||0)-(a.splitAt?.seconds||a.updatedAt?.seconds||0));
+  const getTeamStatus = (ps) => ps.teamStatus || "active";
+  const TEAM_STATUS_LABELS = {active:"진행중", paused:"휴식중", ended:"종료"};
+  const TEAM_STATUS_COLORS = {active:"#5EEAD4", paused:"#ffd166", ended:"#64748b"};
+
+  const byStatus = pairSessions
+    .filter(ps => getTeamStatus(ps) === statusFilter)
+    .sort((a,b) => (b.updatedAt?.seconds||0) - (a.updatedAt?.seconds||0));
+  const drafts    = byStatus.filter(ps => !ps.splitDone);
+  const completed = byStatus.filter(ps => ps.splitDone);
+
+  async function doStatusChange(ps, newStatus) {
+    if (!window.confirm(`"${ps.memberAName} + ${ps.memberBName}" 수업을 ${TEAM_STATUS_LABELS[newStatus]}(으)로 변경할까요?`)) return;
+    setChangingStatus(true);
+    try { await onStatusChange(ps.id, newStatus); }
+    catch(e) { showToast(e.message,"err"); }
+    finally { setChangingStatus(false); setStatusMenuId(null); }
+  }
+
+  const STATUS_TABS = [
+    {key:"active",  label:"진행중", color:"#5EEAD4"},
+    {key:"paused",  label:"휴식중", color:"#ffd166"},
+    {key:"ended",   label:"종료",   color:"#64748b"},
+  ];
 
   const fmtDate = (ps) => {
     const d = ps.updatedAt?.toDate ? ps.updatedAt.toDate() : (ps.updatedAt ? new Date(ps.updatedAt) : null);
@@ -7035,58 +7070,100 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
     return ps.date || d.toISOString().slice(0,10);
   };
 
-  const PsCard = ({ps}) => (
-    <div style={{background:"#111827",border:`1px solid ${ps.splitDone?"rgba(94,234,212,.2)":"rgba(255,209,102,.25)"}`,
-      borderRadius:10,padding:"12px 13px",marginBottom:8}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-        <div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#e2e8f0"}}>
-            {ps.memberAName} + {ps.memberBName}
+  const PsCard = ({ps}) => {
+    const ts = getTeamStatus(ps);
+    const tsColor = TEAM_STATUS_COLORS[ts];
+    const isMenuOpen = statusMenuId === ps.id;
+    return (
+      <div style={{position:"relative",background:"#111827",border:`1px solid ${ps.splitDone?"rgba(94,234,212,.2)":"rgba(255,209,102,.25)"}`,
+        borderRadius:10,padding:"12px 13px",marginBottom:8}}
+        onClick={()=>isMenuOpen&&setStatusMenuId(null)}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#e2e8f0"}}>
+              {ps.memberAName} + {ps.memberBName}
+            </div>
+            <Mo c="#54546a" s={9}>{ps.date} · {fmtDate(ps)}</Mo>
           </div>
-          <Mo c="#54546a" s={9}>{ps.date} · {fmtDate(ps)}</Mo>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+            <span style={{padding:"3px 8px",borderRadius:20,background:`${tsColor}18`,color:tsColor,fontSize:9,fontWeight:800}}>{TEAM_STATUS_LABELS[ts]}</span>
+            {ps.splitDone
+              ? <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:9,fontWeight:800}}>기록완료</span>
+              : <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(255,209,102,.12)",color:"#ffd166",fontSize:9,fontWeight:800}}>작성중</span>
+            }
+          </div>
         </div>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-          {ps.splitDone
-            ? <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:9,fontWeight:800}}>기록완료</span>
-            : <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(255,209,102,.12)",color:"#ffd166",fontSize:9,fontWeight:800}}>작성중</span>
-          }
-          {ps.splitDone && <Mo c="#54546a" s={8}>회원기록 생성완료</Mo>}
-        </div>
-      </div>
-      <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>
-        종목 {(ps.exercises||[]).length}개 · {ps.intensity||"중강도"}
-      </Mo>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        <button onClick={()=>onEdit(ps)}
-          style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${ps.splitDone?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
-            background:ps.splitDone?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
-            color:ps.splitDone?"#54546a":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
-          {ps.splitDone?"보기":"이어쓰기"}
-        </button>
-        {!ps.splitDone && (
-          <button onClick={()=>setConfirmSplit(ps)}
-            style={{flex:1,padding:"7px 10px",borderRadius:7,border:"1px solid rgba(94,234,212,.4)",
-              background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:10,fontWeight:800,cursor:"pointer"}}>
-            나눠서 기록
+        <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>
+          종목 {(ps.exercises||[]).length}개 · {ps.intensity||"중강도"}
+        </Mo>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button onClick={()=>onEdit(ps)}
+            style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${ps.splitDone?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
+              background:ps.splitDone?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
+              color:ps.splitDone?"#54546a":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+            {ps.splitDone?"보기":"이어쓰기"}
           </button>
-        )}
-        <button onClick={()=>onDelete(ps.id)}
-          style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,107,107,.2)",
-            background:"none",color:"#ff6b6b",fontSize:10,fontWeight:700,cursor:"pointer"}}>
-          삭제
-        </button>
+          {!ps.splitDone && (
+            <button onClick={()=>setConfirmSplit(ps)}
+              style={{flex:1,padding:"7px 10px",borderRadius:7,border:"1px solid rgba(94,234,212,.4)",
+                background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+              나눠서 기록
+            </button>
+          )}
+          <div style={{position:"relative"}}>
+            <button onClick={e=>{e.stopPropagation();setStatusMenuId(isMenuOpen?null:ps.id);}}
+              disabled={changingStatus}
+              style={{padding:"7px 10px",borderRadius:7,border:`1px solid ${tsColor}44`,
+                background:"none",color:tsColor,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+              상태 ▾
+            </button>
+            {isMenuOpen && (
+              <div style={{position:"absolute",right:0,bottom:36,background:"#1e293b",border:"1px solid rgba(255,255,255,0.1)",
+                borderRadius:8,zIndex:20,minWidth:110,boxShadow:"0 4px 16px rgba(0,0,0,.5)"}}>
+                {Object.entries(TEAM_STATUS_LABELS).filter(([k])=>k!==ts).map(([k,label])=>(
+                  <button key={k} onClick={e=>{e.stopPropagation();doStatusChange(ps,k);}}
+                    style={{display:"block",width:"100%",padding:"9px 14px",background:"none",border:"none",
+                      color:TEAM_STATUS_COLORS[k],fontSize:12,fontWeight:700,textAlign:"left",cursor:"pointer"}}>
+                    → {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={()=>onDelete(ps.id)}
+            style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,107,107,.2)",
+              background:"none",color:"#ff6b6b",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+            삭제
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div>
-      <SH title="⚡ 2:1 수업" sub={`${pairSessions.length}개`}
+      <SH title="⚡ 2:1 수업" sub={`${byStatus.length}개`}
         right={<div style={{display:"flex",gap:6}}>
           <Btn ghost sm onClick={onRefresh}>↻</Btn>
           <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
           <Btn sm onClick={onAdd}>+ 2:1 추가</Btn>
         </div>} />
+
+      {/* 상태 필터 탭 */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {STATUS_TABS.map(t=>(
+          <button key={t.key} onClick={()=>setStatusFilter(t.key)}
+            style={{padding:"6px 14px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
+              borderColor:statusFilter===t.key?t.color:"rgba(255,255,255,0.08)",
+              background:statusFilter===t.key?`${t.color}18`:"transparent",
+              color:statusFilter===t.key?t.color:"#54546a"}}>
+            {t.label}
+            <span style={{marginLeft:4,fontSize:9,opacity:.7}}>
+              {pairSessions.filter(ps=>getTeamStatus(ps)===t.key).length}
+            </span>
+          </button>
+        ))}
+      </div>
 
       {confirmSplit && (
         <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
@@ -7126,6 +7203,14 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
             "+ 2:1 추가" 버튼으로<br/>새 2:1 수업을 시작하세요
           </Mo>
           <Btn onClick={onAdd}>+ 2:1 추가</Btn>
+        </div>
+      )}
+
+      {pairSessions.length > 0 && byStatus.length === 0 && (
+        <div style={{textAlign:"center",padding:"32px 20px"}}>
+          <Mo c="#54546a" s={12} style={{display:"block",fontWeight:700}}>
+            {TEAM_STATUS_LABELS[statusFilter]} 2:1 수업이 없습니다
+          </Mo>
         </div>
       )}
 

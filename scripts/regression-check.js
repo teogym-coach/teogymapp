@@ -349,7 +349,7 @@ const checks = [
   ['레이아웃: 대표님 운동기록이 2:1 수업보다 앞에 위치',
     (() => {
       const ownerIdx = app.indexOf('대표님 전용 운동 기록 버튼');
-      const pairIdx  = app.indexOf('2:1 전용 메뉴');
+      const pairIdx  = app.indexOf('2:1 진입 카드');
       return ownerIdx > 0 && pairIdx > 0 && ownerIdx < pairIdx;
     })()
   ],
@@ -481,6 +481,39 @@ const checks = [
     app.includes('최근 7일') &&
     app.includes('최근 30일') &&
     app.includes('대사 추정·식단 분석 참고용')
+  ],
+  // ── 2:1 수업 상태 관리 ──
+  ['2:1 메인 카드: active/all 필터에서만 표시 조건',
+    app.includes('filter==="active"||filter==="all"') &&
+    app.includes('pairSessions.some(ps=>!ps.teamStatus||ps.teamStatus==="active")')
+  ],
+  ['2:1 메인 카드: MembersScreen이 pairSessions prop 수신',
+    app.includes('function MembersScreen(') &&
+    app.includes('pairSessions=[]')
+  ],
+  ['2:1 관리 화면: 진행중/휴식중/종료 상태 필터 탭',
+    app.includes('statusFilter') &&
+    app.includes('STATUS_TABS') &&
+    app.includes('"active"') &&
+    app.includes('"paused"') &&
+    app.includes('"ended"')
+  ],
+  ['2:1 관리 화면: 기본 필터 진행중(active)',
+    app.includes('useState("active")')
+  ],
+  ['2:1 상태 변경: updatePairSessionStatus db.js 함수',
+    db.includes('export async function updatePairSessionStatus(id, teamStatus)')
+  ],
+  ['2:1 상태 변경: handlePairStatusChange App.jsx 핸들러',
+    app.includes('async function handlePairStatusChange(id, teamStatus)')
+  ],
+  ['2:1 상태 변경: teamStatus 필드 savePairSession에 포함',
+    db.includes('teamStatus: data.teamStatus || "active"')
+  ],
+  ['2:1 상태 배지: PsCard에 TEAM_STATUS_LABELS 표시',
+    app.includes('TEAM_STATUS_LABELS') &&
+    app.includes('TEAM_STATUS_COLORS') &&
+    app.includes('getTeamStatus(ps)')
   ],
 ];
 

@@ -1614,6 +1614,7 @@ export async function savePairSession(data, id = null) {
     memberBName: data.memberBName || "",
     date: data.date || new Date().toISOString().slice(0, 10),
     status: data.status || "draft",
+    teamStatus: data.teamStatus || "active",
     splitDone: data.splitDone || false,
     splitAt: data.splitAt || null,
     exercises: data.exercises || [],
@@ -1644,6 +1645,15 @@ export async function deletePairSession(id) {
   if (!snap.exists()) return;
   if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
   await deleteDoc(ref);
+}
+
+export async function updatePairSessionStatus(id, teamStatus) {
+  const uid = requireUid();
+  const ref = doc(db, "pairSessions", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("2:1 수업을 찾을 수 없습니다.");
+  if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
+  await updateDoc(ref, { teamStatus, updatedAt: serverTimestamp() });
 }
 
 export async function splitPairSession(pairSessionId, memberASessionData, memberBSessionData) {

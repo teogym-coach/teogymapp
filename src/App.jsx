@@ -1759,7 +1759,7 @@ export default function App() {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
           width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))"}}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} />}
         {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
@@ -2073,7 +2073,26 @@ function NoticeAdminScreen({ members=[], onBack, showToast }) {
     </div>
   );
 }
-function HomeMenuCard({ icon, title, desc, accentColor, onClick }) {
+function StatCard({ label, value }) {
+  return (
+    <div style={{
+      background:"#0D1420", border:"1px solid rgba(255,255,255,.07)",
+      borderRadius:12, padding:"14px 8px", textAlign:"center",
+    }}>
+      <div style={{
+        fontFamily:"'Syne',sans-serif", fontWeight:900, fontSize:22,
+        color:"#5EEAD4", lineHeight:1, marginBottom:5,
+      }}>{value}</div>
+      <div style={{
+        fontFamily:"'DM Mono',monospace", fontSize:8,
+        color:"#374151", letterSpacing:".05em", lineHeight:1.3,
+        whiteSpace:"pre-line",
+      }}>{label}</div>
+    </div>
+  );
+}
+
+function HomeMenuCard({ svgIcon, title, desc, onClick }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
@@ -2081,71 +2100,107 @@ function HomeMenuCard({ icon, title, desc, accentColor, onClick }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        width:"100%", padding:"18px 20px", borderRadius:14, cursor:"pointer",
-        border:`1px solid rgba(${accentColor},.22)`,
-        background: hovered
-          ? `linear-gradient(135deg,rgba(${accentColor},.1),rgba(${accentColor},.04))`
-          : `linear-gradient(135deg,rgba(${accentColor},.06),rgba(0,0,0,0))`,
-        color:"#fff", display:"flex", alignItems:"center", gap:16, textAlign:"left",
+        width:"100%", padding:"16px 18px", borderRadius:14, cursor:"pointer",
+        border:`1px solid ${hovered?"rgba(45,212,191,.28)":"rgba(255,255,255,.07)"}`,
+        background: hovered ? "rgba(45,212,191,.04)" : "#0D1420",
+        color:"#fff", display:"flex", alignItems:"center", gap:14, textAlign:"left",
         transition:"all .18s ease",
-        boxShadow: hovered ? `0 4px 24px rgba(${accentColor},.12)` : "none",
+        boxShadow: hovered ? "0 4px 28px rgba(45,212,191,.08)" : "none",
       }}>
       <div style={{
-        width:50, height:50, borderRadius:13, flexShrink:0,
-        background:`rgba(${accentColor},.12)`,
-        border:`1px solid rgba(${accentColor},.2)`,
-        display:"flex", alignItems:"center", justifyContent:"center", fontSize:22,
-        transition:"transform .18s ease",
-        transform: hovered ? "scale(1.06)" : "scale(1)",
-      }}>{icon}</div>
+        width:44, height:44, borderRadius:11, flexShrink:0,
+        background: hovered ? "rgba(45,212,191,.1)" : "rgba(255,255,255,.04)",
+        border:`1px solid ${hovered?"rgba(45,212,191,.28)":"rgba(255,255,255,.08)"}`,
+        display:"flex", alignItems:"center", justifyContent:"center",
+        transition:"all .18s ease",
+      }}>{svgIcon}</div>
       <div style={{flex:1}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"#e2e8f0",marginBottom:4,letterSpacing:"-.2px"}}>{title}</div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#475569",lineHeight:1.5}}>{desc}</div>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#e2e8f0",marginBottom:3,letterSpacing:"-.2px"}}>{title}</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#374151",lineHeight:1.5,letterSpacing:".02em"}}>{desc}</div>
       </div>
-      <span style={{color:`rgba(${accentColor},.5)`,fontSize:18,fontWeight:300}}>›</span>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+        stroke={hovered?"#2DD4BF":"#2a3548"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        style={{flexShrink:0,transition:"stroke .18s ease"}}>
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
     </button>
   );
 }
 
-function HomeScreen({ setScreen, loadMembers }) {
+function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions, loadPairSessions }) {
+  const today = new Date().toISOString().slice(0,10);
+  const activeCount = (members||[]).filter(m => (m.status||"active") !== "ended").length;
+  const todayCount  = Object.values(sessionsMap||{}).reduce((n,ss) => n + (ss||[]).filter(s=>(s.date||"").slice(0,10)===today).length, 0);
+  const draftPair   = (pairSessions||[]).filter(ps=>!ps.splitDone).length;
+
+  const iconMembers = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5EEAD4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="7" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>
+    </svg>
+  );
+  const iconNotice = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5EEAD4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </svg>
+  );
+  const iconPair = (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#5EEAD4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="7" r="3"/><circle cx="16" cy="7" r="3"/>
+      <path d="M2 21c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M18 14.5c1.7.6 3 2.3 3 4.5"/>
+    </svg>
+  );
+
   return (
-    <div style={{paddingTop:32,paddingBottom:24}}>
+    <div style={{paddingTop:36,paddingBottom:32,maxWidth:540,margin:"0 auto",paddingLeft:16,paddingRight:16}}>
+
       {/* 브랜드 헤더 */}
-      <div style={{textAlign:"center",marginBottom:40}}>
+      <div style={{textAlign:"center",marginBottom:32}}>
+        {/* TG 모노그램 */}
         <div style={{
-          display:"inline-flex",alignItems:"center",gap:12,
-          background:"linear-gradient(135deg,rgba(94,234,212,.1),rgba(124,111,255,.07))",
-          border:"1px solid rgba(94,234,212,.18)",
-          borderRadius:18,padding:"14px 22px",marginBottom:16,
+          width:52, height:52, borderRadius:14, margin:"0 auto 18px",
+          background:"linear-gradient(135deg,#0D1F30,#0f1c2e)",
+          border:"1px solid rgba(45,212,191,.35)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          boxShadow:"0 0 24px rgba(45,212,191,.1)",
         }}>
-          <span style={{fontSize:30}}>🏋️</span>
-          <div style={{textAlign:"left"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:24,color:"#fff",letterSpacing:"-0.8px",lineHeight:1.1}}>TEO GYM</div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",letterSpacing:".15em",marginTop:3}}>ADMIN SYSTEM</div>
-          </div>
+          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"#2DD4BF",letterSpacing:"-.5px"}}>TG</span>
         </div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#475569",letterSpacing:".04em"}}>기록으로 관리하는 PT 시스템</div>
+
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:30,color:"#f0f4f8",letterSpacing:"-1.2px",lineHeight:1,marginBottom:7}}>TEO GYM</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#2DD4BF",letterSpacing:".22em",marginBottom:10}}>PT MANAGEMENT SYSTEM</div>
+        <div style={{display:"inline-block",width:28,height:1,background:"rgba(45,212,191,.3)",marginBottom:10}}/>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#2a3a52",letterSpacing:".06em"}}>기록으로 관리하는 PT 시스템</div>
+      </div>
+
+      {/* 통계 카드 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:20}}>
+        <StatCard label={"전체\n회원"} value={activeCount} />
+        <StatCard label={"오늘\n수업"} value={todayCount} />
+        <StatCard label={"2:1\n작성중"} value={draftPair} />
       </div>
 
       {/* 메뉴 카드 */}
-      <div style={{display:"grid",gap:10,maxWidth:480,margin:"0 auto"}}>
+      <div style={{display:"grid",gap:8}}>
         <HomeMenuCard
-          icon="👥" title="회원 관리"
+          svgIcon={iconMembers} title="회원 관리"
           desc="등록 · 수업일지 · 운동기록 · 분석"
-          accentColor="0,229,160"
           onClick={() => { loadMembers(); setScreen("members"); }}
         />
         <HomeMenuCard
-          icon="📢" title="공지사항 관리"
+          svgIcon={iconNotice} title="공지사항 관리"
           desc="작성 · 수정 · 게시/숨김 · 회원별 공지"
-          accentColor="94,234,212"
           onClick={() => setScreen("notices")}
+        />
+        <HomeMenuCard
+          svgIcon={iconPair} title="2:1 수업 관리"
+          desc="2인 동시 수업 기록 · 나눠서 기록"
+          onClick={() => { loadPairSessions && loadPairSessions(); setScreen("pair21"); }}
         />
       </div>
 
       {/* 하단 서명 */}
-      <div style={{textAlign:"center",marginTop:40}}>
-        <Mo c="#1e293b" s={9} style={{letterSpacing:".08em"}}>TEO GYM · PT MANAGEMENT</Mo>
+      <div style={{textAlign:"center",marginTop:36}}>
+        <Mo c="#1a2337" s={9} style={{letterSpacing:".1em"}}>TEO GYM · PT MANAGEMENT</Mo>
       </div>
     </div>
   );

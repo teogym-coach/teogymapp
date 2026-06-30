@@ -2085,11 +2085,11 @@ function SideNavItem({ icon, label, active, onClick }) {
   return (
     <button onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
       style={{
-        width:"100%",display:"flex",alignItems:"center",gap:10,
-        padding:"10px 12px",borderRadius:9,cursor:"pointer",
+        width:"100%",display:"flex",alignItems:"center",gap:9,
+        padding:"8px 10px",borderRadius:8,cursor:"pointer",
         border:"none",textAlign:"left",
         background:active?"linear-gradient(90deg,rgba(45,212,191,.16),rgba(45,212,191,.04))":hov?"rgba(255,255,255,.04)":"transparent",
-        color:lit?"#5EEAD4":"#64748B",transition:"all .15s ease",marginBottom:2,
+        color:lit?"#5EEAD4":"#64748B",transition:"all .15s ease",marginBottom:1,
       }}>
       <span style={{color:lit?"#5EEAD4":"#374151",flexShrink:0,display:"flex",alignItems:"center"}}>{icon}</span>
       <span style={{fontFamily:"'Syne',sans-serif",fontWeight:lit?700:500,fontSize:12,letterSpacing:"-.1px"}}>{label}</span>
@@ -2100,18 +2100,18 @@ function SideNavItem({ icon, label, active, onClick }) {
 
 function DashStatCard({ icon, label, value, sub, note }) {
   return (
-    <div style={{background:"#0D1520",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:"16px 14px"}}>
+    <div style={{background:"#0D1520",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,padding:"12px 12px"}}>
       <div style={{
-        width:40,height:40,borderRadius:11,
+        width:34,height:34,borderRadius:9,
         background:"rgba(45,212,191,.09)",border:"1px solid rgba(45,212,191,.18)",
-        display:"flex",alignItems:"center",justifyContent:"center",marginBottom:12,
+        display:"flex",alignItems:"center",justifyContent:"center",marginBottom:9,
       }}>{icon}</div>
-      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#64748B",letterSpacing:".06em",marginBottom:4}}>{label}</div>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8.5,color:"#64748B",letterSpacing:".05em",marginBottom:3}}>{label}</div>
       <div style={{display:"flex",alignItems:"baseline",gap:3}}>
-        <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:26,color:"#F8FAFC",lineHeight:1}}>{value}</span>
-        <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4"}}>{sub}</span>
+        <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:22,color:"#F8FAFC",lineHeight:1}}>{value}</span>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#5EEAD4"}}>{sub}</span>
       </div>
-      {note && <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#374151",marginTop:5}}>{note}</div>}
+      {note && <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#374151",marginTop:4}}>{note}</div>}
     </div>
   );
 }
@@ -2129,7 +2129,7 @@ function HomeMenuCard({ svgIcon, title, desc, onClick }) {
         boxShadow:hovered?"0 4px 28px rgba(45,212,191,.08)":"none",
       }}>
       <div style={{
-        width:46,height:46,borderRadius:12,flexShrink:0,
+        width:40,height:40,borderRadius:10,flexShrink:0,
         background:hovered?"rgba(45,212,191,.1)":"rgba(45,212,191,.06)",
         border:`1px solid ${hovered?"rgba(45,212,191,.3)":"rgba(45,212,191,.15)"}`,
         display:"flex",alignItems:"center",justifyContent:"center",transition:"all .18s ease",
@@ -2208,128 +2208,130 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
     {label:"설정",         icon:icGr, act:false, fn:goCs},
   ];
 
-  const PAD = isWide ? "20px 24px" : "14px 14px";
+  // iPad Pro 11" landscape 기준 높이 (dvh = dynamic viewport height, Safari 주소창 대응)
+  const VH = "100dvh";
+  const PAD = isWide ? "14px 20px" : "12px 14px";
 
   const mainContent = (
-    <div style={{flex:1,overflowY:"auto",height:isWide?"100vh":undefined,background:"#070B12"}}>
+    <div style={{flex:1,overflowY:"auto",minHeight:0,height:isWide?VH:undefined,background:"#070B12"}}>
       {/* Top bar */}
       <div style={{
         display:"flex",alignItems:"center",justifyContent:"flex-end",
-        padding:"12px 20px",borderBottom:"1px solid rgba(255,255,255,.06)",
+        padding:"9px 20px",borderBottom:"1px solid rgba(255,255,255,.06)",
         gap:10,background:"#070B12",
         ...(isWide?{position:"sticky",top:0,zIndex:10}:{}),
       }}>
         <button onClick={goCs} style={{
           background:"none",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,
-          color:"#64748B",padding:"7px 9px",cursor:"pointer",
+          color:"#64748B",padding:"6px 8px",cursor:"pointer",
           display:"flex",alignItems:"center",justifyContent:"center",
         }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
         </button>
         <button onClick={onLogout} style={{
           background:"none",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,
-          color:"#64748B",fontSize:11,fontWeight:700,padding:"7px 12px",
+          color:"#64748B",fontSize:10,fontWeight:700,padding:"6px 11px",
           cursor:"pointer",fontFamily:"'Syne',sans-serif",
         }}>로그아웃</button>
       </div>
 
       <div style={{padding:PAD}}>
         {/* Greeting */}
-        <div style={{marginBottom:isWide?18:14}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:isWide?20:17,color:"#F8FAFC",marginBottom:3}}>안녕하세요, 대표님</div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#64748B"}}>오늘도 회원들의 변화를 만들어가는 하루 되세요.</div>
+        <div style={{marginBottom:isWide?10:10}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:isWide?18:16,color:"#F8FAFC",marginBottom:2}}>안녕하세요, 대표님</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9.5,color:"#64748B"}}>오늘도 회원들의 변화를 만들어가는 하루 되세요.</div>
         </div>
 
         {/* Hero */}
         <div style={{
           background:"linear-gradient(135deg,#08142A 0%,#0A1E30 55%,#071828 100%)",
           border:"1px solid rgba(255,255,255,.07)",
-          borderRadius:18,padding:isWide?"30px 36px":"22px 20px",
-          marginBottom:14,position:"relative",overflow:"hidden",
-          display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,
+          borderRadius:16,padding:isWide?"18px 28px":"16px 18px",
+          marginBottom:10,position:"relative",overflow:"hidden",
+          display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,
         }}>
           <div style={{position:"absolute",inset:0,opacity:.065,pointerEvents:"none"}}>
-            <svg width="100%" height="100%" viewBox="0 0 600 220" preserveAspectRatio="xMidYMid slice">
+            <svg width="100%" height="100%" viewBox="0 0 600 180" preserveAspectRatio="xMidYMid slice">
               {[0,1,2,3,4,5].map(i=>(
-                <path key={i} d={`M${-60+i*130},220 C${-10+i*130},140 ${40+i*130},80 ${70+i*130},0`}
+                <path key={i} d={`M${-60+i*130},180 C${-10+i*130},110 ${40+i*130},60 ${70+i*130},0`}
                   stroke="#2DD4BF" strokeWidth="1" fill="none"/>
               ))}
             </svg>
           </div>
-          <div style={{position:"absolute",top:-40,right:isWide?180:50,width:180,height:180,
+          <div style={{position:"absolute",top:-30,right:isWide?160:40,width:150,height:150,
             background:"radial-gradient(circle,rgba(45,212,191,.1) 0%,transparent 70%)",pointerEvents:"none"}}/>
 
           <div style={{position:"relative",zIndex:1,minWidth:0}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:isWide?44:28,color:"#F8FAFC",letterSpacing:isWide?"-2px":"-1px",lineHeight:1,marginBottom:8}}>TEO GYM</div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:isWide?10:8,color:"#2DD4BF",letterSpacing:".22em",marginBottom:10}}>PT MANAGEMENT SYSTEM</div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:isWide?11:9,color:"#374151"}}>기록으로 관리하는 PT 시스템</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:isWide?38:24,color:"#F8FAFC",letterSpacing:isWide?"-1.8px":"-0.8px",lineHeight:1,marginBottom:6}}>TEO GYM</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:isWide?9:7.5,color:"#2DD4BF",letterSpacing:".2em",marginBottom:7}}>PT MANAGEMENT SYSTEM</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:isWide?10:8,color:"#374151"}}>기록으로 관리하는 PT 시스템</div>
           </div>
 
           {/* TG 원형 로고 */}
           <div style={{flexShrink:0,position:"relative",zIndex:1}}>
             <div style={{
-              width:isWide?110:70,height:isWide?110:70,borderRadius:"50%",
+              width:isWide?88:62,height:isWide?88:62,borderRadius:"50%",
               background:"linear-gradient(135deg,#071E20,#0A2022)",
               border:"2px solid #2DD4BF",
               display:"flex",alignItems:"center",justifyContent:"center",
-              boxShadow:"0 0 36px rgba(45,212,191,.22),0 0 80px rgba(45,212,191,.07)",
+              boxShadow:"0 0 30px rgba(45,212,191,.2),0 0 60px rgba(45,212,191,.06)",
               position:"relative",
             }}>
-              <div style={{position:"absolute",inset:isWide?-14:-9,borderRadius:"50%",border:"1px solid rgba(45,212,191,.2)"}}/>
-              <div style={{position:"absolute",inset:isWide?-27:-16,borderRadius:"50%",border:"1px solid rgba(45,212,191,.1)"}}/>
-              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:isWide?32:20,color:"#2DD4BF",letterSpacing:"-1px"}}>TG</span>
+              <div style={{position:"absolute",inset:isWide?-12:-8,borderRadius:"50%",border:"1px solid rgba(45,212,191,.2)"}}/>
+              <div style={{position:"absolute",inset:isWide?-22:-14,borderRadius:"50%",border:"1px solid rgba(45,212,191,.1)"}}/>
+              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:isWide?26:17,color:"#2DD4BF",letterSpacing:"-1px"}}>TG</span>
             </div>
           </div>
         </div>
 
         {/* 통계 4개 */}
-        <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(4,1fr)":"repeat(2,1fr)",gap:10,marginBottom:18}}>
+        <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(4,1fr)":"repeat(2,1fr)",gap:8,marginBottom:12}}>
           <DashStatCard icon={sc1} label="전체 회원" value={activeCount} sub="명" note="" />
           <DashStatCard icon={sc2} label="오늘 수업" value={todayCount} sub="건" note="" />
           <DashStatCard icon={sc3} label="2:1 작성중" value={draftPair} sub="건" note="Draft 상태" />
-          <DashStatCard icon={sc4} label="미게시 수업" value={unpubCount} sub="건" note="회원앱 미공개" />
+          <DashStatCard icon={sc4} label="미게시 수업" value={unpubCount} sub="건" note="미공개" />
         </div>
 
         {/* 빠른 메뉴 */}
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#F8FAFC",marginBottom:10}}>빠른 메뉴</div>
-        <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:10,marginBottom:18}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#F8FAFC",marginBottom:8}}>빠른 메뉴</div>
+        <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:8,marginBottom:12}}>
           <HomeMenuCard svgIcon={qm} title="회원 관리" desc="회원 정보 등록 및 관리" onClick={()=>{loadMembers();setScreen("members");}} />
           <HomeMenuCard svgIcon={qp} title="2:1 수업 관리" desc="2:1 수업 작성 및 관리" onClick={()=>{loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
           <HomeMenuCard svgIcon={qn} title="공지사항 관리" desc="공지 작성 및 관리" onClick={()=>setScreen("notices")} />
         </div>
 
         {/* 하단 카드 2개 */}
-        <div style={{display:"grid",gridTemplateColumns:isWide?"1fr 1fr":"1fr",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:isWide?"1fr 1fr":"1fr",gap:8}}>
           {/* 오늘의 수업 일정 */}
-          <div style={{background:"#0D1520",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:"18px 20px"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#F8FAFC"}}>오늘의 수업 일정</div>
-              <button onClick={()=>{loadMembers();setScreen("members");}} style={{background:"none",border:"none",color:"#2DD4BF",fontSize:10,fontFamily:"'DM Mono',monospace",cursor:"pointer",padding:0,fontWeight:700}}>전체 보기</button>
+          <div style={{background:"#0D1520",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,padding:"12px 16px",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:9}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#F8FAFC"}}>오늘의 수업 일정</div>
+              <button onClick={()=>{loadMembers();setScreen("members");}} style={{background:"none",border:"none",color:"#2DD4BF",fontSize:9,fontFamily:"'DM Mono',monospace",cursor:"pointer",padding:0,fontWeight:700}}>전체 보기</button>
             </div>
             {todaySess.length===0?(
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#374151",padding:"12px 0",textAlign:"center"}}>오늘 예정된 수업이 없습니다.</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9.5,color:"#374151",padding:"8px 0",textAlign:"center"}}>오늘 예정된 수업이 없습니다.</div>
             ):(
-              todaySess.slice(0,4).map((item,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<Math.min(3,todaySess.length-1)?"1px solid rgba(255,255,255,.04)":"none"}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#374151",width:36,flexShrink:0}}>PT</div>
-                  <div style={{flex:1,fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:12,color:"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.m.name} 회원</div>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94A3B8",flexShrink:0}}>PT 60분</div>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,fontWeight:700,padding:"3px 7px",borderRadius:5,background:"rgba(45,212,191,.1)",color:"#2DD4BF",flexShrink:0}}>완료</div>
+              todaySess.slice(0,2).map((item,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:i<Math.min(1,todaySess.length-1)?"1px solid rgba(255,255,255,.04)":"none"}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#374151",width:30,flexShrink:0}}>PT</div>
+                  <div style={{flex:1,fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:11,color:"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.m.name} 회원</div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",flexShrink:0}}>PT 60분</div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:7.5,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(45,212,191,.1)",color:"#2DD4BF",flexShrink:0}}>완료</div>
                 </div>
               ))
             )}
           </div>
 
           {/* 최근 공지사항 */}
-          <div style={{background:"#0D1520",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:"18px 20px"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#F8FAFC"}}>최근 공지사항</div>
-              <button onClick={()=>setScreen("notices")} style={{background:"none",border:"none",color:"#2DD4BF",fontSize:10,fontFamily:"'DM Mono',monospace",cursor:"pointer",padding:0,fontWeight:700}}>전체 보기</button>
+          <div style={{background:"#0D1520",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,padding:"12px 16px",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:9}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#F8FAFC"}}>최근 공지사항</div>
+              <button onClick={()=>setScreen("notices")} style={{background:"none",border:"none",color:"#2DD4BF",fontSize:9,fontFamily:"'DM Mono',monospace",cursor:"pointer",padding:0,fontWeight:700}}>전체 보기</button>
             </div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#374151",padding:"12px 0",textAlign:"center"}}>공지사항 관리에서 확인해주세요.</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9.5,color:"#374151",padding:"8px 0",textAlign:"center"}}>공지사항 관리에서 확인해주세요.</div>
           </div>
         </div>
       </div>
@@ -2338,55 +2340,55 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
 
   return (
     <>
-      <div style={{display:"flex",height:"100vh",background:"#070B12",overflow:"hidden"}}>
+      <div style={{display:"flex",height:VH,background:"#070B12",overflow:"hidden"}}>
         {/* 사이드바 (와이드 전용) */}
         {isWide && (
           <aside style={{
-            width:210,minWidth:210,background:"#08111F",
+            width:204,minWidth:204,background:"#08111F",
             borderRight:"1px solid rgba(255,255,255,.07)",
             display:"flex",flexDirection:"column",
-            height:"100vh",overflow:"hidden",flexShrink:0,
+            height:VH,overflow:"hidden",flexShrink:0,
           }}>
             {/* 로고 */}
-            <div style={{padding:"20px 16px 16px",borderBottom:"1px solid rgba(255,255,255,.07)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{padding:"16px 14px 13px",borderBottom:"1px solid rgba(255,255,255,.07)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:9}}>
                 <div style={{
-                  width:36,height:36,borderRadius:9,flexShrink:0,
+                  width:34,height:34,borderRadius:8,flexShrink:0,
                   background:"linear-gradient(135deg,#071E1E,#0C2020)",
                   border:"1.5px solid #2DD4BF",
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  boxShadow:"0 0 16px rgba(45,212,191,.18)",
+                  boxShadow:"0 0 14px rgba(45,212,191,.16)",
                 }}>
-                  <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:14,color:"#2DD4BF",letterSpacing:"-.4px"}}>TG</span>
+                  <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:13,color:"#2DD4BF",letterSpacing:"-.4px"}}>TG</span>
                 </div>
                 <div>
-                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:13,color:"#F8FAFC",letterSpacing:"-.3px",lineHeight:1.1}}>TEO GYM</div>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:6.5,color:"#2DD4BF",letterSpacing:".12em",marginTop:2}}>PT MANAGEMENT SYSTEM</div>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:12.5,color:"#F8FAFC",letterSpacing:"-.3px",lineHeight:1.1}}>TEO GYM</div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:6,color:"#2DD4BF",letterSpacing:".1em",marginTop:2}}>PT MANAGEMENT SYSTEM</div>
                 </div>
               </div>
             </div>
 
             {/* 네비게이션 */}
-            <nav style={{flex:1,padding:"10px 8px",overflowY:"auto"}}>
+            <nav style={{flex:1,padding:"8px 6px",overflowY:"auto"}}>
               {navItems.map((item,i)=>(
                 <SideNavItem key={i} icon={item.icon} label={item.label} active={item.act} onClick={item.fn||undefined} />
               ))}
             </nav>
 
             {/* 하단 유저 */}
-            <div style={{padding:"14px 14px",borderTop:"1px solid rgba(255,255,255,.07)",display:"flex",alignItems:"center",gap:10}}>
+            <div style={{padding:"11px 12px",borderTop:"1px solid rgba(255,255,255,.07)",display:"flex",alignItems:"center",gap:9}}>
               <div style={{
-                width:30,height:30,borderRadius:7,flexShrink:0,
+                width:28,height:28,borderRadius:6,flexShrink:0,
                 background:"linear-gradient(135deg,#071E1E,#0C2020)",
                 border:"1px solid rgba(45,212,191,.4)",
                 display:"flex",alignItems:"center",justifyContent:"center",
-                fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:13,color:"#2DD4BF",
+                fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:12,color:"#2DD4BF",
               }}>T</div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:11,color:"#F8FAFC",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>TEO GYM</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#64748B",marginTop:1}}>관리자</div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:10.5,color:"#F8FAFC",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>TEO GYM</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:7.5,color:"#64748B",marginTop:1}}>관리자</div>
               </div>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
           </aside>
         )}

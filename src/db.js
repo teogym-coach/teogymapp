@@ -1672,3 +1672,45 @@ export async function splitPairSession(pairSessionId, memberASessionData, member
   });
   return { aSessionId: aRef.id, bSessionId: bRef.id };
 }
+
+// ════════════════════════════════════════════
+// 출석 — members/{id}/attendance/{YYYY-MM-DD}
+// ════════════════════════════════════════════
+export async function saveAttendance(memberId, dateKey) {
+  requireUid();
+  const ref = doc(db, "members", memberId, "attendance", dateKey);
+  const snap = await getDoc(ref);
+  if (snap.exists()) return { duplicate: true };
+  await setDoc(ref, {
+    date: dateKey,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    source: "memberApp",
+  });
+  return { duplicate: false };
+}
+
+export async function getAttendanceMonth(memberId, year, month) {
+  requireUid();
+  const ym = `${year}-${String(month).padStart(2, "0")}`;
+  const snap = await getDocs(
+    query(collection(db, "members", memberId, "attendance"),
+      where("date", ">=", `${ym}-01`),
+      where("date", "<=", `${ym}-31`),
+    )
+  );
+  return snap.docs.map(d => d.data());
+}
+
+export async function getAttendanceRecent(memberId, days = 90) {
+  requireUid();
+  const since = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+  const snap = await getDocs(
+    query(collection(db, "members", memberId, "attendance"),
+      where("date", ">=", since),
+      orderBy("date", "desc"),
+      limit(100),
+    )
+  );
+  return snap.docs.map(d => d.data());
+}

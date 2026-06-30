@@ -157,6 +157,15 @@ service cloud.firestore {
         allow delete: if isTrainerOfMember(memberId);
       }
 
+      match /attendance/{dateId} {
+        allow read: if isTrainerOfMember(memberId) || isMemberSelf(memberId);
+        allow create: if isMemberSelf(memberId)
+                      && request.resource.data.keys().hasOnly(["date", "createdAt", "updatedAt", "source"])
+                      && request.resource.data.date == dateId;
+        allow update: if false;
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
       match /readSessions/{sessionId} {
         allow read: if isTrainerOfMember(memberId) || isMemberSelf(memberId);
         allow create, update: if isMemberSelf(memberId)

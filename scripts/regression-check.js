@@ -411,6 +411,47 @@ const checks = [
   ['NEW 배지: 카드 클릭 시 읽음 처리',
     app.includes('markAdminInputRead(m.id);onSelect(m)')
   ],
+  // ── 출석 기능 ──
+  ['출석 기능: saveAttendance 함수 존재 (db.js)',
+    db.includes('export async function saveAttendance(memberId, dateKey)') &&
+    db.includes('duplicate: true') &&
+    db.includes('source: "memberApp"')
+  ],
+  ['출석 기능: getAttendanceRecent 함수 존재 (db.js)',
+    db.includes('export async function getAttendanceRecent(memberId')
+  ],
+  ['출석 기능: Firestore Rules attendance 본인만 write',
+    firestoreRules.includes('match /attendance/{dateId}') &&
+    firestoreRules.includes('allow create: if isMemberSelf(memberId)') &&
+    firestoreRules.includes('allow update: if false')
+  ],
+  ['출석 기능: AttendanceCard 컴포넌트 존재',
+    app.includes('function AttendanceCard({attendance') &&
+    app.includes('출석하기') &&
+    app.includes('이번 달 출석')
+  ],
+  ['출석 기능: AttendanceCalendar 컴포넌트 존재 (건강관리 탭)',
+    app.includes('function AttendanceCalendar({attendance') &&
+    app.includes('출석 캘린더')
+  ],
+  ['출석 기능: 중복 출석 방지 (duplicate check)',
+    db.includes('if (snap.exists()) return { duplicate: true }')
+  ],
+  ['출석 기능: attendance import (App.jsx)',
+    app.includes('saveAttendance, getAttendanceRecent')
+  ],
+  ['섭취칼로리: getKcalLogs 사용 (dates+logs 통합)',
+    app.includes('const kcalLogs=getKcalLogs(effectiveNutrition)') &&
+    app.includes('const recentKcal=kcalLogs.find(l=>l.date===today)')
+  ],
+  ['홈 공지사항: NoticeCard 홈에 포함',
+    app.includes('NoticeCard notices={p.notices}') &&
+    app.includes('function NoticeCard({notices=[]')
+  ],
+  ['관리자 출석 확인: HubScreen 출석 현황 섹션',
+    app.includes('hubAttendance') &&
+    app.includes('getAttendanceRecent(member.id')
+  ],
 ];
 
 let failed = 0;

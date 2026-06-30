@@ -21,7 +21,7 @@ const appName = getRuntimeAppMode();
 
 // 관리자 앱과 회원전용 앱은 같은 Firebase 프로젝트를 쓰지만 Auth app name을 분리한다.
 // 이렇게 하면 동일 브라우저/동일 origin에서도 관리자 세션과 회원앱 세션 저장소가 섞이지 않는다.
-const app  = initializeApp(firebaseConfig, appName);
+export const app  = initializeApp(firebaseConfig, appName);
 export const db   = getFirestore(app);
 export const auth = getAuth(app);
 export const authAppName = appName;

@@ -896,6 +896,15 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   return { height, startWeight, currentWeight, targetWeightKg, workoutFrequency, weeklyWorkoutCount, messages: results };
 }
 
+export async function saveFcmToken(memberId, token) {
+  if (!memberId || !token) return;
+  requireUid();
+  await updateDoc(doc(db, "members", memberId), {
+    fcmToken: token,
+    fcmTokenUpdatedAt: serverTimestamp(),
+  });
+}
+
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   requireUid();
   const batch = writeBatch(db);

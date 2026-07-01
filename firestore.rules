@@ -80,11 +80,12 @@ service cloud.firestore {
         && data.get('visibility', '') != "hidden";
     }
 
-    // 현재 사용자가 이 회원의 트레이너인지 확인 (notices 접근 제어용)
-    function isMyTrainerUid(trainerUid) {
-      return exists(/databases/$(database)/documents/members/$(request.auth.uid)) == false
-        && isSignedIn()
-        && trainerUid == uid();
+    // settings/trainers 문서에 등록된 트레이너 uid인지 검증
+    // 회원 계정은 이 목록에 없으므로 pairSessions·notices 생성·수정·삭제 불가
+    function isVerifiedTrainer() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/settings/trainers)
+        && uid() in get(/databases/$(database)/documents/settings/trainers).data.uids;
     }
 
     function memberProfileUpdateKeysAllowed() {
@@ -265,6 +266,13 @@ service cloud.firestore {
       }
     }
 
+    // settings: 로그인 사용자 읽기 허용 (isVerifiedTrainer 함수에서 rules 내부 get() 사용)
+    // 쓰기는 Firebase Console에서만 — 클라이언트 수정 불가
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /dailyConditioning/{conditioningId} {
       allow read: if isSignedIn() && isPublishedData(resource.data);
       allow create, update: if isSignedIn() && request.resource.data.trainerUid == uid();
@@ -273,21 +281,39 @@ service cloud.firestore {
 
     match /notices/{noticeId} {
       allow read: if isSignedIn()
-        && (resource.data.trainerUid == uid()
+        && (resource.data.get('trainerUid', '') == uid()
           || (resource.data.isPublished == true
             && (resource.data.targetType == "all"
               || (resource.data.targetType == "member"
                 && isTargetMemberSelf(resource.data.targetMemberId)))));
-      allow create: if isSignedIn() && request.resource.data.trainerUid == uid() && request.resource.data.createdBy == uid();
-      allow update: if isSignedIn() && resource.data.trainerUid == uid() && request.resource.data.trainerUid == uid();
-      allow delete: if isSignedIn() && resource.data.trainerUid == uid();
+      // create/update/delete: isVerifiedTrainer() 로 settings/trainers 목록 검증
+      // → 회원 uid는 목록에 없으므로 차단, trainerUid 필드값 조작 불가
+      allow create: if isSignedIn()
+        && request.resource.data.get('trainerUid', '') == uid()
+        && request.resource.data.get('createdBy', '') == uid()
+        && isVerifiedTrainer();
+      allow update: if isSignedIn()
+        && resource.data.get('trainerUid', '') == uid()
+        && request.resource.data.get('trainerUid', '') == uid()
+        && isVerifiedTrainer();
+      allow delete: if isSignedIn()
+        && resource.data.get('trainerUid', '') == uid()
+        && isVerifiedTrainer();
     }
 
     match /pairSessions/{pairSessionId} {
-      allow read: if isSignedIn() && resource.data.trainerUid == uid();
-      allow create: if isSignedIn() && request.resource.data.trainerUid == uid();
-      allow update: if isSignedIn() && resource.data.trainerUid == uid();
-      allow delete: if isSignedIn() && resource.data.trainerUid == uid();
+      allow read: if isSignedIn() && resource.data.get('trainerUid', '') == uid();
+      // create/update/delete: trainerUid == uid() + members 컬렉션에서 실제 트레이너임을 검증
+      // → 회원이 자신의 uid를 trainerUid로 설정해도 isTrainerOfMember() 에서 차단
+      allow create: if isSignedIn()
+        && request.resource.data.get('trainerUid', '') == uid()
+        && isTrainerOfMember(request.resource.data.memberAId);
+      allow update: if isSignedIn()
+        && resource.data.get('trainerUid', '') == uid()
+        && isTrainerOfMember(resource.data.memberAId);
+      allow delete: if isSignedIn()
+        && resource.data.get('trainerUid', '') == uid()
+        && isTrainerOfMember(resource.data.memberAId);
     }
   }
 }

@@ -724,6 +724,8 @@ describe("TEO GYM Firestore Rules v8", function () {
   // ════════════════════════════════════════════════════
   describe("10. pairSessions (2:1 수업) — 관리자 전용", () => {
     beforeEach(async () => {
+      // isTrainerOfMember() 검증에 필요한 회원 문서 시드
+      await seedMembers({ "member_a": memberActive });
       await seedGlobal("pairSessions", "pair_001", {
         trainerUid: TRAINER_UID, memberAId: "member_a", memberBId: "member_b",
       });
@@ -734,7 +736,8 @@ describe("TEO GYM Firestore Rules v8", function () {
       await assertSucceeds(db.collection("pairSessions").doc("pair_001").get());
     });
 
-    it("[관리자] pairSessions create 허용 (trainerUid == 본인)", async () => {
+    it("[관리자] pairSessions create 허용 (isTrainerOfMember 통과)", async () => {
+      // TRAINER_UID == members/member_a.trainerUid → isTrainerOfMember 통과
       const db = asUser(testEnv, TRAINER_UID);
       await assertSucceeds(
         db.collection("pairSessions").doc("pair_002").set({
@@ -743,22 +746,44 @@ describe("TEO GYM Firestore Rules v8", function () {
       );
     });
 
+    it("[관리자] pairSessions update 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(
+        db.collection("pairSessions").doc("pair_001").update({ status: "recorded" })
+      );
+    });
+
+    it("[관리자] pairSessions delete 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("pairSessions").doc("pair_001").delete());
+    });
+
     it("[진행중 회원] pairSessions read 차단", async () => {
       const db = asUser(testEnv, MEMBER_A_UID);
       await assertFails(db.collection("pairSessions").doc("pair_001").get());
     });
 
-    it("[진행중 회원] pairSessions create 허용 (자신의 uid를 trainerUid로 설정 가능 — 설계 한계)", async () => {
-      // ⚠ 알려진 한계: Rules는 "trainerUid == uid()" 만 검사하므로
-      //   회원도 본인 uid를 trainerUid로 넣으면 생성 가능.
-      //   그러나 관리자앱은 자신의 trainer uid로만 조회하므로 UI에 노출되지 않음.
-      //   실제 영향: DB 오염 가능, 다른 회원 데이터 접근 불가 → 위험도 낮음.
+    it("[진행중 회원] pairSessions create 차단 (isTrainerOfMember 불통과)", async () => {
+      // MEMBER_A_UID를 trainerUid로 설정해도 members/member_a.trainerUid == TRAINER_UID 이므로 차단
       const db = asUser(testEnv, MEMBER_A_UID);
-      await assertSucceeds(
-        db.collection("pairSessions").doc("pair_member_fake").set({
-          trainerUid: MEMBER_A_UID, memberAId: "member_a",
+      await assertFails(
+        db.collection("pairSessions").doc("pair_fake").set({
+          trainerUid: MEMBER_A_UID, memberAId: "member_a", memberBId: "member_b",
         })
       );
+    });
+
+    it("[진행중 회원] pairSessions update 차단", async () => {
+      // pair_001.trainerUid == TRAINER_UID ≠ MEMBER_A_UID → 첫 번째 조건에서 차단
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("pairSessions").doc("pair_001").update({ status: "fake" })
+      );
+    });
+
+    it("[진행중 회원] pairSessions delete 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("pairSessions").doc("pair_001").delete());
     });
 
     it("[비로그인] pairSessions read 차단", async () => {
@@ -837,6 +862,8 @@ describe("TEO GYM Firestore Rules v8", function () {
   describe("13. notices", () => {
     beforeEach(async () => {
       await seedMembers({ "member_a": memberActive });
+      // isVerifiedTrainer() 검증을 위한 settings/trainers 문서 시드
+      await seedGlobal("settings", "trainers", { uids: [TRAINER_UID] });
       await seedGlobal("notices", "notice_all", {
         trainerUid: TRAINER_UID, createdBy: TRAINER_UID,
         isPublished: true, targetType: "all", title: "전체 공지",
@@ -871,7 +898,8 @@ describe("TEO GYM Firestore Rules v8", function () {
       await assertFails(db.collection("notices").doc("notice_unpub").get());
     });
 
-    it("[관리자] 공지 create 허용 (trainerUid == createdBy == uid)", async () => {
+    it("[관리자] 공지 create 허용 (settings/trainers 목록 검증 통과)", async () => {
+      // TRAINER_UID가 settings/trainers.uids 목록에 있으므로 isVerifiedTrainer() 통과
       const db = asUser(testEnv, TRAINER_UID);
       await assertSucceeds(
         db.collection("notices").doc("new_notice").set({
@@ -881,19 +909,42 @@ describe("TEO GYM Firestore Rules v8", function () {
       );
     });
 
-    it("[진행중 회원] 공지 create 허용 (자신의 uid를 trainerUid로 설정 가능 — 설계 한계)", async () => {
-      // ⚠ 알려진 한계: Rules는 "trainerUid == uid() && createdBy == uid()" 만 검사하므로
-      //   회원도 본인 uid를 trainerUid로 넣으면 공지 생성 가능.
-      //   그러나 관리자앱과 회원앱 모두 각자 trainer uid로 조회하므로 UI에는 노출 안 됨.
-      //   실제 영향: DB 오염 가능, published+all 타입이면 notice ID를 아는 회원이 읽기 가능.
-      //   개선 방향: 별도 trainers 컬렉션 또는 커스텀 클레임으로 trainer 신원 검증 필요.
-      const db = asUser(testEnv, MEMBER_A_UID);
+    it("[관리자] 공지 update 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
       await assertSucceeds(
+        db.collection("notices").doc("notice_all").update({
+          trainerUid: TRAINER_UID, title: "수정된 공지",
+        })
+      );
+    });
+
+    it("[관리자] 공지 delete 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("notices").doc("notice_all").delete());
+    });
+
+    it("[진행중 회원] 공지 create 차단 (isVerifiedTrainer 불통과)", async () => {
+      // MEMBER_A_UID는 settings/trainers.uids 목록에 없으므로 차단
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
         db.collection("notices").doc("fake_notice").set({
           trainerUid: MEMBER_A_UID, createdBy: MEMBER_A_UID,
           isPublished: true, targetType: "all", title: "가짜 공지",
         })
       );
+    });
+
+    it("[진행중 회원] 공지 update 차단", async () => {
+      // notice_all.trainerUid == TRAINER_UID ≠ MEMBER_A_UID → 첫 번째 조건에서 차단
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("notices").doc("notice_all").update({ title: "해킹된 공지" })
+      );
+    });
+
+    it("[진행중 회원] 공지 delete 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("notices").doc("notice_all").delete());
     });
   });
 

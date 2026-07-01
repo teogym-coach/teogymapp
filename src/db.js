@@ -62,16 +62,24 @@ function clean(obj) {
   return obj;
 }
 
-// ── 디버그 로그 ──────────────────────────────────────
+// ── 디버그 로그 (개발 환경 전용) ─────────────────────
 function dbLog(fn, ...args) {
+  if (process.env.NODE_ENV === "production") return;
   const uid = auth.currentUser?.uid || "none";
   console.log(`[DB:${fn}] uid=${uid}`, ...args);
 }
 
 function dbWarn(fn, ...args) {
+  if (process.env.NODE_ENV === "production") return;
   const uid = auth.currentUser?.uid || "none";
   console.warn(`[DB:${fn}] uid=${uid}`, ...args);
 }
+
+// ── 회원앱 접근 허용 상태값 ───────────────────────────
+const MEMBER_ACTIVE_STATUSES = new Set([
+  "active", "pt", "pt_active", "in_progress",
+  "진행중", "진행", "pt진행", "pt 진행중",
+]);
 
 function describeFirestoreError(e) {
   return {
@@ -435,7 +443,6 @@ async function verifyMemberOwnership(memberId) {
   const snap = await getDoc(doc(db, "members", memberId));
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   if (snap.data().trainerUid !== uid) {
-    console.error(`[DB] 권한 위반: memberId=${memberId} trainerUid=${snap.data().trainerUid} myUid=${uid}`);
     throw new Error("이 회원에 대한 권한이 없습니다.");
   }
   return uid;
@@ -447,7 +454,6 @@ async function verifyMemberProfileAccess(memberId) {
   if (!snap.exists()) throw new Error("회원을 찾을 수 없습니다.");
   const data = snap.data() || {};
   if (data.trainerUid !== uid && data.memberUid !== uid) {
-    console.error(`[DB] 회원앱 권한 위반: memberId=${memberId} trainerUid=${data.trainerUid} memberUid=${data.memberUid} myUid=${uid}`);
     throw new Error("이 회원에 대한 권한이 없습니다.");
   }
   return uid;
@@ -813,11 +819,9 @@ export async function saveMemberProfileFields(memberId, data = {}) {
 
     if (Object.keys(memberPayload).length) {
       memberPayload.updatedAt = now;
-      console.log("[saveMemberProfile] memberPayload", { path: `members/${memberId}`, memberPayload });
       await updateDoc(memberRef, clean(memberPayload));
       results.push("프로필 기본정보 저장 성공");
     } else {
-      console.log("[saveMemberProfile] memberPayload", { path: `members/${memberId}`, memberPayload: {}, skipped: "변경된 members 필드 없음" });
       results.push("프로필 기본정보 변경 없음");
     }
   } catch (e) {
@@ -843,15 +847,12 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   if (Object.keys(onboardingPayload).length) {
     try {
       onboardingPayload.updatedAt = now;
-      console.log("[saveMemberProfile] onboardingPayload", { path: `members/${memberId}/memberOnboarding/main`, onboardingPayload });
       await setDoc(onboardingRef, clean(onboardingPayload), { merge: true });
       results.push("온보딩 정보 저장 성공");
     } catch (e) {
       console.error("[DB:saveMemberProfileFields] memberOnboarding write failed", { path: `members/${memberId}/memberOnboarding/main`, code: e?.code, message: e?.message, memberId });
       failures.push(`온보딩 정보 저장 실패: memberOnboarding/main 권한 오류 (${e?.message || String(e)})`);
     }
-  } else {
-    console.log("[saveMemberProfile] onboardingPayload", { path: `members/${memberId}/memberOnboarding/main`, onboardingPayload: {}, skipped: "변경된 memberOnboarding 필드 없음" });
   }
 
   const bodyCheckPayload = {};
@@ -871,15 +872,12 @@ export async function saveMemberProfileFields(memberId, data = {}) {
         }));
       }
       bodyCheckPayload.updatedAt = serverTimestamp();
-      console.log("[saveMemberProfile] bodyCheckPayload", { path: `members/${memberId}/bodyCheck/main`, bodyCheckPayload });
       await setDoc(bodyRef, clean(bodyCheckPayload), { merge: true });
       results.push("체중 기록 저장 성공");
     } catch (e) {
       console.error("[DB:saveMemberProfileFields] bodyCheck write failed", { path: `members/${memberId}/bodyCheck/main`, code: e?.code, message: e?.message, memberId });
       failures.push(`체중 기록 저장 실패: bodyCheck/main 권한 오류 (${e?.message || String(e)})`);
     }
-  } else {
-    console.log("[saveMemberProfile] bodyCheckPayload", { path: `members/${memberId}/bodyCheck/main`, bodyCheckPayload: {}, skipped: "변경된 bodyCheck 필드 없음" });
   }
 
   if (failures.length) {
@@ -1171,6 +1169,17 @@ export async function getMemberAppProfile() {
     if (!snap.empty) {
       const memberDoc = snap.docs[0];
       const data = memberDoc.data();
+      // memberStatus 검사 — "active" 계열 진행중 회원만 허용
+      const rawStatus = String(data.status || data.memberStatus || "").trim().toLowerCase();
+      const statusIsActive = rawStatus
+        ? (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행"))
+        : false;
+      if (!statusIsActive || data.isActive === false) {
+        const err = new Error("현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
+        err.code = "member/inactive";
+        err.memberAppDetails = { code: "member/inactive" };
+        throw err;
+      }
       diagnostics.membersRead = true;
       diagnostics.matchedMemberId = memberDoc.id;
       diagnostics.matchedBy = "members.memberUid";
@@ -1463,7 +1472,6 @@ export async function getRoutineRecommendations(memberId, { publishedOnly = fals
   const snap = await getDocs(publishedOnly ? query(baseRef, where("status", "==", "published")) : baseRef);
   const result = snap.docs.map(d => ({ id: d.id, ...normalizeRecommendation(d.data()) }))
     .filter(r => !publishedOnly || isPublishedData(r));
-  console.log("[memberApp:routineRecommendation:fetch]", path, result);
   return result
     .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")) || String(b.createdAt?.seconds||0).localeCompare(String(a.createdAt?.seconds||0)));
 }
@@ -1493,7 +1501,6 @@ export async function saveRoutineRecommendation(memberId, recommendationId, data
     ...(snap?.exists?.() ? {} : { createdAt: serverTimestamp() }),
   });
   const path = `members/${memberId}/routineRecommendations/${ref.id}`;
-  console.log("[routineRecommendation:publish]", path, payload);
   await setDoc(ref, payload, { merge: true });
   const saved = await getDoc(ref);
   const savedData = normalizeRecommendation(saved.data() || {});
@@ -1512,8 +1519,8 @@ export async function deleteRoutineRecommendation(memberId, recommendationId) {
 export async function getDailyConditioning({ memberId = null, publishedOnly = false } = {}) {
   requireUid();
   const read = async (colPath, scope) => {
-    try { const path = colPath.join("/"); const baseRef = collection(db, ...colPath); const snap = await getDocs(publishedOnly ? query(baseRef, where("status", "==", "published")) : baseRef); const result = snap.docs.map(d=>({ id:d.id, scope, ...normalizeRecommendation(d.data()) })); console.log("[memberApp:dailyConditioning:fetch]", path, result); return result; }
-    catch(e){ console.warn("[DB:getDailyConditioning] read failed", scope, e?.code, e?.message); return []; }
+    try { const baseRef = collection(db, ...colPath); const snap = await getDocs(publishedOnly ? query(baseRef, where("status", "==", "published")) : baseRef); return snap.docs.map(d=>({ id:d.id, scope, ...normalizeRecommendation(d.data()) })); }
+    catch(e){ if (process.env.NODE_ENV !== "production") console.warn("[DB:getDailyConditioning] read failed", scope, e?.code, e?.message); return []; }
   };
   const rows = [ ...(await read(["dailyConditioning"], "global")) ];
   if (memberId) rows.push(...(await read(["members", memberId, "dailyConditioning"], "member")));
@@ -1533,7 +1540,6 @@ export async function saveDailyConditioning(data, { memberId = null, publish = f
     status, published: status === "published", isPublished: status === "published", publishedAt: publish ? serverTimestamp() : (data.publishedAt || null), updatedAt: serverTimestamp(), createdAt: data.createdAt || serverTimestamp(),
   });
   const path = memberId ? `members/${memberId}/dailyConditioning/${date}` : `dailyConditioning/${date}`;
-  console.log("[dailyConditioning:publish]", path, payload);
   await setDoc(ref, payload, { merge: true });
   const saved = await getDoc(ref);
   const savedData = normalizeRecommendation(saved.data() || {});

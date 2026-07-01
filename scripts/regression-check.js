@@ -33,7 +33,7 @@ const checks = [
   ['Firestore Rules bodyCheck 회원 create/update/read 허용', firestoreRules.includes('match /bodyCheck/{docId}') && firestoreRules.includes('bodyCheckProfileCreateKeysAllowed') && firestoreRules.includes('bodyCheckProfileUpdateKeysAllowed') && firestoreRules.includes('docId == "main"')],
   ['회원앱 members.memberUid 쿼리 조회', memberProfileFn.includes('collection(db, "members")') && memberProfileFn.includes('where("memberUid", "==", uid)') && memberProfileFn.includes('limit(1)')],
   ['회원앱 memberAppIndex 미사용', !memberProfileFn.includes('memberAppIndex') && !app.includes('memberAppIndex')],
-  ['Firestore Rules members 본인 list 허용', firestoreRules.includes('allow get, list: if canReadMemberData(resource.data)') && firestoreRules.includes('return isTrainerData(data) || isMemberUidData(data)')],
+  ['Firestore Rules members 본인 list 허용', firestoreRules.includes('allow get, list: if canReadMemberData(resource.data)') && firestoreRules.includes('isMemberStatusActive(data)')],
   ['createMemberAppIndexForMember Cloud Function 제거', !functionsIndex.includes('exports.createMemberAppIndexForMember') && !functionsIndex.includes('memberAppIndex/{')],
   ['공지 대상 회원 엄격 필터 제거', app.includes('function isNoticeEligibleMember(m)') && !app.includes('m.remainingSessions==null') && !app.includes('status!=="active"') && app.includes('["deleted","archived","inactive"].includes(noticeMemberStatus(m))')],
   ['개별 공지 저장/회원앱 조회', db.includes('targetType=data.targetType==="member"?"member":"all"') && db.includes('targetMemberId=targetType==="member"') && db.includes('targetMemberName=targetType==="member"') && db.includes('where("targetType","==","member"),where("targetMemberId","==",memberId)')],
@@ -116,7 +116,7 @@ const checks = [
     })()
   ],
   ['published=false 세션 회원앱 미노출',
-    firestoreRules.includes('isMemberSelf(memberId) && resource.data.isPublished == true') &&
+    firestoreRules.includes('isMemberSelfActive(memberId) && resource.data.isPublished == true') &&
     db.includes('getPublishedSessions') &&
     db.includes('where("isPublished", "==", true)')
   ],
@@ -439,7 +439,7 @@ const checks = [
   ],
   ['출석 기능: Firestore Rules attendance 본인만 write',
     firestoreRules.includes('match /attendance/{dateId}') &&
-    firestoreRules.includes('allow create: if isMemberSelf(memberId)') &&
+    firestoreRules.includes('allow create: if isMemberSelfActive(memberId)') &&
     firestoreRules.includes('allow update: if false')
   ],
   ['운동 체크: AttendanceCard 컴포넌트 — 운동 체크 문구',
@@ -475,7 +475,7 @@ const checks = [
   ],
   ['출석 기능: Firestore Rules attendance 본인만 write',
     firestoreRules.includes('match /attendance/{dateId}') &&
-    firestoreRules.includes('allow create: if isMemberSelf(memberId)') &&
+    firestoreRules.includes('allow create: if isMemberSelfActive(memberId)') &&
     firestoreRules.includes('allow update: if false')
   ],
   ['출석 기능: 중복 출석 방지 (duplicate check)',

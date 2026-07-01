@@ -251,9 +251,9 @@ describe("TEO GYM Firestore Rules v8", function () {
       await assertFails(db.collection("members").doc("member_ended").get());
     });
 
-    it("[상태없는 회원] 본인 문서 get 차단", async () => {
+    it("[상태없는 회원] 본인 문서 get 허용 (status 없으면 active 간주)", async () => {
       const db = asUser(testEnv, "nostatus_uid");
-      await assertFails(db.collection("members").doc("member_nostatus").get());
+      await assertSucceeds(db.collection("members").doc("member_nostatus").get());
     });
 
     // ── 임의 사용자 ──

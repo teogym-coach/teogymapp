@@ -1170,10 +1170,11 @@ export async function getMemberAppProfile() {
       const memberDoc = snap.docs[0];
       const data = memberDoc.data();
       // memberStatus 검사 — "active" 계열 진행중 회원만 허용
+      // status/memberStatus 필드 없으면 active 간주 (관리자앱 기본값과 동일)
       const rawStatus = String(data.status || data.memberStatus || "").trim().toLowerCase();
-      const statusIsActive = rawStatus
-        ? (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행"))
-        : false;
+      const statusIsActive = !rawStatus
+        ? true
+        : (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행"));
       if (!statusIsActive || data.isActive === false) {
         const err = new Error("현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
         err.code = "member/inactive";

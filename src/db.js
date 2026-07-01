@@ -82,6 +82,7 @@ function describeFirestoreError(e) {
 }
 
 function logMemberRulesEvaluation(fn, memberId, memberData) {
+  if (process.env.NODE_ENV === "production") return {};
   const user = auth.currentUser;
   const uid = user?.uid || null;
   const authEmail = (user?.email || "").trim().toLowerCase();
@@ -90,19 +91,13 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
     path: `members/${memberId}`,
     authUid: uid,
     authEmail,
-    trainerUid: memberData?.trainerUid || null,
     memberUid: memberData?.memberUid || null,
     memberEmail,
-    trainerMatch: !!uid && memberData?.trainerUid === uid,
     memberUidMatch: !!uid && memberData?.memberUid === uid,
     emailMatchesForDisplayOnly: !!authEmail && !!memberEmail && authEmail === memberEmail,
   };
-  result.canAccessMember = result.trainerMatch || result.memberUidMatch;
-  result.publishedSessionsRule = "trainerMatch OR (memberUidMatch AND sessions.isPublished == true)";
-  result.bodyCheckRule = "trainerMatch OR memberUidMatch";
-  result.memberCheckinsRule = "trainerMatch OR memberUidMatch";
-  result.memberMessagesRule = "trainerMatch OR memberUidMatch";
-  result.memberOnboardingRule = "trainerMatch OR memberUidMatch (허용된 프로필 필드만)";
+  result.canAccessMember = result.memberUidMatch;
+  result.publishedSessionsRule = "memberUidMatch AND sessions.isPublished == true";
   dbLog(fn, "Firestore Rules 평가(클라이언트 추정):", result);
   return result;
 }
@@ -1198,7 +1193,7 @@ export async function getMemberAppProfile() {
   }
 
   dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
-  const err = new Error("members 컬렉션에서 현재 로그인 UID와 연결된 회원 문서를 찾을 수 없습니다.");
+  const err = new Error("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요.");
   err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
   err.memberAppDetails = { code: err.code, path: "members?where(memberUid==auth.uid)", ...diagnostics };
   throw err;

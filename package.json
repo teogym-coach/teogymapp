@@ -17,7 +17,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "regression": "node scripts/regression-check.js",
-    "test:rules": "firebase emulators:exec --only firestore \"npx mocha --timeout 30000 --exit tests/rules/firestore.rules.test.mjs\""
+    "test:rules": "npm install --prefix tests/rules && firebase emulators:exec --only firestore \"npx mocha --timeout 30000 --exit tests/rules/firestore.rules.test.mjs\""
   },
   "eslintConfig": {
     "extends": [
@@ -37,7 +37,6 @@
     ]
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^5.0.1",
     "chai": "^6.2.2",
     "firebase": "^10.14.1",
     "mocha": "^11.7.6"

@@ -1,0 +1,10 @@
+{
+  "name": "teocoach-rules-tests",
+  "private": true,
+  "type": "module",
+  "description": "Firestore Rules unit tests — isolated from main app dependencies",
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.0.0"
+  }
+}

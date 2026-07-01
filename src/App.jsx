@@ -8110,7 +8110,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                 setConfirmSplit(false);
                 try {
                   await handleManualSave();
-                  await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name} : null);
+                  await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
                 } catch(e){ showToast(e.message||"실패","err"); }
               }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:"pointer",
                 background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontWeight:800,fontSize:13}}>

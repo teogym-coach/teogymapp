@@ -77,7 +77,7 @@ function initialBmrCalories(profile={},onboarding={},body=null){const {weight,he
 function initialMaintenanceCalories(profile={},onboarding={},body=null,checkins=[]){const bmr=initialBmrCalories(profile,onboarding,body); const explicitAct=onboarding.activityLevel&&ACTIVITY_MULT?.[onboarding.activityLevel]; const factor=explicitAct||activityFactorFromProfile(onboarding,checkins); return Math.round(bmr*factor);}
 function getKcalLogs(nutrition={}){const byDate=new Map(); (nutrition?.logs||[]).forEach(l=>{const kcal=toPositiveNumber(l.kcal||l.totalKcal||l.memberInputKcal||l.cal); if(l.date&&kcal)byDate.set(l.date,{date:l.date,kcal,source:l.source||l.sourceType||"log"});}); Object.entries(nutrition?.dates||{}).forEach(([date,d])=>{const kcal=toPositiveNumber(d.totalKcal||d.memberInputKcal||d.kcal||d.cal); if(kcal)byDate.set(date,{date,kcal,source:d.source||"date"});}); return [...byDate.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));}
 function getRecentKcalLogsByDays(nutrition={},days=7){const since=new Date(Date.now()-(Math.max(1,days)-1)*86400000).toISOString().slice(0,10); return getKcalLogs(nutrition).filter(x=>String(x.date)>=since);}
-function averageKcalLogs(rows=[]){return rows.length?Math.round(rows.reduce((a,b)=>a+b.kcal,0)/rows.length):null;}
+function averageKcalLogs(rows=[]){const valid=rows.filter(r=>r.kcal>0); return valid.length?Math.round(valid.reduce((a,b)=>a+b.kcal,0)/valid.length):null;}
 function estimateMaintenance(profile={},onboarding={},body=null,nutrition=null,checkins=[],sessions=[]){const bmr=initialBmrCalories(profile,onboarding,body); const formula=initialMaintenanceCalories(profile,onboarding,body,checkins); const kcalLogs=getKcalLogs(nutrition); const weights=getBodyWeightRecords(body); const today=new Date(); const windows=[14,28,56]; const estimates=[]; windows.forEach(days=>{const since=new Date(today.getTime()-days*86400000).toISOString().slice(0,10); const kcals=kcalLogs.filter(x=>x.date>=since); const ws=weights.filter(x=>x.date>=since); if(kcals.length>=4&&ws.length>=2){const avg=kcals.reduce((a,b)=>a+b.kcal,0)/kcals.length; const first=ws[0],last=ws.at(-1); const span=Math.max(1,(new Date(last.date)-new Date(first.date))/86400000); const weekly=(last.weight-first.weight)/span*7; const maintenance=avg-(weekly*7700/7); estimates.push({days,maintenance,avg,weekly,quality:Math.min(1,kcals.length/days)*0.65+Math.min(1,ws.length/Math.max(2,days/7))*0.35});}}); const weighted=estimates.reduce((a,e)=>a+e.maintenance*e.quality*(e.days===28?1.15:e.days===56?0.9:1),0); const wsum=estimates.reduce((a,e)=>a+e.quality*(e.days===28?1.15:e.days===56?0.9:1),0); const learned=wsum?Math.round(weighted/wsum):null; const maintenance=learned||formula; const confidence=Math.round(Math.min(96,Math.max(42,(learned?58:35)+Math.min(30,kcalLogs.length*2)+Math.min(18,weights.length*3)+Math.min(8,sessions.length)))); const diet=Math.max(1200,Math.round(maintenance-500)); const bulk=Math.round(maintenance+300); const recent7=getRecentKcalLogsByDays(nutrition,7); const avg7=averageKcalLogs(recent7); const recent30=getRecentKcalLogsByDays(nutrition,30); const avg30=averageKcalLogs(recent30); const lastEstimate=estimates.find(e=>e.days===28)||estimates[0]; return {bmr,formula,maintenance,diet,maintain:maintenance,bulk,confidence,learned:!!learned,period:learned?`실제 데이터 보정값 · 최근 ${lastEstimate?.days||28}일`:"공식 기반 초기값",basis:learned?"실제 데이터 보정값":"공식 기반 초기값",avg7,avg28:avg30,avg30,weeklyChange:lastEstimate?.weekly??null,avgIntake:lastEstimate?.avg?Math.round(lastEstimate.avg):avg30};}
 function formatKcal(v){return v!=null&&Number.isFinite(Number(v))?`${Math.round(Number(v)).toLocaleString()} kcal`:"-";}
 function getGoalCalorieRecommendation(analysis,goal=""){const g=String(goal||""); if(g.includes("다이어트")||g.includes("감량"))return {label:"감량 권장 칼로리",shortLabel:"감량 목표 기준",value:analysis.diet}; if(g.includes("벌크")||g.includes("증량"))return {label:"증량 권장 칼로리",shortLabel:"증량 목표 기준",value:analysis.bulk}; return {label:"유지 권장 칼로리",shortLabel:"유지 목표 기준",value:analysis.maintain};}
@@ -762,7 +762,8 @@ function exVol(ex, memberBodyWeight) {
       const reps = parseInt(r.reps) || 0;
       return s + Math.round((bw + addW) * reps);
     }
-    return s + (r.volume || 0);
+    const w = parseFloat(r.weight)||0, reps = parseInt(r.reps)||0;
+    return s + (w > 0 && reps > 0 ? Math.round(w * reps * 10) / 10 : 0);
   }, 0);
 }
 
@@ -983,7 +984,7 @@ function formatDateDot(d){return `${d.getFullYear()}.${String(d.getMonth()+1).pa
 function getWeightForecast(p){const weights=getBodyWeightRecords(p.body); const cur=toPositiveNumber(p.curW)||weights.at(-1)?.weight||toPositiveNumber(p.profile.currentWeight); const start=toPositiveNumber(p.startW)||weights[0]?.weight||cur; const target=getTargetWeight(p.profile,p.onboarding); const remain=Number.isFinite(cur)&&Number.isFinite(target)?cur-target:null; const recent=weights.slice(-6); let weekly=null; if(recent.length>=2){const first=recent[0],last=recent.at(-1); const days=Math.max(1,(new Date(last.date)-new Date(first.date))/86400000); weekly=(last.weight-first.weight)/days*7;} const neededLoss=Number.isFinite(remain)?Math.max(0,remain):0; const baseRate=Math.max(.5,Math.min(.8,cur?cur*.0065:0.65)); const actualLoss=weekly!==null&&weekly<0?Math.abs(weekly):null; const recommended=actualLoss?Math.max(.45,Math.min(.85,(actualLoss+baseRate)/2)):baseRate; const weeks=neededLoss?Math.max(1,Math.ceil(neededLoss/recommended)):0; const aggressiveWeeks=neededLoss?`${Math.ceil(neededLoss/Math.min(1,Math.max(.8,cur*.009)))}~${Math.ceil(neededLoss/Math.max(.8,cur*.008))}`:"0"; const targetWeeks=parseTargetWeeks(p.onboarding.targetPeriodCustom||p.onboarding.targetPeriod||p.onboarding.goalPeriod); const required=targetWeeks&&neededLoss?neededLoss/targetWeeks:null; const risk=required&&required>Math.max(1,cur*.01)?"high":required&&required>Math.max(.8,cur*.008)?"medium":"low"; return {cur,start,target,remain:neededLoss,recommended,weeks,estimatedDate:formatDateDot(addDays(new Date(),weeks*7)),aggressiveWeeks,risk,required,targetWeeks,possibility:risk==="high"?"조정 필요":"높음"};}
 function GoalWeightForecastCard(p){const f=getWeightForecast(p); return <div className="metric goal-forecast"><span>목표 기간 예상</span><b>{f.target?f.estimatedDate:"목표 설정 필요"}</b><small>남은 감량</small><b className="goal-forecast-value">{f.remain?`-${f.remain.toFixed(1)}kg`:"0kg"}</b><small>예상 기간</small><small>약 {f.weeks}주</small><em>{f.risk==="high"?"목표 기간 조정 권장":"현재 페이스 유지 시 가능"}</em></div>}
 function summarizeStrength(sessions=[]){const rows=buildPerformanceChanges(sessions).filter(r=>Number.isFinite(r.delta)); if(!rows.length)return null; const pcts=rows.map(r=>{const b=Number(String(r.before).replace(/[^0-9.]/g,"")); const a=Number(String(r.after).replace(/[^0-9.]/g,"")); return b?((a-b)/b*100):0;}).filter(Number.isFinite); return pcts.length?Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length):null;}
-function getVolumeIncrease(sessions=[]){const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const vols=sorted.map(s=>(s.exercises||[]).reduce((sum,e)=>sum+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0)).filter(v=>v>0); if(vols.length<2)return null; const half=Math.max(1,Math.floor(vols.length/2)); const prev=vols.slice(0,half), recent=vols.slice(-half); const avg=a=>a.reduce((x,y)=>x+y,0)/a.length; return Math.round((avg(recent)-avg(prev))/Math.max(1,avg(prev))*100);}
+function getVolumeIncrease(sessions=[]){const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const vols=sorted.map(s=>(s.exercises||[]).reduce((sum,e)=>sum+(e.sets||[]).reduce((v,st)=>{const w=Number(st.weight||0),r=Number(st.reps||0);return v+(w>0&&r>0?w*r:0);},0),0)).filter(v=>v>0); if(vols.length<2)return null; const half=Math.max(1,Math.floor(vols.length/2)); const prev=vols.slice(0,half), recent=vols.slice(-half); const avg=a=>a.reduce((x,y)=>x+y,0)/a.length; return Math.round((avg(recent)-avg(prev))/Math.max(1,avg(prev))*100);}
 function getPainSummary(checkins=[]){const rows=getPainRecords(checkins).filter(r=>r.part!=="없음"); const first=rows[0],last=rows.at(-1); return {first:first?.vas,last:last?.vas,pct:first&&Number(first.vas)>0?Math.round((first.vas-last.vas)/first.vas*100):null,rows};}
 // 위상각 → 신체나이 변환 기준표 (각 항목: [최소위상각, 신체나이])
 const PHASE_AGE_MALE = [[7.0,22],[6.8,25],[6.6,28],[6.5,32],[6.4,35],[6.3,38],[6.2,42],[6.1,52],[5.9,55],[5.7,58],[5.6,62],[5.4,65],[5.2,68],[5.1,72],[4.7,75],[4.4,78],[4.3,82],[4.0,85],[3.7,88],[0,92]];
@@ -1994,7 +1995,8 @@ export default function App() {
 
       const calcVol = (exList) => exList.reduce((s,e)=>{
         return s + (e.sets||[]).reduce((ss,r)=>{
-          return ss + Math.round((parseFloat(r.weight)||0)*(parseInt(r.reps)||0)*10)/10;
+          const w=parseFloat(r.weight)||0, reps=parseInt(r.reps)||0;
+          return ss + (w > 0 && reps > 0 ? Math.round(w*reps*10)/10 : 0);
         },0);
       },0);
 
@@ -8518,9 +8520,8 @@ function calcPartVolumes(exercises) {
     const part = ex.muscleTop || "";
     if (!part || part === "기능") return;
     const vol = (ex.sets||[]).reduce((s,r)=>{
-      if (r.volume != null) return s + (r.volume||0);
       const w = parseFloat(r.weight)||0, reps = parseInt(r.reps)||0;
-      return s + w * reps;
+      return s + (w > 0 && reps > 0 ? Math.round(w * reps * 10) / 10 : 0);
     }, 0);
     if (vol > 0) map[part] = (map[part]||0) + vol;
   });

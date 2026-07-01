@@ -27,31 +27,25 @@ service cloud.firestore {
     }
 
     function isTrainerData(data) {
-      return isSignedIn() && data.trainerUid == uid();
+      return isSignedIn() && data.get('trainerUid', '') == uid();
     }
 
     function isMemberUidData(data) {
-      return isSignedIn() && data.memberUid == uid();
+      return isSignedIn() && data.get('memberUid', '') == uid();
     }
 
-    // 진행중 상태 확인: active 계열 값만 허용, 그 외 모두 차단
+    // 진행중 상태 확인: active 계열 값만 허용, 그 외 모두 차단 (필드 없으면 차단)
     function isMemberStatusActive(data) {
-      return data.status == "active"
-          || data.memberStatus == "active"
-          || data.status == "pt"
-          || data.memberStatus == "pt"
-          || data.status == "pt_active"
-          || data.memberStatus == "pt_active"
-          || data.status == "in_progress"
-          || data.memberStatus == "in_progress"
-          || data.status == "진행중"
-          || data.memberStatus == "진행중"
-          || data.status == "진행"
-          || data.memberStatus == "진행"
-          || data.status == "pt진행"
-          || data.memberStatus == "pt진행"
-          || data.status == "pt 진행중"
-          || data.memberStatus == "pt 진행중";
+      let s = data.get('status', '');
+      let ms = data.get('memberStatus', '');
+      return s == "active" || ms == "active"
+          || s == "pt" || ms == "pt"
+          || s == "pt_active" || ms == "pt_active"
+          || s == "in_progress" || ms == "in_progress"
+          || s == "진행중" || ms == "진행중"
+          || s == "진행" || ms == "진행"
+          || s == "pt진행" || ms == "pt진행"
+          || s == "pt 진행중" || ms == "pt 진행중";
     }
 
     function canReadMemberData(data) {
@@ -81,8 +75,16 @@ service cloud.firestore {
     }
 
     function isPublishedData(data) {
-      return (data.status == "published" || data.published == true || data.isPublished == true)
-        && data.visible != false && data.visibility != "hidden";
+      return (data.get('status', '') == "published" || data.get('published', false) == true || data.get('isPublished', false) == true)
+        && data.get('visible', true) != false
+        && data.get('visibility', '') != "hidden";
+    }
+
+    // 현재 사용자가 이 회원의 트레이너인지 확인 (notices 접근 제어용)
+    function isMyTrainerUid(trainerUid) {
+      return exists(/databases/$(database)/documents/members/$(request.auth.uid)) == false
+        && isSignedIn()
+        && trainerUid == uid();
     }
 
     function memberProfileUpdateKeysAllowed() {

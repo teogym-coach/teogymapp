@@ -1168,47 +1168,14 @@ export async function getMemberAppProfile() {
     matchedBy: "none",
   };
 
+  // 1) Firestore 쿼리 자체의 성공/실패만 여기서 구분한다 (permission-denied 등)
+  //    — 이 try/catch 밖에서 던지는 에러(member/inactive 등)는 그대로 호출자에게 전파되어야 하므로
+  //      status 판정 로직은 이 블록 밖으로 분리한다.
+  let snap;
   try {
     const membersQuery = query(collection(db, "members"), where("memberUid", "==", uid), limit(1));
-    const snap = await getDocs(membersQuery);
+    snap = await getDocs(membersQuery);
     diagnostics.membersQueryRead = true;
-    debugMemberProfile("2) memberUid query 결과:", snap.empty ? `문서 못 찾음 (0건, uid=${uid})` : `문서 ${snap.size}건 찾음`);
-    if (!snap.empty) {
-      const memberDoc = snap.docs[0];
-      const data = memberDoc.data();
-      debugMemberProfile("3) 찾은 문서 id:", memberDoc.id);
-      debugMemberProfile("4) status/memberStatus 값:", { status: data.status ?? null, memberStatus: data.memberStatus ?? null, isActive: data.isActive ?? null });
-      debugMemberProfile("5) isOwner/role 값:", { isOwner: data.isOwner ?? null, role: data.role ?? null });
-      // memberStatus 검사 — "active" 계열 진행중 회원만 허용
-      // status/memberStatus 필드 없으면 active 간주 (관리자앱 기본값과 동일)
-      const rawStatus = String(data.status || data.memberStatus || "").trim().toLowerCase();
-      const statusIsActive = !rawStatus
-        ? true
-        : (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행"));
-      if (!statusIsActive || data.isActive === false) {
-        debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile status 차단 분기 (member/inactive) — rawStatus:", rawStatus, "statusIsActive:", statusIsActive, "isActive:", data.isActive);
-        const err = new Error("현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
-        err.code = "member/inactive";
-        err.memberAppDetails = { code: "member/inactive" };
-        throw err;
-      }
-      diagnostics.membersRead = true;
-      diagnostics.matchedMemberId = memberDoc.id;
-      diagnostics.matchedBy = "members.memberUid";
-      const profile = {
-        id: memberDoc.id,
-        ...data,
-        _matchedBy: "members.memberUid",
-        _diagnostics: diagnostics,
-      };
-      dbLog("getMemberAppProfile", "2) members query 성공 memberId:", memberDoc.id, "memberUid:", data.memberUid || null);
-      debugMemberProfile("7) 성공: 프로필 반환 — memberId:", memberDoc.id);
-      logMemberRulesEvaluation("getMemberAppProfile", memberDoc.id, data);
-      return profile;
-    }
-    dbLog("getMemberAppProfile", "2) members query 결과 없음 uid:", uid);
-    debugMemberProfile("6) Rules PERMISSION_DENIED 여부: 아님 — 쿼리 자체는 정상 실행되어 0건 반환됨 (권한 문제가 아니라 memberUid 불일치)");
-    debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile query-empty 분기 (member/not-found) — members 컬렉션에 memberUid ==", uid, "인 문서가 없음");
   } catch (e) {
     const isPermissionDenied = e?.code === "permission-denied";
     const details = { path: "members?where(memberUid==auth.uid)", ...describeFirestoreError(e), authUid: uid, authEmail };
@@ -1216,14 +1183,62 @@ export async function getMemberAppProfile() {
     diagnostics.queryErrors.members = details;
     console.error("[DB:getMemberAppProfile] members.memberUid query 실패:", details);
     debugMemberProfile("6) Rules PERMISSION_DENIED 여부:", isPermissionDenied ? "YES — Firestore Rules에서 차단(permission-denied)" : `NO — 다른 오류 (code=${e?.code || "unknown"})`);
-    debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile catch 블록 (member/query-failed) — Firestore 쿼리 자체가 실패:", details);
+    debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile query 자체 실패 (Firestore 오류) —", details);
+    dbWarn("getMemberAppProfile", "members 쿼리 실패.", { authUid: uid, authEmail, diagnostics });
+    const err = new Error(isPermissionDenied
+      ? "회원 정보에 접근할 권한이 없습니다. 대표에게 문의해주세요."
+      : "회원 정보를 불러오는 중 오류가 발생했습니다. 대표에게 문의해주세요.");
+    err.code = isPermissionDenied ? "permission-denied" : "member/query-failed";
+    err.memberAppDetails = { code: err.code, path: "members?where(memberUid==auth.uid)", ...diagnostics };
+    throw err;
   }
 
-  dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
-  const err = new Error("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요.");
-  err.code = Object.keys(diagnostics.queryErrors).length ? "member/query-failed" : "member/not-found";
-  err.memberAppDetails = { code: err.code, path: "members?where(memberUid==auth.uid)", ...diagnostics };
-  throw err;
+  debugMemberProfile("2) memberUid query 결과:", snap.empty ? `문서 못 찾음 (0건, uid=${uid})` : `문서 ${snap.size}건 찾음`);
+
+  if (snap.empty) {
+    dbLog("getMemberAppProfile", "2) members query 결과 없음 uid:", uid);
+    debugMemberProfile("6) Rules PERMISSION_DENIED 여부: 아님 — 쿼리 자체는 정상 실행되어 0건 반환됨 (권한 문제가 아니라 memberUid 불일치)");
+    debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile query-empty 분기 (member/not-found) — members 컬렉션에 memberUid ==", uid, "인 문서가 없음");
+    dbWarn("getMemberAppProfile", "회원 문서를 찾지 못했습니다.", { authUid: uid, authEmail, diagnostics });
+    const err = new Error("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요.");
+    err.code = "member/not-found";
+    err.memberAppDetails = { code: err.code, path: "members?where(memberUid==auth.uid)", ...diagnostics };
+    throw err;
+  }
+
+  const memberDoc = snap.docs[0];
+  const data = memberDoc.data();
+  debugMemberProfile("3) 찾은 문서 id:", memberDoc.id);
+  debugMemberProfile("4) status/memberStatus 값:", { status: data.status ?? null, memberStatus: data.memberStatus ?? null, isActive: data.isActive ?? null });
+  debugMemberProfile("5) isOwner/role 값:", { isOwner: data.isOwner ?? null, role: data.role ?? null });
+
+  // memberStatus 검사 — "active" 계열 진행중 회원만 허용
+  // status/memberStatus 필드 없으면 active 간주 (관리자앱 기본값과 동일)
+  const rawStatus = String(data.status || data.memberStatus || "").trim().toLowerCase();
+  const statusIsActive = !rawStatus
+    ? true
+    : (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행"));
+  if (!statusIsActive || data.isActive === false) {
+    debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile status 차단 분기 (member/inactive) — rawStatus:", rawStatus, "statusIsActive:", statusIsActive, "isActive:", data.isActive);
+    const err = new Error("현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
+    err.code = "member/inactive";
+    err.memberAppDetails = { code: "member/inactive", matchedMemberId: memberDoc.id };
+    throw err;
+  }
+
+  diagnostics.membersRead = true;
+  diagnostics.matchedMemberId = memberDoc.id;
+  diagnostics.matchedBy = "members.memberUid";
+  const profile = {
+    id: memberDoc.id,
+    ...data,
+    _matchedBy: "members.memberUid",
+    _diagnostics: diagnostics,
+  };
+  dbLog("getMemberAppProfile", "2) members query 성공 memberId:", memberDoc.id, "memberUid:", data.memberUid || null);
+  debugMemberProfile("7) 성공: 프로필 반환 — memberId:", memberDoc.id);
+  logMemberRulesEvaluation("getMemberAppProfile", memberDoc.id, data);
+  return profile;
 }
 
 

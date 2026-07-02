@@ -929,6 +929,91 @@ export async function saveMemberProfileFields(memberId, data = {}) {
   return { height, startWeight, currentWeight, targetWeightKg, workoutFrequency, weeklyWorkoutCount, messages: results };
 }
 
+// ════════════════════════════════════════════════════
+// 온보딩 → 관리자앱 회원 프로필 동기화
+//
+// 관리자앱 "회원 프로필 수정" 화면(MemberForm)은 아래 두 경로에서 값을 읽는다.
+//   - 기본 탭 이름/이메일/시작일 등 = members/{id} 최상위 필드
+//   - 성별/나이/키/체중 및 목표·목적/통증·건강/운동경험/방문계기/생활습관/스케줄 탭 = members/{id}.survey.*
+// 회원앱 온보딩(memberOnboarding/main)은 이 중 성별/생년월일/키/체중/목표/목표기간/주당 운동횟수만 수집하고,
+// 통증·건강/운동경험/방문계기/생활습관/스케줄/메모는 전혀 수집하지 않는다 — 그 탭들은 동기화 대상이 아니다.
+// 옵션 값 어휘가 서로 다른 필드(온보딩 목표 5종 vs 관리자 목적 10종, 온보딩 집중부위 vs 관리자 약점부위 등)는
+// 잘못된 값이 들어가는 것을 막기 위해 의도적으로 동기화하지 않는다.
+//
+// 대상(회원 본인이 항상 최신값으로 갱신 — Rules memberProfileUpdateKeysAllowed에 survey 포함,
+// memberSurveySyncKeysAllowed로 survey 내부는 gender/height/weight/age만 쓰기 허용):
+//   members.survey.gender/height/weight/age  (관리자 수정화면 기본 탭이 직접 읽는 값)
+//   members.height/startWeight/currentWeight/targetWeight/targetWeightKg (기존 saveMemberProfileFields와 동일 경로)
+//   members.birthYear/birthMonth/birthDay/birthYearMonth/birthSource
+//   members.goal (관리자 수정화면에 직접 편집 UI가 없는 표시용 필드라 안전하게 덮어씀)
+//   members.goalPeriod/goalPeriodType/customGoalDate, members.weeklyWorkoutCount/workoutFrequency
+export async function syncOnboardingToMemberProfile(memberId, onboarding = {}) {
+  if (!memberId) return;
+  requireUid();
+  const payload = {};
+  const surveyPayload = {};
+
+  if (onboarding.gender) surveyPayload.gender = onboarding.gender;
+  const heightNum = Number(onboarding.heightCm);
+  if (Number.isFinite(heightNum) && heightNum > 0) {
+    payload.height = heightNum;
+    surveyPayload.height = heightNum;
+  }
+  const startWeightNum = Number(onboarding.startingWeightKg);
+  if (Number.isFinite(startWeightNum) && startWeightNum > 0) payload.startWeight = startWeightNum;
+  const currentWeightNum = Number(onboarding.currentWeightKg);
+  if (Number.isFinite(currentWeightNum) && currentWeightNum > 0) {
+    payload.currentWeight = currentWeightNum;
+    surveyPayload.weight = currentWeightNum;
+  }
+  const targetWeightNum = Number(onboarding.targetWeightKg);
+  if (Number.isFinite(targetWeightNum) && targetWeightNum > 0) {
+    payload.targetWeight = targetWeightNum;
+    payload.targetWeightKg = targetWeightNum;
+  }
+
+  const birthYear = String(onboarding.birthYear || "").trim();
+  const birthMonth = String(onboarding.birthMonth || "").trim();
+  const birthDay = String(onboarding.birthDay || "").trim();
+  if (birthYear) {
+    payload.birthYear = birthYear;
+    payload.birthSource = "onboarding";
+    // 관리자 상담 설문의 "나이"는 한국식 나이로 기재하는 관행과 동일하게 맞춘다(HubScreen 표시 계산과 동일 공식).
+    const koreanAge = new Date().getFullYear() - Number(birthYear) + 1;
+    if (Number.isFinite(koreanAge) && koreanAge > 0 && koreanAge < 130) surveyPayload.age = koreanAge;
+  }
+  if (birthMonth) payload.birthMonth = birthMonth;
+  if (birthDay) payload.birthDay = birthDay;
+  if (birthYear && birthMonth) payload.birthYearMonth = `${birthYear}-${String(birthMonth).padStart(2, "0")}`;
+
+  if (onboarding.goal) payload.goal = onboarding.goal;
+  if (onboarding.targetPeriod) {
+    payload.goalPeriod = onboarding.targetPeriod;
+    payload.goalPeriodType = onboarding.targetPeriod;
+    if (onboarding.targetPeriod === "직접 입력" && onboarding.targetPeriodCustom) {
+      payload.customGoalDate = onboarding.targetPeriodCustom;
+    }
+  }
+  if (onboarding.weeklyWorkoutCount) {
+    payload.weeklyWorkoutCount = onboarding.weeklyWorkoutCount;
+    payload.workoutFrequency = onboarding.weeklyWorkoutCount;
+  }
+
+  if (Object.keys(surveyPayload).length) {
+    Object.entries(surveyPayload).forEach(([k, v]) => { payload[`survey.${k}`] = v; });
+  }
+  if (!Object.keys(payload).length) return;
+  payload.updatedAt = serverTimestamp();
+
+  try {
+    await updateDoc(doc(db, "members", memberId), clean(payload));
+    dbLog("syncOnboardingToMemberProfile", `members/${memberId} 동기화 완료: ${Object.keys(payload).join(",")}`);
+  } catch (e) {
+    console.error("[DB:syncOnboardingToMemberProfile] 동기화 실패", { path: `members/${memberId}`, code: e?.code, message: e?.message, memberId });
+    // 온보딩 자체는 이미 저장 성공했으므로 여기서 던지지 않고 콘솔에만 남긴다.
+  }
+}
+
 export async function saveFcmToken(memberId, token) {
   if (!memberId || !token) return;
   requireUid();

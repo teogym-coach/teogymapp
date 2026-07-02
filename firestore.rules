@@ -96,8 +96,16 @@ service cloud.firestore {
         "workoutFrequency", "weeklyWorkoutCount", "height", "startWeight", "currentWeight", "targetWeight", "targetWeightKg", "goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "memberAppLastLoginAt", "updatedAt",
         "birthYear", "birthMonth", "birthDay", "birthYearMonth", "birthSource",
         "fcmToken", "fcmTokenUpdatedAt",
-        "memberLastInputAt"
-      ]);
+        "memberLastInputAt",
+        "survey"
+      ]) && memberSurveySyncKeysAllowed();
+    }
+
+    // 온보딩 완료 시 회원 본인이 survey 맵에 쓸 수 있는 필드를 gender/height/weight/age로만 제한
+    // (관리자 상담 설문의 나머지 필드 — 통증/운동경험/방문계기/생활습관 등 — 는 회원이 직접 쓸 수 없음)
+    function memberSurveySyncKeysAllowed() {
+      return !("survey" in request.resource.data.diff(resource.data).affectedKeys())
+        || request.resource.data.survey.diff(resource.data.get('survey', {})).affectedKeys().hasOnly(["gender", "height", "weight", "age"]);
     }
 
     function memberOnboardingProfileKeysAllowed() {

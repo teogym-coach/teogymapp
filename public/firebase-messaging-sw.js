@@ -24,8 +24,8 @@ messaging.onBackgroundMessage((payload) => {
   const body = payload.notification?.body || "새 알림이 있습니다.";
   self.registration.showNotification(title, {
     body,
-    icon: "/icon-192.png?v=5",
-    badge: "/icon-192.png?v=5",
+    icon: "/icon-192.png?v=6",
+    badge: "/icon-192.png?v=6",
     tag: "teogym-notification",
   });
 });

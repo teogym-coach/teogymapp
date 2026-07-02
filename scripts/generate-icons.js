@@ -21,7 +21,8 @@ const PUBLIC_DIR = path.join(__dirname, "..", "public");
 // 원본 배경과 자연스럽게 이어지도록 safe-area 패딩에 채울 색 (원본 카드 배경 샘플링 값)
 const PAD_BG = { r: 249, g: 244, b: 237, alpha: 1 };
 // Apple HIG 권장 safe-area — 콘텐츠를 캔버스의 이 비율로 축소하고 나머지를 여백으로 둔다
-const SAFE_AREA_CONTENT_RATIO = 0.85; // 약 15% 여백
+// 2026-07-02 조정: 홈화면에서 심볼이 작아 보인다는 피드백으로 15%→8% 여백으로 축소(요청 범위 8~10%의 최솟값 채택)
+const SAFE_AREA_CONTENT_RATIO = 0.92; // 약 8% 여백
 
 async function withSafeArea(canvasSize) {
   const contentSize = Math.round(canvasSize * SAFE_AREA_CONTENT_RATIO);

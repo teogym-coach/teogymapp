@@ -1368,11 +1368,33 @@ export async function saveMemberOnboarding(memberId, data) {
   return { id: "main", ...payload };
 }
 
+// 온보딩 재진행 시 회원앱이 다시 채워 넣는 "온보딩 답변 미러" 필드만 초기화한다.
+// 체중/식단/공지/수업일지/피드백 등 실제 기록(bodyCheck.records, nutrition, sessions, notices 등)은
+// 별도 컬렉션·서브문서라 이 목록과 무관하며 절대 건드리지 않는다.
+const ONBOARDING_PROFILE_ECHO_FIELDS = [
+  "gender", "birthYear", "birthMonth", "birthDay", "birthYearMonth", "birthSource", "birth",
+  "height", "weight", "startWeight", "currentWeight",
+  "targetWeightKg", "targetWeight", "goalWeight",
+  "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
+  "workoutFrequency", "goal",
+];
+
 export async function resetMemberOnboarding(memberId) {
   requireUid();
-  const ref = doc(db, "members", memberId, "memberOnboarding", "main");
-  await setDoc(ref, { completed: false, updatedAt: serverTimestamp() }, { merge: true });
-  return { id: "main", completed: false };
+  // 1) 온보딩 답변 문서 자체를 완전히 삭제 — completed/진행 단계/입력값이 merge로 남지 않도록 한다.
+  //    (이전엔 {completed:false}만 merge해서 gender·height·체중·목표 등 기존 답변이 그대로 남아있었음)
+  const onboardingRef = doc(db, "members", memberId, "memberOnboarding", "main");
+  await deleteDoc(onboardingRef);
+
+  // 2) 회원이 온보딩 이후 "내 정보" 화면에서 저장한 값이 members 문서에도 미러링돼 있어
+  //    온보딩 답변을 지워도 이 값들이 다음 단계 기본값으로 자동 재입력되는 문제가 있었다.
+  //    해당 온보딩 미러 필드만 지운다 — bodyCheck.records(체중 이력) 등 실제 기록은 그대로 유지된다.
+  const memberRef = doc(db, "members", memberId);
+  const patch = { updatedAt: serverTimestamp() };
+  ONBOARDING_PROFILE_ECHO_FIELDS.forEach(f => { patch[f] = deleteField(); });
+  await updateDoc(memberRef, patch);
+
+  return { id: "main", completed: false, reset: true };
 }
 
 // ════════════════════════════════════════════════════

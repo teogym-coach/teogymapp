@@ -17,6 +17,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "regression": "node scripts/regression-check.js",
+    "icons": "node scripts/generate-icons.js",
     "test:rules": "npm install --prefix tests/rules && firebase emulators:exec --only firestore \"npx mocha --timeout 30000 --exit tests/rules/firestore.rules.test.mjs\""
   },
   "eslintConfig": {
@@ -39,6 +40,7 @@
   "devDependencies": {
     "chai": "^6.2.2",
     "firebase": "^10.14.1",
-    "mocha": "^11.7.6"
+    "mocha": "^11.7.6",
+    "sharp": "^0.35.3"
   }
 }

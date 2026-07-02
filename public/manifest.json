@@ -4,19 +4,38 @@
   "description": "TEO GYM 회원 전용 운동 관리 앱",
   "icons": [
     {
-      "src": "icon-192.png",
+      "src": "favicon-16x16.png?v=2",
       "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "any maskable"
+      "sizes": "16x16",
+      "purpose": "any"
     },
     {
-      "src": "icon-512.png",
+      "src": "favicon-32x32.png?v=2",
+      "type": "image/png",
+      "sizes": "32x32",
+      "purpose": "any"
+    },
+    {
+      "src": "apple-touch-icon.png?v=2",
+      "type": "image/png",
+      "sizes": "180x180",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png?v=2",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png?v=2",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "start_url": "/?app=member",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "theme_color": "#09090c",

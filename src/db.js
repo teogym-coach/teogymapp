@@ -660,6 +660,44 @@ export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
   return { id: uid, ...feedback, sorenessBodyParts, sorenessBodyPart: sorenessBodyParts[0] || "", source: "memberApp" };
 }
 
+// ════════════════════════════════════════════════════
+// 회원 알림 배지 데이터 구조 (memberNotifications)
+// type: workout_log | feedback | notice | nutrition
+// 현재는 배지 카운트 소스로 아직 연결하지 않음(회원앱 배지는 기존
+// sessions.isPublished/readSessionIds, notices.isRead 기반 unreadCount 사용 — 중복 집계 방지).
+// publishSession()에서 workout_log 알림을 생성하는 것을 시작으로,
+// 대표 피드백/식단 피드백 저장 시에도 동일하게 createMemberNotification()을 호출해 확장하면 된다.
+// ════════════════════════════════════════════════════
+export async function createMemberNotification(memberId, { type, title, body }) {
+  if (!memberId || !type) return;
+  const uid = requireUid();
+  await addDoc(collection(db, "members", memberId, "memberNotifications"), {
+    memberId,
+    type,
+    title: title || "",
+    body: body || "",
+    isRead: false,
+    createdBy: uid,
+    createdAt: serverTimestamp(),
+    readAt: null,
+  });
+}
+
+export async function getMemberNotifications(memberId, max = 30) {
+  requireUid();
+  const q = query(collection(db, "members", memberId, "memberNotifications"), orderBy("createdAt", "desc"), limit(max));
+  const snap = await getDocs(q);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function markMemberNotificationRead(memberId, notificationId) {
+  requireUid();
+  await updateDoc(doc(db, "members", memberId, "memberNotifications", notificationId), {
+    isRead: true,
+    readAt: serverTimestamp(),
+  });
+}
+
 export async function publishSession(memberId, sessionId) {
   await verifyMemberOwnership(memberId);
   dbLog("publishSession", `memberId=${memberId} sessionId=${sessionId}`);
@@ -669,6 +707,7 @@ export async function publishSession(memberId, sessionId) {
     publishedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  createMemberNotification(memberId, { type: "workout_log", title: "새 수업일지가 도착했어요", body: "오늘 수업 기록이 회원앱에 공개됐어요." }).catch(() => {});
   dbLog("publishSession", "완료");
 }
 

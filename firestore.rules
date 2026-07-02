@@ -124,6 +124,11 @@ service cloud.firestore {
       ]);
     }
 
+    // memberNotifications — 회원 본인은 isRead/readAt만 수정 가능(알림 읽음 처리), 생성/삭제는 트레이너만
+    function memberNotificationUpdateKeysAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead", "readAt"]);
+    }
+
     function bodyCheckProfileUpdateKeysAllowed() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         "records", "goal", "inbody", "updatedAt", "currentWeight", "weight", "targetWeight", "targetWeightKg"
@@ -263,6 +268,15 @@ service cloud.firestore {
                       || (isMemberSelfActive(memberId)
                           && docId == "main"
                           && memberOnboardingProfileKeysAllowed());
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
+      // 알림 배지 데이터 구조 — 운동일지/피드백/공지/식단 피드백 등 회원용 알림
+      match /memberNotifications/{docId} {
+        allow read: if canAccessMember(memberId);
+        allow create: if isTrainerOfMember(memberId);
+        allow update: if isTrainerOfMember(memberId)
+                      || (isMemberSelfActive(memberId) && memberNotificationUpdateKeysAllowed());
         allow delete: if isTrainerOfMember(memberId);
       }
 

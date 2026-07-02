@@ -1635,6 +1635,18 @@ export default function App() {
     return unsub;
   }, []);
 
+  // 회원앱 공식 주소를 /member로 정리 — 과거 ?app=member 쿼리 링크로 들어와도 주소창을 /member로 교체한다.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const path = window.location.pathname || "/";
+    if (params.get("app") === "member" && !path.startsWith("/member")) {
+      params.delete("app");
+      const rest = params.toString();
+      window.location.replace("/member" + (rest ? `?${rest}` : ""));
+    }
+  }, []);
+
   // 회원앱 계정이 관리자 URL로 접근 시 자동 리디렉션 (isOwner·트레이너는 제외)
   // 관리자로 확인된 경우 private 마이그레이션 상태를 콘솔에 출력한다
   useEffect(() => {
@@ -1642,7 +1654,7 @@ export default function App() {
     getMemberAppProfile().then(profile => {
       if (profile && profile.isOwner !== true && profile.role !== "owner") {
         try { localStorage.setItem("teogymAppMode", "member"); } catch {}
-        window.location.replace("/?app=member");
+        window.location.replace("/member");
       } else {
         checkPrivateMigrationStatus().catch(() => {});
       }

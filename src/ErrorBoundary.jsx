@@ -100,12 +100,13 @@ export default class ErrorBoundary extends React.Component {
 
   handleReload = () => window.location.reload();
   handleHome = () => { window.location.href = '/'; };
-  handleMemberHome = () => { window.location.href = '/?app=member'; };
+  handleMemberHome = () => { window.location.href = '/member'; };
 
   render() {
     if (!this.state.hasError) return this.props.children;
 
     const isMember = this.props.isMember ||
+      window.location.pathname.startsWith('/member') ||
       window.location.search.includes('app=member') ||
       (typeof localStorage !== 'undefined' && localStorage.getItem('teogymAppMode') === 'member');
     const isDev = process.env.NODE_ENV === 'development';

@@ -65,10 +65,14 @@ const checks = [
     app.includes('getPairSessions') &&
     app.includes('splitPairSession')
   ],
-  ['관리자 URL 회원 자동 리디렉션',
+  ['관리자 URL 회원 자동 리디렉션 (/member)',
     app.includes('getMemberAppProfile().then(profile') &&
-    app.includes('app=member') &&
+    app.includes("window.location.replace(\"/member\")") &&
     app.includes('isOwner !== true')
+  ],
+  ['?app=member 쿼리 접속 시 /member로 주소 정리',
+    app.includes('params.get("app") === "member" && !path.startsWith("/member")') &&
+    app.includes('window.location.replace("/member"')
   ],
 
   // ── private 서브컬렉션 보안 분리 체크 ──
@@ -208,11 +212,11 @@ const checks = [
       } catch { return false; }
     })()
   ],
-  ['manifest.json start_url 경로 정확성 (/?app=member)',
+  ['manifest.json start_url/scope 경로 정확성 (/member)',
     (() => {
       try {
         const m = require('fs').readFileSync(require('path').join(require('path').resolve(__dirname,'..'), 'public', 'manifest.json'), 'utf8');
-        return m.includes('"start_url": "/?app=member"') && !m.includes('/member?app=member');
+        return m.includes('"start_url": "/member"') && m.includes('"scope": "/member"');
       } catch { return false; }
     })()
   ],

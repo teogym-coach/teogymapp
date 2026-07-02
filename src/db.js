@@ -263,6 +263,7 @@ export async function addMember(data) {
     ...clean(normalizeMemberData(publicData)),
     trainerUid: uid,
     createdAt:  serverTimestamp(),
+    updatedAt:  serverTimestamp(),
   };
   const ref = await addDoc(collection(db, "members"), payload);
   if (memo || ticketInfo) {

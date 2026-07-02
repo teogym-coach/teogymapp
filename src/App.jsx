@@ -4775,23 +4775,32 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
         .hub-sbadge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;font-family:'DM Mono',monospace;font-size:9px;font-weight:800;margin-right:6px;}
         .hub-ptgrid{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;}
         @media(max-width:540px){.hub-2col{grid-template-columns:1fr 1fr!important;}.hub-3col{grid-template-columns:1fr 1fr!important;}.hub-ptgrid{grid-template-columns:1fr 1fr!important;}.hub-ptgrid>*:last-child{grid-column:span 2;}}
+        .hub-header-row1{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;}
+        .hub-header-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;}
+        .hub-header-actions{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
+        @media(max-width:768px){
+          .hub-header-row1{flex-direction:column;align-items:stretch;}
+          .hub-header-card{padding:11px 12px!important;}
+          .hub-header-actions{width:100%;justify-content:stretch;flex-wrap:nowrap;gap:6px;}
+          .hub-header-actions button{flex:1 1 0;min-width:0;padding:8px 4px!important;font-size:12px!important;}
+        }
       `}</style>
 
       {isTodayBirthday&&<div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.3)",borderRadius:10,padding:"9px 14px",marginBottom:10,fontSize:12,color:"#fbbf24",lineHeight:1.5}}>🎂 오늘 생일입니다. 수업 시작 전에 축하 멘트를 해주세요.</div>}
 
       {/* ═══════════════════════════════════════ HEADER ═══ */}
-      <div style={{background:"#0f1626",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:"14px 16px",marginBottom:10}}>
-        {/* Row 1: 아이콘 + 이름 + 빠른버튼 */}
-        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:10}}>
+      <div className="hub-header-card" style={{background:"#0f1626",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:"14px 16px",marginBottom:10}}>
+        {/* Row 1: 아이콘 + 이름 + 빠른버튼 (모바일 768px 이하에서는 세로로 분리됨) */}
+        <div className="hub-header-row1">
           <div style={{display:"flex",alignItems:"center",gap:11,flex:1,minWidth:0}}>
             <div style={{width:44,height:44,borderRadius:12,
               background:"linear-gradient(135deg,rgba(94,234,212,.18),rgba(94,234,212,.05))",
               border:"1px solid rgba(94,234,212,.25)",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💪</div>
-            <div style={{minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"#fff",letterSpacing:"-.3px"}}>{member.name}</span>
-                {member.goal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(129,140,248,.15)",color:"#a5b4fc",fontWeight:700,border:"1px solid rgba(129,140,248,.28)"}}>{member.goal}</span>}
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
+                <span className="hub-header-name" style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"#fff",letterSpacing:"-.3px"}}>{member.name}</span>
+                {member.goal&&<span style={{flexShrink:0,fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:5,background:"rgba(129,140,248,.15)",color:"#a5b4fc",fontWeight:700,border:"1px solid rgba(129,140,248,.28)"}}>{member.goal}</span>}
               </div>
               <div style={{display:"flex",gap:5,marginTop:3,flexWrap:"wrap"}}>
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
@@ -4804,7 +4813,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
             </div>
           </div>
           {/* 수업 운영 빠른 버튼 (← 목록 포함) */}
-          <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          <div className="hub-header-actions">
             <button onClick={()=>setScreen("members")} style={{
               background:"rgba(255,255,255,.04)",
               border:"1.5px solid rgba(255,255,255,.14)",borderRadius:10,
@@ -5024,9 +5033,8 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
           <span className="hub-sbadge" style={{background:"rgba(34,211,238,.15)",color:"#22d3ee"}}>B</span>
           <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:700,color:"#22d3ee",letterSpacing:".1em"}}>건강 관리</span>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:wData.length>=2?10:0}} className="hub-2col">
+        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:wData.length>=2?10:0}}>
           {menuBtn("💢","근육통 기록","부위별 근육통 0~5","soreness","255,159,67")}
-          {menuBtn("🏥","건강관리 허브","체중·칼로리·영양","healthhub","0,206,201")}
         </div>
         {!loading&&wData.length>=2&&(
           <div style={{background:"rgba(255,255,255,.02)",borderRadius:10,padding:"10px 8px",border:"1px solid rgba(255,255,255,.05)"}}>

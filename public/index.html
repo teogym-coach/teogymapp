@@ -10,15 +10,15 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="TEO GYM" />
-  <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png?v=3" />
 
   <!-- Favicon / 브라우저 탭 아이콘 (TG 브랜드 아이콘, ?v=3로 캐시 무효화) -->
-  <!-- SVG를 최우선으로 두면 지원 브라우저(Chrome/Edge/최신 Safari)가 이를 먼저 사용함 -->
+  <!-- 순서: svg(최신 브라우저 우선) → ico(브라우저 자동 프로브 대비) → png 폴백들 → apple-touch-icon → mask-icon → manifest -->
   <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/favicon.svg?v=3" />
   <link rel="icon" href="%PUBLIC_URL%/favicon.ico?v=3" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="%PUBLIC_URL%/favicon-32x32.png?v=3" />
   <link rel="icon" type="image/png" sizes="16x16" href="%PUBLIC_URL%/favicon-16x16.png?v=3" />
   <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icon-192.png?v=3" />
+  <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png?v=3" />
   <!-- Safari 고정 탭(macOS) 마스크 아이콘 — 단색 실루엣만 렌더링되고 color 속성이 실제 표시 색상이 됨 -->
   <link rel="mask-icon" href="%PUBLIC_URL%/safari-pinned-tab.svg?v=3" color="#111111" />
 

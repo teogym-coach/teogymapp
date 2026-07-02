@@ -12,7 +12,7 @@
 - [x] **ErrorBoundary 추가** — `src/ErrorBoundary.jsx`, 앱 전체 감싸기 완료
 - [x] **Sentry 연동 코드 준비** — DSN만 설정하면 즉시 활성화 (production 전용)
 - [x] **Firestore Rules 배포 완료** (v7)
-- [x] **manifest.json `start_url` 수정** (`/member?app=member` → `/?app=member`)
+- [x] **manifest.json `start_url` 수정** (`/?app=member` → `/member`, 회원앱 공식 주소로 정리)
 - [x] **Firestore read 최적화** — 회원 목록 세션 95% 절감, 회원앱 병렬 로드
 - [x] **보안 강화** — private 서브컬렉션 분리, 관리자 URL 차단, URL memberId 조작 차단
 
@@ -81,7 +81,7 @@
 
 ## 5. 관리자 URL 보안 확인
 
-- [ ] 회원 계정으로 루트 URL(`/`) 접속 → 자동 `/?app=member` 리디렉션 확인
+- [ ] 회원 계정으로 루트 URL(`/`) 접속 → 자동 `/member` 리디렉션 확인
 - [ ] 회원앱에서 `private/admin` 데이터 미노출 확인 (콘솔에 getMemberPrivate 호출 없음)
 
 ---
@@ -90,7 +90,7 @@
 
 - [ ] **iPhone Safari** — 로그인, 홈, 건강관리 저장
 - [ ] **Android Chrome** — 로그인, 홈, 건강관리 저장
-- [ ] **PWA 설치** ("홈 화면에 추가") → `/?app=member` 진입 확인 (manifest.json 수정됨)
+- [ ] **PWA 설치** ("홈 화면에 추가") → `/member` 진입 확인 (manifest.json `start_url` 반영)
 
 ---
 
@@ -118,7 +118,7 @@
 | `Firebase permission-denied` | 로그인 전 쿼리 또는 잘못된 회원 연결 | 개별 확인 필요 |
 | `[TEO GYM] getSessions error` | 특정 회원 세션 읽기 실패 | 해당 회원 Firestore 확인 |
 | `Failed to fetch` | 일시적 네트워크 오류 | 새로고침으로 해결 |
-| `manifest.json start_url` | 수정 완료 (`/?app=member`) | 해결됨 ✅ |
+| `manifest.json start_url` | 수정 완료 (`/member`) | 해결됨 ✅ |
 
 ---
 

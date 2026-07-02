@@ -2828,10 +2828,9 @@ const isOwner = (m) => {
 };
 
 // 회원앱 로그인/상태 차단/공지/2:1 테스트용 프리셋 — docs/member-app-test-accounts.md 참고
+// 계정 1개를 만들어두고 상태(active/paused/ended)만 바꿔가며 재사용한다.
 const TEST_MEMBER_PRESETS = [
-  { key:"active", name:"TEST 진행중", email:"teogym.test+active@gmail.com", status:"active" },
-  { key:"paused", name:"TEST 휴식",   email:"teogym.test+paused@gmail.com", status:"paused" },
-  { key:"ended",  name:"TEST 종료",   email:"teogym.test+ended@gmail.com",  status:"ended"  },
+  { key:"test", name:"🧪 TEST MEMBER", email:"teogymapptest@gmail.com", status:"active" },
 ];
 
 function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {

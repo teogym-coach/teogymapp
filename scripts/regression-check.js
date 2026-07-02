@@ -120,7 +120,8 @@ const checks = [
     })()
   ],
   ['published=false 세션 회원앱 미노출',
-    firestoreRules.includes('isMemberSelfActive(memberId) && resource.data.isPublished == true') &&
+    firestoreRules.includes('canReadSession(memberId, resource.data)') &&
+    firestoreRules.includes("isMemberSelfActive(memberId) && sessionData.get('isPublished', false) == true") &&
     db.includes('getPublishedSessions') &&
     db.includes('where("isPublished", "==", true)')
   ],

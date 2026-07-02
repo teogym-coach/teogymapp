@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════
-//  TEO GYM — Firestore 보안 규칙 v8
+//  TEO GYM — Firestore 보안 규칙 v9 (2026-07 회원 실배포 보안 감사)
 //
 //  회원앱 원칙:
 //    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터 접근
@@ -9,6 +9,20 @@ rules_version = '2';
 //               이면서 status == "active" (진행중) 인 회원만 접근 허용
 //    - 휴식중(paused) / 종료(ended) / 상태값 없음 / 알 수 없는 상태 → 회원 self-access 차단
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
+//
+//  검증은 반드시 request.auth.uid 기준(uid()) — 클라이언트가 보낸 memberId/이메일 값은
+//  절대 신뢰하지 않고, 항상 memberDoc(memberId).memberUid == uid() 형태로 서버측 데이터와 대조한다.
+//
+//  테스트 가능한 시나리오 — tests/rules/firestore.rules.test.mjs (npm run test:rules)에 대응 테스트 존재:
+//    1. 회원 A가 회원 B의 memberId로 get/list 시도 → members get 차단 (§1 "다른 회원 문서 get 차단")
+//    2. 회원 A가 개발자 도구에서 memberId를 바꿔 sessions/bodyCheck/nutrition 등에 쓰기 시도
+//       → 전부 isTrainerOfMember/isMemberSelfActive가 memberDoc(memberId).memberUid를 실제로 조회해
+//         request.auth.uid와 대조하므로, 클라이언트가 보낸 memberId가 본인 것이 아니면 차단됨
+//    3. isPublished == false 인 세션은 회원 자신의 세션이라도 read 차단 (§2 "비공개 세션 read 차단")
+//    4. 휴식중(paused)/종료(ended)/상태 불명 회원은 본인 문서라도 전 컬렉션 접근 차단 (§1, §2, §4~9)
+//    5. 관리자(trainerUid 일치)는 본인이 담당하는 회원 전체에 대해 read/write 가능,
+//       타 트레이너 회원 문서는 차단 (§1 "타 트레이너 회원 get/delete 차단")
+//    6. 회원은 memberProfileUpdateKeysAllowed()에 없는 필드(trainerUid/memberUid/isOwner 등) 수정 불가
 // ═══════════════════════════════════════════════════════════════
 
 service cloud.firestore {
@@ -75,6 +89,30 @@ service cloud.firestore {
     // 관리자 OR 진행중 회원 본인
     function canAccessMember(memberId) {
       return isTrainerOfMember(memberId) || isMemberSelfActive(memberId);
+    }
+
+    // ── 아래 4개는 보안 감사 요청에 따라 이름을 명시적으로 정리한 헬퍼(기존 로직의 별칭) ──
+    // isVerifiedTrainer()는 settings/trainers.uids 목록으로 검증된 "진짜 트레이너 계정"인지 확인한다.
+    // (member 문서 단위 소유권 확인은 isTrainerOfMember/isOwner를 쓴다 — 전역 admin과 개념이 다름)
+    function isAdmin() {
+      return isVerifiedTrainer();
+    }
+
+    // memberId를 "소유"한 트레이너인지 확인. 주의: 앱 코드의 member.isOwner 필드(대표 개인 기록용 owner
+    // 회원 플래그)와는 다른 개념이다 — 여기서 isOwner(memberId)는 "이 회원 데이터의 트레이너 소유자"를 뜻한다.
+    function isOwner(memberId) {
+      return isTrainerOfMember(memberId);
+    }
+
+    // 세션 1건을 회원 본인이 읽을 수 있는지 — 공개(isPublished)된 것만 허용
+    function canReadSession(memberId, sessionData) {
+      return isTrainerOfMember(memberId)
+          || (isMemberSelfActive(memberId) && sessionData.get('isPublished', false) == true);
+    }
+
+    // private 서브컬렉션(memo/ticketInfo 등 회원에게 절대 노출되면 안 되는 필드) — 트레이너만 write 가능
+    function canWriteMemberPrivateData(memberId) {
+      return isTrainerOfMember(memberId);
     }
 
     function isPublishedData(data) {
@@ -178,8 +216,7 @@ service cloud.firestore {
                     && resource.data.trainerUid == uid();
 
       match /sessions/{sessionId} {
-        allow read: if isTrainerOfMember(memberId)
-                    || (isMemberSelfActive(memberId) && resource.data.isPublished == true);
+        allow read: if canReadSession(memberId, resource.data);
         allow create, delete: if isTrainerOfMember(memberId);
         allow update: if isTrainerOfMember(memberId)
                       || (isMemberSelfActive(memberId)
@@ -288,8 +325,10 @@ service cloud.firestore {
         allow delete: if isTrainerOfMember(memberId);
       }
 
+      // 명시적으로 매칭되지 않은 모든 서브컬렉션의 기본값 — private(memo/ticketInfo) 포함,
+      // 화이트리스트에 없는 컬렉션은 전부 트레이너 전용으로 기본 차단(default-deny to non-trainer)
       match /{subCollection}/{docId} {
-        allow read, write: if isTrainerOfMember(memberId);
+        allow read, write: if canWriteMemberPrivateData(memberId);
       }
     }
 

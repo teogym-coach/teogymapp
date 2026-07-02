@@ -1345,6 +1345,7 @@ const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
   "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight",
   "targetWeight", "targetWeightKg", "targetPeriod", "targetPeriodCustom",
   "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
+  "agreedTermsAt", "agreedPrivacyAt",
 ]);
 
 function sanitizeMemberOnboardingPayload(data = {}) {

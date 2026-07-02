@@ -107,7 +107,8 @@ service cloud.firestore {
         "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
-        "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt"
+        "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
+        "agreedTermsAt", "agreedPrivacyAt"
       ]);
     }
 
@@ -118,7 +119,8 @@ service cloud.firestore {
         "weightHistoryModeTransferredAt", "calorieHistoryModeTransferredAt",
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
-        "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt"
+        "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
+        "agreedTermsAt", "agreedPrivacyAt"
       ]);
     }
 

@@ -746,11 +746,34 @@ const checks = [
     app.includes('<MCard title="체중과 섭취 칼로리">') &&
     app.includes('function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){')
   ],
-  ['변화분석: 벌크업 회원 - 운동 볼륨/수행능력이 최상단, 5RM·10RM은 Epley 추정 + 예상값 문구 명시',
-    app.includes('{persona === "bulk" && (') &&
-    (() => { const i = app.indexOf('{persona === "bulk" && ('); return app.indexOf('<StrengthChangeCard', i) !== -1 && app.indexOf('<StrengthChangeCard', i) < app.indexOf('총 운동량 변화', i); })() &&
-    app.includes('function estimate1RM(weight,reps){const w=Number(weight),r=Number(reps); if(!w||!r) return null; return r<=1?w:w*(1+r/30);}') &&
-    app.includes('실측 1RM이 아닌, 기록된 무게·반복수 기반 추정값입니다.')
+  ['변화분석: 벌크업 회원 - 부위별 운동량 그래프가 최상단, 그다음 대표 운동(빈도 기준 자동 선정) 수행능력 변화, 그다음 변화 요약',
+    (() => {
+      const i = app.indexOf('{persona === "bulk" && (');
+      if (i === -1) return false;
+      const partVolumeIdx = app.indexOf('<PartVolumeCard sessions={periodSessions} />', i);
+      const strengthIdx = app.indexOf('운동 수행능력 변화', i);
+      const summaryIdx = app.indexOf('변화 요약', i);
+      const weightIdx = app.indexOf('{weightChart}', i);
+      return partVolumeIdx !== -1 && strengthIdx !== -1 && summaryIdx !== -1 && weightIdx !== -1 &&
+        partVolumeIdx < strengthIdx && strengthIdx < summaryIdx && summaryIdx < weightIdx;
+    })() &&
+    app.includes('function buildTopExercisesByFrequency(sessions=[],limit=5){') &&
+    app.includes('function buildRepEnduranceChanges(sessions=[],exerciseNames=[]){') &&
+    app.includes('function buildBulkGrowthSummary({partVolumeData=[],topExercises=[],repEndurance=[],periodLabel="최근"}){')
+  ],
+  ['변화분석: 부위별 운동량 - 누적이 아닌 최근 세션별 볼륨을 부위 탭 선택 방식으로 최근 5회까지 표시',
+    app.includes('.filter(r=>r.value>0).slice(-5);') &&
+    app.includes('<div className="part-volume-tabs">') &&
+    app.includes('최근 {current.part} 운동 {current.values.length}회')
+  ],
+  ['변화분석: 벌크업 회원 - 체중·골격근량·체지방은 운동 수행능력보다 뒤(보조 지표)에 배치',
+    (() => {
+      const i = app.indexOf('{persona === "bulk" && (');
+      const weightIdx = app.indexOf('{weightChart}', i);
+      const mmIdx = app.indexOf('title="골격근량 변화"', i);
+      const fatIdx = app.indexOf('title="체지방 변화"', i);
+      return weightIdx !== -1 && mmIdx !== -1 && fatIdx !== -1 && weightIdx < mmIdx && mmIdx < fatIdx;
+    })()
   ],
   ['변화분석: 체형교정 회원 - 통증(VAS)이 최상단, 가동범위/기능평가는 데이터 없음을 정직하게 표시(신규 Firestore 구조 추가 없음)',
     app.includes('{persona === "correction" && (') &&

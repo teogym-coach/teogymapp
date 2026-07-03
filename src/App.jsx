@@ -82,16 +82,16 @@ function averageKcalLogs(rows=[]){const valid=rows.filter(r=>r.kcal>0); return v
 function estimateMaintenance(profile={},onboarding={},body=null,nutrition=null,checkins=[],sessions=[]){const bmr=initialBmrCalories(profile,onboarding,body); const formula=initialMaintenanceCalories(profile,onboarding,body,checkins); const kcalLogs=getKcalLogs(nutrition); const weights=getBodyWeightRecords(body); const today=new Date(); const windows=[14,28,56]; const estimates=[]; windows.forEach(days=>{const since=new Date(today.getTime()-days*86400000).toISOString().slice(0,10); const kcals=kcalLogs.filter(x=>x.date>=since); const ws=weights.filter(x=>x.date>=since); if(kcals.length>=4&&ws.length>=2){const avg=kcals.reduce((a,b)=>a+b.kcal,0)/kcals.length; const first=ws[0],last=ws.at(-1); const span=Math.max(1,(new Date(last.date)-new Date(first.date))/86400000); const weekly=(last.weight-first.weight)/span*7; const maintenance=avg-(weekly*7700/7); estimates.push({days,maintenance,avg,weekly,quality:Math.min(1,kcals.length/days)*0.65+Math.min(1,ws.length/Math.max(2,days/7))*0.35});}}); const weighted=estimates.reduce((a,e)=>a+e.maintenance*e.quality*(e.days===28?1.15:e.days===56?0.9:1),0); const wsum=estimates.reduce((a,e)=>a+e.quality*(e.days===28?1.15:e.days===56?0.9:1),0); const learned=wsum?Math.round(weighted/wsum):null; const maintenance=learned||formula; const confidence=Math.round(Math.min(96,Math.max(42,(learned?58:35)+Math.min(30,kcalLogs.length*2)+Math.min(18,weights.length*3)+Math.min(8,sessions.length)))); const diet=Math.max(1200,Math.round(maintenance-500)); const bulk=Math.round(maintenance+300); const recent7=getRecentKcalLogsByDays(nutrition,7); const avg7=averageKcalLogs(recent7); const recent30=getRecentKcalLogsByDays(nutrition,30); const avg30=averageKcalLogs(recent30); const lastEstimate=estimates.find(e=>e.days===28)||estimates[0]; return {bmr,formula,maintenance,diet,maintain:maintenance,bulk,confidence,learned:!!learned,period:learned?`실제 데이터 보정값 · 최근 ${lastEstimate?.days||28}일`:"공식 기반 초기값",basis:learned?"실제 데이터 보정값":"공식 기반 초기값",avg7,avg28:avg30,avg30,weeklyChange:lastEstimate?.weekly??null,avgIntake:lastEstimate?.avg?Math.round(lastEstimate.avg):avg30};}
 function formatKcal(v){return v!=null&&Number.isFinite(Number(v))?`${Math.round(Number(v)).toLocaleString()} kcal`:"-";}
 function getGoalCalorieRecommendation(analysis,goal=""){const g=String(goal||""); if(g.includes("다이어트")||g.includes("감량"))return {label:"감량 권장 칼로리",shortLabel:"감량 목표 기준",value:analysis.diet}; if(g.includes("벌크")||g.includes("증량"))return {label:"증량 권장 칼로리",shortLabel:"증량 목표 기준",value:analysis.bulk}; return {label:"유지 권장 칼로리",shortLabel:"유지 목표 기준",value:analysis.maintain};}
-function KpiTile({label,value,sub,accent="#5EEAD4",large=false}){return <div style={{position:"relative",overflow:"hidden",background:"linear-gradient(145deg,rgba(15,23,42,.98),rgba(8,13,26,.98))",border:"1px solid rgba(255,255,255,.08)",borderRadius:large?18:14,padding:large?"18px 16px":"13px 12px",boxShadow:"0 14px 34px rgba(0,0,0,.18)"}}><div style={{position:"absolute",inset:"auto -18px -28px auto",width:86,height:86,borderRadius:"50%",background:accent+"18",filter:"blur(2px)"}}/><Mo c="#94a3b8" s={large?10:9} style={{display:"block",fontWeight:800,letterSpacing:.2,marginBottom:large?8:5}}>{label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:large?32:19,lineHeight:1,color:accent,letterSpacing:-.7}}>{value}</div>{sub&&<Mo c="#64748b" s={large?10:8} style={{display:"block",marginTop:large?8:5}}>{sub}</Mo>}</div>}
-function MiniInsightTile({label,value,accent="#e2e8f0"}){return <div style={{background:"rgba(15,23,42,.72)",border:"1px solid rgba(148,163,184,.13)",borderRadius:13,padding:"12px 11px",minHeight:76}}><Mo c="#64748b" s={8} style={{display:"block",fontWeight:800,marginBottom:7}}>{label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:850,fontSize:18,lineHeight:1.1,color:accent}}>{value}</div></div>}
+function KpiTile({label,value,sub,accent="#5EEAD4",large=false}){return <div style={{position:"relative",overflow:"hidden",background:"linear-gradient(145deg,rgba(15,23,42,.98),rgba(8,13,26,.98))",border:"1px solid rgba(255,255,255,.08)",borderRadius:large?18:14,padding:large?"18px 16px":"13px 12px",boxShadow:"0 14px 34px rgba(0,0,0,.18)"}}><div style={{position:"absolute",inset:"auto -18px -28px auto",width:86,height:86,borderRadius:"50%",background:accent+"18",filter:"blur(2px)"}}/><Mo c="#94a3b8" s={large?10:9} style={{display:"block",fontWeight:800,letterSpacing:.2,marginBottom:large?8:5}}>{label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:large?32:19,lineHeight:1,color:accent,letterSpacing:-.7}}>{value}</div>{sub&&<Mo c="#94a3b8" s={large?10:8} style={{display:"block",marginTop:large?8:5}}>{sub}</Mo>}</div>}
+function MiniInsightTile({label,value,accent="#e2e8f0"}){return <div style={{background:"rgba(15,23,42,.72)",border:"1px solid rgba(148,163,184,.13)",borderRadius:13,padding:"12px 11px",minHeight:76}}><Mo c="#94a3b8" s={8} style={{display:"block",fontWeight:800,marginBottom:7}}>{label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:850,fontSize:18,lineHeight:1.1,color:accent}}>{value}</div></div>}
 function CalorieAnalysisCard({profile,onboarding,body,nutrition,checkins,sessions,admin=false}){const a=estimateMaintenance(profile,onboarding,body,nutrition,checkins,sessions); const target=getGoalCalorieRecommendation(a,onboarding?.goal||profile?.goal); const status=getCalorieStatus({avg:a.avg7,target:target.value,goal:onboarding?.goal||profile?.goal}); const kcalCount=getKcalLogs(nutrition).length; const weightCount=getBodyWeightRecords(body).length; return <MCard title={admin?"🔥 전문가 칼로리 분석":"섭취 칼로리 분석"}><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:12}}><KpiTile large label="유지 칼로리" value={formatKcal(a.maintenance)} sub="현재 추정 TDEE" accent="#ffd166"/><KpiTile large label="현재 목표 권장" value={formatKcal(target.value)} sub={target.shortLabel||target.label} accent="#5EEAD4"/></div><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8,marginBottom:12}}><MiniInsightTile label="최근 7일 평균" value={formatKcal(a.avg7)} accent="#5EEAD4"/><MiniInsightTile label="최근 30일 평균" value={formatKcal(a.avg30)} accent="#7c6fff"/><MiniInsightTile label="권장 대비 상태" value={status.label} accent={status.tone==="high"?"#ff6b6b":status.tone==="low"?"#ffd166":"#5EEAD4"}/><MiniInsightTile label="신뢰도" value={`${a.confidence}%`} accent={a.learned?"#5EEAD4":"#ffd166"}/><MiniInsightTile label="데이터 기준" value={a.basis}/><MiniInsightTile label="기록 표본" value={`${kcalCount}식 · ${weightCount}체중`}/></div><div style={{border:"1px solid rgba(94,234,212,.16)",background:"linear-gradient(135deg,rgba(94,234,212,.08),rgba(124,111,255,.07))",borderRadius:16,padding:"15px 14px"}}><Mo c="#e2e8f0" s={12} style={{display:"block",fontWeight:800,lineHeight:1.65}}>현재 기록이 부족하여<br/>공식 기반 초기값을 사용 중입니다.</Mo><Mo c="#94a3b8" s={10} style={{display:"block",lineHeight:1.75,marginTop:8}}>체중과 섭취칼로리 기록이 누적되면 실제 데이터 기반 유지칼로리로 자동 보정됩니다.</Mo></div></MCard>}
 function RecommendedCalorieMetric({profile,onboarding,body,nutrition,checkins,sessions}){const a=estimateMaintenance(profile,onboarding,body,nutrition,checkins,sessions); const target=getGoalCalorieRecommendation(a,onboarding?.goal||profile?.goal); return <div className="metric recommended-calorie"><span>추천 섭취 칼로리</span><b>{formatKcal(target.value)}</b><small>{target.shortLabel}</small></div>}
 function getCalorieGoalType(goal=""){const g=String(goal||""); if(g.includes("다이어트")||g.includes("감량"))return "diet"; if(g.includes("벌크")||g.includes("증량"))return "bulk"; return "maintain";}
 function getCalorieStatus({avg,target,goal}){if(avg==null)return {label:"기록 없음",tone:"neutral",diff:null,headline:"섭취 칼로리 기록이 없습니다.",message:"칼로리를 기록하면 권장 섭취량과 비교하여 분석해 드립니다."}; if(!Number.isFinite(Number(avg))||!Number.isFinite(Number(target)))return {label:"기록 수집 중",tone:"neutral",diff:null,headline:"섭취 칼로리 기록 수집 중입니다.",message:"체중과 섭취 칼로리를 함께 기록하면 개인에게 맞는 권장 섭취량이 더 정확해집니다."}; const diff=Math.round(Number(avg)-Number(target)); const abs=Math.abs(diff); const state=abs<=150?"range":diff<-150?"low":"high"; const type=getCalorieGoalType(goal); const direction=diff<0?`현재 권장 칼로리보다 ${abs.toLocaleString()}kcal 적게 섭취하고 있습니다.`:diff>0?`현재 권장 칼로리보다 ${abs.toLocaleString()}kcal 많이 섭취하고 있습니다.`:"현재 권장 칼로리와 거의 동일하게 섭취하고 있습니다."; const messages={diet:{low:"섭취량이 너무 낮을 수 있습니다.",range:"감량 목표에 적절한 섭취 흐름입니다.",high:"감량 속도가 느려질 수 있습니다."},bulk:{low:"증량에 필요한 섭취량이 부족할 수 있습니다.",range:"증량 목표에 적절한 섭취 흐름입니다.",high:"체지방 증가 속도가 빨라질 수 있습니다."},maintain:{low:"현재 섭취량은 감량 쪽으로 기울 수 있습니다.",range:"체중 유지에 적절한 섭취 흐름입니다.",high:"현재 섭취량은 증량 쪽으로 기울 수 있습니다."}}; return {label:state==="range"?"목표 범위":state==="low"?"부족":"초과",tone:state,diff,headline:direction,message:messages[type][state]};}
 function formatSignedKcal(v){return v!=null&&Number.isFinite(Number(v))?`${Number(v)>0?"+":""}${Math.round(Number(v)).toLocaleString()} kcal`:"-";}
-function CalorieSummaryCard({avg7,target,goal,admin=false}){const status=getCalorieStatus({avg:avg7,target,goal}); const tone=status.tone==="range"?"#5EEAD4":status.tone==="low"?"#ffd166":status.tone==="high"?"#ff6b6b":"#94a3b8"; const shell=admin?{background:"linear-gradient(145deg,rgba(15,23,42,.96),rgba(8,13,26,.98))",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,padding:"14px 14px",marginBottom:12}:{background:"linear-gradient(135deg,#FFFFFF,#EEF5FF)",border:"1px solid #D9E7FF",borderRadius:22,padding:"16px",marginBottom:12}; return <div style={shell}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}><div><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:900}}>현재 섭취 상태</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:admin?25:28,color:tone,marginTop:5}}>{status.label}</div></div><div style={{textAlign:"right"}}><Mo c={admin?"#54546a":"#8B949E"} s={admin?8:11}>권장 대비</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:admin?20:22,color:tone,marginTop:4}}>{formatSignedKcal(status.diff)}</div></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8,marginBottom:12}}><div><Mo c={admin?"#54546a":"#8B949E"} s={admin?8:11}>최근 7일 평균</Mo><b style={{display:"block",color:admin?"#e2e8f0":"#20242A",fontSize:admin?15:17,marginTop:3}}>{formatKcal(avg7)}</b></div><div><Mo c={admin?"#54546a":"#8B949E"} s={admin?8:11}>권장 섭취</Mo><b style={{display:"block",color:admin?"#5EEAD4":"#16A34A",fontSize:admin?15:17,marginTop:3}}>{formatKcal(target)}</b></div></div><Mo c={admin?"#cbd5e1":"#334155"} s={admin?10:13} style={{display:"block",fontWeight:900,lineHeight:1.6}}>{status.headline}</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.6,marginTop:3}}>{status.message}</Mo></div>}
-function CalorieKpiGrid({items,admin=false}){return <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:admin?10:8,marginTop:admin?12:12}}>{items.map(item=>admin?<div key={item.label} style={{position:"relative",overflow:"hidden",background:"linear-gradient(145deg,#0B1120,#0f172a)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"11px 12px",minHeight:82}}><div style={{position:"absolute",right:-24,bottom:-30,width:78,height:78,borderRadius:"50%",background:(item.color||"#5EEAD4")+"18"}}/><Mo c="#54546a" s={8} style={{display:"block",fontWeight:800,marginBottom:6}}>{item.label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,lineHeight:1,color:item.color||"#5EEAD4",letterSpacing:-.3}}>{item.value}</div>{item.sub&&<Mo c="#3a3a4a" s={8} style={{display:"block",marginTop:6,fontWeight:700}}>{item.sub}</Mo>}</div>:<div key={item.label} className="metric secondary-metrics" style={{minHeight:92,padding:14}}><span>{item.label}</span><b style={{fontSize:20,color:item.color||"#20242A",marginTop:8}}>{item.value}</b>{item.sub&&<small style={{display:"block",color:"#66717C",fontWeight:900,marginTop:6}}>{item.sub}</small>}</div>)}</div>}
-function CalorieTrendChart({rows,chartRows,admin=false}){const tooltipStyle=admin?{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#e2e8f0"}:{background:"#FFFFFF",border:"1px solid #E8ECF1",borderRadius:12,boxShadow:"0 10px 28px rgba(32,36,42,.08)",fontSize:12,color:"#20242A"}; const axisTick=admin?{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}:{fontSize:11,fill:"#8B949E",fontWeight:800}; if(!rows.length)return <div style={{minHeight:admin?190:180,display:"grid",placeItems:"center",textAlign:"center",padding:18,border:`1px dashed ${admin?"rgba(255,255,255,0.12)":"#D9E7FF"}`,borderRadius:admin?12:18,background:admin?"#0B1120":"#F6F7F9"}}><div><Mo c={admin?"#e2e8f0":"#20242A"} s={admin?11:14} style={{display:"block",fontWeight:900,marginBottom:8}}>섭취 칼로리 기록 수집 중입니다.</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.7}}>체중과 섭취 칼로리를 함께 기록하면<br/>개인에게 맞는 권장 섭취량이 더 정확해집니다.</Mo></div></div>; return <ResponsiveContainer width="100%" height={admin?190:190}><ComposedChart data={chartRows} margin={{top:8,right:admin?14:8,left:admin?-18:-14,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke={admin?"rgba(255,255,255,0.08)":"#EEF1F4"}/><XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}}/><YAxis tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}} unit="kcal"/><Tooltip contentStyle={tooltipStyle} formatter={(v,n)=>[formatKcal(v),n]}/><Legend wrapperStyle={{fontFamily:admin?"'DM Mono',monospace":undefined,fontSize:admin?8:11,color:admin?"#94a3b8":"#66717C",fontWeight:800}}/><Bar dataKey="kcal" name="일별 섭취" fill={admin?"#5EEAD4":"#93C5FD"} radius={[5,5,0,0]} opacity={admin?0.35:0.34}/><Line type="monotone" dataKey="target" name="권장 섭취" stroke={admin?"#ffd166":"#94A3B8"} strokeWidth={admin?1.7:2} strokeDasharray="5 5" dot={false}/></ComposedChart></ResponsiveContainer>}
+function CalorieSummaryCard({avg7,target,goal,admin=false}){const status=getCalorieStatus({avg:avg7,target,goal}); const tone=status.tone==="range"?"#5EEAD4":status.tone==="low"?"#ffd166":status.tone==="high"?"#ff6b6b":"#94a3b8"; const shell=admin?{background:"linear-gradient(145deg,rgba(15,23,42,.96),rgba(8,13,26,.98))",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,padding:"14px 14px",marginBottom:12}:{background:"linear-gradient(135deg,#FFFFFF,#EEF5FF)",border:"1px solid #D9E7FF",borderRadius:22,padding:"16px",marginBottom:12}; return <div style={shell}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}><div><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:900}}>현재 섭취 상태</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:admin?25:28,color:tone,marginTop:5}}>{status.label}</div></div><div style={{textAlign:"right"}}><Mo c={admin?"#94a3b8":"#8B949E"} s={admin?8:11}>권장 대비</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:admin?20:22,color:tone,marginTop:4}}>{formatSignedKcal(status.diff)}</div></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8,marginBottom:12}}><div><Mo c={admin?"#94a3b8":"#8B949E"} s={admin?8:11}>최근 7일 평균</Mo><b style={{display:"block",color:admin?"#e2e8f0":"#20242A",fontSize:admin?15:17,marginTop:3}}>{formatKcal(avg7)}</b></div><div><Mo c={admin?"#94a3b8":"#8B949E"} s={admin?8:11}>권장 섭취</Mo><b style={{display:"block",color:admin?"#5EEAD4":"#16A34A",fontSize:admin?15:17,marginTop:3}}>{formatKcal(target)}</b></div></div><Mo c={admin?"#cbd5e1":"#334155"} s={admin?10:13} style={{display:"block",fontWeight:900,lineHeight:1.6}}>{status.headline}</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.6,marginTop:3}}>{status.message}</Mo></div>}
+function CalorieKpiGrid({items,admin=false}){return <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:admin?10:8,marginTop:admin?12:12}}>{items.map(item=>admin?<div key={item.label} style={{position:"relative",overflow:"hidden",background:"linear-gradient(145deg,#0B1120,#0f172a)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"11px 12px",minHeight:82}}><div style={{position:"absolute",right:-24,bottom:-30,width:78,height:78,borderRadius:"50%",background:(item.color||"#5EEAD4")+"18"}}/><Mo c="#94a3b8" s={8} style={{display:"block",fontWeight:800,marginBottom:6}}>{item.label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,lineHeight:1,color:item.color||"#5EEAD4",letterSpacing:-.3}}>{item.value}</div>{item.sub&&<Mo c="#cbd5e1" s={8} style={{display:"block",marginTop:6,fontWeight:700}}>{item.sub}</Mo>}</div>:<div key={item.label} className="metric secondary-metrics" style={{minHeight:92,padding:14}}><span>{item.label}</span><b style={{fontSize:20,color:item.color||"#20242A",marginTop:8}}>{item.value}</b>{item.sub&&<small style={{display:"block",color:"#66717C",fontWeight:900,marginTop:6}}>{item.sub}</small>}</div>)}</div>}
+function CalorieTrendChart({rows,chartRows,admin=false}){const tooltipStyle=admin?{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#e2e8f0"}:{background:"#FFFFFF",border:"1px solid #E8ECF1",borderRadius:12,boxShadow:"0 10px 28px rgba(32,36,42,.08)",fontSize:12,color:"#20242A"}; const axisTick=admin?{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}:{fontSize:11,fill:"#8B949E",fontWeight:800}; if(!rows.length)return <div style={{minHeight:admin?190:180,display:"grid",placeItems:"center",textAlign:"center",padding:18,border:`1px dashed ${admin?"rgba(255,255,255,0.12)":"#D9E7FF"}`,borderRadius:admin?12:18,background:admin?"#0B1120":"#F6F7F9"}}><div><Mo c={admin?"#e2e8f0":"#20242A"} s={admin?11:14} style={{display:"block",fontWeight:900,marginBottom:8}}>섭취 칼로리 기록 수집 중입니다.</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.7}}>체중과 섭취 칼로리를 함께 기록하면<br/>개인에게 맞는 권장 섭취량이 더 정확해집니다.</Mo></div></div>; return <ResponsiveContainer width="100%" height={admin?190:190}><ComposedChart data={chartRows} margin={{top:8,right:admin?14:8,left:admin?-18:-14,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke={admin?"rgba(255,255,255,0.08)":"#EEF1F4"}/><XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}}/><YAxis tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}} unit="kcal"/><Tooltip contentStyle={tooltipStyle} formatter={(v,n)=>[formatKcal(v),n]}/><Legend wrapperStyle={{fontFamily:admin?"'DM Mono',monospace":undefined,fontSize:admin?8:11,color:admin?"#94a3b8":"#66717C",fontWeight:800}}/><Bar dataKey="kcal" name="일별 섭취" fill={admin?"#5EEAD4":"#93C5FD"} radius={[5,5,0,0]} opacity={admin?0.35:0.34}/><Line type="monotone" dataKey="target" name="권장 섭취" stroke={admin?"#ffd166":"#94A3B8"} strokeWidth={admin?1.7:2} strokeDasharray="5 5" dot={false}/></ComposedChart></ResponsiveContainer>}
 function CalorieTrendCard({profile,onboarding,body,nutrition,checkins,sessions,admin=false}){const a=estimateMaintenance(profile,onboarding,body,nutrition,checkins,sessions); const goal=onboarding?.goal||profile?.goal||nutrition?.goal; const target=getGoalCalorieRecommendation(a,goal); const rows=getRecentKcalLogsByDays(nutrition,30).map(x=>({date:x.date.slice(5),kcal:x.kcal,target:target.value})); const m7=averageKcalLogs(getRecentKcalLogsByDays(nutrition,7)),m30=averageKcalLogs(getRecentKcalLogsByDays(nutrition,30)); const diff=m7!=null&&Number.isFinite(Number(m7))&&Number.isFinite(Number(target.value))?m7-target.value:null; const chartRows=rows.map(r=>({...r,target:target.value})); const items=[{label:"최근 7일 평균",value:formatKcal(m7),color:admin?"#54a0ff":"#2F73F6"},{label:"최근 30일 평균",value:formatKcal(m30),color:admin?"#5EEAD4":"#14B8A6"},{label:"유지 칼로리",value:formatKcal(a.maintenance),color:admin?"#ffd166":"#20242A"},{label:"권장 섭취 칼로리",value:formatKcal(target.value),sub:target.shortLabel||target.label,color:admin?"#22c55e":"#16A34A"},{label:"권장 대비",value:formatSignedKcal(diff),color:diff>150?"#ff6b6b":diff<-150?"#ffd166":admin?"#5EEAD4":"#16A34A"}]; const content=<><CalorieSummaryCard avg7={m7} target={target.value} goal={goal} admin={admin}/><CalorieTrendChart rows={rows} chartRows={chartRows} admin={admin}/><CalorieKpiGrid items={items} admin={admin}/></>; return admin?<Card title="📈 섭취 칼로리 변화 그래프" style={{marginBottom:11}}>{content}</Card>:<MCard title="섭취 칼로리 변화 그래프"><CalorieTrendChart rows={rows} chartRows={chartRows} admin={admin}/></MCard>}
 function MemberCalorieAnalysisCard({profile,onboarding,body,nutrition,checkins,sessions}){const a=estimateMaintenance(profile,onboarding,body,nutrition,checkins,sessions); const goal=onboarding?.goal||profile?.goal||nutrition?.goal; const target=getGoalCalorieRecommendation(a,goal); const m7=averageKcalLogs(getRecentKcalLogsByDays(nutrition,7)); return <MCard title="섭취 칼로리 분석"><CalorieSummaryCard avg7={m7} target={target.value} goal={goal}/></MCard>}
 function AdminCalorieAnalysisSection({member,bodyData,nutritionData,sessions=[]}){return <div><CalorieAnalysisCard profile={member} onboarding={bodyData?.goal||{}} body={bodyData} nutrition={nutritionData} checkins={[]} sessions={sessions} admin /><CalorieTrendCard profile={member} onboarding={bodyData?.goal||{}} body={bodyData} nutrition={nutritionData} checkins={[]} sessions={sessions} admin /></div>}
@@ -1023,7 +1023,7 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:58,marginBottom:10,opacity:1,filter:"none"}}>🏋️</div>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:30,color:"#fff",letterSpacing:"-1px",opacity:1,filter:"none"}}>TEO GYM</div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginTop:4}}>{memberMode ? "회원 전용 운동 관리 앱" : "트레이너 로그인"}</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#94a3b8",marginTop:4}}>{memberMode ? "회원 전용 운동 관리 앱" : "트레이너 로그인"}</div>
         </div>
         <Card>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -1040,7 +1040,7 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
             </div>
           </div>
         </Card>
-        <p style={{textAlign:"center",marginTop:14,fontFamily:"'DM Mono',monospace",fontSize:10,color:"#3a3a4a"}}>
+        <p style={{textAlign:"center",marginTop:14,fontFamily:"'DM Mono',monospace",fontSize:10,color:"#cbd5e1"}}>
           계정은 Firebase 콘솔 → Authentication에서 생성
         </p>
       </div>
@@ -1901,13 +1901,13 @@ function AdminMemberAppPanel({member,members=[],onAccountCreated,showManagement=
   const memberAppStatus=getMemberAppStatus(member);
   const statusColor=member?.memberUid?"#86efac":memberAppStatus==="확인 필요"?"#fbbf24":"#93c5fd";
   return <div style={{marginTop:10,display:"grid",gap:8}}>
-    {showManagement&&<div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 관리</Mo><div style={{display:"grid",gap:5,marginTop:8}}><div style={{fontSize:11,color:statusColor}}>회원앱 상태: {memberAppStatus}</div><div style={{fontSize:11,color:"#cbd5e1"}}>회원 이메일: {hasEmail?currentEmail:"없음"}</div><div style={{fontSize:11,color:"#94a3b8"}}>연결 상태: {member?.memberUid?"memberUid 연결됨":"memberUid 미연결"}</div><div style={{fontSize:11,color:"#cbd5e1"}}>초대 여부: {member?.memberAppInviteSentAt?"초대 완료":"초대 안함"}</div><div style={{fontSize:11,color:"#cbd5e1"}}>가입 여부: {member?.memberUid?"가입 완료":"미가입"}</div><div style={{fontSize:11,color:"#cbd5e1"}}>마지막 로그인: {member?.memberAppLastLoginAt?formatCompactDate(member.memberAppLastLoginAt):"-"}</div></div>{!hasEmail&&<div style={{fontSize:11,color:"#fbbf24",marginTop:6}}>회원 이메일을 먼저 등록해주세요.</div>}<div style={{marginTop:9,padding:9,borderRadius:8,background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.14)"}}><Mo c="#38bdf8" s={9}>회원앱 데이터 전송</Mo><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}}><Btn ghost sm onClick={()=>transferMemberAppData("weightHistoryMode")} disabled={busy} style={{marginTop:0,color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 체중 전송</Btn><Btn ghost sm onClick={()=>transferMemberAppData("calorieHistoryMode")} disabled={busy} style={{marginTop:0,color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 칼로리 전송</Btn></div><div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>회원앱은 기본 새로 시작이며, 전송 버튼을 눌렀을 때만 관리자 기록을 회원앱으로 복사합니다.</div></div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn ghost sm onClick={cleanupTeoGym12} disabled={busy} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 이메일 분리</Btn><Btn ghost sm onClick={resetOnboarding} disabled={busy} style={{color:"#fbbf24",borderColor:"rgba(251,191,36,.35)"}}>온보딩 초기화</Btn><Btn ghost sm onClick={()=>setShowDiagnostics(v=>!v)} style={{color:"#94a3b8",borderColor:"#334155"}}>{showDiagnostics?"상세 진단 숨기기":"상세 진단 보기"}</Btn></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{showDiagnostics&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:6,fontSize:10,color:"#94a3b8"}}><div><b style={{color:"#cbd5e1"}}>문제 해결 정보</b></div><div style={{padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>memberUid 저장</Mo><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 입력" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{isOwnerMember&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)"}}><Mo c="#fbbf24" s={9}>대표 기록 상태 (owner 전용)</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>현재 status: {member?.status||"active(기본값)"} {(!member?.status||member.status==="active")?"✅ 진행중":"⛔ "+member.status}</div><Btn ghost sm onClick={restoreOwnerActiveStatus} disabled={busy} style={{marginTop:7,color:"#fbbf24",borderColor:"rgba(251,191,36,.4)"}}>대표 기록 상태를 진행중으로 복구</Btn></div>}{emailChangedWithUid&&<div>현재 이메일과 과거 초대 이메일이 다릅니다. 과거 이메일: {linkedEmail}</div>}<div>현재 로그인 Auth UID (지금 이 화면을 보고 있는 계정): {identityDiagnostics.current?.authUid||"-"}</div><div>회원 문서 memberUid: {identityDiagnostics.current?.memberUid||"-"}</div><div>회원 문서 trainerUid: {member?.trainerUid||"-"}</div><div style={{fontSize:9,color:"#64748b",marginTop:2}}>ℹ️ memberUid 일치 여부: 관리자 계정으로 다른 회원 상세를 볼 때는 현재 로그인 Auth UID와 memberUid가 달라도 정상입니다(관리자가 조회 중인 것뿐). 대표님 본인의 owner 기록을 볼 때만 두 값이 같아야 정상입니다.</div><div style={{marginTop:4,padding:"6px 8px",borderRadius:6,fontWeight:800,color:identityDiagnostics.current?.memberUidMatchesAuthUid?"#22c55e":"#ef4444",background:identityDiagnostics.current?.memberUidMatchesAuthUid?"rgba(34,197,94,.12)":"rgba(239,68,68,.12)",border:`1px solid ${identityDiagnostics.current?.memberUidMatchesAuthUid?"rgba(34,197,94,.35)":"rgba(239,68,68,.35)"}`}}>{identityDiagnostics.current?.memberUidMatchesAuthUid?"✅ 일치 · memberUid = 현재 로그인 Auth UID":"⚠️ 불일치 · memberUid ≠ 현재 로그인 Auth UID"}</div><div>연결 흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div>중복 email 그룹: {identityDiagnostics.duplicateEmails.length?identityDiagnostics.duplicateEmails.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div>중복 memberUid 그룹: {identityDiagnostics.duplicateMemberUids.length?identityDiagnostics.duplicateMemberUids.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div>Firestore 경로: {`members/${memberId||"memberId"}`}</div>{duplicateEmailMembers.length>0&&<div style={{color:"#ff6b6b"}}>현재 이메일 중복 회원: {duplicateEmailMembers.map(m=>m.name||m.id).join(" · ")}</div>}{duplicateUidMembers.length>0&&<div style={{color:"#ff6b6b"}}>현재 memberUid 중복 회원: {duplicateUidMembers.map(m=>m.name||m.id).join(" · ")}</div>}{inviteLog.length>0&&<div style={{display:"grid",gap:4}}>디버그 로그: {inviteLog.map((l,i)=><div key={i} style={{color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div>}</div>}
+    {showManagement&&<div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><Mo c="#60a5fa" s={9}>회원앱 관리</Mo><div style={{display:"grid",gap:5,marginTop:8}}><div style={{fontSize:11,color:statusColor}}>회원앱 상태: {memberAppStatus}</div><div style={{fontSize:11,color:"#cbd5e1"}}>회원 이메일: {hasEmail?currentEmail:"없음"}</div><div style={{fontSize:11,color:"#94a3b8"}}>연결 상태: {member?.memberUid?"memberUid 연결됨":"memberUid 미연결"}</div><div style={{fontSize:11,color:"#cbd5e1"}}>초대 여부: {member?.memberAppInviteSentAt?"초대 완료":"초대 안함"}</div><div style={{fontSize:11,color:"#cbd5e1"}}>가입 여부: {member?.memberUid?"가입 완료":"미가입"}</div><div style={{fontSize:11,color:"#cbd5e1"}}>마지막 로그인: {member?.memberAppLastLoginAt?formatCompactDate(member.memberAppLastLoginAt):"-"}</div></div>{!hasEmail&&<div style={{fontSize:11,color:"#fbbf24",marginTop:6}}>회원 이메일을 먼저 등록해주세요.</div>}<div style={{marginTop:9,padding:9,borderRadius:8,background:"rgba(94,234,212,.05)",border:"1px solid rgba(94,234,212,.14)"}}><Mo c="#38bdf8" s={9}>회원앱 데이터 전송</Mo><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}}><Btn ghost sm onClick={()=>transferMemberAppData("weightHistoryMode")} disabled={busy} style={{marginTop:0,color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 체중 전송</Btn><Btn ghost sm onClick={()=>transferMemberAppData("calorieHistoryMode")} disabled={busy} style={{marginTop:0,color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 칼로리 전송</Btn></div><div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>회원앱은 기본 새로 시작이며, 전송 버튼을 눌렀을 때만 관리자 기록을 회원앱으로 복사합니다.</div></div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}><Btn ghost sm onClick={cleanupTeoGym12} disabled={busy} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>회원앱 이메일 분리</Btn><Btn ghost sm onClick={resetOnboarding} disabled={busy} style={{color:"#fbbf24",borderColor:"rgba(251,191,36,.35)"}}>온보딩 초기화</Btn><Btn ghost sm onClick={()=>setShowDiagnostics(v=>!v)} style={{color:"#94a3b8",borderColor:"#334155"}}>{showDiagnostics?"상세 진단 숨기기":"상세 진단 보기"}</Btn></div>{msg&&<div style={{fontSize:11,color:msg.includes("완료")||msg.includes("발송했습니다")?"#86efac":"#ff9f43",marginTop:6}}>{msg}</div>}{showDiagnostics&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(255,255,255,.04)",display:"grid",gap:6,fontSize:10,color:"#94a3b8"}}><div><b style={{color:"#cbd5e1"}}>문제 해결 정보</b></div><div style={{padding:8,borderRadius:8,background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.18)"}}><Mo c="#5EEAD4" s={9}>memberUid 저장</Mo><div style={{display:"flex",gap:6,marginTop:6}}><input value={manualUid} onChange={e=>setManualUid(e.target.value)} placeholder="auth.uid 입력" style={{flex:1,minWidth:180,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"#e5e7eb",padding:"7px 8px",fontSize:11}}/><Btn ghost sm onClick={saveManualMemberUid} disabled={busy||!manualUid.trim()} style={{color:"#5EEAD4",borderColor:"#5EEAD444"}}>memberUid 저장</Btn></div></div>{isOwnerMember&&<div style={{marginTop:8,padding:8,borderRadius:8,background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)"}}><Mo c="#fbbf24" s={9}>대표 기록 상태 (owner 전용)</Mo><div style={{fontSize:11,color:"#cbd5e1",marginTop:5}}>현재 status: {member?.status||"active(기본값)"} {(!member?.status||member.status==="active")?"✅ 진행중":"⛔ "+member.status}</div><Btn ghost sm onClick={restoreOwnerActiveStatus} disabled={busy} style={{marginTop:7,color:"#fbbf24",borderColor:"rgba(251,191,36,.4)"}}>대표 기록 상태를 진행중으로 복구</Btn></div>}{emailChangedWithUid&&<div>현재 이메일과 과거 초대 이메일이 다릅니다. 과거 이메일: {linkedEmail}</div>}<div>현재 로그인 Auth UID (지금 이 화면을 보고 있는 계정): {identityDiagnostics.current?.authUid||"-"}</div><div>회원 문서 memberUid: {identityDiagnostics.current?.memberUid||"-"}</div><div>회원 문서 trainerUid: {member?.trainerUid||"-"}</div><div style={{fontSize:9,color:"#94a3b8",marginTop:2}}>ℹ️ memberUid 일치 여부: 관리자 계정으로 다른 회원 상세를 볼 때는 현재 로그인 Auth UID와 memberUid가 달라도 정상입니다(관리자가 조회 중인 것뿐). 대표님 본인의 owner 기록을 볼 때만 두 값이 같아야 정상입니다.</div><div style={{marginTop:4,padding:"6px 8px",borderRadius:6,fontWeight:800,color:identityDiagnostics.current?.memberUidMatchesAuthUid?"#22c55e":"#ef4444",background:identityDiagnostics.current?.memberUidMatchesAuthUid?"rgba(34,197,94,.12)":"rgba(239,68,68,.12)",border:`1px solid ${identityDiagnostics.current?.memberUidMatchesAuthUid?"rgba(34,197,94,.35)":"rgba(239,68,68,.35)"}`}}>{identityDiagnostics.current?.memberUidMatchesAuthUid?"✅ 일치 · memberUid = 현재 로그인 Auth UID":"⚠️ 불일치 · memberUid ≠ 현재 로그인 Auth UID"}</div><div>연결 흐름: 회원 이메일 확인 → Firebase Auth 사용자 생성 확인 → 비밀번호 설정/재설정 메일 발송 → members.memberUid 저장</div><div>중복 email 그룹: {identityDiagnostics.duplicateEmails.length?identityDiagnostics.duplicateEmails.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div>중복 memberUid 그룹: {identityDiagnostics.duplicateMemberUids.length?identityDiagnostics.duplicateMemberUids.map(g=>`${g.value} (${g.members.map(m=>m.name||m.id).join(" · ")})`).join(" / "):"없음"}</div><div>Firestore 경로: {`members/${memberId||"memberId"}`}</div>{duplicateEmailMembers.length>0&&<div style={{color:"#ff6b6b"}}>현재 이메일 중복 회원: {duplicateEmailMembers.map(m=>m.name||m.id).join(" · ")}</div>}{duplicateUidMembers.length>0&&<div style={{color:"#ff6b6b"}}>현재 memberUid 중복 회원: {duplicateUidMembers.map(m=>m.name||m.id).join(" · ")}</div>}{inviteLog.length>0&&<div style={{display:"grid",gap:4}}>디버그 로그: {inviteLog.map((l,i)=><div key={i} style={{color:l.ok?"#86efac":"#ff6b6b"}}>{l.ok?"✓":"!"} {l.at} · {l.text}</div>)}</div>}</div>}</div>}
     {!hideGrid&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:8,alignItems:"stretch"}}>
       <div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",display:"flex",flexDirection:"column",minHeight:118}}><Mo c="#5EEAD4" s={9}>다음 PT 예정 부위</Mo><div style={{flex:1,display:"grid",placeItems:"center",paddingTop:6}}><select value={member?.nextWorkoutPart||member?.nextPtPart||"미정"} onChange={e=>saveNextPtPart(e.target.value)} disabled={busy} style={{width:"100%",background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:8,color:"#e5e7eb",padding:"9px 10px",fontSize:20,fontWeight:900,textAlign:"center",textAlignLast:"center"}}>{NEXT_PT_PART_OPTIONS.map(x=><option key={x}>{x}</option>)}</select></div></div>
       <div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",display:"flex",flexDirection:"column",minHeight:118}}><Mo c="#5EEAD4" s={9}>다음 PT 날짜</Mo><label style={{flex:1,position:"relative",display:"grid",placeItems:"center",paddingTop:6,cursor:busy?"default":"pointer"}}><input type="date" value={member?.nextWorkoutDate||""} onChange={e=>saveNextWorkoutDate(e.target.value)} disabled={busy} aria-label="다음 PT 날짜" style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0,cursor:busy?"default":"pointer"}}/><span style={{display:"inline-flex",alignItems:"baseline",justifyContent:"center",gap:10,background:"#020617",border:"1px solid rgba(255,255,255,.12)",borderRadius:8,color:"#e5e7eb",padding:"9px 12px",minWidth:"100%",fontSize:18,fontWeight:900}}>{member?.nextWorkoutDate?formatCompactDate(member.nextWorkoutDate):"날짜 미정"}{member?.nextWorkoutDate&&<b style={{fontSize:12,color:"#5EEAD4",whiteSpace:"nowrap"}}>{nextPtInfo.dDay}</b>}</span></label></div>
       <div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",display:"grid",gap:5,minHeight:118}}><Mo c="#a78bfa" s={9}>회원 온보딩</Mo><div style={{fontSize:12,color:"#e5e7eb",lineHeight:1.38,fontWeight:800}}>{onboardingBaseLine}</div><div style={{fontSize:12,color:"#cbd5e1",fontWeight:800}}>{onboardingWeightLine||formatWeightValue(ob?.currentWeightKg||member?.currentWeight)}</div><div style={{fontSize:12,color:"#e5e7eb",fontWeight:900}}>{onboardingGoal}</div><div style={{fontSize:10,color:"#94a3b8"}}>집중 목표<br/><b style={{color:"#e5e7eb",fontSize:12}}>{onboardingFocus}</b></div><div style={{fontSize:10,color:"#94a3b8"}}>목표 체중 / 기간<br/><b style={{color:"#e5e7eb",fontSize:12}}>{formatWeightValue(adminTargetWeight)} · {adminTargetPeriod}</b></div>{adminForecast&&<div style={{fontSize:10,color:"#94a3b8"}}>예상 달성 / 추천 속도<br/><b style={{color:"#86efac",fontSize:12}}>{adminForecast.estimatedDate} · 주 {adminForecast.recommended.toFixed(2)}kg</b></div>}</div>
     </div>}
-    <div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",marginBottom:8}}><Mo c="#5EEAD4" s={10} style={{fontWeight:900}}>회원 상태 브리핑</Mo><span style={{fontSize:10,color:"#64748b",background:"rgba(255,255,255,.04)",borderRadius:999,padding:"3px 7px"}}>{briefingDate} 기준</span></div>{ci.length?<><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(132px,1fr))",gap:7}}><BriefTile label="통증" value={painText} sub={`VAS ${painVas}`} color="#ff6b6b" emoji="📍"/><BriefTile label="근육통" value={sorenessText} color="#f97316" emoji="💪"/><BriefTile label="컨디션" value={conditionText} color="#5EEAD4" emoji="🙂"/><BriefTile label="최근 RPE" value={rpeText} color="#818cf8"/></div><div style={{marginTop:7,padding:"8px 9px",borderRadius:8,background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",display:"grid",gridTemplateColumns:"88px 1fr",gap:8,alignItems:"center"}}><Mo c="#94a3b8" s={9}>대표 코멘트</Mo><div style={{fontSize:12,color:"#e5e7eb",fontWeight:800,lineHeight:1.35}}>{trainerComment}</div></div></>:<div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>아직 건강관리 기록이 없습니다</div>}</div>
+    <div style={{padding:10,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",marginBottom:8}}><Mo c="#5EEAD4" s={10} style={{fontWeight:900}}>회원 상태 브리핑</Mo><span style={{fontSize:10,color:"#94a3b8",background:"rgba(255,255,255,.04)",borderRadius:999,padding:"3px 7px"}}>{briefingDate} 기준</span></div>{ci.length?<><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(132px,1fr))",gap:7}}><BriefTile label="통증" value={painText} sub={`VAS ${painVas}`} color="#ff6b6b" emoji="📍"/><BriefTile label="근육통" value={sorenessText} color="#f97316" emoji="💪"/><BriefTile label="컨디션" value={conditionText} color="#5EEAD4" emoji="🙂"/><BriefTile label="최근 RPE" value={rpeText} color="#818cf8"/></div><div style={{marginTop:7,padding:"8px 9px",borderRadius:8,background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",display:"grid",gridTemplateColumns:"88px 1fr",gap:8,alignItems:"center"}}><Mo c="#94a3b8" s={9}>대표 코멘트</Mo><div style={{fontSize:12,color:"#e5e7eb",fontWeight:800,lineHeight:1.35}}>{trainerComment}</div></div></>:<div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>아직 건강관리 기록이 없습니다</div>}</div>
     <div style={{padding:12,borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",minHeight:104}}><Mo c="#ffd166" s={9}>회원앱 소통</Mo><div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>회원 메모 / 요청사항</div>{ms.length?<div style={{display:"grid",gap:7,marginTop:8}}>{ms.slice(0,3).map(m=><div key={m.id} style={{fontSize:12,color:"#cbd5e1",lineHeight:1.45}}><b style={{color:"#e5e7eb"}}>• {m.sessionTitle||m.date||m.createdAt?.toDate?.()?.toISOString?.().slice(0,10)||"최근 메모"}</b> {m.memberMessage||m.message}</div>)}</div>:<div style={{fontSize:12,color:"#94a3b8",marginTop:8}}>아직 회원 메모가 없습니다</div>}</div>
   </div>
 }
@@ -2613,7 +2613,7 @@ export default function App() {
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {member && (
-            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",
+            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
               maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {member.name}
             </span>
@@ -2626,7 +2626,7 @@ export default function App() {
           </button>
           <button onClick={handleLogout}
             style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
-              color:"#54546a",fontSize:10,fontWeight:700,padding:"5px 9px"}}>
+              color:"#94a3b8",fontSize:10,fontWeight:700,padding:"5px 9px"}}>
             로그아웃
           </button>
         </div>
@@ -2827,7 +2827,7 @@ function NoticeAdminScreen({ members=[], onBack, showToast }) {
                   padding:"10px 8px",borderRadius:9,fontSize:13,fontWeight:800,cursor:"pointer",
                   border: form.targetType===v ? "1px solid #5EEAD4" : "1px solid rgba(255,255,255,.08)",
                   background: form.targetType===v ? "rgba(94,234,212,.12)" : "transparent",
-                  color: form.targetType===v ? "#5EEAD4" : "#64748b",
+                  color: form.targetType===v ? "#5EEAD4" : "#94a3b8",
                   transition:"all .15s",
                 }}>{l}</button>
               ))}
@@ -2850,7 +2850,7 @@ function NoticeAdminScreen({ members=[], onBack, showToast }) {
                 {/* 회원 목록 */}
                 <div style={{maxHeight:220,overflowY:"auto",marginBottom: selectedMembers.length?8:0}}>
                   {filteredMembers.length === 0 && (
-                    <Mo c="#64748b" s={10} style={{display:"block",padding:"10px 0",textAlign:"center"}}>
+                    <Mo c="#94a3b8" s={10} style={{display:"block",padding:"10px 0",textAlign:"center"}}>
                       {memberSearch ? "검색 결과가 없습니다." : "선택 가능한 회원이 없습니다."}
                     </Mo>
                   )}
@@ -2938,7 +2938,7 @@ function NoticeAdminScreen({ members=[], onBack, showToast }) {
               <div>
                 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
                   {n.isImportant && <span style={{fontSize:9,background:"rgba(255,200,80,.12)",border:"1px solid rgba(255,200,80,.22)",color:"#ffd166",padding:"1px 5px",borderRadius:4,fontWeight:800}}>📌 중요</span>}
-                  {!n.isPublished && <span style={{fontSize:9,background:"rgba(100,116,139,.12)",border:"1px solid rgba(100,116,139,.18)",color:"#64748b",padding:"1px 5px",borderRadius:4,fontWeight:800}}>숨김</span>}
+                  {!n.isPublished && <span style={{fontSize:9,background:"rgba(100,116,139,.12)",border:"1px solid rgba(100,116,139,.18)",color:"#94a3b8",padding:"1px 5px",borderRadius:4,fontWeight:800}}>숨김</span>}
                   <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{n.title}</Mo>
                 </div>
                 <Mo c="#475569" s={9}>{targetLabel} · {formatCompactDate(n.createdAt)}</Mo>
@@ -2950,7 +2950,7 @@ function NoticeAdminScreen({ members=[], onBack, showToast }) {
               </div>
             </div>
           );
-        }) : <Mo c="#64748b" s={10} style={{display:"block",padding:"12px 0",textAlign:"center"}}>등록된 공지가 없습니다.</Mo>}
+        }) : <Mo c="#94a3b8" s={10} style={{display:"block",padding:"12px 0",textAlign:"center"}}>등록된 공지가 없습니다.</Mo>}
       </Card>
     </div>
   );
@@ -3387,7 +3387,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
   const FILTERS = [
     {key:"active",  label:"진행중",   color:"#5EEAD4"},
     {key:"paused",  label:"휴식중",   color:"#ffd166"},
-    {key:"ended",   label:"종료회원", color:"#64748b"},
+    {key:"ended",   label:"종료회원", color:"#94a3b8"},
     {key:"consult", label:"상담",     color:"#a78bfa"},
     {key:"all",     label:"전체",     color:"#94a3b8"},
     {key:"today",   label:"오늘 수업",color:"#5EEAD4"},
@@ -3493,7 +3493,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏋️</div>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#5EEAD4"}}>대표님 운동 기록</div>
-              <Mo c="#64748b" s={10}>{ownerMember.name} · 개인 운동 전용</Mo>
+              <Mo c="#94a3b8" s={10}>{ownerMember.name} · 개인 운동 전용</Mo>
             </div>
           </div>
           <Mo c="#5EEAD4" s={13}>→</Mo>
@@ -3513,7 +3513,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                 const exists = members.some(m => (m.email||"").trim().toLowerCase() === preset.email);
                 return (
                   <div key={preset.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-                    <div style={{fontSize:11,color:"#cbd5e1"}}>{preset.name} <span style={{color:"#64748b"}}>({preset.email})</span></div>
+                    <div style={{fontSize:11,color:"#cbd5e1"}}>{preset.name} <span style={{color:"#94a3b8"}}>({preset.email})</span></div>
                     <Btn ghost sm disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{color:exists?"#475569":"#a78bfa",borderColor:exists?"#334155":"rgba(167,139,250,.4)"}}>
                       {exists?"생성됨":"생성"}
                     </Btn>
@@ -3521,7 +3521,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                 );
               })}
             </div>
-            <Mo c="#64748b" s={9} style={{display:"block",marginTop:8}}>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:8}}>
               생성 후 회원 상세 → 회원앱 관리 → 회원앱 초대 버튼으로 Firebase Auth 계정을 연결해야 로그인 테스트가 가능합니다.
             </Mo>
           </div>
@@ -3539,7 +3539,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
         {search && (
           <button onClick={()=>setSearch("")}
             style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
-              background:"none",border:"none",color:"#54546a",fontSize:14,cursor:"pointer",padding:0}}>✕</button>
+              background:"none",border:"none",color:"#94a3b8",fontSize:14,cursor:"pointer",padding:0}}>✕</button>
         )}
       </div>
 
@@ -3550,7 +3550,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
             style={{flexShrink:0,padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
               borderColor:filter===f.key?(f.color||"#5EEAD4"):"rgba(255,255,255,0.08)",
               background:filter===f.key?`${f.color||"#5EEAD4"}18`:"transparent",
-              color:filter===f.key?(f.color||"#5EEAD4"):"#54546a"}}>
+              color:filter===f.key?(f.color||"#5EEAD4"):"#94a3b8"}}>
             {f.label}
           </button>
         ))}
@@ -3559,7 +3559,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
             style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
               borderColor:sortBy==="recent"?"#5EEAD4":"rgba(255,255,255,0.08)",
               background:showSort?"rgba(255,255,255,0.08)":"transparent",
-              color:sortBy==="recent"?"#5EEAD4":"#54546a",fontSize:11,fontWeight:700}}>
+              color:sortBy==="recent"?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>
             ⇅ {SORTS.find(s=>s.key===sortBy)?.label}
           </button>
           {showSort && (
@@ -3609,7 +3609,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업 진행중</div>
-              <Mo c="#64748b" s={10}>{pairSessions.filter(ps=>!ps.teamStatus||ps.teamStatus==="active").length}팀 운영중 · 탭하여 관리</Mo>
+              <Mo c="#94a3b8" s={10}>{pairSessions.filter(ps=>!ps.teamStatus||ps.teamStatus==="active").length}팀 운영중 · 탭하여 관리</Mo>
             </div>
           </div>
           <Mo c="#ffd166" s={13}>→</Mo>
@@ -3682,7 +3682,7 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                       )}
                       {isEnded && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(100,116,139,.2)",color:"#64748b",fontWeight:700}}>종료</span>
+                          background:"rgba(100,116,139,.2)",color:"#94a3b8",fontWeight:700}}>종료</span>
                       )}
                       {isPaused && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
@@ -3737,15 +3737,15 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                     {/* 서브 정보 */}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                       {meta.lastDate ? (
-                        <Mo c={isToday?"#5EEAD4":"#54546a"} s={9}>
+                        <Mo c={isToday?"#5EEAD4":"#94a3b8"} s={9}>
                           {meta.lastDate} 수업
                           {meta.lastMuscle ? <span style={{marginLeft:6,color:"#3a3a5a"}}>{"  "+meta.lastMuscle}</span> : ""}
                         </Mo>
                       ) : (
-                        <Mo c="#1e2a3a" s={9}>최근 수업 정보 없음</Mo>
+                        <Mo c="#cbd5e1" s={9}>최근 수업 정보 없음</Mo>
                       )}
                       {meta.remaining !== null && (
-                        <Mo c={meta.remaining<=3?"#ff9f43":"#54546a"} s={9}>
+                        <Mo c={meta.remaining<=3?"#ff9f43":"#94a3b8"} s={9}>
                           잔여 {meta.remaining}회
                         </Mo>
                       )}
@@ -3774,11 +3774,11 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                   {/* 상태 변경 버튼 */}
                   <button onClick={e=>{e.stopPropagation();setStatusMenu(statusMenu===m.id?null:m.id);}}
                     style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
-                      color:"#64748b",fontSize:10,padding:"3px 8px",cursor:"pointer",fontWeight:700}}>
+                      color:"#94a3b8",fontSize:10,padding:"3px 8px",cursor:"pointer",fontWeight:700}}>
                     ···
                   </button>
                   <button onClick={e=>{e.stopPropagation();onDelete(m.id);}}
-                    style={{background:"none",border:"none",color:"#1e2a3a",fontSize:14,padding:"2px 6px",cursor:"pointer"}}>
+                    style={{background:"none",border:"none",color:"#cbd5e1",fontSize:14,padding:"2px 6px",cursor:"pointer"}}>
                     🗑
                   </button>
                 </div>
@@ -4105,7 +4105,7 @@ function ReportCard({ card, LEVEL }) {
         onClick={()=>card.collapsible&&setOpen(v=>!v)}>
         <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>{card.title}</Mo>
         {card.collapsible && (
-          <Mo c="#64748b" s={10}>{open?"▲ 접기":"▼ 상세 보기"}</Mo>
+          <Mo c="#94a3b8" s={10}>{open?"▲ 접기":"▼ 상세 보기"}</Mo>
         )}
       </div>
       {open && (
@@ -4139,7 +4139,7 @@ function ConsultReportView({ member, goal={}, onClose, showClose=true }) {
           <Mo c="#e2e8f0" s={14} style={{fontWeight:700}}>🤖 AI 초기 평가 리포트</Mo>
           <button onClick={onClose}
             style={{padding:"5px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-              background:"#111827",color:"#64748b",fontSize:10,cursor:"pointer"}}>✕ 닫기</button>
+              background:"#111827",color:"#94a3b8",fontSize:10,cursor:"pointer"}}>✕ 닫기</button>
         </div>
       )}
       {/* 헤더 */}
@@ -4148,7 +4148,7 @@ function ConsultReportView({ member, goal={}, onClose, showClose=true }) {
         border:"1px solid rgba(94,234,212,.2)"}}>
         <Mo c="#5EEAD4" s={8} style={{display:"block",letterSpacing:".1em",marginBottom:4}}>TEO GYM · 초기 상담 분석 리포트</Mo>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,color:"#e2e8f0",marginBottom:3}}>{member?.name||"회원"}</div>
-        <Mo c="#64748b" s={10}>
+        <Mo c="#94a3b8" s={10}>
           {sv.surveyDate||"등록일 미기록"} · {(sv.purposes||[]).slice(0,2).join(", ")||"목표 미설정"}
           {pg ? ` · ${pg}` : ""}
         </Mo>
@@ -4156,7 +4156,7 @@ function ConsultReportView({ member, goal={}, onClose, showClose=true }) {
       {!sv.surveyDone ? (
         <div style={{padding:"20px",borderRadius:12,background:"#111827",
           border:"1px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
-          <Mo c="#64748b" s={12} style={{lineHeight:1.8}}>초기 상담 설문이 완료되지 않았습니다<br/>회원 수정 → 목표·목적 탭에서 설문을 완료해주세요</Mo>
+          <Mo c="#94a3b8" s={12} style={{lineHeight:1.8}}>초기 상담 설문이 완료되지 않았습니다<br/>회원 수정 → 목표·목적 탭에서 설문을 완료해주세요</Mo>
         </div>
       ) : cards.map((card,ci)=>(
         <ReportCard key={ci} card={card} LEVEL={LEVEL} />
@@ -4302,7 +4302,7 @@ function MemberForm({ initial, onSave, onBack }) {
                 fontSize:13,fontWeight:active?700:400,transition:"all .1s",
                 borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
                 background:active?"rgba(0,229,160,.15)":"#111827",
-                color:active?"#5EEAD4":"#54546a"}}>
+                color:active?"#5EEAD4":"#94a3b8"}}>
               {opt}
             </button>
           );
@@ -4318,7 +4318,7 @@ function MemberForm({ initial, onSave, onBack }) {
         <Mo c="#ddddf0" s={13}>{label}</Mo>
         <div onClick={()=>onChange(!value)}
           style={{width:46,height:26,borderRadius:13,cursor:"pointer",transition:"background .2s",
-            background:value?"#5EEAD4":"#1e2a3a",position:"relative"}}>
+            background:value?"#5EEAD4":"#cbd5e1",position:"relative"}}>
           <div style={{position:"absolute",top:3,left:value?22:3,width:20,height:20,borderRadius:"50%",
             background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}/>
         </div>
@@ -4327,7 +4327,7 @@ function MemberForm({ initial, onSave, onBack }) {
   }
 
   function StepLabel({ label }) {
-    return <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",
+    return <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
       letterSpacing:".1em",marginBottom:8,marginTop:14}}>{label}</div>;
   }
 
@@ -4403,7 +4403,7 @@ function MemberForm({ initial, onSave, onBack }) {
             <span style={{fontSize:16}}>🤖</span>
             <Mo c="#5EEAD4" s={11} style={{fontWeight:700}}>AI 초기 분석 리포트 보기</Mo>
           </div>
-          <Mo c="#64748b" s={9}>→</Mo>
+          <Mo c="#94a3b8" s={9}>→</Mo>
         </button>
 
         {/* 탭 네비게이션 */}
@@ -4414,7 +4414,7 @@ function MemberForm({ initial, onSave, onBack }) {
                 fontSize:10,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,
                 borderColor:editTab===t?"#5EEAD4":"rgba(255,255,255,0.08)",
                 background:editTab===t?"rgba(94,234,212,.12)":"#111827",
-                color:editTab===t?"#5EEAD4":"#64748b"}}>
+                color:editTab===t?"#5EEAD4":"#94a3b8"}}>
               {t}
             </button>
           ))}
@@ -4667,7 +4667,7 @@ function MemberForm({ initial, onSave, onBack }) {
                 value={preferTime} onChange={setPreferTime} />
               <div style={{marginTop:6,padding:"6px 10px",borderRadius:6,background:"rgba(94,234,212,.05)",
                 border:"1px solid rgba(94,234,212,.12)",marginBottom:10}}>
-                <Mo c="#64748b" s={9}>평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
+                <Mo c="#94a3b8" s={9}>평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
               </div>
               <StepLabel label="주 운동 가능 횟수" />
               <ChipSelect options={["주 1회","주 2회","주 3회","주 4회","주 5회 이상"]} value={daysPerWeek} onChange={setDaysPerWeek} />
@@ -4728,7 +4728,7 @@ function MemberForm({ initial, onSave, onBack }) {
       <div style={{marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
           <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>{STEPS[step]}</Mo>
-          <Mo c="#54546a" s={9}>{step+1} / {TOTAL_STEPS}</Mo>
+          <Mo c="#94a3b8" s={9}>{step+1} / {TOTAL_STEPS}</Mo>
         </div>
         <div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.08)",overflow:"hidden"}}>
           <div style={{height:"100%",width:(((step+1)/TOTAL_STEPS)*100)+"%",
@@ -4779,7 +4779,7 @@ function MemberForm({ initial, onSave, onBack }) {
         {step===1 && (
           <div>
             <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>어떻게 오셨나요?</Mo>
-            <Mo c="#54546a" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
+            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
             <ChipSelect multi
               options={["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"]}
               value={visitRoutes} onChange={setVisitRoutes} />
@@ -4789,7 +4789,7 @@ function MemberForm({ initial, onSave, onBack }) {
               <div style={{marginTop:10,padding:"12px",borderRadius:8,
                 background:"rgba(162,155,254,.08)",border:"1px solid rgba(162,155,254,.25)"}}>
                 <Mo c="#a29bfe" s={10} style={{display:"block",fontWeight:700,marginBottom:8}}>🤖 AI 검색 상세</Mo>
-                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:5}}>어떤 AI로 검색하셨나요?</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:5}}>어떤 AI로 검색하셨나요?</Mo>
                 <ChipSelect
                   options={["ChatGPT","Perplexity","Gemini","Claude","네이버 Cue","기타"]}
                   value={visitAiTool} onChange={setVisitAiTool} />
@@ -4821,7 +4821,7 @@ function MemberForm({ initial, onSave, onBack }) {
         {step===2 && (
           <div>
             <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>운동 목적이 무엇인가요?</Mo>
-            <Mo c="#54546a" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
+            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
             <ChipSelect multi
               options={["체지방 감량","근력 증가","체형 교정","통증 개선","자세 개선","근육 증가","건강 관리","바디프로필","재활 목적","체력 증가","스트레스 해소"]}
               value={purposes} onChange={setPurposes} />
@@ -4884,8 +4884,8 @@ function MemberForm({ initial, onSave, onBack }) {
               onChange={e=>setStressLevel(Number(e.target.value))}
               style={{width:"100%",accentColor:"#5EEAD4"}} />
             <div style={{display:"flex",justifyContent:"space-between"}}>
-              <Mo c="#54546a" s={8}>낮음</Mo>
-              <Mo c="#54546a" s={8}>높음</Mo>
+              <Mo c="#94a3b8" s={8}>낮음</Mo>
+              <Mo c="#94a3b8" s={8}>높음</Mo>
             </div>
           </div>
         )}
@@ -4894,7 +4894,7 @@ function MemberForm({ initial, onSave, onBack }) {
         {step===5 && (
           <div>
             <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>불편하거나 통증 있는 부위</Mo>
-            <Mo c="#54546a" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능 · 없으면 그냥 다음</Mo>
+            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능 · 없으면 그냥 다음</Mo>
             <ChipSelect multi
               options={["목","어깨","팔꿈치","손목","허리","고관절","무릎","발목","없음"]}
               value={painParts} onChange={setPainParts} />
@@ -4945,7 +4945,7 @@ function MemberForm({ initial, onSave, onBack }) {
               value={preferTime} onChange={setPreferTime} />
             <div style={{marginTop:7,padding:"6px 10px",borderRadius:6,background:"rgba(94,234,212,.05)",
               border:"1px solid rgba(94,234,212,.15)"}}>
-              <Mo c="#64748b" s={9}>운영시간: 평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
+              <Mo c="#94a3b8" s={9}>운영시간: 평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
             </div>
             <StepLabel label="주 운동 가능 횟수" />
             <ChipSelect options={["주 1회","주 2회","주 3회","주 4회","주 5회 이상"]}
@@ -4996,7 +4996,7 @@ function MemberForm({ initial, onSave, onBack }) {
                       transition:"all .12s"}}>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,
                       color:active?color:"#e2e8f0",marginBottom:4}}>{label}</div>
-                    <Mo c={active?"#94a3b8":"#64748b"} s={11}>{desc}</Mo>
+                    <Mo c={active?"#94a3b8":"#94a3b8"} s={11}>{desc}</Mo>
                   </button>
                 );
               })}
@@ -5008,7 +5008,7 @@ function MemberForm({ initial, onSave, onBack }) {
         {step===10 && (
           <div>
             <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>가장 중요한 목표</Mo>
-            <Mo c="#64748b" s={11} style={{display:"block",marginBottom:12}}>하나만 선택해주세요</Mo>
+            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:12}}>하나만 선택해주세요</Mo>
             <div style={{display:"flex",flexDirection:"column",gap:7}}>
               {[
                 ["체형 교정 우선","자세와 체형을 먼저 잡고 싶어요","🧍"],
@@ -5030,7 +5030,7 @@ function MemberForm({ initial, onSave, onBack }) {
                     <div>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,
                         color:active?"#5EEAD4":"#e2e8f0",marginBottom:2}}>{label}</div>
-                      <Mo c="#64748b" s={10}>{desc}</Mo>
+                      <Mo c="#94a3b8" s={10}>{desc}</Mo>
                     </div>
                   </button>
                 );
@@ -5074,8 +5074,8 @@ function MemberForm({ initial, onSave, onBack }) {
 function emptyRoutineExercise(name=""){return {name,sets:[{weight:"",reps:""},{weight:"",reps:""},{weight:"",reps:""}]};}
 function findLastExerciseSets(sessions,name){const key=String(name||"").trim().toLowerCase(); if(!key)return null; const sorted=[...(sessions||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||((b.sessionNo||0)-(a.sessionNo||0))); for(const s of sorted){const ex=(s.exercises||[]).find(e=>String(e.name||"").trim().toLowerCase()===key); if(ex) return (ex.sets||[]).map(st=>({weight:st.weight||"",reps:st.reps||"",durationSec:st.durationSec||""}));} return null;}
 function StatusBadge({item}){if(!isSentData(item)) return <Bdg color="#94a3b8">임시저장</Bdg>; const exposed=isPublishedData(item); return <><Bdg color="#5EEAD4">전송됨</Bdg><Bdg color={exposed?"#22c55e":"#f97316"}>{exposed?"노출중":"숨김"}</Bdg></>;}
-function RoutineRecommendScreen({member,sessions,onBack,showToast}){const today=getKoreaDateString(); const parts=["가슴","등","하체","어깨","이두","삼두","코어","전신"]; const [date,setDate]=useState(today); const [targetParts,setTargetParts]=useState(["가슴"]); const [nextSessionPart,setNextSessionPart]=useState(""); const [nextSessionDate,setNextSessionDate]=useState(""); const [exercises,setExercises]=useState([emptyRoutineExercise()]); const [coachComment,setCoachComment]=useState(""); const [visibility,setVisibility]=useState("visible"); const [saving,setSaving]=useState(false); const [rows,setRows]=useState([]); const refresh=useCallback(()=>getRoutineRecommendations(member.id).then(setRows).catch(()=>setRows([])),[member.id]); useEffect(()=>{refresh();},[refresh]); const togglePart=x=>setTargetParts(prev=>prev.includes(x)?prev.filter(v=>v!==x):[...prev,x]); const setName=(i,name)=>setExercises(prev=>prev.map((ex,idx)=>idx===i?{...ex,name,sets:findLastExerciseSets(sessions,name)||ex.sets||emptyRoutineExercise().sets}:ex)); const setSet=(ei,si,k,v)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).map((st,j)=>j===si?{...st,[k]:v}:st)}:ex)); const save=async(publish)=>{setSaving(true); try{const filled=exercises.filter(ex=>String(ex.name||"").trim()); if(publish&&!targetParts.length) throw new Error("추천 부위를 1개 이상 선택해주세요."); if(publish&&!filled.length&&!coachComment.trim()) showToast("부위만 전송할 때는 대표 메모 입력을 권장합니다.","err"); const saved=await saveRoutineRecommendation(member.id,null,{date,targetParts,targetPart:targetParts.join(" + "),nextSessionPart,nextSessionDate,exercises:filled,coachComment,status:publish?"published":"draft",visibility},publish); if(publish&&visibility==="visible"&&!isPublishedData(saved)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요."); showToast(publish?"회원앱으로 루틴 추천을 전송했습니다.":"루틴 추천을 임시 저장했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"저장에 실패했습니다.","err");}finally{setSaving(false);}}; const toggleVisibility=async(r)=>{try{await saveRoutineRecommendation(member.id,r.id,{...r,visibility:isPublishedData(r)?"hidden":"visible"},false); showToast(isPublishedData(r)?"회원앱에서 숨김 처리했습니다.":"회원앱에 다시 노출했습니다."); refresh();}catch(e){console.error(e); showToast("노출 상태 변경에 실패했습니다.","err");}}; const deleteItem=async(r)=>{if(!window.confirm("이 루틴 추천을 삭제할까요? 삭제하면 관리자앱과 회원앱에서 모두 표시되지 않습니다."))return; try{await deleteRoutineRecommendation(member.id,r.id); showToast("루틴 추천을 삭제했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"삭제에 실패했습니다.","err");}}; return <div><SH title="📨 루틴 추천" sub={`${member.name} 회원앱 전송`} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Card title="현재 회원앱 노출 대표 추천">{rows.filter(isPublishedData).length?rows.filter(isPublishedData).map(r=><div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={10}>{r.date} · {formatParts(r)}</Mo>{r.coachComment&&<Mo c="#94a3b8" s={9}>{r.coachComment}</Mo>}</div>):<Mo c="#64748b" s={9}>현재 노출중인 대표 추천 루틴이 없습니다.</Mo>}</Card><Card title="날짜별 대표 추천 루틴 작성"><div style={{display:"grid",gap:10}}><Field label="추천 날짜" type="date" value={date} onChange={setDate}/><Field label="다음 수업 날짜" type="date" value={nextSessionDate} onChange={setNextSessionDate}/><SelectLine label="다음 수업 운동" value={nextSessionPart} opts={["","하체","등","가슴","어깨","팔","코어","전신","교정"]} onChange={setNextSessionPart}/><Mo c="#94a3b8" s={10}>추천 부위(복수 선택 가능)</Mo><div className="part-pills">{parts.map(x=><button key={x} type="button" className={targetParts.includes(x)?"active":""} onClick={()=>togglePart(x)}>{x}</button>)}</div><SelectLine label="노출 상태" value={visibility} opts={["visible","hidden"]} onChange={setVisibility}/>{exercises.map((ex,ei)=><div key={ei} style={{background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:12}}><Field label="운동 종목(비워두면 부위만 전송)" value={ex.name} onChange={v=>setName(ei,v)} placeholder="덤벨 인클라인 벤치프레스"/><div style={{display:"grid",gap:6}}>{(ex.sets||[]).map((st,si)=><div key={si} style={{display:"grid",gridTemplateColumns:"50px 1fr 1fr",gap:6,alignItems:"end"}}><Mo c="#94a3b8" s={10}>{si+1}세트</Mo><Field label="중량" value={st.weight} onChange={v=>setSet(ei,si,"weight",v)}/><Field label="횟수" value={st.reps} onChange={v=>setSet(ei,si,"reps",v)}/></div>)}</div><Btn ghost sm onClick={()=>setExercises(prev=>prev.filter((_,i)=>i!==ei))}>운동 삭제</Btn></div>)}<Btn ghost onClick={()=>setExercises(prev=>[...prev,emptyRoutineExercise()])}>+ 운동 추가</Btn><TextArea label="대표 메모/주의사항(부위만 전송 시 필수 권장)" value={coachComment} onChange={setCoachComment}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Btn ghost disabled={saving} onClick={()=>save(false)}>임시 저장</Btn><Btn disabled={saving} onClick={()=>save(true)}>회원앱 전송</Btn></div></div></Card><Card title="날짜별 추천 현황">{rows.length?rows.map(r=><div key={r.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><div><Mo c="#fff" s={10}>{r.date} · {formatParts(r)}</Mo><StatusBadge item={r}/><Mo c="#64748b" s={8}>{(r.exercises||[]).filter(ex=>ex.name).length?`${(r.exercises||[]).filter(ex=>ex.name).length}개 종목`:"부위만 전송"}</Mo></div>{isSentData(r)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><Btn ghost sm onClick={()=>toggleVisibility(r)}>{isPublishedData(r)?"숨김":"노출"}</Btn><Btn ghost sm onClick={()=>deleteItem(r)} style={{color:"#f87171",borderColor:"rgba(248,113,113,.35)"}}>삭제</Btn></div>}</div>):<Mo c="#64748b" s={9}>저장된 추천이 없습니다.</Mo>}</Card></div>}
-function DailyConditioningAdminScreen({member,onBack,showToast}){const today=getKoreaDateString(); const [form,setForm]=useState({date:today,exerciseName:"",description:"",sets:"2",reps:"10",duration:"",caution:"",visibility:"visible"}); const [scope,setScope]=useState("global"); const [saving,setSaving]=useState(false); const [rows,setRows]=useState([]); const set=(k,v)=>setForm(f=>({...f,[k]:v})); const refresh=useCallback(()=>getDailyConditioning({memberId:member.id}).then(setRows).catch(()=>setRows([])),[member.id]); useEffect(()=>{refresh();},[refresh]); const save=async(publish)=>{setSaving(true); try{if(publish&&!String(form.exerciseName||form.description||"").trim()) throw new Error("매일 컨디셔닝 추천 내용을 입력해야 전송할 수 있습니다."); const saved=await saveDailyConditioning(form,{memberId:scope==="member"?member.id:null,publish}); if(publish&&form.visibility!=="hidden"&&!isPublishedData(saved)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요."); showToast(publish?"오늘의 컨디셔닝을 회원앱으로 전송했습니다.":"오늘의 컨디셔닝을 임시 저장했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"오늘의 컨디셔닝 저장에 실패했습니다.","err");}finally{setSaving(false);}}; const toggleVisibility=async(r)=>{try{await saveDailyConditioning({...r,visibility:isPublishedData(r)?"hidden":"visible"},{memberId:r.scope==="member"?member.id:null,publish:false}); showToast(isPublishedData(r)?"회원앱에서 숨김 처리했습니다.":"회원앱에 다시 노출했습니다."); refresh();}catch(e){console.error(e); showToast("노출 상태 변경에 실패했습니다.","err");}}; const deleteItem=async(r)=>{if(!window.confirm("이 오늘의 컨디셔닝을 삭제할까요? 삭제하면 관리자앱과 회원앱에서 모두 표시되지 않습니다."))return; try{await deleteDailyConditioning(r,{memberId:member.id}); showToast("오늘의 컨디셔닝을 삭제했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"삭제에 실패했습니다.","err");}}; return <div><SH title="🧘 오늘의 컨디셔닝" sub="매일 컨디셔닝 추천 관리" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Card title="현재 회원앱 노출 컨디셔닝">{rows.filter(isPublishedData).length?rows.filter(isPublishedData).map(r=><div key={`${r.scope}-${r.id}`} style={{padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={10}>{r.date||r.id} · {r.exerciseName||r.title}</Mo><Mo c="#94a3b8" s={9}>{r.scope==="member"?"개별 회원":"전체 회원"} · {r.description}</Mo></div>):<Mo c="#64748b" s={9}>현재 노출중인 오늘의 컨디셔닝이 없습니다.</Mo>}</Card><Card title="매일 컨디셔닝 추천 입력"><div style={{display:"grid",gap:10}}><SelectLine label="전송 대상" value={scope} opts={["global","member"]} onChange={setScope}/><Field label="날짜" type="date" value={form.date} onChange={v=>set("date",v)}/><Field label="운동명" value={form.exerciseName} onChange={v=>set("exerciseName",v)} placeholder="데드버그 밴드 Y레이즈"/><TextArea label="회원이 매일 따라 할 기능/교정운동 설명" value={form.description} onChange={v=>set("description",v)}/><Field label="세트" value={form.sets} onChange={v=>set("sets",v)}/><Field label="횟수" value={form.reps} onChange={v=>set("reps",v)}/><Field label="시간" value={form.duration} onChange={v=>set("duration",v)}/><TextArea label="주의사항" value={form.caution} onChange={v=>set("caution",v)}/><SelectLine label="노출 상태" value={form.visibility} opts={["visible","hidden"]} onChange={v=>set("visibility",v)}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Btn ghost disabled={saving} onClick={()=>save(false)}>임시 저장</Btn><Btn disabled={saving} onClick={()=>save(true)}>회원앱 전송</Btn></div></div></Card><Card title="오늘의 컨디셔닝 현황">{rows.length?rows.map(r=><div key={`${r.scope}-${r.id}`} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><div><Mo c="#fff" s={10}>{r.date||r.id} · {r.exerciseName||r.title||"미입력"}</Mo><StatusBadge item={r}/><Mo c="#64748b" s={8}>{r.scope==="member"?"개별 회원":"전체 회원"}</Mo></div>{isSentData(r)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><Btn ghost sm onClick={()=>toggleVisibility(r)}>{isPublishedData(r)?"숨김":"노출"}</Btn><Btn ghost sm onClick={()=>deleteItem(r)} style={{color:"#f87171",borderColor:"rgba(248,113,113,.35)"}}>삭제</Btn></div>}</div>):<Mo c="#64748b" s={9}>저장된 컨디셔닝이 없습니다.</Mo>}</Card></div>}
+function RoutineRecommendScreen({member,sessions,onBack,showToast}){const today=getKoreaDateString(); const parts=["가슴","등","하체","어깨","이두","삼두","코어","전신"]; const [date,setDate]=useState(today); const [targetParts,setTargetParts]=useState(["가슴"]); const [nextSessionPart,setNextSessionPart]=useState(""); const [nextSessionDate,setNextSessionDate]=useState(""); const [exercises,setExercises]=useState([emptyRoutineExercise()]); const [coachComment,setCoachComment]=useState(""); const [visibility,setVisibility]=useState("visible"); const [saving,setSaving]=useState(false); const [rows,setRows]=useState([]); const refresh=useCallback(()=>getRoutineRecommendations(member.id).then(setRows).catch(()=>setRows([])),[member.id]); useEffect(()=>{refresh();},[refresh]); const togglePart=x=>setTargetParts(prev=>prev.includes(x)?prev.filter(v=>v!==x):[...prev,x]); const setName=(i,name)=>setExercises(prev=>prev.map((ex,idx)=>idx===i?{...ex,name,sets:findLastExerciseSets(sessions,name)||ex.sets||emptyRoutineExercise().sets}:ex)); const setSet=(ei,si,k,v)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).map((st,j)=>j===si?{...st,[k]:v}:st)}:ex)); const save=async(publish)=>{setSaving(true); try{const filled=exercises.filter(ex=>String(ex.name||"").trim()); if(publish&&!targetParts.length) throw new Error("추천 부위를 1개 이상 선택해주세요."); if(publish&&!filled.length&&!coachComment.trim()) showToast("부위만 전송할 때는 대표 메모 입력을 권장합니다.","err"); const saved=await saveRoutineRecommendation(member.id,null,{date,targetParts,targetPart:targetParts.join(" + "),nextSessionPart,nextSessionDate,exercises:filled,coachComment,status:publish?"published":"draft",visibility},publish); if(publish&&visibility==="visible"&&!isPublishedData(saved)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요."); showToast(publish?"회원앱으로 루틴 추천을 전송했습니다.":"루틴 추천을 임시 저장했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"저장에 실패했습니다.","err");}finally{setSaving(false);}}; const toggleVisibility=async(r)=>{try{await saveRoutineRecommendation(member.id,r.id,{...r,visibility:isPublishedData(r)?"hidden":"visible"},false); showToast(isPublishedData(r)?"회원앱에서 숨김 처리했습니다.":"회원앱에 다시 노출했습니다."); refresh();}catch(e){console.error(e); showToast("노출 상태 변경에 실패했습니다.","err");}}; const deleteItem=async(r)=>{if(!window.confirm("이 루틴 추천을 삭제할까요? 삭제하면 관리자앱과 회원앱에서 모두 표시되지 않습니다."))return; try{await deleteRoutineRecommendation(member.id,r.id); showToast("루틴 추천을 삭제했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"삭제에 실패했습니다.","err");}}; return <div><SH title="📨 루틴 추천" sub={`${member.name} 회원앱 전송`} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Card title="현재 회원앱 노출 대표 추천">{rows.filter(isPublishedData).length?rows.filter(isPublishedData).map(r=><div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={10}>{r.date} · {formatParts(r)}</Mo>{r.coachComment&&<Mo c="#94a3b8" s={9}>{r.coachComment}</Mo>}</div>):<Mo c="#94a3b8" s={9}>현재 노출중인 대표 추천 루틴이 없습니다.</Mo>}</Card><Card title="날짜별 대표 추천 루틴 작성"><div style={{display:"grid",gap:10}}><Field label="추천 날짜" type="date" value={date} onChange={setDate}/><Field label="다음 수업 날짜" type="date" value={nextSessionDate} onChange={setNextSessionDate}/><SelectLine label="다음 수업 운동" value={nextSessionPart} opts={["","하체","등","가슴","어깨","팔","코어","전신","교정"]} onChange={setNextSessionPart}/><Mo c="#94a3b8" s={10}>추천 부위(복수 선택 가능)</Mo><div className="part-pills">{parts.map(x=><button key={x} type="button" className={targetParts.includes(x)?"active":""} onClick={()=>togglePart(x)}>{x}</button>)}</div><SelectLine label="노출 상태" value={visibility} opts={["visible","hidden"]} onChange={setVisibility}/>{exercises.map((ex,ei)=><div key={ei} style={{background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:12}}><Field label="운동 종목(비워두면 부위만 전송)" value={ex.name} onChange={v=>setName(ei,v)} placeholder="덤벨 인클라인 벤치프레스"/><div style={{display:"grid",gap:6}}>{(ex.sets||[]).map((st,si)=><div key={si} style={{display:"grid",gridTemplateColumns:"50px 1fr 1fr",gap:6,alignItems:"end"}}><Mo c="#94a3b8" s={10}>{si+1}세트</Mo><Field label="중량" value={st.weight} onChange={v=>setSet(ei,si,"weight",v)}/><Field label="횟수" value={st.reps} onChange={v=>setSet(ei,si,"reps",v)}/></div>)}</div><Btn ghost sm onClick={()=>setExercises(prev=>prev.filter((_,i)=>i!==ei))}>운동 삭제</Btn></div>)}<Btn ghost onClick={()=>setExercises(prev=>[...prev,emptyRoutineExercise()])}>+ 운동 추가</Btn><TextArea label="대표 메모/주의사항(부위만 전송 시 필수 권장)" value={coachComment} onChange={setCoachComment}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Btn ghost disabled={saving} onClick={()=>save(false)}>임시 저장</Btn><Btn disabled={saving} onClick={()=>save(true)}>회원앱 전송</Btn></div></div></Card><Card title="날짜별 추천 현황">{rows.length?rows.map(r=><div key={r.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><div><Mo c="#fff" s={10}>{r.date} · {formatParts(r)}</Mo><StatusBadge item={r}/><Mo c="#94a3b8" s={8}>{(r.exercises||[]).filter(ex=>ex.name).length?`${(r.exercises||[]).filter(ex=>ex.name).length}개 종목`:"부위만 전송"}</Mo></div>{isSentData(r)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><Btn ghost sm onClick={()=>toggleVisibility(r)}>{isPublishedData(r)?"숨김":"노출"}</Btn><Btn ghost sm onClick={()=>deleteItem(r)} style={{color:"#f87171",borderColor:"rgba(248,113,113,.35)"}}>삭제</Btn></div>}</div>):<Mo c="#94a3b8" s={9}>저장된 추천이 없습니다.</Mo>}</Card></div>}
+function DailyConditioningAdminScreen({member,onBack,showToast}){const today=getKoreaDateString(); const [form,setForm]=useState({date:today,exerciseName:"",description:"",sets:"2",reps:"10",duration:"",caution:"",visibility:"visible"}); const [scope,setScope]=useState("global"); const [saving,setSaving]=useState(false); const [rows,setRows]=useState([]); const set=(k,v)=>setForm(f=>({...f,[k]:v})); const refresh=useCallback(()=>getDailyConditioning({memberId:member.id}).then(setRows).catch(()=>setRows([])),[member.id]); useEffect(()=>{refresh();},[refresh]); const save=async(publish)=>{setSaving(true); try{if(publish&&!String(form.exerciseName||form.description||"").trim()) throw new Error("매일 컨디셔닝 추천 내용을 입력해야 전송할 수 있습니다."); const saved=await saveDailyConditioning(form,{memberId:scope==="member"?member.id:null,publish}); if(publish&&form.visibility!=="hidden"&&!isPublishedData(saved)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요."); showToast(publish?"오늘의 컨디셔닝을 회원앱으로 전송했습니다.":"오늘의 컨디셔닝을 임시 저장했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"오늘의 컨디셔닝 저장에 실패했습니다.","err");}finally{setSaving(false);}}; const toggleVisibility=async(r)=>{try{await saveDailyConditioning({...r,visibility:isPublishedData(r)?"hidden":"visible"},{memberId:r.scope==="member"?member.id:null,publish:false}); showToast(isPublishedData(r)?"회원앱에서 숨김 처리했습니다.":"회원앱에 다시 노출했습니다."); refresh();}catch(e){console.error(e); showToast("노출 상태 변경에 실패했습니다.","err");}}; const deleteItem=async(r)=>{if(!window.confirm("이 오늘의 컨디셔닝을 삭제할까요? 삭제하면 관리자앱과 회원앱에서 모두 표시되지 않습니다."))return; try{await deleteDailyConditioning(r,{memberId:member.id}); showToast("오늘의 컨디셔닝을 삭제했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"삭제에 실패했습니다.","err");}}; return <div><SH title="🧘 오늘의 컨디셔닝" sub="매일 컨디셔닝 추천 관리" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Card title="현재 회원앱 노출 컨디셔닝">{rows.filter(isPublishedData).length?rows.filter(isPublishedData).map(r=><div key={`${r.scope}-${r.id}`} style={{padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={10}>{r.date||r.id} · {r.exerciseName||r.title}</Mo><Mo c="#94a3b8" s={9}>{r.scope==="member"?"개별 회원":"전체 회원"} · {r.description}</Mo></div>):<Mo c="#94a3b8" s={9}>현재 노출중인 오늘의 컨디셔닝이 없습니다.</Mo>}</Card><Card title="매일 컨디셔닝 추천 입력"><div style={{display:"grid",gap:10}}><SelectLine label="전송 대상" value={scope} opts={["global","member"]} onChange={setScope}/><Field label="날짜" type="date" value={form.date} onChange={v=>set("date",v)}/><Field label="운동명" value={form.exerciseName} onChange={v=>set("exerciseName",v)} placeholder="데드버그 밴드 Y레이즈"/><TextArea label="회원이 매일 따라 할 기능/교정운동 설명" value={form.description} onChange={v=>set("description",v)}/><Field label="세트" value={form.sets} onChange={v=>set("sets",v)}/><Field label="횟수" value={form.reps} onChange={v=>set("reps",v)}/><Field label="시간" value={form.duration} onChange={v=>set("duration",v)}/><TextArea label="주의사항" value={form.caution} onChange={v=>set("caution",v)}/><SelectLine label="노출 상태" value={form.visibility} opts={["visible","hidden"]} onChange={v=>set("visibility",v)}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Btn ghost disabled={saving} onClick={()=>save(false)}>임시 저장</Btn><Btn disabled={saving} onClick={()=>save(true)}>회원앱 전송</Btn></div></div></Card><Card title="오늘의 컨디셔닝 현황">{rows.length?rows.map(r=><div key={`${r.scope}-${r.id}`} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><div><Mo c="#fff" s={10}>{r.date||r.id} · {r.exerciseName||r.title||"미입력"}</Mo><StatusBadge item={r}/><Mo c="#94a3b8" s={8}>{r.scope==="member"?"개별 회원":"전체 회원"}</Mo></div>{isSentData(r)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><Btn ghost sm onClick={()=>toggleVisibility(r)}>{isPublishedData(r)?"숨김":"노출"}</Btn><Btn ghost sm onClick={()=>deleteItem(r)} style={{color:"#f87171",borderColor:"rgba(248,113,113,.35)"}}>삭제</Btn></div>}</div>):<Mo c="#94a3b8" s={9}>저장된 컨디셔닝이 없습니다.</Mo>}</Card></div>}
 
 // ════════════════════════════════════════════
 // HUB
@@ -5167,20 +5167,20 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
   const condAvg = condSlice.length ? condSlice.reduce((a,c)=>a+(condMap[c]||3),0)/condSlice.length : null;
   const condLabel = condAvg===null ? null
     : condAvg>=4.2?"컨디션 양호":condAvg>=3.2?"회복 중":condAvg>=2.2?"피로도 높음":"컨디션 저조";
-  const condColor = condAvg===null?"#54546a":condAvg>=4.2?"#22c55e":condAvg>=3.2?"#5EEAD4":condAvg>=2.2?"#f59e0b":"#ef4444";
+  const condColor = condAvg===null?"#94a3b8":condAvg>=4.2?"#22c55e":condAvg>=3.2?"#5EEAD4":condAvg>=2.2?"#f59e0b":"#ef4444";
 
   // ── 운동 강도 + RPE ──────────────────────────────────────
   const intLabel = last?.intensity || null;
   const intColor = {
     "최고 강도":"#ef4444","높음":"#f97316","고강도":"#ef4444",
     "중강도":"#ffd166","낮음":"#22c55e","저강도":"#22c55e","매우 낮음":"#5EEAD4"
-  }[intLabel] || "#54546a";
+  }[intLabel] || "#94a3b8";
   const recentVols = sessions.slice(-3).map(s=>s.totalVolume||0).filter(v=>v>0);
   const volTrend = recentVols.length>=2
     ? (recentVols[recentVols.length-1]>recentVols[recentVols.length-2]?"볼륨 증가":"볼륨 감소") : null;
   const rpeArr = sessions.slice(-5).flatMap(s=>(s.exercises||[]).flatMap(e=>(e.sets||[]).map(r=>parseFloat(r.rpe)).filter(v=>!isNaN(v)&&v>=7)));
   const rpeAvg = rpeArr.length ? (rpeArr.reduce((a,b)=>a+b,0)/rpeArr.length).toFixed(1) : null;
-  const rpeColor = rpeAvg===null?"#54546a":parseFloat(rpeAvg)>=9?"#ef4444":parseFloat(rpeAvg)>=8?"#f97316":parseFloat(rpeAvg)>=7?"#ffd166":"#5EEAD4";
+  const rpeColor = rpeAvg===null?"#94a3b8":parseFloat(rpeAvg)>=9?"#ef4444":parseFloat(rpeAvg)>=8?"#f97316":parseFloat(rpeAvg)>=7?"#ffd166":"#5EEAD4";
   const fatigueSignal = (() => {
     if (sessions.length < 3) return null;
     const recent = sessions.slice(-3);
@@ -5233,7 +5233,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
   const wBadge = (v, label) => v!==null ? (
     <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:4,
       background:v<0?"rgba(94,234,212,.12)":v>0?"rgba(249,115,22,.12)":"rgba(255,255,255,.06)",
-      color:v<0?"#5EEAD4":v>0?"#f97316":"#64748b"}}>
+      color:v<0?"#5EEAD4":v>0?"#f97316":"#94a3b8"}}>
       {label} {v>0?"+":""}{v}kg
     </span>
   ) : null;
@@ -5384,7 +5384,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
           <div style={{marginBottom:8}}>
             <button onClick={()=>setShowMemo(v=>!v)} style={{width:"100%",background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.14)",borderRadius:8,padding:"6px 10px",textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <span style={{fontSize:10,color:"#f8d98a"}}>📝 {showMemo?"메모 닫기":"메모 보기"} — {member.memo.slice(0,38)}{member.memo.length>38?"…":""}</span>
-              <span style={{color:"#54546a",fontSize:10}}>{showMemo?"▲":"▼"}</span>
+              <span style={{color:"#94a3b8",fontSize:10}}>{showMemo?"▲":"▼"}</span>
             </button>
             {showMemo&&<div style={{marginTop:4,padding:"9px 12px",background:"rgba(255,209,102,.06)",borderRadius:8,fontSize:12,lineHeight:1.6,color:"#f8d98a",border:"1px solid rgba(255,209,102,.12)"}}>{member.memo}</div>}
           </div>
@@ -5468,7 +5468,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
           }}>
             <div style={{fontSize:26,marginBottom:9}}>{m.icon}</div>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:`rgb(${m.rgb})`,marginBottom:3}}>{m.label}</div>
-            <Mo c="#54546a" s={9}>{m.desc}</Mo>
+            <Mo c="#94a3b8" s={9}>{m.desc}</Mo>
           </button>
         ))}
       </div>
@@ -5524,7 +5524,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
                 <Line type="monotone" dataKey="w" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="체중(kg)"/>
               </LineChart>
             </ResponsiveContainer>
-            {(()=>{const diff=(wData[wData.length-1].w-wData[0].w).toFixed(1);const col=diff<0?"#5EEAD4":diff>0?"#ff6b6b":"#54546a";const txt=diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"변화없음";return<div style={{textAlign:"center",marginTop:2,fontFamily:"'DM Mono',monospace",fontSize:10,color:col}}>{txt} kg (시작 대비)</div>;})()}
+            {(()=>{const diff=(wData[wData.length-1].w-wData[0].w).toFixed(1);const col=diff<0?"#5EEAD4":diff>0?"#ff6b6b":"#94a3b8";const txt=diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"변화없음";return<div style={{textAlign:"center",marginTop:2,fontFamily:"'DM Mono',monospace",fontSize:10,color:col}}>{txt} kg (시작 대비)</div>;})()}
           </div>
         )}
       </div>
@@ -5545,7 +5545,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
               <div><Mo c="#8B949E" s={9}>이번 달 운동</Mo><div style={{fontWeight:900,fontSize:18,color:"#5EEAD4"}}>{monthCount}회</div></div>
               <div><Mo c="#8B949E" s={9}>최근 7일</Mo><div style={{fontWeight:900,fontSize:18,color:"#ddddf0"}}>{count7}회</div></div>
               <div><Mo c="#8B949E" s={9}>최근 30일</Mo><div style={{fontWeight:900,fontSize:18,color:"#ddddf0"}}>{count30}회</div></div>
-              <div><Mo c="#8B949E" s={9}>최근 운동일</Mo><div style={{fontWeight:700,fontSize:12,color:"#64748b",marginTop:2}}>{lastDate}</div></div>
+              <div><Mo c="#8B949E" s={9}>최근 운동일</Mo><div style={{fontWeight:700,fontSize:12,color:"#94a3b8",marginTop:2}}>{lastDate}</div></div>
             </div>
             <Mo c="#475569" s={9} style={{display:"block",marginTop:4}}>대사 추정·식단 분석 참고용 데이터입니다.</Mo>
           </Card>
@@ -5560,7 +5560,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
             <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:700,color:"#7c6fff",letterSpacing:".1em"}}>분석 도구</span>
             {!showAnalysis&&<Mo c="#3a4a5a" s={8}>근력·루틴·대사·평가</Mo>}
           </div>
-          <span style={{color:"#54546a",fontSize:10,display:"inline-block",transition:"transform .2s",transform:showAnalysis?"rotate(180deg)":"none"}}>▼</span>
+          <span style={{color:"#94a3b8",fontSize:10,display:"inline-block",transition:"transform .2s",transform:showAnalysis?"rotate(180deg)":"none"}}>▼</span>
         </button>
         {showAnalysis&&(
           <>
@@ -6336,7 +6336,7 @@ function updateEx(ei, key, val) {
               이전에 작성 중이던 기록이 있습니다
             </Mo>
             {draftPopup._savedAt && (
-              <Mo c="#54546a" s={9} style={{display:"block",textAlign:"center",marginBottom:16}}>
+              <Mo c="#94a3b8" s={9} style={{display:"block",textAlign:"center",marginBottom:16}}>
                 저장 시각: {new Date(draftPopup._savedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}
               </Mo>
             )}
@@ -6349,7 +6349,7 @@ function updateEx(ei, key, val) {
               </button>
               <button onClick={()=>{removeDraft(draftKey);setDraftPopup(null);}}
                 style={{padding:"11px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",cursor:"pointer",
-                  background:"transparent",color:"#64748b",fontSize:13}}>
+                  background:"transparent",color:"#94a3b8",fontSize:13}}>
                 삭제 후 새로 작성
               </button>
             </div>
@@ -6386,7 +6386,7 @@ function updateEx(ei, key, val) {
       {/* ── 수업 형태 선택 (1:1 / 2:1 / 그룹PT) ─────────────────────── */}
       {!isEdit && (
         <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
-          <Mo c="#64748b" s={9} style={{fontWeight:700,flexShrink:0}}>수업 형태:</Mo>
+          <Mo c="#94a3b8" s={9} style={{fontWeight:700,flexShrink:0}}>수업 형태:</Mo>
           <div style={{display:"flex",gap:4}}>
             {["1:1","2:1","그룹PT"].map(t=>(
               <button key={t} onClick={()=>{setSessionType(t);if(t!=="2:1"){setMember2Id("");setShowM2Picker(false);}}}
@@ -6394,14 +6394,14 @@ function updateEx(ei, key, val) {
                   fontSize:10,fontWeight:sessionType===t?800:400,
                   borderColor:sessionType===t?"#a29bfe":"rgba(255,255,255,.1)",
                   background:sessionType===t?"rgba(162,155,254,.15)":"transparent",
-                  color:sessionType===t?"#a29bfe":"#54546a"}}>
+                  color:sessionType===t?"#a29bfe":"#94a3b8"}}>
                 {t}
               </button>
             ))}
           </div>
           {sessionType==="2:1" && (
             <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:4}}>
-              <Mo c="#64748b" s={9}>+</Mo>
+              <Mo c="#94a3b8" s={9}>+</Mo>
               {member2 ? (
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 8px",borderRadius:10,
@@ -6427,7 +6427,7 @@ function updateEx(ei, key, val) {
       {sessionType==="2:1" && showM2Picker && !member2 && (
         <div style={{marginBottom:10,background:"#111827",borderRadius:8,
           border:"1px solid rgba(162,155,254,.2)",padding:"6px",maxHeight:180,overflowY:"auto"}}>
-          <Mo c="#64748b" s={8} style={{display:"block",padding:"2px 4px",marginBottom:4}}>회원 선택</Mo>
+          <Mo c="#94a3b8" s={8} style={{display:"block",padding:"2px 4px",marginBottom:4}}>회원 선택</Mo>
           {allMembers.filter(m=>m.id!==member.id).map(m=>(
             <button key={m.id} onClick={()=>{setMember2Id(m.id);setShowM2Picker(false);}}
               style={{display:"block",width:"100%",textAlign:"left",padding:"6px 8px",borderRadius:6,
@@ -6472,7 +6472,7 @@ function updateEx(ei, key, val) {
               {/* 종류 선택 */}
               <select value={cardioType} onChange={e=>setCardioType(e.target.value)}
                 style={{fontSize:13,padding:"5px 7px",borderRadius:6,flex:"1 1 90px",minWidth:0,
-                  background:"#111827",border:"1px solid rgba(249,115,22,.25)",color:cardioType?"#fdba74":"#54546a"}}>
+                  background:"#111827",border:"1px solid rgba(249,115,22,.25)",color:cardioType?"#fdba74":"#94a3b8"}}>
                 <option value="">종류 선택</option>
                 {["트레드밀","싸이클","천국의 계단","일립티컬","로잉머신","야외 걷기","야외 러닝","기타"].map(t=>(
                   <option key={t} value={t}>{t}</option>
@@ -6497,7 +6497,7 @@ function updateEx(ei, key, val) {
                     color:"#fdba74",textAlign:"center"}} />
                 {!cardioCalories && cardioMinutes && (
                   <span style={{position:"absolute",right:3,top:"50%",transform:"translateY(-50%)",
-                    fontSize:7,color:"#54546a",pointerEvents:"none"}}>직접</span>
+                    fontSize:7,color:"#94a3b8",pointerEvents:"none"}}>직접</span>
                 )}
               </div>
               {/* 강도 버튼 */}
@@ -6506,7 +6506,7 @@ function updateEx(ei, key, val) {
                   style={{padding:"4px 8px",borderRadius:5,border:"1px solid",fontSize:9,fontWeight:700,cursor:"pointer",
                     borderColor:cardioIntensity===lv+"강도"?"#f97316":"rgba(255,255,255,0.08)",
                     background:cardioIntensity===lv+"강도"?"rgba(249,115,22,.15)":"transparent",
-                    color:cardioIntensity===lv+"강도"?"#f97316":"#54546a"}}>
+                    color:cardioIntensity===lv+"강도"?"#f97316":"#94a3b8"}}>
                   {lv}
                 </button>
               ))}
@@ -6521,7 +6521,7 @@ function updateEx(ei, key, val) {
         </div>
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginTop:9}}>
           <div style={{gridColumn:"1 / -1",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
-            <label>수업 유형 <span style={{fontWeight:400,fontSize:10,color:"#54546a"}}>(복수 선택 가능)</span></label>
+            <label>수업 유형 <span style={{fontWeight:400,fontSize:10,color:"#94a3b8"}}>(복수 선택 가능)</span></label>
             <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}}>
               {SESSION_TYPE_OPTIONS.map(t => {
                 const active = selectedTypes.includes(t);
@@ -6534,14 +6534,14 @@ function updateEx(ei, key, val) {
                       fontSize:11,fontWeight:active?700:400,transition:"all .12s",
                       borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
                       background:active?"rgba(0,229,160,.15)":"transparent",
-                      color:active?"#5EEAD4":"#54546a"}}>
+                      color:active?"#5EEAD4":"#94a3b8"}}>
                     {t}
                   </button>
                 );
               })}
             </div>
             {selectedTypes.length===0 && (
-              <div style={{marginTop:4,fontSize:10,color:"#3a3a4a"}}>선택 없으면 자동으로 "기타"로 저장됩니다</div>
+              <div style={{marginTop:4,fontSize:10,color:"#cbd5e1"}}>선택 없으면 자동으로 "기타"로 저장됩니다</div>
             )}
           </div>
           <div>
@@ -6559,7 +6559,7 @@ function updateEx(ei, key, val) {
                   <button key={c} onClick={() => setCondition(c)}
                     style={{flex:1,padding:"6px 0",borderRadius:6,border:"1px solid",
                       borderColor:active?cfg.color:"rgba(255,255,255,0.08)",background:active?cfg.color+"22":"transparent",
-                      color:active?cfg.color:"#54546a",fontSize:11,fontWeight:800,
+                      color:active?cfg.color:"#94a3b8",fontSize:11,fontWeight:800,
                       display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
                     <span style={{fontSize:14}}>{cfg.emoji}</span>
                     <span style={{fontFamily:"'DM Mono',monospace",fontSize:8}}>{c}</span>
@@ -6584,14 +6584,14 @@ function updateEx(ei, key, val) {
               style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
                 borderColor:showPainBefore?"#ff9f43":"rgba(255,255,255,0.08)",
                 background:showPainBefore?"rgba(255,159,67,.15)":"transparent",
-                color:showPainBefore?"#ff9f43":"#54546a"}}>
+                color:showPainBefore?"#ff9f43":"#94a3b8"}}>
               운동 전
             </button>
             <button onClick={()=>setShowPainAfter(v=>!v)}
               style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
                 borderColor:showPainAfter?"#5EEAD4":"rgba(255,255,255,0.08)",
                 background:showPainAfter?"rgba(0,229,160,.15)":"transparent",
-                color:showPainAfter?"#5EEAD4":"#54546a"}}>
+                color:showPainAfter?"#5EEAD4":"#94a3b8"}}>
               운동 후
             </button>
           </div>
@@ -6604,7 +6604,7 @@ function updateEx(ei, key, val) {
             {/* VAS 슬라이더 */}
             <div style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#54546a" s={9}>통증 강도 (VAS)</Mo>
+                <Mo c="#94a3b8" s={9}>통증 강도 (VAS)</Mo>
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
                   color:painRecord.before.vas>=7?"#ff6b6b":painRecord.before.vas>=4?"#ffd166":"#5EEAD4"}}>
                   {painRecord.before.vas}/10
@@ -6625,7 +6625,7 @@ function updateEx(ei, key, val) {
             </div>
             {/* 통증 부위 */}
             <div style={{marginBottom:8}}>
-              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:4}}>통증 부위</Mo>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>통증 부위</Mo>
               <input value={painRecord.before.part}
                 onChange={e=>setPainRecord(p=>({...p,before:{...p.before,part:e.target.value}}))}
                 placeholder="예: 우측 무릎 내측"
@@ -6634,14 +6634,14 @@ function updateEx(ei, key, val) {
             </div>
             {/* 발생 상황 */}
             <div style={{marginBottom:8}}>
-              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:4}}>발생 상황</Mo>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>발생 상황</Mo>
               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                 {["아침","오래 앉을 때","걷기","운동 중","특정 동작 시","계단","기타"].map(sit=>(
                   <button key={sit} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,situation:p.before.situation===sit?"":sit}}))}
                     style={{padding:"5px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
                       borderColor:painRecord.before.situation===sit?"#ff9f43":"rgba(255,255,255,0.08)",
                       background:painRecord.before.situation===sit?"rgba(255,159,67,.2)":"transparent",
-                      color:painRecord.before.situation===sit?"#ff9f43":"#54546a"}}>
+                      color:painRecord.before.situation===sit?"#ff9f43":"#94a3b8"}}>
                     {sit}
                   </button>
                 ))}
@@ -6665,7 +6665,7 @@ function updateEx(ei, key, val) {
             {/* VAS */}
             <div style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#54546a" s={9}>운동 후 통증 강도 (VAS)</Mo>
+                <Mo c="#94a3b8" s={9}>운동 후 통증 강도 (VAS)</Mo>
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
                   color:painRecord.after.vas>=7?"#ff6b6b":painRecord.after.vas>=4?"#ffd166":"#5EEAD4"}}>
                   {painRecord.after.vas}/10
@@ -6686,7 +6686,7 @@ function updateEx(ei, key, val) {
             </div>
             {/* 변화 선택 */}
             <div style={{marginBottom:8}}>
-              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:4}}>통증 변화</Mo>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>통증 변화</Mo>
               <div style={{display:"flex",gap:5}}>
                 {[["감소","#5EEAD4"],["동일","#ffd166"],["증가","#ff6b6b"]].map(([ch,color])=>(
                   <button key={ch} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,change:p.after.change===ch?"":ch}}))}
@@ -6694,7 +6694,7 @@ function updateEx(ei, key, val) {
                       fontSize:12,fontWeight:800,
                       borderColor:painRecord.after.change===ch?color:"rgba(255,255,255,0.08)",
                       background:painRecord.after.change===ch?color+"22":"transparent",
-                      color:painRecord.after.change===ch?color:"#54546a"}}>
+                      color:painRecord.after.change===ch?color:"#94a3b8"}}>
                     {ch==="감소"?"✅ 감소":ch==="동일"?"➡️ 동일":"⚠️ 증가"}
                   </button>
                 ))}
@@ -6721,7 +6721,7 @@ function updateEx(ei, key, val) {
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <div>
-              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>운동 시작</Mo>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>운동 시작</Mo>
               <div style={{display:"flex",gap:5}}>
                 <input type="time" value={workoutStartTime}
                   onChange={e=>setWorkoutStartTime(e.target.value)}
@@ -6735,7 +6735,7 @@ function updateEx(ei, key, val) {
               </div>
             </div>
             <div>
-              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>운동 종료</Mo>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>운동 종료</Mo>
               <div style={{display:"flex",gap:5}}>
                 <input type="time" value={workoutEndTime}
                   onChange={e=>setWorkoutEndTime(e.target.value)}
@@ -6808,7 +6808,7 @@ function updateEx(ei, key, val) {
                 onPointerDown={e => { ptrSort.onHandlePointerDown(ei, e); setDraggingIdx(ei); }}
                 style={{
                   cursor:"grab", flexShrink:0, padding:"4px 6px",
-                  color: isDrag ? "#7c6fff" : "#1e2a3a",
+                  color: isDrag ? "#7c6fff" : "#cbd5e1",
                   fontSize:16, lineHeight:1,
                   touchAction:"none", userSelect:"none",
                   transition:"color .12s",
@@ -6853,10 +6853,10 @@ function updateEx(ei, key, val) {
                       cursor:ei===0?"default":"pointer",fontWeight:700,lineHeight:1}}>⇈</button>
                   <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0}
                     style={{background:"none",border:"none",borderRadius:3,
-                      color:ei===0?"rgba(255,255,255,0.1)":"#64748b",fontSize:11,padding:"2px 3px",cursor:ei===0?"default":"pointer",lineHeight:1}}>▲</button>
+                      color:ei===0?"rgba(255,255,255,0.1)":"#94a3b8",fontSize:11,padding:"2px 3px",cursor:ei===0?"default":"pointer",lineHeight:1}}>▲</button>
                   <button onClick={()=>moveEx(ei,ei+1)} disabled={ei===exercises.length-1}
                     style={{background:"none",border:"none",borderRadius:3,
-                      color:ei===exercises.length-1?"rgba(255,255,255,0.1)":"#64748b",fontSize:11,padding:"2px 3px",cursor:ei===exercises.length-1?"default":"pointer",lineHeight:1}}>▼</button>
+                      color:ei===exercises.length-1?"rgba(255,255,255,0.1)":"#94a3b8",fontSize:11,padding:"2px 3px",cursor:ei===exercises.length-1?"default":"pointer",lineHeight:1}}>▼</button>
                   <button onClick={()=>moveEx(ei,exercises.length-1)} disabled={ei===exercises.length-1}
                     title="맨 아래로"
                     style={{background:"none",border:"none",borderRadius:3,
@@ -6899,7 +6899,7 @@ function updateEx(ei, key, val) {
                       {[["1RM",e1RM],["5RM",e5RM],["10RM",e10RM]].map(([label,val])=>(
                         <span key={label} style={{fontFamily:"'DM Mono',monospace",fontSize:11,
                           color:"#fca5a5",fontWeight:600,whiteSpace:"nowrap"}}>
-                          <span style={{color:"#64748b",fontSize:9}}>{label} </span>{val}kg
+                          <span style={{color:"#94a3b8",fontSize:9}}>{label} </span>{val}kg
                         </span>
                       ))}
                     </div>
@@ -6922,7 +6922,7 @@ function updateEx(ei, key, val) {
                 return (
                   <div style={{marginBottom:9,padding:"7px 10px",background:"#0d0d14",
                     borderRadius:7,border:"1px dashed #1a1a2e",display:"flex",alignItems:"center",gap:6}}>
-                    <Mo c="#1e2a3a" s={9}>📭 이전 기록 없음 — {ex.name}</Mo>
+                    <Mo c="#cbd5e1" s={9}>📭 이전 기록 없음 — {ex.name}</Mo>
                   </div>
                 );
               }
@@ -6993,7 +6993,7 @@ function updateEx(ei, key, val) {
                   {/* 기록 내용 */}
                   <div style={{padding:"8px 10px"}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                      <Mo c="#54546a" s={9}>{rec.date}</Mo>
+                      <Mo c="#94a3b8" s={9}>{rec.date}</Mo>
                       {rec.sessionNo && <Mo c="#3a3a5a" s={9}>{rec.sessionNo}회차</Mo>}
                       {ex._loaded && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 7px",
@@ -7014,7 +7014,7 @@ function updateEx(ei, key, val) {
                           <span key={si} style={{fontFamily:"'DM Mono',monospace",fontSize:10,
                             padding:"3px 8px",borderRadius:5,fontWeight:700,
                             background:"rgba(255,255,255,.05)",
-                            color: hasData ? "#ddddf0" : "#3a3a4a",
+                            color: hasData ? "#ddddf0" : "#cbd5e1",
                             border:"1px solid #1a1a2e",
                             display:"inline-flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
                             {si+1}세트&nbsp;
@@ -7040,7 +7040,7 @@ function updateEx(ei, key, val) {
                         <Mo c="#a29bfe" s={8} style={{fontWeight:700}}>이전 RPE 참고</Mo>
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,
                           color:"#a29bfe",fontWeight:800}}>RPE {rec.rpe}</span>
-                        <Mo c="#64748b" s={8}>— {["","극저","매우쉬움","쉬움","가벼움","보통","약간힘","힘듦","매우힘","한계근접","한계"][rec.rpe]||""}</Mo>
+                        <Mo c="#94a3b8" s={8}>— {["","극저","매우쉬움","쉬움","가벼움","보통","약간힘","힘듦","매우힘","한계근접","한계"][rec.rpe]||""}</Mo>
                       </div>
                     )}
 
@@ -7063,7 +7063,7 @@ function updateEx(ei, key, val) {
                           {rec.nextPlan && <Mo c="#ffd166" s={8}>다음 수업: {nextPlanLabel(rec.nextPlan)}</Mo>}
                         </div>
                         {rec.stimMemo && <Mo c="#a5b4fc" s={8} style={{display:"block",marginTop:2}}>대표 메모: {rec.stimMemo}</Mo>}
-                        {rec.stimNote && <Mo c="#64748b" s={8} style={{display:"block",marginTop:2}}>📝 {rec.stimNote}</Mo>}
+                        {rec.stimNote && <Mo c="#94a3b8" s={8} style={{display:"block",marginTop:2}}>📝 {rec.stimNote}</Mo>}
                       </div>
                     )}
 
@@ -7092,7 +7092,7 @@ function updateEx(ei, key, val) {
                       <button key={eq} onClick={() => updateEx(ei,"equipment",eq)}
                         style={{padding:"4px 9px",borderRadius:4,border:"1px solid",
                           borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
-                          color:active?col:"#54546a",fontSize:10,fontWeight:700}}>{eq}</button>
+                          color:active?col:"#94a3b8",fontSize:10,fontWeight:700}}>{eq}</button>
                     );
                   })}
                 </div>
@@ -7109,7 +7109,7 @@ function updateEx(ei, key, val) {
                           style={{padding:"3px 8px",borderRadius:4,border:"1px solid",
                             borderColor:active?c.color:"rgba(255,255,255,0.08)",
                             background:active?c.color+"22":"transparent",
-                            color:active?c.color:"#64748b",fontSize:9,fontWeight:active?700:400}}>{c.label}</button>;
+                            color:active?c.color:"#94a3b8",fontSize:9,fontWeight:active?700:400}}>{c.label}</button>;
                       })}
                     </div>
                   </div>
@@ -7122,7 +7122,7 @@ function updateEx(ei, key, val) {
                           style={{padding:"3px 8px",borderRadius:4,border:"1px solid",
                             borderColor:active?"#ffd166":"rgba(255,255,255,0.08)",
                             background:active?"rgba(255,209,102,.15)":"transparent",
-                            color:active?"#ffd166":"#64748b",fontSize:9}}>{t}</button>;
+                            color:active?"#ffd166":"#94a3b8",fontSize:9}}>{t}</button>;
                       })}
                     </div>
                   </div>
@@ -7155,7 +7155,7 @@ function updateEx(ei, key, val) {
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr 18px",gap:4,marginBottom:3}}>
                   {["SET","중량kg","시간초","횟수",""].map((h,i) =>
-                    <Mo key={i} c="#1e2a3a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                    <Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                 </div>
                 {ex.sets.map((row, si) => (
                   <div key={si} style={{marginBottom:3}}>
@@ -7168,7 +7168,7 @@ function updateEx(ei, key, val) {
                       <input value={row.reps||""} onChange={e => updateSet(ei,si,"reps",e.target.value)}
                         placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
                       {ex.sets.length>1
-                        ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:11,padding:0,textAlign:"center"}}>✕</button>
+                        ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:11,padding:0,textAlign:"center"}}>✕</button>
                         : <div />}
                     </div>
                     {/* 세트 미리보기 */}
@@ -7201,7 +7201,7 @@ function updateEx(ei, key, val) {
                   const h1 = exType2==="assist" ? "보조kg" : exType2==="bodyweight" ? "추가kg" : "무게kg";
                   return (
                     <div className="set-grid-header" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3,width:"100%"}}>
-                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#1e2a3a" s={8} className={i===3?"vol-col":""} style={{textAlign:"center"}}>{h}</Mo>)}
+                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#cbd5e1" s={8} className={i===3?"vol-col":""} style={{textAlign:"center"}}>{h}</Mo>)}
                     </div>
                   );
                 })()}
@@ -7219,7 +7219,7 @@ function updateEx(ei, key, val) {
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,229,160,.06)",borderRadius:5}}>
                           {row.volume>0 ? row.volume.toLocaleString() : "—"}
                         </div>
-                        {ex.sets.length>1 ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:11,padding:0,textAlign:"center"}}>✕</button> : <div />}
+                        {ex.sets.length>1 ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:11,padding:0,textAlign:"center"}}>✕</button> : <div />}
                       </div>
                       {exTypeRow==="assist" && row.weight && mbwRow && (
                         <div style={{marginTop:2,padding:"3px 8px",background:"rgba(124,111,255,.08)",borderRadius:5,display:"flex",gap:8,alignItems:"center"}}>
@@ -7308,10 +7308,10 @@ function updateEx(ei, key, val) {
                               ? "20px 1fr 1fr"
                               : "20px 1fr 1fr",
                           gap:4,marginBottom:3}}>
-                          <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>SET</Mo>
-                          {!isFunc && !isTime && <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>{weightLabel}</Mo>}
-                          {isTime && <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>시간(초)</Mo>}
-                          <Mo c="#1e2a3a" s={7} style={{textAlign:"center"}}>횟수</Mo>
+                          <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>SET</Mo>
+                          {!isFunc && !isTime && <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>{weightLabel}</Mo>}
+                          {isTime && <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>시간(초)</Mo>}
+                          <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>횟수</Mo>
                         </div>
                         {m2sets.map((row, si) => (
                           <div key={si} style={{display:"grid",
@@ -7359,7 +7359,7 @@ function updateEx(ei, key, val) {
                         </button>
                         {/* RPE + 메모 */}
                         <div style={{display:"flex",gap:5,marginTop:4,alignItems:"center"}}>
-                          <Mo c="#64748b" s={8}>RPE</Mo>
+                          <Mo c="#94a3b8" s={8}>RPE</Mo>
                           <input type="number" placeholder="—" min="1" max="10"
                             value={m2.rpe??""}
                             onChange={e=>updateM2('rpe',e.target.value)}
@@ -7410,7 +7410,7 @@ function updateEx(ei, key, val) {
             {/* RPE 선택 */}
             <div style={{marginTop:8,marginBottom:5}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                <Mo c="#54546a" s={8}>RPE</Mo>
+                <Mo c="#94a3b8" s={8}>RPE</Mo>
                 {ex.rpe && <Mo c="#ffd166" s={9}>{ex.rpe} — {["","극저강도","매우 쉬움","쉬움","가벼움","보통","약간 힘듦","힘듦","매우 힘듦","한계 근접","한계"][ex.rpe]}</Mo>}
               </div>
               <div style={{display:"flex",gap:2,flexWrap:"wrap",width:"100%"}}>
@@ -7422,7 +7422,7 @@ function updateEx(ei, key, val) {
                       style={{width:28,height:28,borderRadius:6,border:"1px solid",
                         borderColor:active?col:"rgba(255,255,255,0.08)",
                         background:active?col+"33":"transparent",
-                        color:active?col:"#3a3a4a",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        color:active?col:"#cbd5e1",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                       {n}
                     </button>
                   );
@@ -7522,14 +7522,14 @@ function updateEx(ei, key, val) {
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:4,marginBottom:6}}>
                 {STIM_RATING_OPTIONS.map(opt=>{
                   const active = Number(ex.stimRating)===opt.value;
-                  const cols={1:"#64748b",2:"#94a3b8",3:"#5EEAD4",4:"#22c55e",5:"#ef4444"};
+                  const cols={1:"#94a3b8",2:"#94a3b8",3:"#5EEAD4",4:"#22c55e",5:"#ef4444"};
                   const col=cols[opt.value];
                   return (
                     <button key={opt.value} onClick={()=>updateEx(ei,"stimRating",active?null:opt.value)}
                       style={{minHeight:30,borderRadius:6,border:"1px solid",fontSize:11,
                         borderColor:active?col:"rgba(255,255,255,0.08)",
                         background:active?col+"22":"transparent",
-                        color:active?col:"#64748b",fontWeight:800,cursor:"pointer",padding:"0 4px"}}>
+                        color:active?col:"#94a3b8",fontWeight:800,cursor:"pointer",padding:"0 4px"}}>
                       {opt.label}
                     </button>
                   );
@@ -7539,7 +7539,7 @@ function updateEx(ei, key, val) {
                 placeholder="대표 메모 · 왼쪽 어깨 불편 / 승모 개입 / 다음 수업 중량 증가 등"
                 style={{fontSize:13,padding:"6px 8px",color:"#c4b5fd",marginBottom:6}} />
               <div style={{marginBottom:6}}>
-                <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>다음 수업 추천</Mo>
+                <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>다음 수업 추천</Mo>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                   {NEXT_PLAN_OPTIONS.map(opt=>{
                     const active=ex.nextPlan===opt.value;
@@ -7547,7 +7547,7 @@ function updateEx(ei, key, val) {
                       style={{fontSize:10,padding:"4px 8px",borderRadius:999,border:"1px solid",cursor:"pointer",
                         borderColor:active?"rgba(94,234,212,.55)":"rgba(255,255,255,.08)",
                         background:active?"rgba(94,234,212,.14)":"rgba(255,255,255,.02)",
-                        color:active?"#5EEAD4":"#64748b",fontWeight:active?800:600}}>{opt.label}</button>;
+                        color:active?"#5EEAD4":"#94a3b8",fontWeight:active?800:600}}>{opt.label}</button>;
                   })}
                 </div>
               </div>
@@ -7557,7 +7557,7 @@ function updateEx(ei, key, val) {
         <div style={{display:"flex",gap:8,marginTop:10}}>
           <button onClick={() => setExercises(prev=>[...prev, mkEx()])}
             style={{flex:1,padding:"9px 0",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:8,
-              background:"transparent",color:"#64748b",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+              background:"transparent",color:"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             + 마지막에 추가
           </button>
           <button onClick={() => setExercises(prev=>[mkEx(),...prev])}
@@ -7567,14 +7567,14 @@ function updateEx(ei, key, val) {
           </button>
         </div>
         <div style={{marginTop:9,padding:"9px 13px",background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.2)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <Mo c="#54546a" s={9}>TOTAL VOLUME</Mo>
-          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#54546a"}}>kg</span></span>
+          <Mo c="#94a3b8" s={9}>TOTAL VOLUME</Mo>
+          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#94a3b8"}}>kg</span></span>
         </div>
         <PartVolBadges exercises={exercises} style={{marginTop:6}} />
         {/* 세트 수 (트레이너 전용) */}
         <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
           <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
-            background:"rgba(255,255,255,0.05)",color:"#64748b",fontWeight:600,flexShrink:0}}>
+            background:"rgba(255,255,255,0.05)",color:"#94a3b8",fontWeight:600,flexShrink:0}}>
             총 {calcTotalSets(exercises)}세트
           </span>
           <PartSetBadges exercises={exercises} style={{marginTop:0}} />
@@ -7724,14 +7724,14 @@ function CardSaveView({ member, trainerName, gymName, date, sessionNo, intensity
         <button onClick={generateImage} disabled={generating}
           style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
             background:generating?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#5EEAD4,#2DD4BF)",
-            color:generating?"#54546a":"#0B1120",fontFamily:"'Syne',sans-serif",fontWeight:800,
+            color:generating?"#94a3b8":"#0B1120",fontFamily:"'Syne',sans-serif",fontWeight:800,
             fontSize:15,cursor:generating?"not-allowed":"pointer",
             display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
           {generating ? "⏳ 이미지 생성 중..." : imgDataUrl ? "🔄 다시 생성" : "📥 이미지 생성"}
         </button>
         {!imgDataUrl && (
           <div style={{padding:"10px 14px",background:"#111827",borderRadius:8,
-            border:"1px dashed rgba(255,255,255,0.08)",fontSize:11,color:"#54546a",textAlign:"center",lineHeight:1.9}}>
+            border:"1px dashed rgba(255,255,255,0.08)",fontSize:11,color:"#94a3b8",textAlign:"center",lineHeight:1.9}}>
             📥 버튼을 누르면 이미지가 생성됩니다<br/>
             <strong style={{color:"#ddddf0"}}>아이폰/아이패드</strong>: 생성된 이미지를 <strong style={{color:"#5EEAD4"}}>길게 눌러</strong> 사진 저장<br/>
             <strong style={{color:"#ddddf0"}}>맥/PC</strong>: 자동으로 파일이 다운로드됩니다
@@ -7763,7 +7763,7 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
           <div>
             <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",letterSpacing:".12em",marginBottom:3}}>PERSONAL TRAINING</div>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,color:"#fff",letterSpacing:"-0.5px"}}>{member.name}</div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginTop:2}}>{gymName}{trainerName?" · "+trainerName:""}</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#94a3b8",marginTop:2}}>{gymName}{trainerName?" · "+trainerName:""}</div>
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#7070a0"}}>{ds}</div>
@@ -7817,7 +7817,7 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         {/* ── 2. 웨이트 트레이닝 (기능운동 제외) ── */}
         {exList.some(e=>!isFuncEx(e)) && (
           <>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",letterSpacing:".1em",marginBottom:10}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",letterSpacing:".1em",marginBottom:10}}>
               {exList.some(e=>isFuncEx(e)) ? "웨이트 트레이닝" : "TODAY'S WORKOUT"}
             </div>
             {exList.filter(e=>!isFuncEx(e)).map((ex, ei) => {
@@ -7835,16 +7835,16 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>{vol.toLocaleString()} kg</div>
-                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a"}}>최고 {maxW}kg</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8"}}>최고 {maxW}kg</div>
                     </div>
                   </div>
                   <div style={{padding:"6px 12px"}}>
                     <div style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
-                      {["SET","무게","횟수","볼륨"].map((h,i) => <Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                      {["SET","무게","횟수","볼륨"].map((h,i) => <Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                     </div>
                     {(ex.sets||[]).map((row,si) => (
                       <div key={si} style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
-                        <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
+                        <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
                         <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
                         <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
                         <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
@@ -7858,18 +7858,18 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         )}
         <div style={{background:"linear-gradient(135deg,#0d2018,#0F172A)",borderRadius:10,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}>
           <div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",marginBottom:2}}>TOTAL VOLUME</div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:12,color:"#54546a",fontWeight:400}}>kg</span></div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",marginBottom:2}}>TOTAL VOLUME</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}>kg</span></div>
           </div>
           <div style={{textAlign:"right"}}>
             {Object.entries(byMuscle).slice(0,4).map(([k,v]) => (
               <div key={k} style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#7070a0",marginBottom:1}}>
-                <span style={{color:mColor(k)}}>{k}</span><span style={{color:"#54546a"}}> {v.toLocaleString()}kg</span>
+                <span style={{color:mColor(k)}}>{k}</span><span style={{color:"#94a3b8"}}> {v.toLocaleString()}kg</span>
               </div>
             ))}
           </div>
         </div>
-        {bodyWeight && <div style={{background:"#111827",borderRadius:8,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><Mo c="#54546a" s={10}>체중</Mo><Mo c="#ffd166" s={14}>{bodyWeight} kg</Mo></div>}
+        {bodyWeight && <div style={{background:"#111827",borderRadius:8,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><Mo c="#94a3b8" s={10}>체중</Mo><Mo c="#ffd166" s={14}>{bodyWeight} kg</Mo></div>}
         {/* 유산소 기록 — 회원 카드에 표시 가능 */}
         {cardio && (cardio.type || cardio.minutes) && (
           <div style={{background:"rgba(249,115,22,.05)",borderRadius:8,padding:"8px 12px",
@@ -7884,7 +7884,7 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
         )}
         {trainerComment && <div style={{background:"rgba(0,229,160,.05)",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}><Mo c="#5EEAD4" s={8} style={{marginBottom:5,display:"block"}}>TRAINER COMMENT</Mo><div style={{fontSize:12,color:"#ddddf0",lineHeight:1.65}}>{trainerComment}</div></div>}
         <div style={{marginTop:8,borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <Mo c="#1e2a3a" s={8}>TEO GYM</Mo>
+          <Mo c="#cbd5e1" s={8}>TEO GYM</Mo>
           <Mo c="#5EEAD4" s={9}>{trainerName}{gymName?" · "+gymName:""}</Mo>
         </div>
       </div>
@@ -7917,7 +7917,7 @@ function ExNameList({ exercises }) {
         <button onClick={e=>{e.stopPropagation();setExpanded(true);}}
           style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",
             borderRadius:3,border:"1px solid rgba(255,255,255,0.08)",
-            background:"transparent",color:"#54546a",cursor:"pointer"}}>
+            background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
           +{more} 더보기
         </button>
       )}
@@ -7925,7 +7925,7 @@ function ExNameList({ exercises }) {
         <button onClick={e=>{e.stopPropagation();setExpanded(false);}}
           style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",
             borderRadius:3,border:"1px solid rgba(255,255,255,0.08)",
-            background:"transparent",color:"#54546a",cursor:"pointer"}}>
+            background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
           접기
         </button>
       )}
@@ -7942,7 +7942,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
 
   const getTeamStatus = (ps) => ps.teamStatus || "active";
   const TEAM_STATUS_LABELS = {active:"진행중", paused:"휴식중", ended:"종료"};
-  const TEAM_STATUS_COLORS = {active:"#5EEAD4", paused:"#ffd166", ended:"#64748b"};
+  const TEAM_STATUS_COLORS = {active:"#5EEAD4", paused:"#ffd166", ended:"#94a3b8"};
 
   const byStatus = pairSessions
     .filter(ps => getTeamStatus(ps) === statusFilter)
@@ -7961,7 +7961,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   const STATUS_TABS = [
     {key:"active",  label:"진행중", color:"#5EEAD4"},
     {key:"paused",  label:"휴식중", color:"#ffd166"},
-    {key:"ended",   label:"종료",   color:"#64748b"},
+    {key:"ended",   label:"종료",   color:"#94a3b8"},
   ];
 
   const fmtDate = (ps) => {
@@ -7987,7 +7987,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#e2e8f0"}}>
               {ps.memberAName} + {ps.memberBName}
             </div>
-            <Mo c="#54546a" s={9}>{ps.date} · {fmtDate(ps)}</Mo>
+            <Mo c="#94a3b8" s={9}>{ps.date} · {fmtDate(ps)}</Mo>
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
             <span style={{padding:"3px 8px",borderRadius:20,background:`${tsColor}18`,color:tsColor,fontSize:9,fontWeight:800}}>{TEAM_STATUS_LABELS[ts]}</span>
@@ -7997,14 +7997,14 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
             }
           </div>
         </div>
-        <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>
+        <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:8}}>
           종목 {(ps.exercises||[]).length}개 · {ps.intensity||"중강도"}
         </Mo>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           <button onClick={()=>onEdit(ps)}
             style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${ps.splitDone?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
               background:ps.splitDone?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
-              color:ps.splitDone?"#54546a":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+              color:ps.splitDone?"#94a3b8":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
             {ps.splitDone?"보기":"이어쓰기"}
           </button>
           {!ps.splitDone && (
@@ -8060,7 +8060,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
             style={{padding:"6px 14px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
               borderColor:statusFilter===t.key?t.color:"rgba(255,255,255,0.08)",
               background:statusFilter===t.key?`${t.color}18`:"transparent",
-              color:statusFilter===t.key?t.color:"#54546a"}}>
+              color:statusFilter===t.key?t.color:"#94a3b8"}}>
             {t.label}
             <span style={{marginLeft:4,fontSize:9,opacity:.7}}>
               {pairSessions.filter(ps=>getTeamStatus(ps)===t.key).length}
@@ -8079,12 +8079,12 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
               2:1 원본을 기준으로<br/>
               <b style={{color:"#5EEAD4"}}>{confirmSplit.memberAName}</b> + <b style={{color:"#a29bfe"}}>{confirmSplit.memberBName}</b><br/>
               개인 수업일지를 각각 생성합니다.<br/>
-              <span style={{color:"#64748b",fontSize:10}}>원본은 계속 보관됩니다.</span>
+              <span style={{color:"#94a3b8",fontSize:10}}>원본은 계속 보관됩니다.</span>
             </Mo>
             <div style={{display:"flex",gap:8}}>
               <button disabled={splitting} onClick={()=>setConfirmSplit(null)}
                 style={{flex:1,padding:11,borderRadius:9,border:"1px solid rgba(255,255,255,.1)",
-                  background:"transparent",color:"#64748b",fontSize:13,cursor:"pointer"}}>취소</button>
+                  background:"transparent",color:"#94a3b8",fontSize:13,cursor:"pointer"}}>취소</button>
               <button disabled={splitting} onClick={async()=>{
                 setSplitting(true);
                 try { await onSplit(confirmSplit); setConfirmSplit(null); }
@@ -8103,7 +8103,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
         <div style={{textAlign:"center",padding:"40px 20px"}}>
           <div style={{fontSize:40,marginBottom:12}}>⚡</div>
           <Mo c="#e2e8f0" s={14} style={{display:"block",fontWeight:700,marginBottom:6}}>2:1 수업 기록이 없습니다</Mo>
-          <Mo c="#54546a" s={11} style={{display:"block",marginBottom:20,lineHeight:1.6}}>
+          <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:20,lineHeight:1.6}}>
             "+ 2:1 추가" 버튼으로<br/>새 2:1 수업을 시작하세요
           </Mo>
           <Btn onClick={onAdd}>+ 2:1 추가</Btn>
@@ -8112,7 +8112,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
 
       {pairSessions.length > 0 && byStatus.length === 0 && (
         <div style={{textAlign:"center",padding:"32px 20px"}}>
-          <Mo c="#54546a" s={12} style={{display:"block",fontWeight:700}}>
+          <Mo c="#94a3b8" s={12} style={{display:"block",fontWeight:700}}>
             {TEAM_STATUS_LABELS[statusFilter]} 2:1 수업이 없습니다
           </Mo>
         </div>
@@ -8349,7 +8349,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
         sub={memberA&&memberB?`${memberA.name} + ${memberB.name}`:""}
         right={
           <div style={{display:"flex",gap:6}}>
-            {saveStatus && <Mo c="#54546a" s={8} style={{alignSelf:"center"}}>{saveStatus}</Mo>}
+            {saveStatus && <Mo c="#94a3b8" s={8} style={{alignSelf:"center"}}>{saveStatus}</Mo>}
             <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
           </div>
         } />
@@ -8364,7 +8364,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
               {memberA?.name||"-"}
             </div>
           </div>
-          <Mo c="#54546a" s={14}>+</Mo>
+          <Mo c="#94a3b8" s={14}>+</Mo>
           <div style={{flex:1,textAlign:"right"}}>
             <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:4,fontWeight:700}}>B 회원</Mo>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#a29bfe"}}>
@@ -8374,14 +8374,14 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
         </div>
         <div style={{display:"flex",gap:8}}>
           <div style={{flex:1}}>
-            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
+            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
             <input type="date" value={date} onChange={e=>setDate(e.target.value)}
               disabled={isSplitDone}
               style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
                 background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
           </div>
           <div style={{flex:1}}>
-            <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>강도</Mo>
+            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>강도</Mo>
             <select value={intensity} onChange={e=>setIntensity(e.target.value)}
               disabled={isSplitDone}
               style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
@@ -8396,15 +8396,15 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
         <div style={{padding:"10px 13px",borderRadius:8,background:"rgba(94,234,212,.06)",
           border:"1px solid rgba(94,234,212,.2)",marginBottom:10}}>
           <Mo c="#5EEAD4" s={10} style={{fontWeight:800}}>✅ 나눠서 기록 완료 — 개인 기록이 생성되었습니다</Mo>
-          <Mo c="#54546a" s={9} style={{display:"block",marginTop:3}}>2:1 원본은 계속 조회·수정 가능합니다</Mo>
+          <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:3}}>2:1 원본은 계속 조회·수정 가능합니다</Mo>
         </div>
       )}
 
       {/* 수업 유형 (운동 부위) */}
       <div style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,
         padding:"12px 13px",marginBottom:10}}>
-        <Mo c="#54546a" s={9} style={{display:"block",marginBottom:7,fontWeight:700}}>
-          수업 유형 <span style={{color:"#3a3a4a",fontSize:8,fontWeight:400}}>(복수 선택 가능)</span>
+        <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:7,fontWeight:700}}>
+          수업 유형 <span style={{color:"#cbd5e1",fontSize:8,fontWeight:400}}>(복수 선택 가능)</span>
         </Mo>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
           {SESSION_TYPE_OPTIONS.map(t => {
@@ -8416,13 +8416,13 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                   fontSize:11,fontWeight:active?700:400,
                   borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
                   background:active?"rgba(0,229,160,.15)":"transparent",
-                  color:active?"#5EEAD4":"#54546a"}}>
+                  color:active?"#5EEAD4":"#94a3b8"}}>
                 {t}
               </button>
             );
           })}
         </div>
-        {selectedTypes.length===0 && <Mo c="#3a3a4a" s={7} style={{display:"block",marginTop:4}}>선택 없으면 "기타"로 저장됩니다</Mo>}
+        {selectedTypes.length===0 && <Mo c="#cbd5e1" s={7} style={{display:"block",marginTop:4}}>선택 없으면 "기타"로 저장됩니다</Mo>}
       </div>
 
       {/* 운동 목록 */}
@@ -8438,10 +8438,10 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
               <div style={{display:"flex",flexDirection:"column",gap:2}}>
                 <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0||isSplitDone}
                   style={{padding:"2px 6px",borderRadius:4,border:"1px solid rgba(255,255,255,.08)",
-                    background:"none",color:ei===0?"#1e2a3a":"#54546a",fontSize:10,cursor:"pointer",lineHeight:1}}>▲</button>
+                    background:"none",color:ei===0?"#cbd5e1":"#94a3b8",fontSize:10,cursor:"pointer",lineHeight:1}}>▲</button>
                 <button onClick={()=>moveEx(ei,ei+1)} disabled={ei===exercises.length-1||isSplitDone}
                   style={{padding:"2px 6px",borderRadius:4,border:"1px solid rgba(255,255,255,.08)",
-                    background:"none",color:ei===exercises.length-1?"#1e2a3a":"#54546a",fontSize:10,cursor:"pointer",lineHeight:1}}>▼</button>
+                    background:"none",color:ei===exercises.length-1?"#cbd5e1":"#94a3b8",fontSize:10,cursor:"pointer",lineHeight:1}}>▼</button>
               </div>
               <input value={ex.name} onChange={e=>updateEx(ei,"name",e.target.value)}
                 disabled={isSplitDone}
@@ -8480,14 +8480,14 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                   <select value={ex.funcCategory||""} onChange={e=>updateEx(ei,"funcCategory",e.target.value)}
                     disabled={isSplitDone}
                     style={{padding:"5px 6px",borderRadius:5,border:"1px solid rgba(94,234,212,.2)",
-                      background:"#0c1523",color:ex.funcCategory?"#5EEAD4":"#3a3a4a",fontSize:10}}>
+                      background:"#0c1523",color:ex.funcCategory?"#5EEAD4":"#cbd5e1",fontSize:10}}>
                     <option value="">카테고리 선택</option>
                     {FUNC_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}
                   </select>
                   <select value={ex.funcTool||""} onChange={e=>updateEx(ei,"funcTool",e.target.value)}
                     disabled={isSplitDone}
                     style={{padding:"5px 6px",borderRadius:5,border:"1px solid rgba(94,234,212,.2)",
-                      background:"#0c1523",color:ex.funcTool?"#5EEAD4":"#3a3a4a",fontSize:10}}>
+                      background:"#0c1523",color:ex.funcTool?"#5EEAD4":"#cbd5e1",fontSize:10}}>
                     <option value="">도구 선택</option>
                     {FUNC_TOOLS.map(t=><option key={t} value={t}>{t}</option>)}
                   </select>
@@ -8505,7 +8505,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                         style={{padding:"2px 7px",borderRadius:10,border:"1px solid",fontSize:9,cursor:isSplitDone?"default":"pointer",
                           borderColor:active?"#5EEAD4":"rgba(255,255,255,.08)",
                           background:active?"rgba(94,234,212,.15)":"transparent",
-                          color:active?"#5EEAD4":"#3a3a4a",fontWeight:active?700:400}}>
+                          color:active?"#5EEAD4":"#cbd5e1",fontWeight:active?700:400}}>
                         {p}
                       </button>
                     );
@@ -8540,7 +8540,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
               const rB = setsB[si]||{};
               return (
                 <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:4,alignItems:"center"}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#54546a",
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
                     background:"#0c1523",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>
                     {si+1}
                   </div>
@@ -8610,7 +8610,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                 <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:6}}>{label} 피드백</Mo>
                 {/* RPE 1~10 버튼 */}
                 <div style={{marginBottom:5}}>
-                  <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>RPE</Mo>
+                  <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>RPE</Mo>
                   <div style={{display:"flex",gap:2}}>
                     {[1,2,3,4,5,6,7,8,9,10].map(n=>{
                       const sel = curRpe===n;
@@ -8628,7 +8628,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                 </div>
                 {/* 자극도 버튼 */}
                 <div style={{marginBottom:5}}>
-                  <Mo c="#54546a" s={8} style={{display:"block",marginBottom:3}}>자극도</Mo>
+                  <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>자극도</Mo>
                   <div style={{display:"flex",gap:2}}>
                     {["없음","애매함","약함","중간","강함"].map(v=>{
                       const sel = curStim===v;
@@ -8663,7 +8663,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
       {!isSplitDone && (
         <button onClick={addEx}
           style={{width:"100%",padding:"12px",border:"1px dashed rgba(255,255,255,.1)",borderRadius:10,
-            background:"none",color:"#54546a",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+            background:"none",color:"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:10}}>
           + 운동 추가
         </button>
       )}
@@ -8721,12 +8721,12 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
               2:1 원본을 기준으로<br/>
               <b style={{color:"#ffd166"}}>{memberA?.name}</b> + <b style={{color:"#a29bfe"}}>{memberB?.name}</b><br/>
               개인 수업일지를 각각 생성합니다.<br/>
-              <span style={{color:"#64748b",fontSize:10}}>2:1 원본은 계속 보관됩니다.</span>
+              <span style={{color:"#94a3b8",fontSize:10}}>2:1 원본은 계속 보관됩니다.</span>
             </Mo>
             <div style={{display:"flex",gap:8}}>
               <button disabled={splitting} onClick={()=>setConfirmSplit(false)}
                 style={{flex:1,padding:11,borderRadius:9,border:"1px solid rgba(255,255,255,.1)",
-                  background:"transparent",color:"#64748b",fontSize:13,cursor:splitting?"not-allowed":"pointer"}}>취소</button>
+                  background:"transparent",color:"#94a3b8",fontSize:13,cursor:splitting?"not-allowed":"pointer"}}>취소</button>
               <button disabled={splitting} onClick={async()=>{
                 if (splitting) return;
                 setSplitting(true);
@@ -8801,24 +8801,24 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"#fff",marginBottom:6}}>
           나눠서 기록
         </div>
-        <Mo c="#54546a" s={10} style={{display:"block",marginBottom:14,lineHeight:1.8}}>
+        <Mo c="#94a3b8" s={10} style={{display:"block",marginBottom:14,lineHeight:1.8}}>
           2:1 수업 기록을 회원별 개인 일지로 나눠서 기록하시겠습니까?<br/>
           회원앱 공개는 각 회원 일지에서 별도로 전송해야 합니다.
         </Mo>
         <div style={{display:"flex",gap:8,marginBottom:14}}>
           <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)"}}>
             <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700}}>{confirmPair.memberName || member?.name}</Mo>
-            <Mo c="#64748b" s={9}>{(confirmPair.exercises || []).length}개 종목</Mo>
+            <Mo c="#94a3b8" s={9}>{(confirmPair.exercises || []).length}개 종목</Mo>
           </div>
           <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.18)"}}>
             <Mo c="#a29bfe" s={9} style={{display:"block",fontWeight:700}}>{confirmPair.memberBName}</Mo>
-            <Mo c="#64748b" s={9}>{(confirmPair.memberBExercises || []).length}개 종목</Mo>
+            <Mo c="#94a3b8" s={9}>{(confirmPair.memberBExercises || []).length}개 종목</Mo>
           </div>
         </div>
         <div style={{display:"flex",gap:8}}>
           <button disabled={splitting} onClick={() => setConfirmPair(null)}
             style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.1)",
-              background:"transparent",color:"#64748b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              background:"transparent",color:"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer"}}>
             취소
           </button>
           <button disabled={splitting} onClick={async () => {
@@ -8870,7 +8870,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
             style={{padding:"5px 11px",borderRadius:6,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
               borderColor:sortMode===m?"#5EEAD4":"rgba(255,255,255,0.08)",
               background:sortMode===m?"rgba(94,234,212,.12)":"transparent",
-              color:sortMode===m?"#5EEAD4":"#54546a"}}>
+              color:sortMode===m?"#5EEAD4":"#94a3b8"}}>
             {l}
           </button>
         ))}
@@ -8883,20 +8883,20 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
             style={{padding:"3px 9px",borderRadius:5,border:"1px solid",fontSize:9,cursor:"pointer",
               borderColor:!filterPart?"#5EEAD4":"rgba(255,255,255,0.07)",
               background:!filterPart?"rgba(94,234,212,.12)":"transparent",
-              color:!filterPart?"#5EEAD4":"#64748b"}}>전체</button>
+              color:!filterPart?"#5EEAD4":"#94a3b8"}}>전체</button>
           {availableParts.map(p=>(
             <button key={p} onClick={()=>setFilterPart(p===filterPart?null:p)}
               style={{padding:"3px 9px",borderRadius:5,border:"1px solid",fontSize:9,cursor:"pointer",
                 borderColor:filterPart===p?mColor(p):"rgba(255,255,255,0.07)",
                 background:filterPart===p?mColor(p)+"22":"transparent",
-                color:filterPart===p?mColor(p):"#64748b"}}>
+                color:filterPart===p?mColor(p):"#94a3b8"}}>
               {p}
             </button>
           ))}
         </div>
       )}
 
-      <Mo c="#54546a" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</Mo>
+      <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</Mo>
       {loading ? <Skel n={5} /> : sortedSessions.length===0 ? <Emp msg={isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."} /> : (
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {sortedSessions.map((s,i) => {
@@ -8910,7 +8910,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                   padding:"11px 13px",cursor:"pointer",transition:"border-color .15s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                   <div style={{flex:1,minWidth:0}}>
-                    <Mo c="#54546a" s={9} style={{marginBottom:2}}>{s.date} · {s.sessionNo}회차</Mo>
+                    <Mo c="#94a3b8" s={9} style={{marginBottom:2}}>{s.date} · {s.sessionNo}회차</Mo>
                     <div style={{display:"inline-flex",marginBottom:4,padding:"2px 7px",borderRadius:999,fontSize:8,fontWeight:800,background:s.isPublished?"rgba(94,234,212,.12)":"rgba(255,209,102,.10)",color:s.isPublished?"#5EEAD4":"#ffd166",border:"1px solid "+(s.isPublished?"rgba(94,234,212,.24)":"rgba(255,209,102,.22)")}}>
                       {s.isPublished ? "회원 공개" : (s.status === "completed" ? "비공개·완료" : "비공개·초안")}
                     </div>
@@ -8958,7 +8958,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                     {calcTotalSets(s.exercises) > 0 && (
                       <div style={{display:"flex",gap:3,marginTop:4,justifyContent:"flex-end",flexWrap:"wrap",alignItems:"center"}}>
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,255,255,0.05)",color:"#64748b",fontWeight:600}}>
+                          background:"rgba(255,255,255,0.05)",color:"#94a3b8",fontWeight:600}}>
                           {calcTotalSets(s.exercises)}세트
                         </span>
                         {calcPartSets(s.exercises).slice(0,3).map(([g,c])=>(
@@ -8977,7 +8977,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                   </div>
                 </div>
                 {s.trainerComment && (
-                  <div style={{marginTop:6,fontSize:10,color:"#54546a",borderTop:"1px solid rgba(255,255,255,0.08)",
+                  <div style={{marginTop:6,fontSize:10,color:"#94a3b8",borderTop:"1px solid rgba(255,255,255,0.08)",
                     paddingTop:6,fontStyle:"italic",overflow:"hidden",
                     display:"-webkit-box",WebkitLineClamp:1,WebkitBoxOrient:"vertical"}}>
                     {s.trainerComment}
@@ -9293,7 +9293,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
               <button key={k} onClick={()=>setCardMode(k)}
                 style={{padding:"5px 11px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
                   background:cardMode===k?"#5EEAD422":"transparent",
-                  color:cardMode===k?"#5EEAD4":"#54546a"}}>
+                  color:cardMode===k?"#5EEAD4":"#94a3b8"}}>
                 {l}
               </button>
             ))}
@@ -9336,7 +9336,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                   letterSpacing:".14em",marginBottom:4}}>TEO GYM · PERSONAL TRAINING</div>
                 <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,
                   color:"#fff",letterSpacing:"-0.5px"}}>{member?.name || "회원"}</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginTop:2}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#94a3b8",marginTop:2}}>
                   {gymName}{trainerName?" · "+trainerName:""}
                 </div>
               </div>
@@ -9450,11 +9450,11 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                   <div style={{padding:"6px 12px"}}>
                     <div>
                       <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
-                        {["SET","무게","횟수","볼륨"].map((h,i)=><Mo key={i} c="#3a3a4a" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                        {["SET","무게","횟수","볼륨"].map((h,i)=><Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                       </div>
                       {(ex.sets||[]).map((row,si)=>(
                         <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
-                          <Mo c="#3a3a4a" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
+                          <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
                           <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.weight||"—"}</Mo>
                           <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
                           <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
@@ -9471,9 +9471,9 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
               padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",
               border:"1px solid rgba(0,229,160,.2)",marginBottom:12}}>
               <div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#54546a",marginBottom:2}}>TOTAL VOLUME</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94a3b8",marginBottom:2}}>TOTAL VOLUME</div>
                 <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#5EEAD4"}}>
-                  {totalVol.toLocaleString()} <span style={{fontSize:12,color:"#54546a",fontWeight:400}}>kg</span>
+                  {totalVol.toLocaleString()} <span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}>kg</span>
                 </div>
                 <PartVolBadges exercises={exercises} style={{marginTop:5}} />
                 {/* 세트 수 — 트레이너 전용, 공유 카드 미포함 */}
@@ -9481,7 +9481,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                   <div style={{marginTop:5}}>
                     <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
                       <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:3,
-                        background:"rgba(255,255,255,0.06)",color:"#64748b",fontWeight:700}}>
+                        background:"rgba(255,255,255,0.06)",color:"#94a3b8",fontWeight:700}}>
                         총 {calcTotalSets(exercises)}세트
                       </span>
                       {calcPartSets(exercises).map(([g,c])=>(
@@ -9496,7 +9496,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
               </div>
               {bodyWeight && (
                 <div style={{textAlign:"right"}}>
-                  <Mo c="#54546a" s={8}>체중</Mo>
+                  <Mo c="#94a3b8" s={8}>체중</Mo>
                   <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:16,color:"#ffd166"}}>{bodyWeight}kg</div>
                 </div>
               )}
@@ -9537,7 +9537,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                             {b.vas > 0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:bColor,fontWeight:800}}>VAS {b.vas}</div>}
                             {b.part && <Mo c="#ddddf0" s={11} style={{display:"block",marginTop:2}}>{b.part}</Mo>}
                             {b.situation && <Mo c="#7070a0" s={9} style={{display:"block"}}>{b.situation}</Mo>}
-                            {b.memo && <Mo c="#54546a" s={9} style={{display:"block",marginTop:2}}>{b.memo}</Mo>}
+                            {b.memo && <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{b.memo}</Mo>}
                           </div>
                         )}
                         {(a.vas > 0 || a.change) && (
@@ -9545,7 +9545,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                             <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:3}}>운동 후</Mo>
                             {a.vas > 0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:aColor,fontWeight:800}}>VAS {a.vas}</div>}
                             {a.change && <Mo c={aColor} s={11} style={{display:"block",marginTop:2,fontWeight:700}}>{a.change==="감소"?"✅ 통증 감소":a.change==="증가"?"⚠️ 통증 증가":"➡️ 동일"}</Mo>}
-                            {a.memo && <Mo c="#54546a" s={9} style={{display:"block",marginTop:2}}>{a.memo}</Mo>}
+                            {a.memo && <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{a.memo}</Mo>}
                           </div>
                         )}
                       </div>
@@ -9596,7 +9596,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                               color:"#a5b4fc",fontWeight:800}}>{stimRatingLabel(ex.stimRating)}</span>
                           )}
                           {ex.stimPrimary && <Mo c="#818cf8" s={8}>주: {ex.stimPrimary}</Mo>}
-                          {ex.stimSecondary && <Mo c="#64748b" s={8}>보조: {ex.stimSecondary}</Mo>}
+                          {ex.stimSecondary && <Mo c="#94a3b8" s={8}>보조: {ex.stimSecondary}</Mo>}
                           {ex.nextPlan && <Mo c="#ffd166" s={8}>다음 수업: {nextPlanLabel(ex.nextPlan)}</Mo>}
                         </div>
                         {ex.stimMemo && <Mo c="#a5b4fc" s={8} style={{display:"block",marginTop:2}}>대표 메모: {ex.stimMemo}</Mo>}
@@ -9638,7 +9638,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
             {/* 푸터 */}
             <div style={{borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,marginTop:4,
               display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <Mo c="#1e2a3a" s={8}>TEO GYM</Mo>
+              <Mo c="#cbd5e1" s={8}>TEO GYM</Mo>
               <Mo c="#5EEAD4" s={9}>{trainerName}{gymName?" · "+gymName:""}</Mo>
             </div>
           </div>
@@ -9647,7 +9647,7 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
 
       {/* iOS 안내 */}
       <div style={{marginTop:10,padding:"9px 12px",background:"#111827",borderRadius:7,
-        border:"1px dashed rgba(255,255,255,0.08)",fontSize:10,color:"#54546a",textAlign:"center",lineHeight:1.8}}>
+        border:"1px dashed rgba(255,255,255,0.08)",fontSize:10,color:"#94a3b8",textAlign:"center",lineHeight:1.8}}>
         📱 아이폰: 저장 버튼 → 새 탭 이미지를 길게 눌러 저장<br/>
         💻 맥/PC: 📥 저장 버튼으로 자동 다운로드
       </div>
@@ -9815,7 +9815,7 @@ function LibraryScreen({ sessions, loading, onBack }) {
       </div>
 
       {searching && (
-        <div style={{marginBottom:14,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54546a"}}>
+        <div style={{marginBottom:14,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#94a3b8"}}>
           검색 결과 {recordedForTab.length}개
         </div>
       )}
@@ -9831,12 +9831,12 @@ function LibraryScreen({ sessions, loading, onBack }) {
               <button key={top} onClick={() => setSelTop(top)}
                 style={{padding:"6px 13px",borderRadius:20,border:"1px solid",
                   borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
-                  color:active?col:"#54546a",fontSize:12,fontWeight:700,
+                  color:active?col:"#94a3b8",fontSize:12,fontWeight:700,
                   display:"flex",alignItems:"center",gap:5}}>
                 {top}
                 {cnt > 0 && (
                   <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"0 5px",
-                    borderRadius:8,background:active?col+"44":"rgba(255,255,255,0.08)",color:active?col:"#3a3a4a"}}>{cnt}</span>
+                    borderRadius:8,background:active?col+"44":"rgba(255,255,255,0.08)",color:active?col:"#cbd5e1"}}>{cnt}</span>
                 )}
               </button>
             );
@@ -9849,7 +9849,7 @@ function LibraryScreen({ sessions, loading, onBack }) {
         <div style={{textAlign:"center",padding:"40px 20px",background:"#111827",
           borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
           <div style={{fontSize:32,marginBottom:8}}>🔍</div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#54546a"}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#94a3b8"}}>
             검색 결과가 없습니다.
           </div>
         </div>
@@ -9860,10 +9860,10 @@ function LibraryScreen({ sessions, loading, onBack }) {
         <div style={{textAlign:"center",padding:"40px 20px",background:"#111827",
           borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
           <div style={{fontSize:32,marginBottom:8}}>📭</div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#54546a",marginBottom:4}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#94a3b8",marginBottom:4}}>
             {selTop} 운동 기록 없음
           </div>
-          <Mo c="#1e2a3a" s={10}>수업 기록에서 {selTop} 운동을 추가하면 여기에 정리됩니다.</Mo>
+          <Mo c="#cbd5e1" s={10}>수업 기록에서 {selTop} 운동을 추가하면 여기에 정리됩니다.</Mo>
         </div>
       )}
 
@@ -9899,15 +9899,15 @@ function LibraryScreen({ sessions, loading, onBack }) {
                           borderRadius:4,background:"rgba(255,255,255,0.08)",color:"#5a5a7a"}}>{ex.muscleSub}</span>
                       </div>
                       <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-                        <div><Mo c="#54546a" s={8}>수행</Mo><Mo c="#ddddf0" s={11}> {ex.count}회</Mo></div>
-                        <div><Mo c="#54546a" s={8}>세트</Mo><Mo c="#ddddf0" s={11}> {ex.totalSets}</Mo></div>
-                        <div><Mo c="#54546a" s={8}>최고</Mo><Mo c="#ffd166" s={11}> {ex.maxWeight}kg</Mo></div>
-                        <div><Mo c="#54546a" s={8}>볼륨</Mo><Mo c="#5EEAD4" s={11}> {ex.totalVolume.toLocaleString()}kg</Mo></div>
+                        <div><Mo c="#94a3b8" s={8}>수행</Mo><Mo c="#ddddf0" s={11}> {ex.count}회</Mo></div>
+                        <div><Mo c="#94a3b8" s={8}>세트</Mo><Mo c="#ddddf0" s={11}> {ex.totalSets}</Mo></div>
+                        <div><Mo c="#94a3b8" s={8}>최고</Mo><Mo c="#ffd166" s={11}> {ex.maxWeight}kg</Mo></div>
+                        <div><Mo c="#94a3b8" s={8}>볼륨</Mo><Mo c="#5EEAD4" s={11}> {ex.totalVolume.toLocaleString()}kg</Mo></div>
                       </div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                      <Mo c="#3a3a4a" s={8}>마지막</Mo>
-                      <Mo c="#54546a" s={9} style={{display:"block"}}>{ex.lastDate||"—"}</Mo>
+                      <Mo c="#cbd5e1" s={8}>마지막</Mo>
+                      <Mo c="#94a3b8" s={9} style={{display:"block"}}>{ex.lastDate||"—"}</Mo>
                     </div>
                   </div>
                 </div>
@@ -9959,17 +9959,17 @@ function FeedbackScreen({ sessions, member, loading, onBack }) {
     <div>
       <SH title="📊 블록 피드백" sub={member?.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
       <div style={{display:"flex",gap:11,marginBottom:13,flexWrap:"wrap"}}>
-        <div><Mo c="#54546a" s={8} style={{marginBottom:3}}>블록 단위</Mo><div style={{display:"flex",gap:3}}>{[5,10,20].map(n=><button key={n} onClick={()=>{setBs(n);setBi(0);}} style={{padding:"5px 12px",borderRadius:5,border:"1px solid",borderColor:bs===n?"#5EEAD4":"rgba(255,255,255,0.08)",background:bs===n?"rgba(0,229,160,.12)":"transparent",color:bs===n?"#5EEAD4":"#54546a",fontSize:11,fontWeight:700}}>{n}회</button>)}</div></div>
-        {tb>1&&<div><Mo c="#54546a" s={8} style={{marginBottom:3}}>블록 선택</Mo><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{Array.from({length:tb},(_,i)=><button key={i} onClick={()=>setBi(i)} style={{padding:"5px 10px",borderRadius:5,border:"1px solid",borderColor:bi===i?"#7c6fff":"rgba(255,255,255,0.08)",background:bi===i?"rgba(124,111,255,.12)":"transparent",color:bi===i?"#7c6fff":"#54546a",fontSize:10,fontWeight:700}}>{i*bs+1}~{Math.min(i*bs+bs,sessions.length)}회</button>)}</div></div>}
+        <div><Mo c="#94a3b8" s={8} style={{marginBottom:3}}>블록 단위</Mo><div style={{display:"flex",gap:3}}>{[5,10,20].map(n=><button key={n} onClick={()=>{setBs(n);setBi(0);}} style={{padding:"5px 12px",borderRadius:5,border:"1px solid",borderColor:bs===n?"#5EEAD4":"rgba(255,255,255,0.08)",background:bs===n?"rgba(0,229,160,.12)":"transparent",color:bs===n?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>{n}회</button>)}</div></div>
+        {tb>1&&<div><Mo c="#94a3b8" s={8} style={{marginBottom:3}}>블록 선택</Mo><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{Array.from({length:tb},(_,i)=><button key={i} onClick={()=>setBi(i)} style={{padding:"5px 10px",borderRadius:5,border:"1px solid",borderColor:bi===i?"#7c6fff":"rgba(255,255,255,0.08)",background:bi===i?"rgba(124,111,255,.12)":"transparent",color:bi===i?"#7c6fff":"#94a3b8",fontSize:10,fontWeight:700}}>{i*bs+1}~{Math.min(i*bs+bs,sessions.length)}회</button>)}</div></div>}
       </div>
       <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:11}}>
         <StatTile label="수업 횟수" value={sl.length+"회"}/><StatTile label="총 볼륨" value={(sv/1000).toFixed(1)+"t"} sub={tr!=null?"전블록 "+(tr>0?"+":"")+tr+"%":"."}/><StatTile label="회당 평균" value={(sv/(sl.length||1)/1000).toFixed(1)+"t"}/>
       </div>
-      <Card title="세션별 총 볼륨 추이"><ResponsiveContainer width="100%" height={150}><LineChart data={trendData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><Tooltip contentStyle={tt}/><Line type="monotone" dataKey="total" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="총볼륨(kg)"/></LineChart></ResponsiveContainer></Card>
+      <Card title="세션별 총 볼륨 추이"><ResponsiveContainer width="100%" height={150}><LineChart data={trendData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Line type="monotone" dataKey="total" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="총볼륨(kg)"/></LineChart></ResponsiveContainer></Card>
       <div style={{display:"flex",gap:5,marginTop:11,marginBottom:11,flexWrap:"wrap"}}>
-        {[["muscle","💪 부위별"],["sets","📋 세트분석"],["equipment","🏋️ 기구별"],["detail","🔍 세부"]].map(([m,l])=><button key={m} onClick={()=>setVm(m)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid",borderColor:vm===m?"#5EEAD4":"rgba(255,255,255,0.08)",background:vm===m?"rgba(0,229,160,.12)":"transparent",color:vm===m?"#5EEAD4":"#54546a",fontSize:12,fontWeight:700}}>{l}</button>)}
+        {[["muscle","💪 부위별"],["sets","📋 세트분석"],["equipment","🏋️ 기구별"],["detail","🔍 세부"]].map(([m,l])=><button key={m} onClick={()=>setVm(m)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid",borderColor:vm===m?"#5EEAD4":"rgba(255,255,255,0.08)",background:vm===m?"rgba(0,229,160,.12)":"transparent",color:vm===m?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:700}}>{l}</button>)}
       </div>
-      {vm==="muscle"&&<div><Card title="💪 부위별 볼륨 분포"><ResponsiveContainer width="100%" height={175}><BarChart data={muscleData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{MUSCLE_LIST.map(g=><Bar key={g} dataKey={g} stackId="a" fill={mColor(g)}/>)}</BarChart></ResponsiveContainer></Card><Card title="💪 누적 부위별 볼륨" style={{marginTop:11}}><div style={{display:"flex",flexDirection:"column",gap:10}}>{muscleTotals.map(({g,total})=>{const {days,avg}=muscleDayAvg[g]||{days:0,avg:0};return(<div key={g}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:3}}><Mo c={mColor(g)} s={11} style={{fontWeight:700}}>{g}</Mo><div style={{textAlign:"right"}}><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div></div><div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,marginBottom:5}}><div style={{height:"100%",width:((total/(muscleTotals[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#64748b"}}>운동일 {days}일</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>일평균 {avg.toLocaleString()} kg</span></div></div>);})}</div><div style={{marginTop:12,padding:"10px 12px",background:"#0B1120",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)"}}><Mo c="#5EEAD4" s={9} style={{marginBottom:5}}>자동 분석</Mo><div style={{fontSize:11,color:"#7070a0",lineHeight:1.7}}>{muscleTotals[0]&&"가장 많이 훈련한 부위는 "+muscleTotals[0].g+"("+muscleTotals[0].total.toLocaleString()+"kg)입니다. "}{muscleTotals.length>1&&muscleTotals[muscleTotals.length-1].g+"("+muscleTotals[muscleTotals.length-1].total.toLocaleString()+"kg) 부위의 비중을 늘려보세요."}{tr!=null&&" 전 블록 대비 볼륨이 "+(parseFloat(tr)>0?"증가":"감소")+"("+tr+"%)했습니다."}</div></div></Card></div>}
+      {vm==="muscle"&&<div><Card title="💪 부위별 볼륨 분포"><ResponsiveContainer width="100%" height={175}><BarChart data={muscleData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{MUSCLE_LIST.map(g=><Bar key={g} dataKey={g} stackId="a" fill={mColor(g)}/>)}</BarChart></ResponsiveContainer></Card><Card title="💪 누적 부위별 볼륨" style={{marginTop:11}}><div style={{display:"flex",flexDirection:"column",gap:10}}>{muscleTotals.map(({g,total})=>{const {days,avg}=muscleDayAvg[g]||{days:0,avg:0};return(<div key={g}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:3}}><Mo c={mColor(g)} s={11} style={{fontWeight:700}}>{g}</Mo><div style={{textAlign:"right"}}><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div></div><div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,marginBottom:5}}><div style={{height:"100%",width:((total/(muscleTotals[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동일 {days}일</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>일평균 {avg.toLocaleString()} kg</span></div></div>);})}</div><div style={{marginTop:12,padding:"10px 12px",background:"#0B1120",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)"}}><Mo c="#5EEAD4" s={9} style={{marginBottom:5}}>자동 분석</Mo><div style={{fontSize:11,color:"#7070a0",lineHeight:1.7}}>{muscleTotals[0]&&"가장 많이 훈련한 부위는 "+muscleTotals[0].g+"("+muscleTotals[0].total.toLocaleString()+"kg)입니다. "}{muscleTotals.length>1&&muscleTotals[muscleTotals.length-1].g+"("+muscleTotals[muscleTotals.length-1].total.toLocaleString()+"kg) 부위의 비중을 늘려보세요."}{tr!=null&&" 전 블록 대비 볼륨이 "+(parseFloat(tr)>0?"증가":"감소")+"("+tr+"%)했습니다."}</div></div></Card></div>}
       {vm==="sets"&&(()=>{
         // 세션별 총세트 + 부위별 세트 집계
         const setTrend = sl.map((s,i) => ({
@@ -9995,8 +9995,8 @@ function FeedbackScreen({ sessions, member, loading, onBack }) {
               <ResponsiveContainer width="100%" height={150}>
                 <LineChart data={setTrend} margin={{top:6,right:6,left:-22,bottom:0}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                  <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
-                  <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+                  <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                  <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
                   <Tooltip contentStyle={tt}/>
                   <Line type="monotone" dataKey="sets" stroke="#818cf8" strokeWidth={2} dot={{fill:"#818cf8",r:3}} name="총세트"/>
                 </LineChart>
@@ -10014,7 +10014,7 @@ function FeedbackScreen({ sessions, member, loading, onBack }) {
                       <div style={{height:"100%",width:((total/(partSetList[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
                     </div>
                     <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#64748b"}}>운동일 {days}회</span>
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동일 {days}회</span>
                       <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>회당 평균 {avg}세트</span>
                     </div>
                   </div>
@@ -10025,7 +10025,7 @@ function FeedbackScreen({ sessions, member, loading, onBack }) {
           </div>
         );
       })()}
-      {vm==="equipment"&&<div><Card title="🏋️ 기구별 볼륨 분포"><ResponsiveContainer width="100%" height={175}><BarChart data={equipData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{EQUIP_LIST.map(e=><Bar key={e} dataKey={e} stackId="a" fill={EQUIP_COLOR[e]}/>)}</BarChart></ResponsiveContainer></Card><Card title="🏋️ 기구별 누적 볼륨" style={{marginTop:11}}><div style={{display:"flex",flexDirection:"column",gap:7}}>{equipTotals.map(({e,total})=><div key={e}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><Mo c={EQUIP_COLOR[e]} s={10}>{e}</Mo><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div><div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:3}}><div style={{height:"100%",width:((total/(equipTotals[0]?.total||1))*100)+"%",background:EQUIP_COLOR[e],borderRadius:3,transition:"width .5s"}}/></div></div>)}</div></Card></div>}
+      {vm==="equipment"&&<div><Card title="🏋️ 기구별 볼륨 분포"><ResponsiveContainer width="100%" height={175}><BarChart data={equipData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{EQUIP_LIST.map(e=><Bar key={e} dataKey={e} stackId="a" fill={EQUIP_COLOR[e]}/>)}</BarChart></ResponsiveContainer></Card><Card title="🏋️ 기구별 누적 볼륨" style={{marginTop:11}}><div style={{display:"flex",flexDirection:"column",gap:7}}>{equipTotals.map(({e,total})=><div key={e}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><Mo c={EQUIP_COLOR[e]} s={10}>{e}</Mo><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div><div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:3}}><div style={{height:"100%",width:((total/(equipTotals[0]?.total||1))*100)+"%",background:EQUIP_COLOR[e],borderRadius:3,transition:"width .5s"}}/></div></div>)}</div></Card></div>}
       {vm==="detail"&&<Card title="🔍 세부 부위별 누적 볼륨">{detailList.length===0?<Emp msg="운동 기록이 없습니다."/>:<div style={{display:"flex",flexDirection:"column",gap:7}}>{detailList.map(([key,total])=>{const col=mColor(key.split(" / ")[0]);return<div key={key}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><Mo c={col} s={10}>{key}</Mo><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div><div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:3}}><div style={{height:"100%",width:((total/(detailList[0]?.[1]||1))*100)+"%",background:col,borderRadius:3,transition:"width .5s"}}/></div></div>;})}</div>}</Card>}
     </div>
   );
@@ -10046,9 +10046,9 @@ function CorrectionScreen({ sessions, loading, onBack }) {
   return (
     <div>
       <SH title="🧘 교정 분석" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
-      <Card title="통증 변화 (처음 vs 현재)"><ResponsiveContainer width="100%" height={200}><RadarChart data={rd} margin={{top:8,right:26,left:26,bottom:8}}><PolarGrid stroke="rgba(255,255,255,0.08)"/><PolarAngleAxis dataKey="part" tick={{fontFamily:"'DM Mono',monospace",fontSize:9,fill:"#54546a"}}/><Radar name="처음" dataKey="처음" stroke="#ff6b6b" fill="#ff6b6b" fillOpacity={0.15}/><Radar name="현재" dataKey="현재" stroke="#5EEAD4" fill="#5EEAD4" fillOpacity={0.15}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:9}}/><Tooltip contentStyle={tt}/></RadarChart></ResponsiveContainer><Mo c="#54546a" s={9} style={{textAlign:"center"}}>0=통증 없음 · 10=심함 · 낮을수록 개선</Mo></Card>
-      <Card title="부위별 통증 추이" style={{marginTop:11}}><ResponsiveContainer width="100%" height={180}><LineChart data={pc} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><YAxis domain={[0,10]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{CPARTS.map((p,i)=><Line key={p} type="monotone" dataKey={p} stroke={cols[i%cols.length]} strokeWidth={1.5} dot={{r:2}}/>)}</LineChart></ResponsiveContainer></Card>
-      <Card title="변화 요약" style={{marginTop:11}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:400}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["부위","통증처음","통증현재","변화","ROM처음","ROM현재","평가"].map(h=><th key={h} style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#54546a",padding:"5px 6px",textAlign:"center",fontWeight:500}}>{h}</th>)}</tr></thead><tbody>{CPARTS.map(p=>{const p0=f.painData?.[p]||0,p1=l.painData?.[p]||0,diff=p1-p0;const r0=f.romData?.[p]||"정상",r1=l.romData?.[p]||"정상",rD=ROMNUM[r1]-ROMNUM[r0];const imp=diff<0&&rD<=0,wor=diff>0||rD>0;return<tr key={p} style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}><td style={{padding:"5px 6px",fontFamily:"'DM Mono',monospace",fontSize:9,color:"#7070a0"}}>{p}</td><td style={{padding:"5px 6px",textAlign:"center"}}>{p0}</td><td style={{padding:"5px 6px",textAlign:"center"}}>{p1}</td><td style={{padding:"5px 6px",textAlign:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:diff<0?"#5EEAD4":diff>0?"#ff6b6b":"#54546a"}}>{diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"—"}</span></td><td style={{padding:"5px 6px",textAlign:"center",fontSize:9,color:"#6060a0"}}>{r0}</td><td style={{padding:"5px 6px",textAlign:"center",fontSize:9,color:"#6060a0"}}>{r1}</td><td style={{padding:"5px 6px",textAlign:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 5px",borderRadius:4,background:imp?"rgba(0,229,160,.12)":wor?"rgba(255,107,107,.12)":"rgba(84,84,106,.12)",color:imp?"#5EEAD4":wor?"#ff6b6b":"#54546a"}}>{imp?"✓ 개선":wor?"⚠ 주의":"유지"}</span></td></tr>;})}   </tbody></table></div></Card>
+      <Card title="통증 변화 (처음 vs 현재)"><ResponsiveContainer width="100%" height={200}><RadarChart data={rd} margin={{top:8,right:26,left:26,bottom:8}}><PolarGrid stroke="rgba(255,255,255,0.08)"/><PolarAngleAxis dataKey="part" tick={{fontFamily:"'DM Mono',monospace",fontSize:9,fill:"#94a3b8"}}/><Radar name="처음" dataKey="처음" stroke="#ff6b6b" fill="#ff6b6b" fillOpacity={0.15}/><Radar name="현재" dataKey="현재" stroke="#5EEAD4" fill="#5EEAD4" fillOpacity={0.15}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:9}}/><Tooltip contentStyle={tt}/></RadarChart></ResponsiveContainer><Mo c="#94a3b8" s={9} style={{textAlign:"center"}}>0=통증 없음 · 10=심함 · 낮을수록 개선</Mo></Card>
+      <Card title="부위별 통증 추이" style={{marginTop:11}}><ResponsiveContainer width="100%" height={180}><LineChart data={pc} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis domain={[0,10]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{CPARTS.map((p,i)=><Line key={p} type="monotone" dataKey={p} stroke={cols[i%cols.length]} strokeWidth={1.5} dot={{r:2}}/>)}</LineChart></ResponsiveContainer></Card>
+      <Card title="변화 요약" style={{marginTop:11}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:400}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["부위","통증처음","통증현재","변화","ROM처음","ROM현재","평가"].map(h=><th key={h} style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94a3b8",padding:"5px 6px",textAlign:"center",fontWeight:500}}>{h}</th>)}</tr></thead><tbody>{CPARTS.map(p=>{const p0=f.painData?.[p]||0,p1=l.painData?.[p]||0,diff=p1-p0;const r0=f.romData?.[p]||"정상",r1=l.romData?.[p]||"정상",rD=ROMNUM[r1]-ROMNUM[r0];const imp=diff<0&&rD<=0,wor=diff>0||rD>0;return<tr key={p} style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}><td style={{padding:"5px 6px",fontFamily:"'DM Mono',monospace",fontSize:9,color:"#7070a0"}}>{p}</td><td style={{padding:"5px 6px",textAlign:"center"}}>{p0}</td><td style={{padding:"5px 6px",textAlign:"center"}}>{p1}</td><td style={{padding:"5px 6px",textAlign:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:diff<0?"#5EEAD4":diff>0?"#ff6b6b":"#94a3b8"}}>{diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"—"}</span></td><td style={{padding:"5px 6px",textAlign:"center",fontSize:9,color:"#6060a0"}}>{r0}</td><td style={{padding:"5px 6px",textAlign:"center",fontSize:9,color:"#6060a0"}}>{r1}</td><td style={{padding:"5px 6px",textAlign:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 5px",borderRadius:4,background:imp?"rgba(0,229,160,.12)":wor?"rgba(255,107,107,.12)":"rgba(84,84,106,.12)",color:imp?"#5EEAD4":wor?"#ff6b6b":"#94a3b8"}}>{imp?"✓ 개선":wor?"⚠ 주의":"유지"}</span></td></tr>;})}   </tbody></table></div></Card>
     </div>
   );
 }
@@ -10304,7 +10304,7 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
             style={{padding:"5px 12px",borderRadius:7,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
               borderColor:range===d?"#f97316":"rgba(255,255,255,0.1)",
               background:range===d?"rgba(249,115,22,.12)":"transparent",
-              color:range===d?"#f97316":"#54546a"}}>
+              color:range===d?"#f97316":"#94a3b8"}}>
             최근 {l}
           </button>
         ))}
@@ -10369,8 +10369,8 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
           <ResponsiveContainer width="100%" height={140}>
             <LineChart data={analysis.wChartData} margin={{top:6,right:6,left:-28,bottom:0}}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)"/>
-              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
-              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} domain={["auto","auto"]}/>
+              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} domain={["auto","auto"]}/>
               <Tooltip contentStyle={tt}/>
               <Line type="monotone" dataKey="체중" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:2}} name="체중(kg)"/>
             </LineChart>
@@ -10384,8 +10384,8 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
           <ResponsiveContainer width="100%" height={130}>
             <BarChart data={analysis.volChartData} margin={{top:6,right:6,left:-28,bottom:0}}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)"/>
-              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
-              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
               <Tooltip contentStyle={tt}/>
               <Bar dataKey="볼륨" fill="#818cf8" name="볼륨(t)" radius={[3,3,0,0]}/>
             </BarChart>
@@ -10396,7 +10396,7 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
       {/* 대표님 근거 데이터 */}
       <button onClick={()=>setShowDetail(v=>!v)}
         style={{width:"100%",padding:"8px",borderRadius:8,border:"1px solid rgba(255,255,255,0.1)",
-          background:"transparent",color:"#54546a",fontSize:10,cursor:"pointer",marginBottom:10}}>
+          background:"transparent",color:"#94a3b8",fontSize:10,cursor:"pointer",marginBottom:10}}>
         {showDetail?"▲ 분석 근거 숨기기":"▼ 분석 근거 보기 (대표님 전용)"}
       </button>
       {showDetail && (
@@ -10417,7 +10417,7 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
           ].map(([k,v])=>(
             <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:4,
               paddingBottom:4,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-              <Mo c="#54546a" s={9}>{k}</Mo>
+              <Mo c="#94a3b8" s={9}>{k}</Mo>
               <Mo c="#94a3b8" s={9} style={{fontFamily:"'DM Mono',monospace"}}>{v}</Mo>
             </div>
           ))}
@@ -10493,7 +10493,7 @@ function ReferralStatsScreen({ members=[], onBack }) {
             style={{padding:"5px 12px",borderRadius:7,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
               borderColor:period===v?"#a29bfe":"rgba(255,255,255,0.1)",
               background:period===v?"rgba(162,155,254,.12)":"transparent",
-              color:period===v?"#a29bfe":"#54546a"}}>
+              color:period===v?"#a29bfe":"#94a3b8"}}>
             {l}
           </button>
         ))}
@@ -10557,7 +10557,7 @@ function ReferralStatsScreen({ members=[], onBack }) {
               <div key={m.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
                 borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
                 <Mo c="#e2e8f0" s={10}>{m.name}</Mo>
-                <Mo c="#64748b" s={9}>{m.survey?.visitAiTool||""} {m.survey?.visitKeyword?`· ${m.survey.visitKeyword}`:""}</Mo>
+                <Mo c="#94a3b8" s={9}>{m.survey?.visitAiTool||""} {m.survey?.visitKeyword?`· ${m.survey.visitKeyword}`:""}</Mo>
               </div>
             ))}
           </div>
@@ -10572,7 +10572,7 @@ function ReferralStatsScreen({ members=[], onBack }) {
               <Mo c="#e2e8f0" s={10} style={{fontWeight:700}}>{m.name}</Mo>
               <Mo c="#5EEAD4" s={9}>{(m.survey?.visitRoutes||[]).join(", ")||"미기재"}</Mo>
             </div>
-            {m.survey?.visitRealMemo && <Mo c="#64748b" s={8} style={{marginTop:2}}>📝 {m.survey.visitRealMemo}</Mo>}
+            {m.survey?.visitRealMemo && <Mo c="#94a3b8" s={8} style={{marginTop:2}}>📝 {m.survey.visitRealMemo}</Mo>}
           </div>
         ))}
       </Card>
@@ -10619,7 +10619,7 @@ function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveB
               cursor:"pointer",fontSize:10,fontWeight:tab===t.key?800:400,
               borderColor:tab===t.key?ac:"rgba(255,255,255,0.1)",
               background:tab===t.key?ac+"22":"rgba(255,255,255,.02)",
-              color:tab===t.key?ac:"#54546a"}}>
+              color:tab===t.key?ac:"#94a3b8"}}>
             {t.icon} {t.key}
           </button>
         ))}
@@ -10678,22 +10678,22 @@ function AdminCardioSection({ member, bodyData }) {
     <div>
       <Card title="🏃 이번 주 유산소" style={{marginBottom:11}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-          <div><Mo c="#54546a" s={9}>총 시간</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#5EEAD4"}}>{week.totalMinutes}분</div></div>
-          <div><Mo c="#54546a" s={9}>예상 소모 칼로리</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#ffd166"}}>{week.totalCalories}kcal</div></div>
-          <div><Mo c="#54546a" s={9}>운동 횟수</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#e2e8f0"}}>{week.count}회</div></div>
+          <div><Mo c="#94a3b8" s={9}>총 시간</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#5EEAD4"}}>{week.totalMinutes}분</div></div>
+          <div><Mo c="#94a3b8" s={9}>예상 소모 칼로리</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#ffd166"}}>{week.totalCalories}kcal</div></div>
+          <div><Mo c="#94a3b8" s={9}>운동 횟수</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#e2e8f0"}}>{week.count}회</div></div>
         </div>
       </Card>
 
       <Card title="❤️ Zone2 구간 · 달성 여부" style={{marginBottom:11}}>
         <Mo c="#94a3b8" s={11}>Zone2 예상 구간</Mo>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:22,color:"#5EEAD4",margin:"6px 0 10px"}}>{zone2.min}~{zone2.max}bpm <span style={{fontSize:11,color:"#54546a",fontWeight:700}}>({zone2.method==="personalized"?"개인화":"기본"} 방식)</span></div>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:22,color:"#5EEAD4",margin:"6px 0 10px"}}>{zone2.min}~{zone2.max}bpm <span style={{fontSize:11,color:"#94a3b8",fontWeight:700}}>({zone2.method==="personalized"?"개인화":"기본"} 방식)</span></div>
         {zoneStat.total>0
           ? <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-              <div><Mo c="#54546a" s={9}>Zone2 이하</Mo><div style={{color:"#94a3b8",fontWeight:900,fontSize:15}}>{zoneStat.below}회</div></div>
-              <div><Mo c="#54546a" s={9}>Zone2 구간</Mo><div style={{color:"#22c55e",fontWeight:900,fontSize:15}}>{zoneStat.inZone}회</div></div>
-              <div><Mo c="#54546a" s={9}>Zone2 초과</Mo><div style={{color:"#f97316",fontWeight:900,fontSize:15}}>{zoneStat.above}회</div></div>
+              <div><Mo c="#94a3b8" s={9}>Zone2 이하</Mo><div style={{color:"#94a3b8",fontWeight:900,fontSize:15}}>{zoneStat.below}회</div></div>
+              <div><Mo c="#94a3b8" s={9}>Zone2 구간</Mo><div style={{color:"#22c55e",fontWeight:900,fontSize:15}}>{zoneStat.inZone}회</div></div>
+              <div><Mo c="#94a3b8" s={9}>Zone2 초과</Mo><div style={{color:"#f97316",fontWeight:900,fontSize:15}}>{zoneStat.above}회</div></div>
             </div>
-          : <Mo c="#54546a" s={11}>평균 심박수를 기록한 항목이 없어 달성 여부는 미확인입니다.</Mo>}
+          : <Mo c="#94a3b8" s={11}>평균 심박수를 기록한 항목이 없어 달성 여부는 미확인입니다.</Mo>}
       </Card>
 
       {weightInsight && (
@@ -10708,7 +10708,7 @@ function AdminCardioSection({ member, bodyData }) {
           <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.06)"}}>
             <div>
               <Mo c="#e2e8f0" s={12} style={{fontWeight:800}}>{l.date} · {l.activityType}</Mo>
-              <Mo c="#54546a" s={9} style={{display:"block",marginTop:2}}>{l.durationMinutes}분{l.averageHeartRate?` · 심박 ${l.averageHeartRate}bpm`:""}</Mo>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{l.durationMinutes}분{l.averageHeartRate?` · 심박 ${l.averageHeartRate}bpm`:""}</Mo>
             </div>
             <div style={{textAlign:"right"}}>
               <Mo c="#ffd166" s={12} style={{fontWeight:800}}>{l.caloriesBurned?`${l.caloriesBurned}kcal`:"-"}</Mo>
@@ -10774,7 +10774,7 @@ function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], o
           background:"#111827",color:"#ddddf0",marginBottom:10}} />
 
       <Card title="회원앱 통증 기록" style={{marginBottom:10}}>
-        {memberPainRows.length?memberPainRows.map((r,i)=><div key={i} style={{padding:"7px 0",borderBottom:i<memberPainRows.length-1?"1px solid rgba(255,255,255,.08)":"none"}}><Mo c="#f87171" s={9} style={{fontWeight:700}}>{r.date} · {r.side} {r.part} · VAS {r.vas}</Mo>{r.memo&&<Mo c="#94a3b8" s={8}>{r.memo}</Mo>}</div>):<Mo c="#54546a" s={9}>회원앱 통증 기록이 없습니다.</Mo>}
+        {memberPainRows.length?memberPainRows.map((r,i)=><div key={i} style={{padding:"7px 0",borderBottom:i<memberPainRows.length-1?"1px solid rgba(255,255,255,.08)":"none"}}><Mo c="#f87171" s={9} style={{fontWeight:700}}>{r.date} · {r.side} {r.part} · VAS {r.vas}</Mo>{r.memo&&<Mo c="#94a3b8" s={8}>{r.memo}</Mo>}</div>):<Mo c="#94a3b8" s={9}>회원앱 통증 기록이 없습니다.</Mo>}
       </Card>
 
       {(todayRec||todayLog) && (
@@ -10792,7 +10792,7 @@ function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], o
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:12}}>
           {[["체중(kg)",w,setW,"#5EEAD4"],["체지방(%)",bf,setBf,"#fcd34d"],["골격근(kg)",mm,setMm,"#60a5fa"]].map(([l,v,sv,col])=>(
             <div key={l}>
-              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:2}}>{l}</Mo>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:2}}>{l}</Mo>
               <input type="number" value={v} onChange={e=>sv(e.target.value)} placeholder="—"
                 style={{width:"100%",boxSizing:"border-box",padding:"7px",borderRadius:5,
                   fontSize:13,fontWeight:700,border:"1px solid rgba(255,255,255,0.1)",
@@ -10805,7 +10805,7 @@ function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], o
           {[["총칼로리(kcal)",kcal,setKcal,"#fcd34d"],["단백질(g)",prot,setProt,"#fdba74"],
             ["걸음수(보)",steps,setSteps,"#a5b4fc"],["물(L)",water,setWater,"#60a5fa"]].map(([l,v,sv,col])=>(
             <div key={l}>
-              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:2}}>{l}</Mo>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:2}}>{l}</Mo>
               <input type="number" value={v} onChange={e=>sv(e.target.value)} placeholder="—"
                 style={{width:"100%",boxSizing:"border-box",padding:"7px",borderRadius:5,
                   fontSize:13,fontWeight:700,border:"1px solid rgba(255,255,255,0.1)",
@@ -10825,7 +10825,7 @@ function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], o
           {recentRecs.map((r,i)=>(
             <div key={r.id||i} style={{display:"flex",justifyContent:"space-between",
               padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-              <Mo c="#64748b" s={9}>{r.date}</Mo>
+              <Mo c="#94a3b8" s={9}>{r.date}</Mo>
               <div style={{display:"flex",gap:10}}>
                 {r.weight&&<Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>{r.weight}kg</Mo>}
                 {r.bodyFat&&<Mo c="#fcd34d" s={9}>{r.bodyFat}%</Mo>}
@@ -10973,7 +10973,7 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
             style={{padding:"7px 14px",borderRadius:20,border:"1px solid",flexShrink:0,cursor:"pointer",
               borderColor:tab===t.key?"#5EEAD4":"rgba(255,255,255,0.08)",
               background:tab===t.key?"rgba(0,229,160,.12)":"transparent",
-              color:tab===t.key?"#5EEAD4":"#54546a",fontSize:12,fontWeight:700}}>
+              color:tab===t.key?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:700}}>
             {t.icon} {t.key}
           </button>
         ))}
@@ -10984,8 +10984,8 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
           {!goal.currentWeight && (
             <div style={{textAlign:"center",padding:"40px 16px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)",marginBottom:12}}>
               <div style={{fontSize:40,marginBottom:10}}>🎯</div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#54546a",marginBottom:6}}>목표를 먼저 설정해주세요</div>
-              <Mo c="#1e2a3a" s={10}>목표 탭에서 체중 목표를 입력하면 분석이 시작됩니다.</Mo>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#94a3b8",marginBottom:6}}>목표를 먼저 설정해주세요</div>
+              <Mo c="#cbd5e1" s={10}>목표 탭에서 체중 목표를 입력하면 분석이 시작됩니다.</Mo>
               <div style={{marginTop:14}}><Btn sm onClick={() => setTab("목표")}>목표 설정 →</Btn></div>
             </div>
           )}
@@ -10995,9 +10995,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
               <Card style={{marginBottom:11}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                   <div>
-                    <Mo c="#54546a" s={9}>현재 체중</Mo>
+                    <Mo c="#94a3b8" s={9}>현재 체중</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:32,color:"#fff",marginTop:2}}>
-                      {latestRec ? latestWeight : cw}<span style={{fontSize:14,color:"#54546a",fontWeight:400}}> kg</span>
+                      {latestRec ? latestWeight : cw}<span style={{fontSize:14,color:"#94a3b8",fontWeight:400}}> kg</span>
                     </div>
                     {lostSoFar !== 0 && (
                       <Mo c={lostSoFar>0?"#5EEAD4":"#ff6b6b"} s={11}>
@@ -11006,16 +11006,16 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                     )}
                   </div>
                   <div style={{textAlign:"right"}}>
-                    <Mo c="#54546a" s={9}>목표 체중</Mo>
+                    <Mo c="#94a3b8" s={9}>목표 체중</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:"#5EEAD4",marginTop:2}}>
-                      {tw}<span style={{fontSize:12,color:"#54546a",fontWeight:400}}> kg</span>
+                      {tw}<span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}> kg</span>
                     </div>
-                    {daysLeft!==null && <Mo c="#3a3a4a" s={9}>{daysLeft}일 남음</Mo>}
+                    {daysLeft!==null && <Mo c="#cbd5e1" s={9}>{daysLeft}일 남음</Mo>}
                   </div>
                 </div>
                 <div style={{marginBottom:6}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <Mo c="#54546a" s={9}>목표 달성률</Mo>
+                    <Mo c="#94a3b8" s={9}>목표 달성률</Mo>
                     <Mo c="#5EEAD4" s={10}>{progressPct.toFixed(1)}%</Mo>
                   </div>
                   <div style={{height:7,background:"rgba(255,255,255,0.08)",borderRadius:4}}>
@@ -11024,15 +11024,15 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:12}}>
                   <div style={{background:"#0B1120",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                    <Mo c="#54546a" s={8}>목표 감량</Mo>
+                    <Mo c="#94a3b8" s={8}>목표 감량</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166",marginTop:2}}>{totalLoss.toFixed(1)}kg</div>
                   </div>
                   <div style={{background:"#0B1120",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                    <Mo c="#54546a" s={8}>주당 목표</Mo>
+                    <Mo c="#94a3b8" s={8}>주당 목표</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ff9f43",marginTop:2}}>{weeklyLoss>0?weeklyLoss.toFixed(2):"—"}kg</div>
                   </div>
                   <div style={{background:"#0B1120",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                    <Mo c="#54546a" s={8}>기록 횟수</Mo>
+                    <Mo c="#94a3b8" s={8}>기록 횟수</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#7c6fff",marginTop:2}}>{records.length}회</div>
                   </div>
                 </div>
@@ -11042,23 +11042,23 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                 <Card title="🔥 칼로리 분석" style={{marginBottom:11}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
                     <div style={{background:"#0B1120",borderRadius:8,padding:"10px 12px"}}>
-                      <Mo c="#54546a" s={8}>기초대사량 (BMR)</Mo>
+                      <Mo c="#94a3b8" s={8}>기초대사량 (BMR)</Mo>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#fff",marginTop:3}}>{Math.round(bmr).toLocaleString()}</div>
-                      <Mo c="#3a3a4a" s={8}>kcal / 일</Mo>
+                      <Mo c="#cbd5e1" s={8}>kcal / 일</Mo>
                     </div>
                     <div style={{background:"#0B1120",borderRadius:8,padding:"10px 12px"}}>
-                      <Mo c="#54546a" s={8}>유지 칼로리 (TDEE)</Mo>
+                      <Mo c="#94a3b8" s={8}>유지 칼로리 (TDEE)</Mo>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#ffd166",marginTop:3}}>{tdee.toLocaleString()}</div>
-                      <Mo c="#3a3a4a" s={8}>kcal / 일</Mo>
+                      <Mo c="#cbd5e1" s={8}>kcal / 일</Mo>
                     </div>
                   </div>
                   {targetCal > 0 && (
                     <div style={{background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.25)",borderRadius:10,padding:"13px 15px"}}>
-                      <Mo c="#54546a" s={9}>권장 섭취 칼로리</Mo>
+                      <Mo c="#94a3b8" s={9}>권장 섭취 칼로리</Mo>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:30,color:"#5EEAD4",marginTop:3,marginBottom:3}}>
-                        {targetCal.toLocaleString()}<span style={{fontSize:13,color:"#54546a",fontWeight:400}}> kcal / 일</span>
+                        {targetCal.toLocaleString()}<span style={{fontSize:13,color:"#94a3b8",fontWeight:400}}> kcal / 일</span>
                       </div>
-                      <Mo c="#54546a" s={9}>{calorieAnalysis.basis} · 신뢰도 {calorieAnalysis.confidence}%</Mo>
+                      <Mo c="#94a3b8" s={9}>{calorieAnalysis.basis} · 신뢰도 {calorieAnalysis.confidence}%</Mo>
                     </div>
                   )}
                 </Card>
@@ -11068,11 +11068,11 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                 <Card title="📈 감량 속도 분석" style={{marginBottom:11}}>
                   <div style={{padding:"12px 14px",borderRadius:10,border:"1px solid "+assessment.color+"44",background:assessment.color+"11",marginBottom:10}}>
                     <div style={{fontSize:13,color:assessment.color,fontWeight:700,marginBottom:5}}>{assessment.text}</div>
-                    <Mo c="#54546a" s={10}>주당 {weeklyLoss.toFixed(2)}kg 목표 · 체중의 {weeklyPct.toFixed(2)}%</Mo>
+                    <Mo c="#94a3b8" s={10}>주당 {weeklyLoss.toFixed(2)}kg 목표 · 체중의 {weeklyPct.toFixed(2)}%</Mo>
                   </div>
                   <div style={{padding:"10px 12px",background:"#0B1120",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)"}}>
                     <Mo c="#5EEAD4" s={9} style={{display:"block",marginBottom:5}}>권장 기준 (Mifflin-St Jeor 기반)</Mo>
-                    <div style={{fontSize:11,color:"#54546a",lineHeight:1.9}}>
+                    <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.9}}>
                       {"• 안전 범위: 주당 체중의 0.5~1% ("+( cw*0.005).toFixed(1)+"~"+(cw*0.01).toFixed(1)+"kg)"}<br/>
                       {"• 최대 권장: 주당 1.0kg 이하"}<br/>
                       {"• 1.0kg 초과 시 근손실 위험 증가"}
@@ -11097,8 +11097,8 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                   <ResponsiveContainer width="100%" height={185}>
                     <LineChart data={wGraph} margin={{top:6,right:14,left:-18,bottom:0}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis dataKey="date" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} />
-                      <YAxis domain={["auto","auto"]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} unit="kg" />
+                      <XAxis dataKey="date" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} />
+                      <YAxis domain={["auto","auto"]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} unit="kg" />
                       <Tooltip contentStyle={tt} formatter={(v,n) => [v+"kg", n]} />
                       <Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}} />
                       <Line type="monotone" dataKey="weight" stroke="#5EEAD4" strokeWidth={2.5} dot={{fill:"#5EEAD4",r:4}} name="실제 체중" />
@@ -11120,15 +11120,15 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                   <ResponsiveContainer width="100%" height={160}>
                     <LineChart data={simData} margin={{top:6,right:14,left:-18,bottom:0}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis dataKey="week" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} />
-                      <YAxis domain={[tw-2, cw+1]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}} unit="kg" />
+                      <XAxis dataKey="week" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} />
+                      <YAxis domain={[tw-2, cw+1]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} unit="kg" />
                       <Tooltip contentStyle={tt} formatter={(v,n) => [v+"kg", n]} />
                       <Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}} />
                       <Line type="monotone" dataKey="예상" stroke="#7c6fff" strokeWidth={2} dot={false} />
                       <Line type="monotone" dataKey="목표" stroke="#ff6b6b" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
-                  <Mo c="#54546a" s={9} style={{textAlign:"center",display:"block",marginTop:4}}>
+                  <Mo c="#94a3b8" s={9} style={{textAlign:"center",display:"block",marginTop:4}}>
                     {goal.targetDate} 목표 {tw}kg 달성 ({daysLeft}일 남음)
                   </Mo>
                 </Card>
@@ -11141,14 +11141,14 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                   {records.slice().sort((a,b) => b.date.localeCompare(a.date)).slice(0,5).map((r,i) => (
                     <div key={r.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<4?"1px solid rgba(255,255,255,0.08)":"none"}}>
                       <div>
-                        <Mo c="#54546a" s={9}>{r.date}{r.fasting?" · 공복":""}</Mo>
+                        <Mo c="#94a3b8" s={9}>{r.date}{r.fasting?" · 공복":""}</Mo>
                         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#fff",marginTop:1}}>{r.weight} kg</div>
-                        {r.memo && <Mo c="#3a3a4a" s={9}>{r.memo}</Mo>}
+                        {r.memo && <Mo c="#cbd5e1" s={9}>{r.memo}</Mo>}
                       </div>
                       <div style={{display:"flex",gap:8,alignItems:"center"}}>
                         {r.bodyFat && <Mo c="#ffd166" s={10}>{r.bodyFat}%</Mo>}
                         {r.water && <Mo c="#54a0ff" s={9}>{r.water}ml</Mo>}
-                        <button onClick={() => deleteRecord(r.id)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:14,cursor:"pointer"}}>✕</button>
+                        <button onClick={() => deleteRecord(r.id)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:14,cursor:"pointer"}}>✕</button>
                       </div>
                     </div>
                   ))}
@@ -11181,7 +11181,7 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                     style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid",cursor:"pointer",
                       borderColor:rFast===f?"#5EEAD4":"rgba(255,255,255,0.08)",
                       background:rFast===f?"rgba(0,229,160,.1)":"transparent",
-                      color:rFast===f?"#5EEAD4":"#54546a",fontSize:12,fontWeight:700}}>
+                      color:rFast===f?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:700}}>
                     {f ? "🌅 공복 측정" : "☀️ 일반 측정"}
                   </button>
                 ))}
@@ -11213,7 +11213,7 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                     style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid",cursor:"pointer",
                       borderColor:gGen===g?"#5EEAD4":"rgba(255,255,255,0.08)",
                       background:gGen===g?"rgba(0,229,160,.1)":"transparent",
-                      color:gGen===g?"#5EEAD4":"#54546a",fontSize:13,fontWeight:700}}>
+                      color:gGen===g?"#5EEAD4":"#94a3b8",fontSize:13,fontWeight:700}}>
                     {g}
                   </button>
                 ))}
@@ -11239,10 +11239,10 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                   const tc2=def3?Math.max(1200,t2-def3):null;
                   return (
                     <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                      <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#54546a" s={10}>기초대사량 (BMR)</Mo><Mo c="#fff" s={11}>{Math.round(b2).toLocaleString()} kcal</Mo></div>
-                      <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#54546a" s={10}>유지 칼로리 (TDEE)</Mo><Mo c="#ffd166" s={11}>{t2.toLocaleString()} kcal</Mo></div>
-                      {tc2 && <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#54546a" s={10}>권장 섭취 칼로리</Mo><Mo c="#5EEAD4" s={11}>{tc2.toLocaleString()} kcal</Mo></div>}
-                      {wl2 && <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#54546a" s={10}>주당 감량 목표</Mo><Mo c={parseFloat(wl2)>1.0?"#ff6b6b":"#5EEAD4"} s={11}>{wl2} kg / 주</Mo></div>}
+                      <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#94a3b8" s={10}>기초대사량 (BMR)</Mo><Mo c="#fff" s={11}>{Math.round(b2).toLocaleString()} kcal</Mo></div>
+                      <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#94a3b8" s={10}>유지 칼로리 (TDEE)</Mo><Mo c="#ffd166" s={11}>{t2.toLocaleString()} kcal</Mo></div>
+                      {tc2 && <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#94a3b8" s={10}>권장 섭취 칼로리</Mo><Mo c="#5EEAD4" s={11}>{tc2.toLocaleString()} kcal</Mo></div>}
+                      {wl2 && <div style={{display:"flex",justifyContent:"space-between"}}><Mo c="#94a3b8" s={10}>주당 감량 목표</Mo><Mo c={parseFloat(wl2)>1.0?"#ff6b6b":"#5EEAD4"} s={11}>{wl2} kg / 주</Mo></div>}
                     </div>
                   );
                 })()}
@@ -11274,20 +11274,20 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
             <Card title="인바디 기록 목록">
               {inbodyList.slice().sort((a,b) => b.date.localeCompare(a.date)).map((r,i) => (
                 <div key={r.id||i} style={{padding:"10px 0",borderBottom:i<inbodyList.length-1?"1px solid rgba(255,255,255,0.08)":"none"}}>
-                  <Mo c="#54546a" s={9}>{r.date}</Mo>
+                  <Mo c="#94a3b8" s={9}>{r.date}</Mo>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(58px,1fr))",gap:6,marginTop:5}}>
-                    {r.weight     && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#54546a" s={8}>체중</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#fff",marginTop:1}}>{r.weight}kg</div></div>}
-                    {r.bodyFat    && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#54546a" s={8}>체지방</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#ffd166",marginTop:1}}>{r.bodyFat}%</div></div>}
-                    {r.muscleMass && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#54546a" s={8}>근육량</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#5EEAD4",marginTop:1}}>{r.muscleMass}kg</div></div>}
-                    {r.phaseAngle && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#54546a" s={8}>위상각</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#22c55e",marginTop:1}}>{r.phaseAngle}°</div></div>}
+                    {r.weight     && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#94a3b8" s={8}>체중</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#fff",marginTop:1}}>{r.weight}kg</div></div>}
+                    {r.bodyFat    && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#94a3b8" s={8}>체지방</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#ffd166",marginTop:1}}>{r.bodyFat}%</div></div>}
+                    {r.muscleMass && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#94a3b8" s={8}>근육량</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#5EEAD4",marginTop:1}}>{r.muscleMass}kg</div></div>}
+                    {r.phaseAngle && <div style={{background:"#0B1120",borderRadius:6,padding:"6px 8px",textAlign:"center"}}><Mo c="#94a3b8" s={8}>위상각</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:"#22c55e",marginTop:1}}>{r.phaseAngle}°</div></div>}
                   </div>
-                  {r.memo && <Mo c="#3a3a4a" s={9} style={{display:"block",marginTop:4}}>{r.memo}</Mo>}
+                  {r.memo && <Mo c="#cbd5e1" s={9} style={{display:"block",marginTop:4}}>{r.memo}</Mo>}
                 </div>
               ))}
             </Card>
           ) : (
             <div style={{textAlign:"center",padding:"32px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
-              <Mo c="#1e2a3a" s={10}>인바디 기록이 없습니다. 위에서 추가해보세요!</Mo>
+              <Mo c="#cbd5e1" s={10}>인바디 기록이 없습니다. 위에서 추가해보세요!</Mo>
             </div>
           )}
         </div>
@@ -11360,7 +11360,7 @@ function ChangeCalendar({ sessions=[], records=[] }) {
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2}}>
         {["일","월","화","수","목","금","토"].map((d,i)=>(
           <div key={d} style={{textAlign:"center",padding:"4px 0",
-            fontSize:10,color:i===0?"#ef4444":i===6?"#818cf8":"#64748b",fontWeight:700}}>{d}</div>
+            fontSize:10,color:i===0?"#ef4444":i===6?"#818cf8":"#94a3b8",fontWeight:700}}>{d}</div>
         ))}
       </div>
 
@@ -11401,7 +11401,7 @@ function ChangeCalendar({ sessions=[], records=[] }) {
         {[["#5EEAD4","PT 수업"],["#818cf8","체중 기록"],["#ef4444","통증 기록"]].map(([c,l])=>(
           <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
             <div style={{width:8,height:8,borderRadius:"50%",background:c}}/>
-            <Mo c="#64748b" s={9}>{l}</Mo>
+            <Mo c="#94a3b8" s={9}>{l}</Mo>
           </div>
         ))}
       </div>
@@ -11412,14 +11412,14 @@ function ChangeCalendar({ sessions=[], records=[] }) {
           background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
           <Mo c="#e2e8f0" s={12} style={{fontWeight:700,display:"block",marginBottom:8}}>{sel}</Mo>
           {selWeight && <Mo c="#818cf8" s={11} style={{display:"block",marginBottom:4}}>⚖️ 체중: {selWeight}kg</Mo>}
-          {selSessions.length===0 && !selWeight && <Mo c="#64748b" s={10}>기록 없음</Mo>}
+          {selSessions.length===0 && !selWeight && <Mo c="#94a3b8" s={10}>기록 없음</Mo>}
           {selSessions.map((s,i)=>(
             <div key={i} style={{marginBottom:6,padding:"8px 10px",background:"#0F172A",borderRadius:7}}>
               <Mo c="#5EEAD4" s={10} style={{fontWeight:700,display:"block",marginBottom:3}}>
                 {s.sessionNo}회차 PT · 볼륨 {(s.totalVolume||0).toLocaleString()}kg
               </Mo>
               {(s.exercises||[]).slice(0,3).map((e,j)=>(
-                <Mo key={j} c="#64748b" s={9} style={{display:"block"}}>· {e.name}</Mo>
+                <Mo key={j} c="#94a3b8" s={9} style={{display:"block"}}>· {e.name}</Mo>
               ))}
               {s.painRecord?.before?.vas > 0 && (
                 <Mo c="#ef4444" s={9} style={{display:"block",marginTop:3}}>
@@ -11545,7 +11545,7 @@ function SurveyAnalysis({ member, bodyData, sessions=[], onSave, showToast }) {
               style={{padding:"6px 12px",borderRadius:16,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:active?700:400,
                 borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
                 background:active?"rgba(94,234,212,.15)":"#111827",
-                color:active?"#5EEAD4":"#64748b"}}>
+                color:active?"#5EEAD4":"#94a3b8"}}>
               {o}
             </button>
           );
@@ -11610,14 +11610,14 @@ function SurveyAnalysis({ member, bodyData, sessions=[], onSave, showToast }) {
           <Mo c="#e2e8f0" s={13} style={{fontWeight:700}}>📝 PT 분석 리포트</Mo>
           <button onClick={()=>setStep(0)}
             style={{padding:"5px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-              background:"#111827",color:"#64748b",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+              background:"#111827",color:"#94a3b8",fontSize:10,fontWeight:700,cursor:"pointer"}}>
             설문 다시하기
           </button>
         </div>
         {!hasSurvey && (
           <div style={{padding:"20px",borderRadius:12,background:"#111827",
             border:"1px solid rgba(255,255,255,0.08)",textAlign:"center",marginBottom:12}}>
-            <Mo c="#64748b" s={11} style={{lineHeight:1.8}}>설문을 완료하면<br/>맞춤 PT 분석 리포트가 생성됩니다</Mo>
+            <Mo c="#94a3b8" s={11} style={{lineHeight:1.8}}>설문을 완료하면<br/>맞춤 PT 분석 리포트가 생성됩니다</Mo>
             <button onClick={()=>setStep(0)}
               style={{marginTop:12,padding:"9px 20px",borderRadius:9,border:"none",cursor:"pointer",
                 background:"rgba(94,234,212,.2)",color:"#5EEAD4",fontSize:12,fontWeight:700}}>
@@ -11656,7 +11656,7 @@ function SurveyAnalysis({ member, bodyData, sessions=[], onSave, showToast }) {
       <div style={{marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
           <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>{cur.title}</Mo>
-          <Mo c="#64748b" s={9}>{step+1} / {STEPS.length}</Mo>
+          <Mo c="#94a3b8" s={9}>{step+1} / {STEPS.length}</Mo>
         </div>
         <div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.08)",overflow:"hidden"}}>
           <div style={{height:"100%",width:`${((step+1)/STEPS.length)*100}%`,
@@ -12002,7 +12002,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
     return (
       <div style={{marginBottom:8}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-          <Mo c="#54546a" s={9}>{label}</Mo>
+          <Mo c="#94a3b8" s={9}>{label}</Mo>
           <Mo c={over?"#ff6b6b":color} s={10}>{Math.round(val)} / {target}g</Mo>
         </div>
         <div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:3}}>
@@ -12022,7 +12022,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
             style={{padding:"7px 14px",borderRadius:20,border:"1px solid",flexShrink:0,cursor:"pointer",
               borderColor:tab===t.key?"#5EEAD4":"rgba(255,255,255,0.08)",
               background:tab===t.key?"rgba(0,229,160,.12)":"transparent",
-              color:tab===t.key?"#5EEAD4":"#54546a",fontSize:12,fontWeight:700}}>
+              color:tab===t.key?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:700}}>
             {t.icon} {t.key}
           </button>
         ))}
@@ -12044,8 +12044,8 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
           {totals.cal === 0 && (
             <div style={{textAlign:"center",padding:"28px 16px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)",marginBottom:12}}>
               <div style={{fontSize:32,marginBottom:8}}>🍽️</div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#54546a",marginBottom:6}}>오늘 식단 기록이 없습니다</div>
-              <Mo c="#1e2a3a" s={10}>기록 탭에서 음식을 추가해보세요.</Mo>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#94a3b8",marginBottom:6}}>오늘 식단 기록이 없습니다</div>
+              <Mo c="#cbd5e1" s={10}>기록 탭에서 음식을 추가해보세요.</Mo>
               <div style={{marginTop:12}}><Btn sm onClick={() => { setTab("기록"); setShowAdd(true); }}>+ 음식 추가</Btn></div>
             </div>
           )}
@@ -12055,24 +12055,24 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
               <Card style={{marginBottom:11}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                   <div>
-                    <Mo c="#54546a" s={9}>오늘 총 섭취 칼로리</Mo>
+                    <Mo c="#94a3b8" s={9}>오늘 총 섭취 칼로리</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:30,color:"#fff",marginTop:2}}>
-                      {Math.round(totals.cal).toLocaleString()}<span style={{fontSize:13,color:"#54546a",fontWeight:400}}> kcal</span>
+                      {Math.round(totals.cal).toLocaleString()}<span style={{fontSize:13,color:"#94a3b8",fontWeight:400}}> kcal</span>
                     </div>
                     <Mo c={totals.cal>tCal?"#ff6b6b":"#5EEAD4"} s={10}>
                       목표 {tCal.toLocaleString()} kcal ({totals.cal>tCal?"+":""}{Math.round(totals.cal-tCal)})
                     </Mo>
                   </div>
                   <div style={{textAlign:"right"}}>
-                    <Mo c="#54546a" s={8}>탄단지 비율</Mo>
+                    <Mo c="#94a3b8" s={8}>탄단지 비율</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#fff",marginTop:4}}>
                       <span style={{color:"#ffd166"}}>{carbPct}%</span>
-                      <span style={{color:"#54546a"}}> · </span>
+                      <span style={{color:"#94a3b8"}}> · </span>
                       <span style={{color:"#5EEAD4"}}>{proteinPct}%</span>
-                      <span style={{color:"#54546a"}}> · </span>
+                      <span style={{color:"#94a3b8"}}> · </span>
                       <span style={{color:"#ff9f43"}}>{fatPct}%</span>
                     </div>
-                    <Mo c="#3a3a4a" s={8}>탄 · 단 · 지</Mo>
+                    <Mo c="#cbd5e1" s={8}>탄 · 단 · 지</Mo>
                     <div style={{marginTop:6,padding:"4px 8px",background:"rgba(0,229,160,.1)",borderRadius:6,border:"1px solid rgba(0,229,160,.2)"}}>
                       <Mo c="#5EEAD4" s={9}>{mr.label}</Mo>
                     </div>
@@ -12091,7 +12091,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                     {label:"식사 수", val:MEAL_TYPES.filter(mt=>getMealFoods(mt).length>0).length+"끼",color:"#7c6fff"},
                   ].map(({label,val,color}) => (
                     <div key={label} style={{background:"#0B1120",borderRadius:8,padding:"7px 8px",textAlign:"center"}}>
-                      <Mo c="#54546a" s={8}>{label}</Mo>
+                      <Mo c="#94a3b8" s={8}>{label}</Mo>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color,marginTop:2}}>{val}</div>
                     </div>
                   ))}
@@ -12108,7 +12108,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                       <div style={{display:"flex",alignItems:"center",gap:7}}>
                         <span style={{fontSize:16}}>{MEAL_ICONS[mt]}</span>
                         <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:col}}>{mt}</span>
-                        <Mo c="#54546a" s={9}>{foods.length}가지</Mo>
+                        <Mo c="#94a3b8" s={9}>{foods.length}가지</Mo>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <Mo c={col} s={11}>{Math.round(mNut.cal)} kcal</Mo>
@@ -12121,17 +12121,17 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                             <span style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>{f.name}</span>
-                            {f.amount && <Mo c="#3a3a4a" s={9}>{f.amount}{f.unit}</Mo>}
+                            {f.amount && <Mo c="#cbd5e1" s={9}>{f.amount}{f.unit}</Mo>}
                             <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 5px",borderRadius:3,
                               background:ACC_COLOR[f.accuracy||"낮음"]+"22",color:ACC_COLOR[f.accuracy||"낮음"]}}>
                               정확도 {f.accuracy||"낮음"}{f.accuracy==="낮음"?" (예상값)":""}
                             </span>
                           </div>
-                          <Mo c="#54546a" s={9}>탄 {f.carb}g · 단 {f.protein}g · 지 {f.fat}g</Mo>
+                          <Mo c="#94a3b8" s={9}>탄 {f.carb}g · 단 {f.protein}g · 지 {f.fat}g</Mo>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
                           <Mo c="#ffd166" s={10}>{Math.round(f.cal)} kcal</Mo>
-                          <button onClick={() => removeFood(mt,f.id)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:13,cursor:"pointer"}}>✕</button>
+                          <button onClick={() => removeFood(mt,f.id)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:13,cursor:"pointer"}}>✕</button>
                         </div>
                       </div>
                     ))}
@@ -12182,7 +12182,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                 style={{padding:"6px 12px",borderRadius:16,border:"1px solid",flexShrink:0,cursor:"pointer",
                   borderColor:addMeal===mt?MEAL_COL[mt]:"rgba(255,255,255,0.08)",
                   background:addMeal===mt?MEAL_COL[mt]+"22":"transparent",
-                  color:addMeal===mt?MEAL_COL[mt]:"#54546a",fontSize:11,fontWeight:700}}>
+                  color:addMeal===mt?MEAL_COL[mt]:"#94a3b8",fontSize:11,fontWeight:700}}>
                 {MEAL_ICONS[mt]} {mt}
               </button>
             ))}
@@ -12195,7 +12195,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                 style={{flex:1,padding:"7px 0",borderRadius:8,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
                   borderColor:inputMode===m?"#a29bfe":"rgba(255,255,255,0.1)",
                   background:inputMode===m?"rgba(162,155,254,.12)":"rgba(255,255,255,.02)",
-                  color:inputMode===m?"#a29bfe":"#64748b"}}>
+                  color:inputMode===m?"#a29bfe":"#94a3b8"}}>
                 {l}
               </button>
             ))}
@@ -12207,21 +12207,21 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
               <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>⚡ 빠른 칼로리 기록</Mo>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                 <div>
-                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>섭취칼로리 (kcal) *</Mo>
+                  <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3}}>섭취칼로리 (kcal) *</Mo>
                   <input type="number" value={qKcal} onChange={e=>setQKcal(e.target.value)}
                     placeholder="예: 650"
                     style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:14,fontWeight:700,
                       border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4",textAlign:"center"}}/>
                 </div>
                 <div>
-                  <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>추정 정확도</Mo>
+                  <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3}}>추정 정확도</Mo>
                   <div style={{display:"flex",gap:4}}>
                     {["낮음","보통","높음"].map(c=>(
                       <button key={c} onClick={()=>setQConfidence(c)}
                         style={{flex:1,padding:"7px 0",borderRadius:5,border:"1px solid",cursor:"pointer",fontSize:9,
                           borderColor:qConfidence===c?"#ffd166":"rgba(255,255,255,0.1)",
                           background:qConfidence===c?"rgba(255,209,102,.12)":"transparent",
-                          color:qConfidence===c?"#fcd34d":"#54546a"}}>
+                          color:qConfidence===c?"#fcd34d":"#94a3b8"}}>
                         {c}
                       </button>
                     ))}
@@ -12248,9 +12248,9 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
           {inputMode==="daily" && (
             <Card style={{marginBottom:10,border:"1px solid rgba(249,115,22,.2)",background:"rgba(249,115,22,.04)"}}>
               <Mo c="#f97316" s={10} style={{fontWeight:700,display:"block",marginBottom:8}}>📊 하루 총 섭취칼로리</Mo>
-              <Mo c="#64748b" s={8} style={{display:"block",marginBottom:8}}>식사별 기록이 있으면 합산값이 우선 사용됩니다</Mo>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:8}}>식사별 기록이 있으면 합산값이 우선 사용됩니다</Mo>
               <div style={{marginBottom:8}}>
-                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:4}}>총 섭취칼로리 (kcal) *</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>총 섭취칼로리 (kcal) *</Mo>
                 <input type="number" value={dayKcal} onChange={e=>setDayKcal(e.target.value)}
                   placeholder="예: 1800"
                   style={{width:"100%",boxSizing:"border-box",padding:"10px",borderRadius:7,fontSize:18,fontWeight:800,
@@ -12269,7 +12269,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                 style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:12,
                   border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",marginBottom:6}}/>
               <div style={{marginBottom:8}}>
-                <Mo c="#64748b" s={9} style={{display:"block",marginBottom:3}}>걸음수 (선택)</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3}}>걸음수 (선택)</Mo>
                 <input type="number" value={daySteps} onChange={e=>setDaySteps(e.target.value)}
                   placeholder="예: 8500"
                   style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:6,fontSize:13,
@@ -12289,7 +12289,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                   style={{flex:1,padding:"7px",borderRadius:7,border:"1px solid",cursor:"pointer",
                     borderColor:isManual===m?"#5EEAD4":"rgba(255,255,255,0.08)",
                     background:isManual===m?"rgba(0,229,160,.1)":"transparent",
-                    color:isManual===m?"#5EEAD4":"#54546a",fontSize:11,fontWeight:700}}>
+                    color:isManual===m?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>
                   {m ? "🖊 직접 입력" : "🔍 음식 검색"}
                 </button>
               ))}
@@ -12306,7 +12306,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                           color:"#ddddf0",textAlign:"left",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <div>
                           <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13}}>{f.name}</span>
-                          <Mo c="#54546a" s={9} style={{marginLeft:8}}>기준 {f.per}{f.unit}</Mo>
+                          <Mo c="#94a3b8" s={9} style={{marginLeft:8}}>기준 {f.per}{f.unit}</Mo>
                         </div>
                         <Mo c="#ffd166" s={10}>{f.cal} kcal</Mo>
                       </button>
@@ -12316,7 +12316,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                 {selFood && (
                   <div style={{marginTop:8,padding:"8px 10px",background:"rgba(0,229,160,.08)",borderRadius:7,border:"1px solid rgba(0,229,160,.2)"}}>
                     <Mo c="#5EEAD4" s={9}>선택됨: {selFood.name}</Mo>
-                    <Mo c="#54546a" s={9} style={{marginLeft:8}}>({selFood.cal}kcal / {selFood.per}{selFood.unit})</Mo>
+                    <Mo c="#94a3b8" s={9} style={{marginLeft:8}}>({selFood.cal}kcal / {selFood.per}{selFood.unit})</Mo>
                   </div>
                 )}
               </div>
@@ -12337,7 +12337,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                     {["g","ml","개","스쿱","인분","그릇","팩","컵","장","봉","캔","줄"].map(u => <option key={u}>{u}</option>)}
                   </select>
                 ) : (
-                  <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.10)",borderRadius:7,padding:"8px 12px",fontSize:13,color:"#54546a"}}>
+                  <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.10)",borderRadius:7,padding:"8px 12px",fontSize:13,color:"#94a3b8"}}>
                     {selFood?.unit || "—"}
                   </div>
                 )}
@@ -12346,7 +12346,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
 
             {isManual && (
               <div>
-                <Mo c="#54546a" s={9} style={{display:"block",marginBottom:6}}>영양 정보 직접 입력</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:6}}>영양 정보 직접 입력</Mo>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
                   <Field label="칼로리 (kcal)" value={mCal}  onChange={setMCal}  placeholder="200" />
                   <Field label="탄수화물 (g)"  value={mCarb} onChange={setMCarb} placeholder="30" />
@@ -12358,12 +12358,12 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
 
             {curNut && (
               <div style={{background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.2)",borderRadius:9,padding:"10px 13px",marginBottom:12}}>
-                <Mo c="#54546a" s={9}>계산된 영양 정보</Mo>
+                <Mo c="#94a3b8" s={9}>계산된 영양 정보</Mo>
                 <div style={{display:"flex",gap:12,marginTop:5,flexWrap:"wrap"}}>
                   <div><Mo c="#ffd166" s={13}>{Math.round(curNut.cal)} kcal</Mo></div>
-                  <div><Mo c="#54546a" s={9}>탄 </Mo><Mo c="#ffd166" s={11}>{curNut.carb}g</Mo></div>
-                  <div><Mo c="#54546a" s={9}>단 </Mo><Mo c="#5EEAD4" s={11}>{curNut.protein}g</Mo></div>
-                  <div><Mo c="#54546a" s={9}>지 </Mo><Mo c="#ff9f43" s={11}>{curNut.fat}g</Mo></div>
+                  <div><Mo c="#94a3b8" s={9}>탄 </Mo><Mo c="#ffd166" s={11}>{curNut.carb}g</Mo></div>
+                  <div><Mo c="#94a3b8" s={9}>단 </Mo><Mo c="#5EEAD4" s={11}>{curNut.protein}g</Mo></div>
+                  <div><Mo c="#94a3b8" s={9}>지 </Mo><Mo c="#ff9f43" s={11}>{curNut.fat}g</Mo></div>
                   <div>
                     <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:3,
                       background:ACC_COLOR[detectAccuracy(isManual?funit:selFood?.unit||"")]+"22",
@@ -12387,11 +12387,11 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                 <div key={f.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:i<getMealFoods(addMeal).length-1?"1px solid rgba(255,255,255,0.08)":"none"}}>
                   <div>
                     <div style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>{f.name} {f.amount&&f.unit?f.amount+f.unit:""}</div>
-                    <Mo c="#54546a" s={9}>탄 {f.carb}g · 단 {f.protein}g · 지 {f.fat}g</Mo>
+                    <Mo c="#94a3b8" s={9}>탄 {f.carb}g · 단 {f.protein}g · 지 {f.fat}g</Mo>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <Mo c="#ffd166" s={10}>{Math.round(f.cal)} kcal</Mo>
-                    <button onClick={() => removeFood(addMeal,f.id)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:13,cursor:"pointer"}}>✕</button>
+                    <button onClick={() => removeFood(addMeal,f.id)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:13,cursor:"pointer"}}>✕</button>
                   </div>
                 </div>
               ))}
@@ -12412,7 +12412,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                       style={{padding:"4px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
                         borderColor:sName===p?"#5EEAD4":"rgba(255,255,255,0.08)",
                         background:sName===p?"rgba(0,229,160,.12)":"transparent",
-                        color:sName===p?"#5EEAD4":"#54546a",fontSize:10,fontWeight:700}}>{p}</button>
+                        color:sName===p?"#5EEAD4":"#94a3b8",fontSize:10,fontWeight:700}}>{p}</button>
                   ))}
                 </div>
                 <input value={sName} onChange={e => setSName(e.target.value)} placeholder="제품명 직접 입력" style={{width:"100%",fontSize:13}} />
@@ -12439,9 +12439,9 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#fff"}}>{s.name}</div>
-                      <Mo c="#54546a" s={9}>{s.time&&s.time+" · "}{s.amount}{s.purpose?" · "+s.purpose:""}</Mo>
+                      <Mo c="#94a3b8" s={9}>{s.time&&s.time+" · "}{s.amount}{s.purpose?" · "+s.purpose:""}</Mo>
                     </div>
-                    <button onClick={() => removeSupp(s.id)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:13,cursor:"pointer"}}>✕</button>
+                    <button onClick={() => removeSupp(s.id)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:13,cursor:"pointer"}}>✕</button>
                   </div>
                   {(s.caffeine||s.creatine||s.protein) && (
                     <div style={{display:"flex",gap:8,marginTop:4,flexWrap:"wrap"}}>
@@ -12450,12 +12450,12 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                       {s.protein  && <Mo c="#5EEAD4" s={9}>단백질 {s.protein}g</Mo>}
                     </div>
                   )}
-                  {s.memo && <Mo c="#3a3a4a" s={9} style={{display:"block",marginTop:3}}>{s.memo}</Mo>}
+                  {s.memo && <Mo c="#cbd5e1" s={9} style={{display:"block",marginTop:3}}>{s.memo}</Mo>}
                 </div>
               ))}
               {(suppTotals.caffeine>0||suppTotals.creatine>0||suppTotals.protein>0) && (
                 <div style={{marginTop:8,padding:"8px 10px",background:"#0B1120",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",display:"flex",gap:10,flexWrap:"wrap"}}>
-                  <Mo c="#54546a" s={9}>합계 </Mo>
+                  <Mo c="#94a3b8" s={9}>합계 </Mo>
                   {suppTotals.caffeine>0&&<Mo c="#ff6b6b" s={9}>카페인 {Math.round(suppTotals.caffeine)}mg</Mo>}
                   {suppTotals.creatine>0&&<Mo c="#54a0ff" s={9}>크레아틴 {Math.round(suppTotals.creatine)}g</Mo>}
                   {suppTotals.protein>0&&<Mo c="#5EEAD4" s={9}>단백질 {Math.round(suppTotals.protein)}g</Mo>}
@@ -12464,7 +12464,7 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
             </Card>
           ) : (
             <div style={{textAlign:"center",padding:"28px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
-              <Mo c="#1e2a3a" s={10}>오늘 보충제 기록이 없습니다.</Mo>
+              <Mo c="#cbd5e1" s={10}>오늘 보충제 기록이 없습니다.</Mo>
             </div>
           )}
         </div>
@@ -12475,8 +12475,8 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
           {favFoods.length === 0 ? (
             <div style={{textAlign:"center",padding:"40px 16px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)",marginBottom:12}}>
               <div style={{fontSize:32,marginBottom:8}}>⭐</div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#54546a",marginBottom:6}}>즐겨찾기 없음</div>
-              <Mo c="#1e2a3a" s={10}>기록 탭에서 ⭐ 버튼을 눌러 자주 먹는 음식을 저장하세요.</Mo>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#94a3b8",marginBottom:6}}>즐겨찾기 없음</div>
+              <Mo c="#cbd5e1" s={10}>기록 탭에서 ⭐ 버튼을 눌러 자주 먹는 음식을 저장하세요.</Mo>
             </div>
           ) : (
             <Card title={"⭐ 즐겨찾는 음식 "+favFoods.length+"개"}>
@@ -12484,12 +12484,12 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
                 <div key={f.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<favFoods.length-1?"1px solid rgba(255,255,255,0.08)":"none"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"#fff"}}>{f.name}</div>
-                    <Mo c="#54546a" s={9}>{f.amount}{f.unit} · {Math.round(f.cal)}kcal · 탄{f.carb}g 단{f.protein}g 지{f.fat}g</Mo>
+                    <Mo c="#94a3b8" s={9}>{f.amount}{f.unit} · {Math.round(f.cal)}kcal · 탄{f.carb}g 단{f.protein}g 지{f.fat}g</Mo>
                   </div>
                   <div style={{display:"flex",gap:6}}>
                     <button onClick={() => applyFav(f)}
                       style={{padding:"4px 10px",borderRadius:5,border:"1px solid #5EEAD4",background:"rgba(0,229,160,.1)",color:"#5EEAD4",fontSize:10,fontWeight:700,cursor:"pointer"}}>사용</button>
-                    <button onClick={() => removeFav(f.id)} style={{background:"none",border:"none",color:"#1e2a3a",fontSize:13,cursor:"pointer"}}>✕</button>
+                    <button onClick={() => removeFav(f.id)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:13,cursor:"pointer"}}>✕</button>
                   </div>
                 </div>
               ))}
@@ -12508,10 +12508,10 @@ function NutritionScreen({ member, onBack, nutritionData, onSaveNutrition, showT
 // ════════════════════════════════════════════
 const SORENESS_PARTS = ["가슴","등","어깨","하체","팔-이두근","팔-삼두근","복근/코어"];
 const SORENESS_LABELS = ["없음","약함","가벼움","보통","강함","매우강함"];
-const SORENESS_COLORS = ["#3a3a4a","#54a0ff","#5EEAD4","#ffd166","#ff9f43","#ff6b6b"];
+const SORENESS_COLORS = ["#cbd5e1","#54a0ff","#5EEAD4","#ffd166","#ff9f43","#ff6b6b"];
 
 function rpeColor(rpe) {
-  if (!rpe) return "#3a3a4a";
+  if (!rpe) return "#cbd5e1";
   if (rpe <= 4) return "#5EEAD4";
   if (rpe <= 6) return "#ffd166";
   if (rpe <= 8) return "#ff9f43";
@@ -12596,7 +12596,7 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
                   textAlign:"left",cursor:"pointer",width:"100%"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
-                    <Mo c={isSelected?"#5EEAD4":"#54546a"} s={9}>{s.date} · {s.sessionNo}회차</Mo>
+                    <Mo c={isSelected?"#5EEAD4":"#94a3b8"} s={9}>{s.date} · {s.sessionNo}회차</Mo>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,
                       color:isSelected?"#fff":"#7070a0",marginTop:2}}>{formatTypes(s.selectedTypes || s.type) || "웨이트"}</div>
                   </div>
@@ -12614,7 +12614,7 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
       {/* 부위별 근육통 선택 */}
       {targetSession && (
         <Card title={"💢 "+selDate+" 수업 — 근육통 강도"} style={{marginBottom:12}}>
-          <Mo c="#54546a" s={9} style={{display:"block",marginBottom:12}}>0=없음 · 5=매우 강함 · 터치 한 번으로 선택</Mo>
+          <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:12}}>0=없음 · 5=매우 강함 · 터치 한 번으로 선택</Mo>
           {SORENESS_PARTS.map(part => {
             const val = soreness[part] || 0;
             return (
@@ -12632,7 +12632,7 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
                         style={{flex:1,padding:"8px 0",borderRadius:6,border:"1px solid",cursor:"pointer",
                           borderColor:active?col:"rgba(255,255,255,0.08)",
                           background:active?col+"33":"transparent",
-                          color:active?col:"#3a3a4a",
+                          color:active?col:"#cbd5e1",
                           fontSize:11,fontWeight:800,transition:"all .15s"}}>
                         {n}
                       </button>
@@ -12643,7 +12643,7 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
             );
           })}
           <div style={{marginTop:8,padding:"8px 12px",background:"#0B1120",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between"}}>
-            <Mo c="#54546a" s={9}>총 근육통 점수</Mo>
+            <Mo c="#94a3b8" s={9}>총 근육통 점수</Mo>
             <Mo c="#ff9f43" s={11}>{getTotalSoreness(soreness)} / 30</Mo>
           </div>
           <div style={{marginTop:12}}>
@@ -12776,7 +12776,7 @@ function StrengthScreen({ member, sessions, onBack }) {
     "유지":    { color:"#5EEAD4", bg:"rgba(94,234,212,.10)", icon:"➡️" },
     "하락":    { color:"#ef4444", bg:"rgba(239,68,68,.12)",  icon:"📉" },
     "신규":    { color:"#818cf8", bg:"rgba(129,140,248,.12)",icon:"🆕" },
-    "데이터 부족":{ color:"#64748b",bg:"rgba(100,116,139,.10)",icon:"❓" },
+    "데이터 부족":{ color:"#94a3b8",bg:"rgba(100,116,139,.10)",icon:"❓" },
   };
 
   // 요약 통계
@@ -12803,14 +12803,14 @@ function StrengthScreen({ member, sessions, onBack }) {
         {[["📈 상승", rising, "#22c55e"],["➡️ 유지", stall, "#5EEAD4"],["📉 하락", drop, "#ef4444"]].map(([l,n,c])=>(
           <div key={l} style={{padding:"10px 8px",borderRadius:9,background:"#111827",border:`1px solid ${c}22`,textAlign:"center"}}>
             <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:c}}>{n}</div>
-            <Mo c="#64748b" s={9}>{l}</Mo>
+            <Mo c="#94a3b8" s={9}>{l}</Mo>
           </div>
         ))}
       </div>
 
       {data.length === 0 ? (
         <div style={{padding:"28px",textAlign:"center",borderRadius:12,background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
-          <Mo c="#64748b" s={12} style={{lineHeight:1.8}}>
+          <Mo c="#94a3b8" s={12} style={{lineHeight:1.8}}>
             유효한 근력 기록이 없습니다<br/>
             중량·횟수가 모두 입력된 수업 기록이 필요합니다
           </Mo>
@@ -12842,16 +12842,16 @@ function StrengthScreen({ member, sessions, onBack }) {
                 </div>
                 <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
                   <div>
-                    <Mo c="#64748b" s={8} style={{display:"block"}}>예상 1RM</Mo>
-                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:16,color:"#ef4444"}}>{d.e1RM}<Mo c="#64748b" s={9}>kg</Mo></span>
+                    <Mo c="#94a3b8" s={8} style={{display:"block"}}>예상 1RM</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:16,color:"#ef4444"}}>{d.e1RM}<Mo c="#94a3b8" s={9}>kg</Mo></span>
                   </div>
                   <div>
-                    <Mo c="#64748b" s={8} style={{display:"block"}}>예상 5RM</Mo>
-                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,color:"#fca5a5"}}>{d.e5RM}<Mo c="#64748b" s={9}>kg</Mo></span>
+                    <Mo c="#94a3b8" s={8} style={{display:"block"}}>예상 5RM</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,color:"#fca5a5"}}>{d.e5RM}<Mo c="#94a3b8" s={9}>kg</Mo></span>
                   </div>
                   <div>
-                    <Mo c="#64748b" s={8} style={{display:"block"}}>예상 10RM</Mo>
-                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,color:"#fca5a5"}}>{d.e10RM}<Mo c="#64748b" s={9}>kg</Mo></span>
+                    <Mo c="#94a3b8" s={8} style={{display:"block"}}>예상 10RM</Mo>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,color:"#fca5a5"}}>{d.e10RM}<Mo c="#94a3b8" s={9}>kg</Mo></span>
                   </div>
                 </div>
               </div>
@@ -12865,44 +12865,44 @@ function StrengthScreen({ member, sessions, onBack }) {
                 {/* 최고 기록 */}
                 <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <div style={{padding:"9px 11px",borderRadius:8,background:"#0F172A",border:"1px solid rgba(255,255,255,0.06)"}}>
-                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:3}}>최고 기록 세트</Mo>
+                    <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>최고 기록 세트</Mo>
                     <Mo c="#e2e8f0" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>
                       {d.curW}kg × {d.curR}회
                     </Mo>
-                    <Mo c="#64748b" s={9} style={{display:"block",marginTop:2}}>{d.bestDate}</Mo>
+                    <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{d.bestDate}</Mo>
                   </div>
                   <div style={{padding:"9px 11px",borderRadius:8,background:"#0F172A",border:"1px solid rgba(255,255,255,0.06)"}}>
-                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:3}}>다음 수업 추천</Mo>
+                    <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>다음 수업 추천</Mo>
                     {d.nextW ? (
                       <Mo c="#5EEAD4" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>
                         {d.nextW}kg 시도 권장
                       </Mo>
                     ) : <Mo c="#3a3a5a" s={10}>중량 데이터 부족</Mo>}
-                    <Mo c="#64748b" s={9} style={{display:"block",marginTop:2}}>현재 +2.5% 기준</Mo>
+                    <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>현재 +2.5% 기준</Mo>
                   </div>
                 </div>
 
                 {/* 4주 변화 */}
                 {(d.recentBest || d.olderBest) && (
                   <div style={{marginTop:8,padding:"9px 11px",borderRadius:8,background:"#0F172A",border:"1px solid rgba(255,255,255,0.06)"}}>
-                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:5}}>최근 4주 변화 (예상 1RM 기준)</Mo>
+                    <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:5}}>최근 4주 변화 (예상 1RM 기준)</Mo>
                     <div style={{display:"flex",gap:14,alignItems:"center"}}>
                       <div>
-                        <Mo c="#64748b" s={8}>이전</Mo>
+                        <Mo c="#94a3b8" s={8}>이전</Mo>
                         <Mo c="#94a3b8" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:700,display:"block"}}>
                           {d.olderBest ? `${d.olderBest}kg` : "—"}
                         </Mo>
                       </div>
                       <Mo c={ts.color} s={14}>→</Mo>
                       <div>
-                        <Mo c="#64748b" s={8}>최근 4주</Mo>
+                        <Mo c="#94a3b8" s={8}>최근 4주</Mo>
                         <Mo c={ts.color} s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:800,display:"block"}}>
                           {d.recentBest ? `${d.recentBest}kg` : "—"}
                         </Mo>
                       </div>
                       {d.recentBest && d.olderBest && (
                         <div>
-                          <Mo c="#64748b" s={8}>차이</Mo>
+                          <Mo c="#94a3b8" s={8}>차이</Mo>
                           <Mo c={d.recentBest>d.olderBest?"#22c55e":"#ef4444"} s={11}
                             style={{fontFamily:"'DM Mono',monospace",fontWeight:700,display:"block"}}>
                             {d.recentBest>d.olderBest?"+":""}{d.recentBest-d.olderBest}kg
@@ -12916,7 +12916,7 @@ function StrengthScreen({ member, sessions, onBack }) {
                 {/* 미니 트렌드 그래프 */}
                 {pts.length >= 2 && (
                   <div style={{marginTop:8}}>
-                    <Mo c="#64748b" s={8} style={{display:"block",marginBottom:5}}>최근 3개월 예상 1RM 추이</Mo>
+                    <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:5}}>최근 3개월 예상 1RM 추이</Mo>
                     <div style={{display:"flex",alignItems:"flex-end",gap:2,height:36,padding:"0 2px"}}>
                       {pts.map((p, pi) => {
                         const h = maxRM===minRM ? 20 : Math.max(4, Math.round(((p.rm-minRM)/(maxRM-minRM))*30)+4);
@@ -13063,7 +13063,7 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
           border:"1px solid rgba(255,255,255,0.08)",textAlign:"center",marginBottom:12}}>
           <div style={{fontSize:32,marginBottom:10}}>🎯</div>
           <Mo c="#e2e8f0" s={14} style={{fontWeight:700,display:"block",marginBottom:6}}>목표가 설정되지 않았습니다</Mo>
-          <Mo c="#64748b" s={11} style={{display:"block",marginBottom:4,lineHeight:1.8}}>
+          <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:4,lineHeight:1.8}}>
             바디체크 → 목표 탭에서<br/>목표를 설정하면 분석 리포트가 생성됩니다
           </Mo>
           <div style={{marginTop:10,padding:"8px 12px",borderRadius:8,
@@ -13080,24 +13080,24 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
               <div style={{fontSize:28}}>{selectedType.icon}</div>
               <div style={{flex:1}}>
                 <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:selectedType.color}}>{selectedType.label}</div>
-                <Mo c="#64748b" s={11}>{selectedType.desc}</Mo>
+                <Mo c="#94a3b8" s={11}>{selectedType.desc}</Mo>
               </div>
-              <Mo c="#64748b" s={9} style={{textAlign:"right",lineHeight:1.6}}>바디체크 →<br/>목표 탭에서 수정</Mo>
+              <Mo c="#94a3b8" s={9} style={{textAlign:"right",lineHeight:1.6}}>바디체크 →<br/>목표 탭에서 수정</Mo>
             </div>
           )}
 
           {(goal.currentWeight||goal.targetWeight) && (
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:12}}>
               <div style={{padding:"12px 14px",borderRadius:10,background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
-                <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>현재 체중</Mo>
+                <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>현재 체중</Mo>
                 <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:20,color:"#e2e8f0"}}>
-                  {goal.currentWeight||"—"}<span style={{fontSize:11,color:"#64748b",fontWeight:400}}> kg</span>
+                  {goal.currentWeight||"—"}<span style={{fontSize:11,color:"#94a3b8",fontWeight:400}}> kg</span>
                 </div>
               </div>
               <div style={{padding:"12px 14px",borderRadius:10,background:"#111827",border:"1px solid rgba(255,255,255,0.08)"}}>
-                <Mo c="#64748b" s={8} style={{display:"block",marginBottom:4}}>목표 체중</Mo>
+                <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>목표 체중</Mo>
                 <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:20,color:"#5EEAD4"}}>
-                  {goal.targetWeight||"—"}<span style={{fontSize:11,color:"#64748b",fontWeight:400}}> kg</span>
+                  {goal.targetWeight||"—"}<span style={{fontSize:11,color:"#94a3b8",fontWeight:400}}> kg</span>
                 </div>
               </div>
             </div>
@@ -13115,14 +13115,14 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
               </svg>
               <div>
                 <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#e2e8f0",marginBottom:3}}>목표 달성률</div>
-                <Mo c="#64748b" s={10}>{goal.targetDate?`D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음`:"목표일 미설정"}</Mo>
+                <Mo c="#94a3b8" s={10}>{goal.targetDate?`D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음`:"목표일 미설정"}</Mo>
               </div>
             </div>
           )}
 
           {reportCards.length===0 ? (
             <div style={{padding:"20px",borderRadius:12,background:"#111827",border:"1px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
-              <Mo c="#64748b" s={12} style={{lineHeight:1.7}}>수업 기록과 생활습관 정보가 쌓이면<br/>분석 리포트가 자동으로 생성됩니다</Mo>
+              <Mo c="#94a3b8" s={12} style={{lineHeight:1.7}}>수업 기록과 생활습관 정보가 쌓이면<br/>분석 리포트가 자동으로 생성됩니다</Mo>
             </div>
           ) : reportCards.map((card,ci)=>(
             <div key={ci} style={{marginBottom:10,borderRadius:12,background:"#111827",
@@ -13310,7 +13310,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
               fontSize:11,fontWeight:700,
               borderColor:tab===k?"#a29bfe":"rgba(255,255,255,0.08)",
               background:tab===k?"rgba(162,155,254,.15)":"transparent",
-              color:tab===k?"#a29bfe":"#54546a"}}>
+              color:tab===k?"#a29bfe":"#94a3b8"}}>
             {l}
           </button>
         ))}
@@ -13322,7 +13322,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
           {/* 안내 */}
           <Card style={{marginBottom:12,border:"1px solid rgba(162,155,254,.25)",background:"rgba(162,155,254,.06)"}}>
             <Mo c="#a29bfe" s={10} style={{display:"block",marginBottom:5,fontWeight:700}}>💡 사용 방법</Mo>
-            <Mo c="#54546a" s={10} style={{lineHeight:1.8}}>
+            <Mo c="#94a3b8" s={10} style={{lineHeight:1.8}}>
               부위 선택 → 요약 생성 → 복사 →{" "}
               <span style={{color:"#5EEAD4"}}>ChatGPT / Claude / Gemini</span>에 붙여넣기
             </Mo>
@@ -13337,7 +13337,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
                     fontSize:12,fontWeight:700,transition:"all .12s",
                     borderColor: targetPart===p ? "#a29bfe" : "rgba(255,255,255,0.08)",
                     background:  targetPart===p ? "rgba(162,155,254,.2)" : "transparent",
-                    color:       targetPart===p ? "#a29bfe" : "#54546a"}}>
+                    color:       targetPart===p ? "#a29bfe" : "#94a3b8"}}>
                   {p}
                 </button>
               ))}
@@ -13364,7 +13364,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
             <div>
               {/* 복사 버튼 */}
               <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
-                <Mo c="#54546a" s={9} style={{flex:1}}>
+                <Mo c="#94a3b8" s={9} style={{flex:1}}>
                   아래 텍스트를 복사해서 ChatGPT / Claude / Gemini에 붙여넣으세요
                 </Mo>
                 <button onClick={handleCopy}
@@ -13405,7 +13405,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
                   return (
                     <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                       padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-                      <Mo c="#54546a" s={9}>{s.date} {s.sessionNo}회차</Mo>
+                      <Mo c="#94a3b8" s={9}>{s.date} {s.sessionNo}회차</Mo>
                       <div style={{display:"flex",gap:8,alignItems:"center"}}>
                         {parts && <Mo c="#7070a0" s={8}>{parts}</Mo>}
                         <Mo c="#5EEAD4" s={9}>{(s.totalVolume||0).toLocaleString()}kg</Mo>
@@ -13458,7 +13458,7 @@ function AIRoutineScreen({ member, sessions, onBack, showToast }) {
                   return (
                     <div key={i} style={{marginBottom:6}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                        <Mo c="#54546a" s={9}>{v.date} {v.no}회차</Mo>
+                        <Mo c="#94a3b8" s={9}>{v.date} {v.no}회차</Mo>
                         <Mo c="#5EEAD4" s={9}>{(v.vol||0).toLocaleString()} kg</Mo>
                       </div>
                       <div style={{height:6,borderRadius:3,background:"rgba(255,255,255,0.08)",overflow:"hidden"}}>
@@ -13556,7 +13556,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
           <Mo c="#ddddf0" s={10}>{label}</Mo>
           <div>
-            {sub && <Mo c="#54546a" s={9} style={{marginRight:6}}>{sub}</Mo>}
+            {sub && <Mo c="#94a3b8" s={9} style={{marginRight:6}}>{sub}</Mo>}
             <Mo c={color} s={10}>{val}</Mo>
           </div>
         </div>
@@ -13576,8 +13576,8 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
       {!hasEnoughData && (
         <div style={{textAlign:"center",padding:"40px 16px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)",marginBottom:14}}>
           <div style={{fontSize:40,marginBottom:10}}>📊</div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#54546a",marginBottom:6}}>분석 데이터 부족</div>
-          <Mo c="#1e2a3a" s={10}>수업 기록이 2회 이상, RPE 또는 근육통 기록이 있어야 분석이 시작됩니다.</Mo>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#94a3b8",marginBottom:6}}>분석 데이터 부족</div>
+          <Mo c="#cbd5e1" s={10}>수업 기록이 2회 이상, RPE 또는 근육통 기록이 있어야 분석이 시작됩니다.</Mo>
         </div>
       )}
 
@@ -13588,7 +13588,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
             style={{padding:"6px 12px",borderRadius:16,border:"1px solid",flexShrink:0,cursor:"pointer",
               borderColor:view===v.key?"#5EEAD4":"rgba(255,255,255,0.08)",
               background:view===v.key?"rgba(0,229,160,.12)":"transparent",
-              color:view===v.key?"#5EEAD4":"#54546a",fontSize:11,fontWeight:700}}>
+              color:view===v.key?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>
             {v.label}
           </button>
         ))}
@@ -13608,8 +13608,8 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
               <ResponsiveContainer width="100%" height={170}>
                 <LineChart data={corrData} margin={{top:6,right:6,left:-22,bottom:0}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                  <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
-                  <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+                  <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                  <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
                   <Tooltip contentStyle={tt}/>
                   <Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>
                   <Line type="monotone" dataKey="vol"      stroke="#5EEAD4" strokeWidth={2} dot={{r:3}} name="볼륨(t)"/>
@@ -13622,17 +13622,17 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
 
           {rpeEfficiency.length > 0 && (
             <Card title="⚡ RPE 효율 베스트 세션" style={{marginBottom:12}}>
-              <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>볼륨 ÷ RPE = 효율 점수 (높을수록 적은 힘으로 많은 볼륨)</Mo>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:8}}>볼륨 ÷ RPE = 효율 점수 (높을수록 적은 힘으로 많은 볼륨)</Mo>
               {rpeEfficiency.map((s,i) => (
                 <div key={s.id||i} style={{padding:"8px 0",borderBottom:i<rpeEfficiency.length-1?"1px solid rgba(255,255,255,0.08)":"none"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
-                      <Mo c="#54546a" s={9}>{s.date} · {s.sessionNo}회차</Mo>
+                      <Mo c="#94a3b8" s={9}>{s.date} · {s.sessionNo}회차</Mo>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"#fff",marginTop:1}}>{formatTypes(s.selectedTypes || s.type) || "웨이트"}</div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"#5EEAD4"}}>{s.effScore.toLocaleString()}</div>
-                      <Mo c="#54546a" s={8}>vol {(s.vol/1000).toFixed(1)}t · RPE {s.avgRPE}</Mo>
+                      <Mo c="#94a3b8" s={8}>vol {(s.vol/1000).toFixed(1)}t · RPE {s.avgRPE}</Mo>
                     </div>
                   </div>
                 </div>
@@ -13647,7 +13647,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
         <div>
           {sorenessTop.length === 0 ? (
             <div style={{textAlign:"center",padding:"32px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
-              <Mo c="#1e2a3a" s={10}>근육통 기록이 없습니다. 허브에서 💢 근육통 기록을 해주세요.</Mo>
+              <Mo c="#cbd5e1" s={10}>근육통 기록이 없습니다. 허브에서 💢 근육통 기록을 해주세요.</Mo>
             </div>
           ) : (
             <div>
@@ -13658,11 +13658,11 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
                     <div key={s.id||i} style={{padding:"10px 0",borderBottom:i<sorenessTop.length-1?"1px solid rgba(255,255,255,0.08)":"none"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                         <div>
-                          <Mo c="#54546a" s={9}>{s.date} · {s.sessionNo}회차</Mo>
+                          <Mo c="#94a3b8" s={9}>{s.date} · {s.sessionNo}회차</Mo>
                           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"#fff",marginTop:1}}>{formatTypes(s.selectedTypes || s.type) || "웨이트"}</div>
                         </div>
                         <div style={{textAlign:"right"}}>
-                          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"#ff9f43"}}>{s.totalSoreness}<span style={{fontSize:10,color:"#54546a"}}>/30</span></div>
+                          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"#ff9f43"}}>{s.totalSoreness}<span style={{fontSize:10,color:"#94a3b8"}}>/30</span></div>
                           {s.avgRPE && <Mo c={rpeColor(s.avgRPE)} s={9}>RPE {s.avgRPE}</Mo>}
                         </div>
                       </div>
@@ -13691,7 +13691,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
               </Card>
 
               <Card title="부위별 누적 근육통" style={{marginBottom:12}}>
-                <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>전체 기록 기준 부위별 합계</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:8}}>전체 기록 기준 부위별 합계</Mo>
                 {partList.filter(([,v])=>v>0).map(([part,total]) => (
                   <ScoreBar key={part} label={part} val={total} max={partList[0]?.[1]||1} color="#ff9f43" sub={total+"점"} />
                 ))}
@@ -13707,7 +13707,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
         <div>
           {rpeEfficiency.length === 0 ? (
             <div style={{textAlign:"center",padding:"32px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
-              <Mo c="#1e2a3a" s={10}>RPE 기록이 없습니다. 수업 기록 시 각 운동의 RPE를 입력해주세요.</Mo>
+              <Mo c="#cbd5e1" s={10}>RPE 기록이 없습니다. 수업 기록 시 각 운동의 RPE를 입력해주세요.</Mo>
             </div>
           ) : (
             <div>
@@ -13716,8 +13716,8 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
                   <BarChart data={analyzed.filter(s=>s.avgRPE).map(s=>({name:s.sessionNo+"회",rpe:s.avgRPE,vol:Math.round(s.vol/100)/10}))}
                     margin={{top:6,right:6,left:-22,bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                    <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
-                    <YAxis domain={[0,10]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#54546a"}}/>
+                    <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                    <YAxis domain={[0,10]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
                     <Tooltip contentStyle={tt}/>
                     <Bar dataKey="rpe" fill="#ffd166" name="평균 RPE" radius={[3,3,0,0]}/>
                   </BarChart>
@@ -13725,22 +13725,22 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
               </Card>
 
               <Card title="⚡ RPE 효율 랭킹" style={{marginBottom:12}}>
-                <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>같은 노력(RPE) 대비 볼륨이 높은 세션이 효율적</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:8}}>같은 노력(RPE) 대비 볼륨이 높은 세션이 효율적</Mo>
                 {rpeEfficiency.map((s,i) => (
                   <div key={s.id||i} style={{padding:"8px 0",borderBottom:i<rpeEfficiency.length-1?"1px solid rgba(255,255,255,0.08)":"none"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:["#ffd166","#aaaaaa","#ff9f43","#54546a","#3a3a4a"][i]||"#3a3a4a"}}>
+                          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:["#ffd166","#aaaaaa","#ff9f43","#94a3b8","#cbd5e1"][i]||"#cbd5e1"}}>
                             {i+1}위
                           </span>
-                          <Mo c="#54546a" s={9}>{s.date} · {s.sessionNo}회차</Mo>
+                          <Mo c="#94a3b8" s={9}>{s.date} · {s.sessionNo}회차</Mo>
                         </div>
                         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"#fff",marginTop:1}}>{formatTypes(s.selectedTypes || s.type) || "웨이트"}</div>
                       </div>
                       <div style={{textAlign:"right"}}>
                         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#5EEAD4"}}>{s.effScore.toLocaleString()}</div>
-                        <Mo c="#54546a" s={8}>RPE {s.avgRPE} · {(s.vol/1000).toFixed(1)}t</Mo>
+                        <Mo c="#94a3b8" s={8}>RPE {s.avgRPE} · {(s.vol/1000).toFixed(1)}t</Mo>
                       </div>
                     </div>
                   </div>
@@ -13750,7 +13750,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
               {/* RPE vs 근육통 */}
               {sorenessTop.length > 0 && (
                 <Card title="RPE vs 근육통 반응" style={{marginBottom:12}}>
-                  <Mo c="#54546a" s={9} style={{display:"block",marginBottom:8}}>낮은 RPE에서 높은 근육통 = 효율적 자극</Mo>
+                  <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:8}}>낮은 RPE에서 높은 근육통 = 효율적 자극</Mo>
                   {[...analyzed].filter(s=>s.avgRPE&&s.totalSoreness>0)
                     .sort((a,b)=>(b.totalSoreness/b.avgRPE)-(a.totalSoreness/a.avgRPE))
                     .slice(0,5)
@@ -13759,7 +13759,7 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
                       return (
                         <div key={s.id||i} style={{padding:"7px 0",borderBottom:i<4?"1px solid rgba(255,255,255,0.08)":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                           <div>
-                            <Mo c="#54546a" s={9}>{s.date} · {s.sessionNo}회차</Mo>
+                            <Mo c="#94a3b8" s={9}>{s.date} · {s.sessionNo}회차</Mo>
                             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:12,color:"#fff",marginTop:1}}>{formatTypes(s.selectedTypes || s.type) || "웨이트"}</div>
                           </div>
                           <div style={{textAlign:"right"}}>
@@ -13783,12 +13783,12 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
         <div>
           {exRPEList.length === 0 ? (
             <div style={{textAlign:"center",padding:"32px",background:"#111827",borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
-              <Mo c="#1e2a3a" s={10}>RPE가 기록된 운동이 없습니다.</Mo>
+              <Mo c="#cbd5e1" s={10}>RPE가 기록된 운동이 없습니다.</Mo>
             </div>
           ) : (
             <div>
               <Card title="🏋️ 운동별 평균 RPE" style={{marginBottom:12}}>
-                <Mo c="#54546a" s={9} style={{display:"block",marginBottom:10}}>자주 한 운동과 평균 RPE · 총 볼륨</Mo>
+                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:10}}>자주 한 운동과 평균 RPE · 총 볼륨</Mo>
                 {exRPEList.map((ex,i) => {
                   const col = rpeColor(ex.avgRPE);
                   return (
@@ -13796,11 +13796,11 @@ function RoutineAnalysisScreen({ member, sessions, onBack }) {
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                         <div>
                           <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#fff"}}>{ex.name}</span>
-                          <Mo c="#54546a" s={9} style={{marginLeft:8}}>{ex.count}회 수행</Mo>
+                          <Mo c="#94a3b8" s={9} style={{marginLeft:8}}>{ex.count}회 수행</Mo>
                         </div>
                         <div style={{textAlign:"right"}}>
                           <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:col}}>RPE {ex.avgRPE}</span>
-                          <Mo c="#54546a" s={9} style={{marginLeft:6}}>{rpeLabel(Math.round(ex.avgRPE))}</Mo>
+                          <Mo c="#94a3b8" s={9} style={{marginLeft:6}}>{rpeLabel(Math.round(ex.avgRPE))}</Mo>
                         </div>
                       </div>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -14644,7 +14644,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
         padding:"9px 12px",borderRadius:8,border:"none",cursor:"pointer",marginBottom:4,
         background:open[id]?"rgba(94,234,212,.08)":"rgba(255,255,255,.03)",
         borderLeft:"3px solid "+(open[id]?"#5EEAD4":"rgba(255,255,255,.1)")}}>
-      <span style={{fontSize:12,fontWeight:700,color:open[id]?"#e2e8f0":"#64748b"}}>{emoji} {title}</span>
+      <span style={{fontSize:12,fontWeight:700,color:open[id]?"#e2e8f0":"#94a3b8"}}>{emoji} {title}</span>
       <div style={{display:"flex",gap:6,alignItems:"center"}}>
         {count>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"1px 6px",borderRadius:10,background:"rgba(94,234,212,.15)",color:"#5EEAD4"}}>{count}</span>}
         <span style={{color:"#3a4a5a",fontSize:10}}>{open[id]?"▲":"▼"}</span>
@@ -14679,7 +14679,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                   background:p.vas>=7?"rgba(239,68,68,.15)":p.vas>=4?"rgba(255,209,102,.15)":"rgba(94,234,212,.1)",
                   color:p.vas>=7?"#f87171":p.vas>=4?"#fcd34d":"#5EEAD4",fontWeight:700}}>VAS {p.vas}</span>
                 <Mo c="#e2e8f0" s={10}>{p.part}{p.side&&p.side!=="중앙"?" "+p.side:""}</Mo>
-                {p.situation&&<Mo c="#54546a" s={9}>{p.situation}</Mo>}
+                {p.situation&&<Mo c="#94a3b8" s={9}>{p.situation}</Mo>}
               </div>
             ))}
           </Card>
@@ -14716,7 +14716,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
               if (!issues.length) return null;
               return (
                 <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                  <Mo c="#64748b" s={9}>{item.label}</Mo>
+                  <Mo c="#94a3b8" s={9}>{item.label}</Mo>
                   <Mo c="#fcd34d" s={9}>{issues.map(([s,val])=>s+" "+val).join(" / ")}</Mo>
                 </div>
               );
@@ -14745,12 +14745,12 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(239,68,68,.12)",color:"#f87171"}}>통증: {s}</span>
               ))}
             </div>
-            {viewRec.gaitMemo && <Mo c="#64748b" s={9} style={{fontStyle:"italic"}}>📝 {viewRec.gaitMemo}</Mo>}
+            {viewRec.gaitMemo && <Mo c="#94a3b8" s={9} style={{fontStyle:"italic"}}>📝 {viewRec.gaitMemo}</Mo>}
           </Card>
         )}
         {viewRec.aiRoutine&&(
           <Card title="🤖 AI 루틴" style={{marginBottom:8}}>
-            <Mo c="#64748b" s={9} style={{lineHeight:1.7,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",display:"block"}}>{viewRec.aiRoutine}</Mo>
+            <Mo c="#94a3b8" s={9} style={{lineHeight:1.7,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",display:"block"}}>{viewRec.aiRoutine}</Mo>
           </Card>
         )}
       </div>
@@ -14768,7 +14768,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
             <button onClick={handleSave} disabled={saving}
               style={{padding:"5px 12px",borderRadius:7,border:"none",cursor:"pointer",
                 background:saving?"rgba(255,255,255,.08)":"#5EEAD4",
-                color:saving?"#54546a":"#0B1120",fontSize:10,fontWeight:800}}>
+                color:saving?"#94a3b8":"#0B1120",fontSize:10,fontWeight:800}}>
               {saving?"저장 중...":"💾 저장"}
             </button>
             )}
@@ -14783,7 +14783,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
               fontSize:11,fontWeight:viewMode===m?800:400,
               borderColor:viewMode===m?"#5EEAD4":"rgba(255,255,255,0.1)",
               background:viewMode===m?"rgba(94,234,212,.12)":"transparent",
-              color:viewMode===m?"#5EEAD4":"#54546a"}}>
+              color:viewMode===m?"#5EEAD4":"#94a3b8"}}>
             {m==="변화 분석"?"📊 "+m:m}
           </button>
         ))}
@@ -14939,7 +14939,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 style={{padding:"4px 8px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
                   borderColor:qPart===p?"#ef4444":"rgba(255,255,255,0.08)",
                   background:qPart===p?"rgba(239,68,68,.15)":"transparent",
-                  color:qPart===p?"#f87171":"#64748b"}}>
+                  color:qPart===p?"#f87171":"#94a3b8"}}>
                 {p}
               </button>
             ))}
@@ -14952,12 +14952,12 @@ function AssessmentScreen({ member, onBack, showToast }) {
                   style={{padding:"4px 7px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:9,
                     borderColor:qSide===s?"#818cf8":"rgba(255,255,255,0.08)",
                     background:qSide===s?"rgba(129,140,248,.15)":"transparent",
-                    color:qSide===s?"#a5b4fc":"#64748b"}}>
+                    color:qSide===s?"#a5b4fc":"#94a3b8"}}>
                   {s}
                 </button>
               ))}
             </div>
-            <Mo c="#54546a" s={9}>VAS</Mo>
+            <Mo c="#94a3b8" s={9}>VAS</Mo>
             <div style={{display:"flex",gap:2}}>
               {[0,1,2,3,4,5,6,7,8,9,10].map(n=>(
                 <button key={n} onClick={()=>setQVas(n)}
@@ -14965,7 +14965,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                     fontSize:9,fontWeight:800,
                     borderColor:qVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#ef4444"):"rgba(255,255,255,0.06)",
                     background:qVas===n?(n<=3?"rgba(94,234,212,.15)":n<=6?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
-                    color:qVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#f87171"):"#54546a"}}>
+                    color:qVas===n?(n<=3?"#5EEAD4":n<=6?"#ffd166":"#f87171"):"#94a3b8"}}>
                   {n}
                 </button>
               ))}
@@ -14978,7 +14978,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 style={{padding:"3px 7px",borderRadius:10,border:"1px solid",cursor:"pointer",fontSize:9,
                   borderColor:qSituation===s?"#f97316":"rgba(255,255,255,0.06)",
                   background:qSituation===s?"rgba(249,115,22,.12)":"transparent",
-                  color:qSituation===s?"#fdba74":"#64748b"}}>
+                  color:qSituation===s?"#fdba74":"#94a3b8"}}>
                 {s}
               </button>
             ))}
@@ -15012,7 +15012,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
               <button key={t} onClick={()=>setMType(t)}
                 style={{flex:1,padding:"6px",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
                   borderColor:mType===t?col:"rgba(255,255,255,0.1)",
-                  background:mType===t?bg:"transparent",color:mType===t?col:"#64748b"}}>
+                  background:mType===t?bg:"transparent",color:mType===t?col:"#94a3b8"}}>
                 {l}
               </button>
             ))}
@@ -15024,7 +15024,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                 style={{flex:1,padding:"5px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:10,
                   borderColor:mSide===s?"#818cf8":"rgba(255,255,255,0.08)",
                   background:mSide===s?"rgba(129,140,248,.12)":"transparent",
-                  color:mSide===s?"#a5b4fc":"#64748b",fontWeight:mSide===s?700:400}}>
+                  color:mSide===s?"#a5b4fc":"#94a3b8",fontWeight:mSide===s?700:400}}>
                 {s}
               </button>
             ))}
@@ -15045,7 +15045,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
             {(mSearch ? MUSCLES.filter(m=>m.includes(mSearch)).slice(0,12) : MUSCLES.slice(0,16)).map(m=>(
               <button key={m} onClick={()=>addMuscle(m)}
                 style={{padding:"3px 7px",borderRadius:10,border:"1px solid",cursor:"pointer",fontSize:9,
-                  borderColor:"rgba(255,255,255,0.08)",background:"transparent",color:"#64748b"}}>
+                  borderColor:"rgba(255,255,255,0.08)",background:"transparent",color:"#94a3b8"}}>
                 {m}
               </button>
             ))}
@@ -15089,7 +15089,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                               style={{flex:1,padding:"4px 0",borderRadius:5,border:"1px solid",cursor:"pointer",fontSize:8,fontWeight:active?800:400,
                                 borderColor:active?col:"rgba(255,255,255,0.07)",
                                 background:active?col+"22":"transparent",
-                                color:active?col:"#54546a"}}>
+                                color:active?col:"#94a3b8"}}>
                               {v}
                             </button>
                           );
@@ -15163,7 +15163,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                             style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,
                               borderColor:sel?col:"rgba(255,255,255,0.08)",
                               background:sel?col+"22":"transparent",
-                              color:sel?col:"#64748b",fontWeight:sel?700:400}}>
+                              color:sel?col:"#94a3b8",fontWeight:sel?700:400}}>
                             {opt}
                           </button>
                         );
@@ -15191,7 +15191,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                             style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,
                               borderColor:sel?col:"rgba(255,255,255,0.08)",
                               background:sel?col+"22":"transparent",
-                              color:sel?col:"#64748b",fontWeight:sel?700:400}}>
+                              color:sel?col:"#94a3b8",fontWeight:sel?700:400}}>
                             {opt}
                           </button>
                         );
@@ -15213,7 +15213,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                           style={{flex:1,padding:"6px 0",borderRadius:8,border:"1px solid",cursor:"pointer",fontSize:9,
                             borderColor:sel?(opt==="없음"?"#5EEAD4":"#f87171"):"rgba(255,255,255,0.08)",
                             background:sel?(opt==="없음"?"rgba(94,234,212,.15)":"rgba(239,68,68,.15)"):"transparent",
-                            color:sel?(opt==="없음"?"#5EEAD4":"#f87171"):"#64748b",fontWeight:sel?700:400}}>
+                            color:sel?(opt==="없음"?"#5EEAD4":"#f87171"):"#94a3b8",fontWeight:sel?700:400}}>
                           {opt}
                         </button>
                       );
@@ -15237,7 +15237,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                           style={{padding:"5px 9px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
                             borderColor:sel?"#f87171":"rgba(255,255,255,0.08)",
                             background:sel?"rgba(239,68,68,.12)":"transparent",
-                            color:sel?"#f87171":"#64748b",fontWeight:sel?700:400}}>
+                            color:sel?"#f87171":"#94a3b8",fontWeight:sel?700:400}}>
                           {opt}
                         </button>
                       );
@@ -15258,7 +15258,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                           style={{padding:"5px 9px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:9,
                             borderColor:sel?"#ef4444":"rgba(255,255,255,0.08)",
                             background:sel?"rgba(239,68,68,.12)":"transparent",
-                            color:sel?"#f87171":"#64748b",fontWeight:sel?700:400}}>
+                            color:sel?"#f87171":"#94a3b8",fontWeight:sel?700:400}}>
                           {opt}
                         </button>
                       );
@@ -15283,7 +15283,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                   style={{padding:"5px 9px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:10,
                     borderColor:sel?"#ffd166":"rgba(255,255,255,0.08)",
                     background:sel?"rgba(255,209,102,.12)":"transparent",
-                    color:sel?"#fcd34d":"#64748b",fontWeight:sel?700:400}}>
+                    color:sel?"#fcd34d":"#94a3b8",fontWeight:sel?700:400}}>
                   {p}
                 </button>
               );
@@ -15303,7 +15303,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
           <button onClick={generateAIRoutine} disabled={aiLoading}
             style={{width:"100%",padding:"9px",borderRadius:7,border:"none",cursor:"pointer",
               background:aiLoading?"rgba(255,255,255,.06)":"linear-gradient(135deg,#7c6fff,#a29bfe)",
-              color:aiLoading?"#54546a":"#fff",fontSize:11,fontWeight:800}}>
+              color:aiLoading?"#94a3b8":"#fff",fontSize:11,fontWeight:800}}>
             {aiLoading?"생성 중...":"🤖 AI 루틴 요청 텍스트 생성"}
           </button>
           {aiResult&&(
@@ -15365,7 +15365,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
         <button onClick={handleSave} disabled={saving}
           style={{width:"100%",padding:"13px",borderRadius:10,border:"none",cursor:"pointer",
             background:saving?"rgba(255,255,255,.06)":"linear-gradient(135deg,#5EEAD4,#2DD4BF)",
-            color:saving?"#54546a":"#0B1120",fontSize:14,fontWeight:800,
+            color:saving?"#94a3b8":"#0B1120",fontSize:14,fontWeight:800,
             boxShadow:"0 4px 20px rgba(94,234,212,.2)"}}>
           {saving ? "저장 중..." : "💾 체형평가 저장"}
         </button>
@@ -15382,7 +15382,7 @@ function AACTitle({children, color}) {
 function AATag({c, bg, children}) {
   return (
     <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
-      background:bg||"rgba(255,255,255,.06)",color:c||"#54546a",
+      background:bg||"rgba(255,255,255,.06)",color:c||"#94a3b8",
       marginRight:4,marginBottom:4,display:"inline-block"}}>{children}</span>
   );
 }
@@ -15396,7 +15396,7 @@ function AssessmentAnalysisView({ records=[], member }) {
       <div style={{textAlign:"center",padding:"40px",background:"#111827",borderRadius:12,
         border:"1px dashed rgba(255,255,255,0.1)"}}>
         <div style={{fontSize:32,marginBottom:8}}>📊</div>
-        <Mo c="#54546a" s={11}>아직 분석할 체형평가 기록이 없습니다.</Mo>
+        <Mo c="#94a3b8" s={11}>아직 분석할 체형평가 기록이 없습니다.</Mo>
         <Mo c="#3a4a5a" s={9} style={{display:"block",marginTop:4}}>입력 탭에서 평가를 기록하면 자동으로 분석됩니다.</Mo>
       </div>
     );
@@ -15516,7 +15516,7 @@ function AssessmentAnalysisView({ records=[], member }) {
           </div>
         )}
         {latest.evalMemo && (
-          <Mo c="#64748b" s={9} style={{fontStyle:"italic"}}>📝 {latest.evalMemo.slice(0,60)}{latest.evalMemo.length>60?"...":""}</Mo>
+          <Mo c="#94a3b8" s={9} style={{fontStyle:"italic"}}>📝 {latest.evalMemo.slice(0,60)}{latest.evalMemo.length>60?"...":""}</Mo>
         )}
       </div>
 
@@ -15673,7 +15673,7 @@ function SH({ title, sub, right }) {
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:8,flexWrap:"wrap"}}>
       <div>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#fff",letterSpacing:"-0.5px"}}>{title}</div>
-        {sub && <Mo c="#54546a" s={9} style={{marginTop:2}}>{sub}</Mo>}
+        {sub && <Mo c="#94a3b8" s={9} style={{marginTop:2}}>{sub}</Mo>}
       </div>
       {right && <div style={{flexShrink:0,marginLeft:8}}>{right}</div>}
     </div>
@@ -15695,16 +15695,16 @@ function TextArea({ label, value, onChange, placeholder }) {
 }
 function Btn({ children, onClick, sm, full, disabled, ghost, style }) {
   if (ghost) return <button onClick={onClick} style={{padding:sm?"5px 10px":"12px 16px",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)",background:"transparent",color:"#7070a0",fontSize:sm?10:13,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",...(style||{})}}>{children}</button>;
-  return <button onClick={onClick} disabled={disabled} style={{padding:sm?"6px 14px":"12px 16px",borderRadius:7,border:"none",background:disabled?"rgba(255,255,255,0.08)":"#5EEAD4",color:disabled?"#54546a":"#0B1120",fontSize:sm?11:13,fontWeight:800,width:full?"100%":"auto",opacity:disabled?0.5:1,cursor:"pointer",whiteSpace:"nowrap",...(style||{})}}>{children}</button>;
+  return <button onClick={onClick} disabled={disabled} style={{padding:sm?"6px 14px":"12px 16px",borderRadius:7,border:"none",background:disabled?"rgba(255,255,255,0.08)":"#5EEAD4",color:disabled?"#94a3b8":"#0B1120",fontSize:sm?11:13,fontWeight:800,width:full?"100%":"auto",opacity:disabled?0.5:1,cursor:"pointer",whiteSpace:"nowrap",...(style||{})}}>{children}</button>;
 }
 function Mo({ children, c, s, style }) { return <span style={{fontFamily:"'DM Mono',monospace",fontSize:s||11,color:c,...(style||{})}}>{children}</span>; }
 function Bdg({ children, color }) { return <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 5px",borderRadius:10,background:color+"22",color}}>{children}</span>; }
 function StatTile({ label, value, sub }) {
-  return <div style={{background:"#0B1120",border:"1px solid rgba(255,255,255,0.08)",borderRadius:9,padding:"9px 10px",textAlign:"center"}}><Mo c="#54546a" s={8}>{label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#5EEAD4",marginTop:2,marginBottom:sub?1:0}}>{value}</div>{sub&&<Mo c="#3a3a4a" s={8}>{sub}</Mo>}</div>;
+  return <div style={{background:"#0B1120",border:"1px solid rgba(255,255,255,0.08)",borderRadius:9,padding:"9px 10px",textAlign:"center"}}><Mo c="#94a3b8" s={8}>{label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#5EEAD4",marginTop:2,marginBottom:sub?1:0}}>{value}</div>{sub&&<Mo c="#cbd5e1" s={8}>{sub}</Mo>}</div>;
 }
 function Spin({ sm }) { return <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:sm?0:40}}><div style={{width:sm?12:24,height:sm?12:24,border:(sm?2:3)+"px solid rgba(255,255,255,0.10)",borderTopColor:"#5EEAD4",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div>; }
 function Skel({ n }) { return <div style={{display:"flex",flexDirection:"column",gap:7}}>{Array.from({length:n||3},(_,i)=><div key={i} style={{height:48,background:"#111827",borderRadius:9}}/>)}</div>; }
-function Emp({ msg }) { return <div style={{textAlign:"center",padding:"36px 16px",fontFamily:"'DM Mono',monospace",fontSize:10,color:"#1e2a3a"}}>{msg}</div>; }
+function Emp({ msg }) { return <div style={{textAlign:"center",padding:"36px 16px",fontFamily:"'DM Mono',monospace",fontSize:10,color:"#cbd5e1"}}>{msg}</div>; }
 function PTag({ children, bg, color, border }) { return <span style={{background:bg,color,fontSize:8,fontWeight:700,padding:"2px 6px",borderRadius:20,fontFamily:"'DM Mono',monospace",border:border||"none"}}>{children}</span>; }
 function PLbl({ children }) { return <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#bbb",letterSpacing:".13em",textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:5}}><span style={{display:"inline-block",width:9,height:1,background:"#ddd"}}/>{children}<span style={{flex:1,display:"inline-block",height:1,background:"#eee"}}/></div>; }
 function PNote({ title, content, accent }) { return <div style={{background:"#fafafa",border:"1px solid #ebebeb",borderRadius:5,padding:"6px 8px",borderTop:"2px solid "+accent}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:accent,marginBottom:2,letterSpacing:".07em"}}>{title.toUpperCase()}</div><div style={{fontSize:9,color:"#444",lineHeight:1.6}}>{content}</div></div>; }

@@ -636,6 +636,48 @@ describe("TEO GYM Firestore Rules v8", function () {
     });
   });
 
+  describe("6-2. correctionSummaries (체형평가 회원 노출용, 회원은 읽기만 가능)", () => {
+    beforeEach(async () => {
+      await seedMembers({ "member_a": memberActive, "member_paused": memberPaused });
+      await seedSubcollection("member_a", "correctionSummaries", "cs1", {
+        date: "2026-07-01", good: ["어깨 움직임이 좋아졌습니다."], caution: [], homeExercise: ["Wall Slide"], nextGoal: "유지",
+      });
+    });
+
+    it("[관리자] correctionSummaries read/write 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("correctionSummaries").doc("cs1").get());
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("correctionSummaries").doc("cs1").set({ date: "2026-07-01", good: ["갱신됨"] })
+      );
+    });
+
+    it("[진행중 회원] 본인 correctionSummaries read 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("correctionSummaries").doc("cs1").get());
+    });
+
+    it("[진행중 회원] 본인 correctionSummaries write 차단(트레이너만 쓰기 가능)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("correctionSummaries").doc("cs1").set({ date: "2026-07-02" })
+      );
+    });
+
+    it("[휴식중 회원] correctionSummaries read 차단", async () => {
+      const db = asUser(testEnv, "paused_uid");
+      await seedSubcollection("member_paused", "correctionSummaries", "cs1", { date: "2026-07-01", good: [] });
+      await assertFails(db.collection("members").doc("member_paused").collection("correctionSummaries").doc("cs1").get());
+    });
+
+    it("[회원 A] 회원 B correctionSummaries read 차단", async () => {
+      await seedMembers({ "member_b": memberB });
+      await seedSubcollection("member_b", "correctionSummaries", "cs1", { date: "2026-07-01", good: [] });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("correctionSummaries").doc("cs1").get());
+    });
+  });
+
   // ════════════════════════════════════════════════════
   // 7. attendance 컬렉션
   // ════════════════════════════════════════════════════

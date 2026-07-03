@@ -1189,6 +1189,48 @@ export async function saveAssessments(memberId, records = []) {
 }
 
 // ════════════════════════════════════════════════════
+// 교정 결과 요약 (correctionSummaries) — assessments의 전문 임상 데이터와 별개로,
+// 회원에게 보여줄 "전문용어 없는 결과만" 저장하는 컬렉션. 회원은 읽기만 가능.
+// ════════════════════════════════════════════════════
+export async function getCorrectionSummaries(memberId) {
+  try {
+    requireUid();
+    dbLog("getCorrectionSummaries", `memberId=${memberId}`);
+    const q = query(
+      collection(db, "members", memberId, "correctionSummaries"),
+      orderBy("date", "desc")
+    );
+    const snap = await getDocs(q);
+    const result = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    dbLog("getCorrectionSummaries", `완료: ${result.length}개`);
+    return result;
+  } catch(e) {
+    console.error("[DB] getCorrectionSummaries error:", e.message, `memberId=${memberId}`);
+    return [];
+  }
+}
+
+export async function saveCorrectionSummary(memberId, data) {
+  try {
+    await verifyMemberOwnership(memberId);
+    const summaryId = data.id || `cs${Date.now()}`;
+    dbLog("saveCorrectionSummary", `memberId=${memberId} summaryId=${summaryId}`);
+    const ref = doc(db, "members", memberId, "correctionSummaries", summaryId);
+    const payload = {
+      ...clean(data),
+      id: summaryId,
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(ref, payload, { merge: true });
+    const saved = await getDoc(ref);
+    return { id: saved.id, ...saved.data() };
+  } catch(e) {
+    console.error("[DB] saveCorrectionSummary error:", e.message, `memberId=${memberId}`);
+    throw new Error("교정 결과 저장 실패: " + e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════
 // 영양 관리 (nutrition)
 // ════════════════════════════════════════════════════
 export async function getNutrition(memberId) {

@@ -775,10 +775,10 @@ const checks = [
       return weightIdx !== -1 && mmIdx !== -1 && fatIdx !== -1 && weightIdx < mmIdx && mmIdx < fatIdx;
     })()
   ],
-  ['변화분석: 체형교정 회원 - 통증(VAS)이 최상단, 가동범위/기능평가는 데이터 없음을 정직하게 표시(신규 Firestore 구조 추가 없음)',
-    app.includes('{persona === "correction" && (') &&
-    app.includes('아직 등록된 가동범위 평가가 없습니다.') &&
-    app.includes('아직 등록된 기능 평가(오버헤드 스쿼트, 싱글레그 밸런스 등)가 없습니다.')
+  ['변화분석: 체형교정 회원 - 통증(VAS)이 최상단, 교정 결과는 correctionSummaries 실데이터로 표시(없으면 정직한 안내)',
+    app.includes('{persona === "correction" && (() => {') &&
+    app.includes('const latestSummary = [...(p.correctionSummaries||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))[0];') &&
+    app.includes('아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.')
   ],
   ['변화분석: 공통 섹션(목표까지 남은 변화/운동 지속 현황)은 모든 페르소나에 동일하게 표시',
     app.includes('<WeightGoalStrategyCard {...p} />') &&
@@ -888,6 +888,43 @@ const checks = [
   ['변화 분석: 좌우 차이는 가장 최근 평가의 통증 VAS 좌/우 기록에서 계산(레거시 기록도 그대로 집계에 포함)',
     app.includes('Object.entries(latest.categoryResults||{}).forEach(([cat,cr]) => {') &&
     app.includes('const diff = Math.abs((t.vas.좌||0)-(t.vas.우||0));')
+  ],
+
+  // ── 체형평가 리뉴얼 Phase 4: Firestore correctionSummaries + 회원앱 연동 ──
+  ['Firestore 규칙: assessments(전문 임상 데이터)는 트레이너 전용 그대로 유지, correctionSummaries만 신규 추가(회원은 읽기만 가능)',
+    firestoreRules.includes('match /assessments/{assessmentId} {\n        allow read, write: if isTrainerOfMember(memberId);\n      }') &&
+    firestoreRules.includes('match /correctionSummaries/{summaryId} {') &&
+    firestoreRules.includes('allow read: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);') &&
+    (() => {
+      const i = firestoreRules.indexOf('match /correctionSummaries/{summaryId} {');
+      const block = firestoreRules.slice(i, firestoreRules.indexOf('}', firestoreRules.indexOf('}', i) + 1));
+      return block.includes('allow write: if isTrainerOfMember(memberId);') && !block.includes('canAccessMember');
+    })()
+  ],
+  ['db.js: getCorrectionSummaries/saveCorrectionSummary가 members/{id}/correctionSummaries 경로를 사용, saveAssessment와 동일한 clean()/merge 패턴 재사용',
+    db.includes('export async function getCorrectionSummaries(memberId) {') &&
+    db.includes('collection(db, "members", memberId, "correctionSummaries")') &&
+    db.includes('export async function saveCorrectionSummary(memberId, data) {') &&
+    db.includes('doc(db, "members", memberId, "correctionSummaries", summaryId)')
+  ],
+  ['체형평가 저장: 유형별 평가/재평가 데이터가 있을 때만 회원용 교정 결과 요약을 별도 컬렉션에 추가 저장(전문용어 없는 문장만)',
+    app.includes('function buildMemberCorrectionFeedback(rec){') &&
+    app.includes('if (hasCategoryResults || rec.retest) {') &&
+    app.includes('await saveCorrectionSummary(member.id, { id: savedRec.id, date: assDate, ...feedback, visibleToMember: true });')
+  ],
+  ['회원앱: correctionSummaries를 다른 컬렉션과 동일한 readStep 패턴으로 로딩하고 common prop으로 전달, 실패해도 다른 데이터 로딩을 막지 않음',
+    app.includes('readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[])') &&
+    app.includes('setCorrectionSummaries((csm||[]).filter(x=>x.visibleToMember!==false));') &&
+    app.includes('cardioSaving,correctionSummaries};')
+  ],
+  ['Firestore 규칙 테스트: correctionSummaries에 회원 read 허용/write 차단/타회원 차단/휴식중 회원 차단 케이스 존재',
+    (() => {
+      const testSrc = fs.readFileSync(path.join(root, 'tests', 'rules', 'firestore.rules.test.mjs'), 'utf8');
+      return testSrc.includes('describe("6-2. correctionSummaries') &&
+        testSrc.includes('[진행중 회원] 본인 correctionSummaries write 차단(트레이너만 쓰기 가능)') &&
+        testSrc.includes('[회원 A] 회원 B correctionSummaries read 차단') &&
+        testSrc.includes('[휴식중 회원] correctionSummaries read 차단');
+    })()
   ],
 ];
 

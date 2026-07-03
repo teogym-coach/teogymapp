@@ -17,7 +17,7 @@ import {
   getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
-  getAssessments, saveAssessment, saveAssessments,
+  getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
   checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
@@ -1176,7 +1176,7 @@ function isMemberDebugMode(){
   }
 }
 function MemberApp({ onLogout }) {
-  const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false);
+  const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
   const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg)),ms))]);
   const resetMemberScroll=useCallback(()=>scrollMemberAppToTop(pageRef),[]);
   const goMemberTab=useCallback(nextTab=>{setTab(nextTab); resetMemberScroll();},[resetMemberScroll]);
@@ -1204,7 +1204,7 @@ function MemberApp({ onLogout }) {
       else navigator.clearAppBadge?.().catch(()=>{});
     }catch{}
   },[badgeUnreadCount]);
-  const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(p?.id){touchMemberAppLastLogin(p.id).catch(()=>{});} if(!p){ setMemberError("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요."); setMemberErrorDetails({code:"member/not-found",path:"members?where(memberUid==auth.uid)",authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:"members?where(memberUid==auth.uid)",status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); return fallback; } }; const [ss,bd,nt,ci,ms,ob,rr,dc,ns,rs,cl]=await Promise.all([readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]),readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null),readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null),readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]),readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]),readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null),readStep("8","routineRecommendations",`members/${p.id}/routineRecommendations (published)`,()=>getRoutineRecommendations(p.id,{publishedOnly:true}),[]),readStep("9","dailyConditioning",`dailyConditioning + members/${p.id}/dailyConditioning (published)`,()=>getDailyConditioning({memberId:p.id,publishedOnly:true}),[]),readStep("10","notices",`notices + members/${p.id}/noticeReads`,()=>getMemberNotices(p.id),[]),readStep("11","readSessions",`members/${p.id}/readSessions`,()=>getReadSessionIds(p.id),new Set()),readStep("12","cardioLogs",`members/${p.id}/cardioLogs`,()=>getCardioLogs(p.id,60),[])]); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); setRoutineRecommendations(rr); setDailyConditioning(dc); setNotices(ns); setReadSessionIds(rs instanceof Set?rs:new Set()); setCardioLogs(cl||[]); getAttendanceRecent(p.id,90).then(setAttendance).catch(()=>{}); const todayCheck=(ci||[]).find(c=>c.date===today||c.id===today)||{}; setForm(f=>({...f,weight:"",kcal:"",steps:"",condition:todayCheck.condition||f.condition||"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:p.memberMessage||f.memberMessage})); }catch(e){ setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ setLoading(false); }},[]); useEffect(()=>{load();},[load]);
+  const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(p?.id){touchMemberAppLastLogin(p.id).catch(()=>{});} if(!p){ setMemberError("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요."); setMemberErrorDetails({code:"member/not-found",path:"members?where(memberUid==auth.uid)",authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:"members?where(memberUid==auth.uid)",status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); return fallback; } }; const [ss,bd,nt,ci,ms,ob,rr,dc,ns,rs,cl,csm]=await Promise.all([readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]),readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null),readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null),readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]),readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]),readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null),readStep("8","routineRecommendations",`members/${p.id}/routineRecommendations (published)`,()=>getRoutineRecommendations(p.id,{publishedOnly:true}),[]),readStep("9","dailyConditioning",`dailyConditioning + members/${p.id}/dailyConditioning (published)`,()=>getDailyConditioning({memberId:p.id,publishedOnly:true}),[]),readStep("10","notices",`notices + members/${p.id}/noticeReads`,()=>getMemberNotices(p.id),[]),readStep("11","readSessions",`members/${p.id}/readSessions`,()=>getReadSessionIds(p.id),new Set()),readStep("12","cardioLogs",`members/${p.id}/cardioLogs`,()=>getCardioLogs(p.id,60),[]),readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[])]); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); setRoutineRecommendations(rr); setDailyConditioning(dc); setNotices(ns); setReadSessionIds(rs instanceof Set?rs:new Set()); setCardioLogs(cl||[]); setCorrectionSummaries((csm||[]).filter(x=>x.visibleToMember!==false)); getAttendanceRecent(p.id,90).then(setAttendance).catch(()=>{}); const todayCheck=(ci||[]).find(c=>c.date===today||c.id===today)||{}; setForm(f=>({...f,weight:"",kcal:"",steps:"",condition:todayCheck.condition||f.condition||"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:p.memberMessage||f.memberMessage})); }catch(e){ setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ setLoading(false); }},[]); useEffect(()=>{load();},[load]);
   if(loading) return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><Spin/></div>;
   if(memberError||!profile) return <MemberAppError message={memberError||"회원 정보를 찾을 수 없습니다. 대표에게 문의해주세요."} details={memberErrorDetails} logs={accessLogs} onRetry={load} onLogout={onLogout}/>;
   const onboardingReadFailed=!!accessErrors.memberOnboarding; const effectiveOnboarding=onboarding||{goal:"온보딩 정보 확인 필요",weeklyWorkoutCount:"-",focusAreas:[]};
@@ -1263,7 +1263,7 @@ function MemberApp({ onLogout }) {
     try{ assertOwnMember(); await saveMemberOnboarding(profile.id,{restingHeartRate:n}); setOnboarding(prev=>({...(prev||{}),restingHeartRate:n})); }
     catch(e){ console.error("[MemberApp] resting heart rate save failed",e); alert(e?.message||"안정시 심박수 저장에 실패했습니다."); }
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveSoreness,saveFeedback,saveProfileInfo,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,cardioSaving};
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveSoreness,saveFeedback,saveProfileInfo,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home","⌂","홈"],["workout","＋","수업"],["health","♥","건강"],["analysis","▥","분석"],["profile","●","프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-block"}}>{i}{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -1652,6 +1652,28 @@ function buildCorrectionInterpretation(pain){
   }
   return "통증 변화를 계속 지켜보고 있어요.";
 }
+// 체형평가(assessments)의 재평가/교정 루틴 결과에서 회원에게 보여줄 "전문용어 없는" 요약만 추출.
+// 테스트 이름(Hip IR, SLR 등)은 절대 포함하지 않고, 부위명(어깨/허리 등)과 통증 수치만 사용한다.
+function buildMemberCorrectionFeedback(rec){
+  const good=[], caution=[], homeExercise=[];
+  (rec.retest?.compare||[]).forEach(c=>{
+    if(c.changeLabel==="좋아짐") good.push(`${c.category} 움직임이 좋아졌습니다.`);
+    else if(c.changeLabel==="악화") caution.push(`${c.category} 부위는 조금 더 지켜봐야 해요.`);
+  });
+  (rec.retest?.painCompare||[]).forEach(c=>{
+    if(c.changeLabel==="좋아짐") good.push(`통증이 ${c.before}에서 ${c.after}로 줄었습니다.`);
+    else if(c.changeLabel==="악화") caution.push(`${c.category} 통증이 늘었어요. 무리한 동작은 피해주세요.`);
+  });
+  (rec.correctiveRoutine?.phases||[]).forEach(p=>{
+    if(p.phase==="가동성"||p.phase==="활성화") p.exercises.filter(e=>e.name).slice(0,2).forEach(e=>homeExercise.push(e.name));
+  });
+  return {
+    good: (good.length?good:["꾸준히 기록하며 변화를 지켜보고 있어요."]).slice(0,3),
+    caution: caution.slice(0,2),
+    homeExercise: [...new Set(homeExercise)].slice(0,3),
+    nextGoal: caution.length ? "다음 수업에서 통증·불편한 부위를 다시 확인해요." : "현재 루틴을 유지하며 꾸준히 기록해요.",
+  };
+}
 function WorkoutConsistencyCard({sessions=[],totalReg,remaining,attendance=[]}){
   const monthCount=attendance.filter(a=>String(a.date||"").startsWith(getKoreaDateString().slice(0,7))).length;
   return <MCard title="운동 지속 현황"><div className="grid2"><Metric t="누적 수업" v={`${sessions.length}회`}/>{totalReg?<Metric t="남은 PT" v={`${remaining}회`}/>:<Metric t="이번 달 운동" v={`${monthCount}회`}/>}</div></MCard>;
@@ -1981,19 +2003,41 @@ function MemberAnalysis(p) {
         </>
       )}
 
-      {persona === "correction" && (
-        <>
-          {painVasCard}
-          <MCard title="가동범위 변화 (Before / After)">
-            <div className="analysis-empty-state">아직 등록된 가동범위 평가가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
-          </MCard>
-          <MCard title="기능 수행능력 변화">
-            <div className="analysis-empty-state">아직 등록된 기능 평가(오버헤드 스쿼트, 싱글레그 밸런스 등)가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
-          </MCard>
-          <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
-          <div className="change-feedback-item">{correctionInterpretation}</div>
-        </>
-      )}
+      {persona === "correction" && (() => {
+        const latestSummary = [...(p.correctionSummaries||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))[0];
+        return (
+          <>
+            {painVasCard}
+            <MCard title="교정 결과">
+              {latestSummary ? (
+                <>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {(latestSummary.good||[]).map((g,i) => <div key={i} className="change-feedback-item">{g}</div>)}
+                  </div>
+                  {(latestSummary.caution||[]).length>0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <p style={{ fontWeight: 800, color: "#F97316", margin: "0 0 6px" }}>주의할 점</p>
+                      {latestSummary.caution.map((c,i) => <div key={i} className="change-feedback-item" style={{ background: "#FFF7ED", color: "#C2410C" }}>{c}</div>)}
+                    </div>
+                  )}
+                  {(latestSummary.homeExercise||[]).length>0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <p style={{ fontWeight: 800, margin: "0 0 6px" }}>집에서 할 운동</p>
+                      <ul style={{ margin: 0, paddingLeft: 18 }}>{latestSummary.homeExercise.map((e,i) => <li key={i}>{e}</li>)}</ul>
+                    </div>
+                  )}
+                  {latestSummary.nextGoal && <p style={{ marginTop: 10, fontWeight: 700, color: "#2F73F6" }}>다음 목표: {latestSummary.nextGoal}</p>}
+                  <p style={{ marginTop: 8, fontSize: 12, color: "#8B949E" }}>{latestSummary.date} 평가 기준</p>
+                </>
+              ) : (
+                <div className="analysis-empty-state">아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
+              )}
+            </MCard>
+            <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
+            <div className="change-feedback-item">{correctionInterpretation}</div>
+          </>
+        );
+      })()}
 
       {persona === "general" && (
         <>
@@ -15258,6 +15302,15 @@ function AssessmentScreen({ member, onBack, showToast }) {
       setRecords(next);
       localStorage.setItem("assess_"+member.id, JSON.stringify(next));
       localStorage.removeItem("assess_draft_"+member.id);
+      // 회원에게 보여줄 "교정 결과만"(전문용어 제외) 별도 컬렉션에 저장 — 실패해도 본 저장은 이미 완료된 상태이므로 안내만
+      if (hasCategoryResults || rec.retest) {
+        try {
+          const feedback = buildMemberCorrectionFeedback(rec);
+          await saveCorrectionSummary(member.id, { id: savedRec.id, date: assDate, ...feedback, visibleToMember: true });
+        } catch(e) {
+          console.error("[TEO GYM] 교정 결과 요약 저장 오류:", e);
+        }
+      }
       showToast("체형평가 저장 완료 ✓");
     } catch(e) {
       console.error("[TEO GYM] 저장 오류:", e);

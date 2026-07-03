@@ -869,6 +869,26 @@ const checks = [
     app.includes('{viewRec.correctiveRoutine?.phases?.length>0 && (') &&
     app.includes('{viewRec.retest?.done && (')
   ],
+
+  // ── 체형평가 리뉴얼 Phase 3: 변화 분석 강화 ──
+  ['변화 분석: ROM 증가 TOP5(재평가 좋아짐 빈도) + 통증 감소 TOP5(재평가 VAS 감소폭 합산)',
+    app.includes('records.forEach(r => (r.retest?.compare||[]).forEach(c => {') &&
+    app.includes('if (c.changeLabel==="좋아짐") { const k=c.category+" "+c.label; romImproveFreq[k]=(romImproveFreq[k]||0)+1; }') &&
+    app.includes('painDecreaseSum[k]=(painDecreaseSum[k]||0)+(c.before-c.after); }')
+  ],
+  ['변화 분석: 반복되는 제한(같은 테스트가 2회 이상 제한/통증) 집계는 유형별 평가 타임라인 기반',
+    app.includes('const catTimeline = {};') &&
+    app.includes('.filter(x => x.badCount>=2)')
+  ],
+  ['변화 분석: 교정 완료(최초 제한/통증→최근 정상) / 재발(정상 이후 다시 제한/통증) 항목을 시간 순으로 자동 판별',
+    app.includes('timeline.length>=2 && timeline[0].result!=="정상" && timeline[timeline.length-1].result==="정상"') &&
+    app.includes('const firstNormalIdx = timeline.findIndex(t=>t.result==="정상");') &&
+    app.includes('return firstNormalIdx!==-1 && timeline.slice(firstNormalIdx+1).some(t=>t.result!=="정상");')
+  ],
+  ['변화 분석: 좌우 차이는 가장 최근 평가의 통증 VAS 좌/우 기록에서 계산(레거시 기록도 그대로 집계에 포함)',
+    app.includes('Object.entries(latest.categoryResults||{}).forEach(([cat,cr]) => {') &&
+    app.includes('const diff = Math.abs((t.vas.좌||0)-(t.vas.우||0));')
+  ],
 ];
 
 let failed = 0;

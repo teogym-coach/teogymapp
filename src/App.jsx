@@ -16425,6 +16425,62 @@ function AssessmentAnalysisView({ records=[], member }) {
   const topFunc = Object.entries(funcFreq).sort((a,b)=>b[1]-a[1]).slice(0,4);
   const FUNC_LABEL={sh_flex:"어깨 굴곡",sh_er:"어깨 외회전",sh_ir:"어깨 내회전",hip_flex:"고관절 굴곡",hip_er:"고관절 외회전",knee_sq:"무릎 기능",slr:"햄스트링 SLR",glute_fn:"둔근 기능",balance:"한발 서기",thoracic:"흉추 회전",df:"발목 가동성"};
 
+  // ── 유형별 평가 / 재평가 기반 강화 분석(Phase 3) ──────────────────
+  // 카테고리별 테스트 타임라인: {"카테고리|테스트키" -> [{date,result,vas}, ...]} (오래된 순)
+  const catTimeline = {};
+  [...records].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(r => {
+    Object.entries(r.categoryResults||{}).forEach(([cat,cr]) => {
+      (cr.tests||[]).forEach(t => {
+        if (!t.result) return;
+        const key = cat+"|"+t.key;
+        (catTimeline[key] = catTimeline[key]||[]).push({
+          date:r.date, category:cat, testKey:t.key,
+          label:CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key,
+          result:t.result, vas:t.vas,
+        });
+      });
+    });
+  });
+  // ROM 증가 TOP5 — 재평가에서 "좋아짐"으로 판정된 항목 빈도
+  const romImproveFreq = {};
+  records.forEach(r => (r.retest?.compare||[]).forEach(c => {
+    if (c.changeLabel==="좋아짐") { const k=c.category+" "+c.label; romImproveFreq[k]=(romImproveFreq[k]||0)+1; }
+  }));
+  const topRomImprove = Object.entries(romImproveFreq).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  // 통증 감소 TOP5 — 재평가 VAS 감소폭 합산
+  const painDecreaseSum = {};
+  records.forEach(r => (r.retest?.painCompare||[]).forEach(c => {
+    if (c.changeLabel==="좋아짐") { const k=`${c.category} ${c.label} ${c.side}`; painDecreaseSum[k]=(painDecreaseSum[k]||0)+(c.before-c.after); }
+  }));
+  const topPainDecrease = Object.entries(painDecreaseSum).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  // 반복되는 제한 — 같은 테스트가 2회 이상 제한/통증으로 기록됨
+  const repeatedLimitations = Object.values(catTimeline)
+    .map(timeline => ({ label:`${timeline[0].category} ${timeline[0].label}`, badCount: timeline.filter(t=>t.result!=="정상").length }))
+    .filter(x => x.badCount>=2)
+    .sort((a,b)=>b.badCount-a.badCount).slice(0,5);
+  // 교정 완료 항목 — 최초 기록이 제한/통증이었고 가장 최근 기록은 정상
+  const completedCorrections = Object.values(catTimeline)
+    .filter(timeline => timeline.length>=2 && timeline[0].result!=="정상" && timeline[timeline.length-1].result==="정상")
+    .map(timeline => ({ label:`${timeline[0].category} ${timeline[0].label}`, from:timeline[0].result }));
+  // 재발한 항목 — 정상이 된 이후 더 최근 기록에서 다시 제한/통증으로 나타남
+  const relapsedItems = Object.values(catTimeline)
+    .filter(timeline => {
+      const firstNormalIdx = timeline.findIndex(t=>t.result==="정상");
+      return firstNormalIdx!==-1 && timeline.slice(firstNormalIdx+1).some(t=>t.result!=="정상");
+    })
+    .map(timeline => ({ label:`${timeline[0].category} ${timeline[0].label}` }));
+  // 좌우 차이 — 가장 최근 평가에서 통증 VAS가 좌우 모두 기록된 테스트
+  const sideDiffs = [];
+  Object.entries(latest.categoryResults||{}).forEach(([cat,cr]) => {
+    (cr.tests||[]).forEach(t => {
+      if (t.result==="통증" && t.vas && (t.vas.좌||t.vas.우)) {
+        const diff = Math.abs((t.vas.좌||0)-(t.vas.우||0));
+        if (diff>0) sideDiffs.push({ label:`${cat} ${CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key}`, 좌:t.vas.좌||0, 우:t.vas.우||0, diff });
+      }
+    });
+  });
+  sideDiffs.sort((a,b)=>b.diff-a.diff);
+
   // ── AI 자동 요약 생성 ─────────────────────────────────────────────
   const autoSummary = (() => {
     const parts = [];
@@ -16605,6 +16661,98 @@ function AssessmentAnalysisView({ records=[], member }) {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 5-1. ROM 증가 / 통증 감소 TOP5 (재평가 기반) */}
+      {(topRomImprove.length>0 || topPainDecrease.length>0) && (
+        <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
+          background:"rgba(94,234,212,.04)",border:"1px solid rgba(94,234,212,.15)"}}>
+          <AACTitle color="#5EEAD4">📈 재평가로 확인된 개선 TOP5</AACTitle>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {topRomImprove.length>0 && (
+              <div>
+                <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700,marginBottom:5}}>ROM 증가</Mo>
+                {topRomImprove.map(([k,cnt])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <Mo c="#94a3b8" s={9}>{k}</Mo>
+                    <Mo c="#5EEAD4" s={9} style={{fontWeight:700}}>{cnt}회</Mo>
+                  </div>
+                ))}
+              </div>
+            )}
+            {topPainDecrease.length>0 && (
+              <div>
+                <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700,marginBottom:5}}>통증 감소</Mo>
+                {topPainDecrease.map(([k,sum])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <Mo c="#94a3b8" s={9}>{k}</Mo>
+                    <Mo c="#5EEAD4" s={9} style={{fontWeight:700}}>-{sum}</Mo>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 5-2. 반복되는 제한 / 교정 완료 / 재발 항목 */}
+      {(repeatedLimitations.length>0 || completedCorrections.length>0 || relapsedItems.length>0) && (
+        <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
+          background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.08)"}}>
+          <AACTitle>🔁 유형별 평가 흐름</AACTitle>
+          {repeatedLimitations.length>0 && (
+            <div style={{marginBottom:8}}>
+              <Mo c="#fcd34d" s={9} style={{display:"block",fontWeight:700,marginBottom:4}}>반복되는 제한</Mo>
+              {repeatedLimitations.map(x=>(
+                <div key={x.label} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <Mo c="#94a3b8" s={9}>{x.label}</Mo>
+                  <Mo c="#fcd34d" s={9} style={{fontWeight:700}}>{x.badCount}회</Mo>
+                </div>
+              ))}
+            </div>
+          )}
+          {completedCorrections.length>0 && (
+            <div style={{marginBottom:8}}>
+              <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700,marginBottom:4}}>✓ 교정 완료</Mo>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {completedCorrections.map(x=>(
+                  <AATag key={x.label} c="#5EEAD4" bg="rgba(94,234,212,.1)">{x.label} {x.from}→정상</AATag>
+                ))}
+              </div>
+            </div>
+          )}
+          {relapsedItems.length>0 && (
+            <div>
+              <Mo c="#f87171" s={9} style={{display:"block",fontWeight:700,marginBottom:4}}>⚠ 재발</Mo>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {relapsedItems.map(x=>(
+                  <AATag key={x.label} c="#f87171" bg="rgba(239,68,68,.1)">{x.label}</AATag>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5-3. 좌우 차이 (최근 평가 기준) */}
+      {sideDiffs.length>0 && (
+        <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
+          background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.08)"}}>
+          <AACTitle>⚖️ 좌우 차이 ({latest.date})</AACTitle>
+          {sideDiffs.slice(0,5).map(d=>(
+            <div key={d.label} style={{marginBottom:6}}>
+              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:3}}>{d.label}</Mo>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <Mo c="#f87171" s={9}>좌 {d.좌}</Mo>
+                <div style={{flex:1,height:5,borderRadius:3,background:"rgba(255,255,255,.06)",position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(100,(d.좌/(d.좌+d.우||1))*100)}%`,background:"#f87171"}} />
+                </div>
+                <Mo c="#60a5fa" s={9}>우 {d.우}</Mo>
+                <Mo c="#fcd34d" s={9} style={{fontWeight:700}}>차이 {d.diff}</Mo>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

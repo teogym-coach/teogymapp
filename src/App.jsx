@@ -1574,6 +1574,77 @@ function getInbodyRecords(body, since) { const list = (body?.inbody || []).filte
 function calcBodyFatMass(r) { if (!r) return null; if (r.bodyFatMass != null && Number.isFinite(Number(r.bodyFatMass))) return parseFloat(Number(r.bodyFatMass).toFixed(1)); const w = Number(r.weight), bf = Number(r.bodyFat); if (w > 0 && bf > 0) return parseFloat((w * bf / 100).toFixed(1)); return null; }
 function CollapsibleSection({ label, defaultOpen = false, children }) { const [open, setOpen] = useState(defaultOpen); return <div style={{margin:"6px 0"}}><button type="button" onClick={()=>setOpen(v=>!v)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1px solid #E8ECF1",borderRadius:22,padding:"14px 20px",cursor:"pointer",boxShadow:"0 6px 18px rgba(32,36,42,.04)",marginBottom:open?6:0,WebkitTapHighlightColor:"transparent",transition:"margin-bottom .2s ease"}}><span style={{fontWeight:900,fontSize:16,color:"#20242A"}}>{label}</span><span style={{color:"#A8B0BA",fontWeight:900,fontSize:13,flexShrink:0}}>{open?"▲ 접기":"▼ 펼치기"}</span></button><div className={`health-collapse${open?" open":""}`}><div className="health-collapse-inner">{children}</div></div></div>; }
 function SummaryTile({title,value,sub,delta,color="#2F73F6"}){return <div className="analysis-kpi" style={{borderColor:color+"33"}}><span style={{color}}>{title}</span><b>{value}</b>{sub&&<small>{sub}</small>}{delta&&<em style={{color}}>{delta}</em>}</div>}
+
+// ════════════════════════════════════════════════════
+// 변화분석 탭 — 회원 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를
+// 가장 먼저 보여주기 위한 계산 함수들. 기존 계산 로직(getBodyWeightRecords,
+// buildPerformanceChanges, getPainSummary 등)은 그대로 재사용하고, 여기서는
+// "어떤 순서로 보여줄지"와 "그래프 2개를 어떻게 겹쳐 보여줄지"만 추가한다.
+// ════════════════════════════════════════════════════
+function getAnalysisPersona(goal=""){
+  const g=String(goal||"");
+  if(g.includes("체형교정")||g.includes("교정")) return "correction";
+  if(g.includes("벌크업")||g.includes("증량")||g.includes("근육 키우기")) return "bulk";
+  if(g.includes("다이어트")||g.includes("감량")) return "diet";
+  return "general";
+}
+function average(arr=[]){const v=arr.filter(n=>Number.isFinite(Number(n))).map(Number); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;}
+// 체중 + 평균 섭취 칼로리를 같은 타임라인에서 비교하기 위해 날짜 기준으로 합침(신규 저장 없음, 기존 데이터만 병합)
+function buildWeightCalorieCombo(weightData=[],kcalRows=[]){
+  const map=new Map();
+  weightData.forEach(w=>map.set(w.date,{...(map.get(w.date)||{}),date:w.date,weight:w.weight}));
+  kcalRows.forEach(k=>map.set(k.date,{...(map.get(k.date)||{}),date:k.date,kcal:k.kcal}));
+  return [...map.values()].sort((a,b)=>a.date.localeCompare(b.date));
+}
+function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){
+  if(weights.length<2||!kcalRows.length) return "체중과 칼로리 기록이 더 쌓이면 변화 해석을 제공합니다.";
+  const half=Math.max(1,Math.floor(kcalRows.length/2));
+  const olderAvg=average(kcalRows.slice(0,half).map(r=>r.kcal));
+  const recentAvg=average(kcalRows.slice(-half).map(r=>r.kcal));
+  const kcalPct=olderAvg?Math.round((recentAvg-olderAvg)/olderAvg*100):null;
+  if(wDiff!=null&&wDiff<-0.3&&kcalPct!=null&&kcalPct<0) return `최근 평균 섭취 칼로리가 ${Math.abs(kcalPct)}% 감소하면서 체중도 ${Math.abs(wDiff)}kg 감소했습니다. 현재 식사 패턴이 감량에 긍정적인 영향을 주고 있습니다.`;
+  if(wDiff!=null&&Math.abs(wDiff)<0.3) return "체중이 정체되고 있어요. 섭취 칼로리와 활동량을 함께 점검하면 정체 원인을 더 정확히 파악할 수 있습니다.";
+  if(wDiff!=null&&wDiff>0.3) return "체중이 증가하는 추세입니다. 최근 섭취 칼로리가 늘지 않았는지 함께 확인해보세요.";
+  return "체중과 칼로리 변화 패턴을 계속 지켜보고 있어요.";
+}
+// 세션에 이미 저장돼 있는 totalVolume(관리자앱에서 계산)만 그대로 사용 — 새 계산식 아님
+function buildTotalVolumeTrend(sessions=[]){
+  return [...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(s=>({date:String(s.date).slice(5),volume:Math.round(s.totalVolume||0)}));
+}
+// Epley 공식(1RM = 무게×(1+반복수/30))으로 추정한 1RM에서 5RM/10RM을 역산 — 예상값이며 실측 1RM이 아님
+function estimate1RM(weight,reps){const w=Number(weight),r=Number(reps); if(!w||!r) return null; return r<=1?w:w*(1+r/30);}
+function buildRepMaxChanges(sessions=[]){
+  const map=new Map();
+  [...sessions].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(s=>(s.exercises||[]).forEach(e=>{
+    if(!e.name) return;
+    const best1RM=Math.max(0,...getFilledSets(e).map(st=>estimate1RM(st.weight,st.reps)||0));
+    if(!best1RM) return;
+    const prev=map.get(e.name)||[]; prev.push(best1RM); map.set(e.name,prev);
+  }));
+  return [...map.entries()].filter(([,v])=>v.length>=2).map(([name,v])=>{
+    const first=v[0], last=v[v.length-1];
+    return {name,rm5Before:Math.round(first/1.1667),rm5After:Math.round(last/1.1667),rm10Before:Math.round(first/1.333),rm10After:Math.round(last/1.333),delta:last-first};
+  }).sort((a,b)=>b.delta-a.delta);
+}
+function buildBulkInterpretation({strengthPct,volumeTrendPct,mmDiff}){
+  const msgs=[];
+  if(strengthPct!=null&&strengthPct>0) msgs.push(`평균 중량이 ${strengthPct}% 향상되며 확실히 강해지고 있습니다.`);
+  if(volumeTrendPct!=null&&volumeTrendPct>0) msgs.push("총 운동 볼륨이 늘어나며 근성장에 필요한 자극이 쌓이고 있습니다.");
+  if(mmDiff!=null&&mmDiff>0) msgs.push(`골격근량이 ${mmDiff}kg 증가했습니다.`);
+  return msgs.length?msgs.join(" "):"기록이 더 쌓이면 근력·볼륨 변화를 더 정확히 알려드릴게요.";
+}
+function buildCorrectionInterpretation(pain){
+  if(!pain?.rows?.length) return "통증 기록이 쌓이면 변화 해석을 제공합니다.";
+  if(pain.first!=null&&pain.last!=null){
+    if(pain.last<pain.first) return `통증(VAS)이 ${pain.first}에서 ${pain.last}로 감소했습니다. 몸이 점점 편해지고 있어요.`;
+    if(pain.last>pain.first) return "통증이 다소 증가했습니다. 다음 수업에서 대표님과 상태를 점검해보세요.";
+  }
+  return "통증 변화를 계속 지켜보고 있어요.";
+}
+function WorkoutConsistencyCard({sessions=[],totalReg,remaining,attendance=[]}){
+  const monthCount=attendance.filter(a=>String(a.date||"").startsWith(getKoreaDateString().slice(0,7))).length;
+  return <MCard title="운동 지속 현황"><div className="grid2"><Metric t="누적 수업" v={`${sessions.length}회`}/>{totalReg?<Metric t="남은 PT" v={`${remaining}회`}/>:<Metric t="이번 달 운동" v={`${monthCount}회`}/>}</div></MCard>;
+}
 function MemberAnalysis(p) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
   const handleSetPeriod = k => { setPeriod(k); try { localStorage.setItem("teogym_analysis_period", k); } catch {} };
@@ -1671,6 +1742,141 @@ function MemberAnalysis(p) {
   const ttStyle = { background: "#fff", border: "1px solid #E8ECF1", borderRadius: 12, boxShadow: "0 10px 28px rgba(32,36,42,.08)", fontSize: 12, color: "#20242A" };
   const axTick = { fontSize: 11, fill: "#8B949E", fontWeight: 800 };
 
+  // ── 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를 가장 먼저 보여주기 위한 계산 ──
+  // 기존 계산 로직은 그대로 재사용하고, 여기서는 표시 순서를 정하는 값만 추가로 계산한다.
+  const persona = getAnalysisPersona(p.onboarding?.goal || p.profile?.goal);
+  const periodSessions = p.sessions.filter(inPeriod);
+  const comboData = buildWeightCalorieCombo(weightData, kcalRows);
+  const dietInterpretation = buildDietInterpretation({ weights, kcalRows, wDiff });
+  const volumeTrendData = buildTotalVolumeTrend(periodSessions);
+  const volumeTrendPct = (() => {
+    if (volumeTrendData.length < 2) return null;
+    const half = Math.max(1, Math.floor(volumeTrendData.length / 2));
+    const olderAvg = average(volumeTrendData.slice(0, half).map(r => r.volume));
+    const recentAvg = average(volumeTrendData.slice(-half).map(r => r.volume));
+    return olderAvg ? Math.round((recentAvg - olderAvg) / olderAvg * 100) : null;
+  })();
+  const repMaxRows = buildRepMaxChanges(periodSessions);
+  const strengthPct = summarizeStrength(periodSessions);
+  const bulkInterpretation = buildBulkInterpretation({ strengthPct, volumeTrendPct, mmDiff });
+  const correctionInterpretation = buildCorrectionInterpretation(pain);
+
+  // ── 재사용 가능한 그래프/카드 조각(기존 마크업 그대로) — 목표별로 순서만 다르게 배치한다 ──
+  const weightChart = (
+    <MCard title="체중 변화 추이">
+      <ResponsiveContainer width="100%" height={persona === "diet" ? 240 : 190}>
+        <LineChart data={weightData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
+          <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
+          <YAxis domain={["dataMin-2", "dataMax+2"]} tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" />
+          <Tooltip contentStyle={ttStyle} formatter={v => [`${v}kg`, "체중"]} />
+          <Line dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </MCard>
+  );
+  const compositionChart = (
+    <MCard title="체성분 변화 추이">
+      {compositionData.length >= 2 ? (
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={compositionData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
+            <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
+            <YAxis tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" />
+            <Tooltip contentStyle={ttStyle} formatter={(v, n) => [v !== null ? `${v}kg` : "-", n === "muscleMass" ? "골격근량" : "체지방량"]} />
+            <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />
+            <Line dataKey="muscleMass" name="골격근량" stroke="#EF4444" strokeWidth={3} dot={{ r: 4, fill: "#EF4444", strokeWidth: 0 }} connectNulls />
+            <Line dataKey="fatMass" name="체지방량" stroke="#3B82F6" strokeWidth={3} dot={{ r: 4, fill: "#3B82F6", strokeWidth: 0 }} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="analysis-empty-state">인바디 기록이 2회 이상 쌓이면 변화 그래프가 표시됩니다.</div>
+      )}
+    </MCard>
+  );
+  const bodyAgeSection = (
+    <>
+      {!gender ? (
+        <div className="analysis-empty-state">성별 정보 입력 시 신체나이 분석이 제공됩니다.</div>
+      ) : bodyAgeData.length >= 2 ? (
+        <>
+          <ResponsiveContainer width="100%" height={190}>
+            <LineChart data={bodyAgeData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
+              <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
+              <YAxis domain={["dataMin-5", "dataMax+5"]} tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="세" />
+              <Tooltip contentStyle={ttStyle} formatter={v => [`${v}세`, "신체나이"]} />
+              <Line dataKey="bodyAge" name="신체나이" stroke="#22C55E" strokeWidth={3} dot={{ r: 4, fill: "#22C55E", strokeWidth: 0 }} />
+            </LineChart>
+          </ResponsiveContainer>
+          {firstBodyAge !== null && lastBodyAge !== null && (
+            <div className="body-age-summary">
+              <div className="body-age-compare">
+                <div className="body-age-block"><span>처음</span><b>{firstBodyAge}세</b></div>
+                <div className="body-age-arrow">→</div>
+                <div className="body-age-block current"><span>현재</span><b>{lastBodyAge}세</b></div>
+              </div>
+              {bodyAgeDiff !== null && (
+                <p className={`body-age-result ${bodyAgeDiff < 0 ? "good" : "warn"}`}>
+                  {bodyAgeDiff < 0 ? `${Math.abs(bodyAgeDiff)}세 젊어졌습니다.` : `${bodyAgeDiff}세 늘었습니다.`}
+                </p>
+              )}
+              {lastPA !== null && <p className="body-age-pa">위상각 {lastPA}° 기준</p>}
+            </div>
+          )}
+        </>
+      ) : !hasPhaseAngle ? (
+        <div className="analysis-empty-state">인바디 위상각이 입력되면 신체나이 변화가 표시됩니다.</div>
+      ) : (
+        <div className="analysis-empty-state">위상각 기록이 2회 이상 쌓이면 그래프가 표시됩니다.</div>
+      )}
+    </>
+  );
+  const kcalWeightCard = (
+    <MCard title="섭취와 체중 변화">
+      {kcalRows.length > 0 ? (
+        <>
+          <CalorieTrendChart rows={kcalRows} chartRows={kcalRows} />
+          <div className="calorie-metric-grid">
+            <div className="calorie-metric-block"><span>목표 칼로리</span><b>{formatKcal(target.value)}</b></div>
+            <div className="calorie-metric-block"><span>최근 7일 평균</span><b style={{ color: calorieDiff !== null && Math.abs(calorieDiff) <= 150 ? "#16A34A" : "#F97316" }}>{formatKcal(avg7)}</b></div>
+            <div className="calorie-metric-block"><span>최근 14일 평균</span><b>{formatKcal(avg14)}</b></div>
+            <div className="calorie-metric-block"><span>목표 달성률</span><b style={{ color: (caloriePct||0) >= 85 ? "#16A34A" : "#F97316" }}>{caloriePct !== null ? `${caloriePct}%` : "-"}</b></div>
+            {wDiff !== null && <div className="calorie-metric-block"><span>체중 변화</span><b style={{ color: wDiff <= 0 ? "#16A34A" : "#F97316" }}>{wDiff > 0 ? "+" : ""}{wDiff}kg</b></div>}
+            {fatMassDiff !== null && <div className="calorie-metric-block"><span>체지방량 변화</span><b style={{ color: fatMassDiff <= 0 ? "#16A34A" : "#F97316" }}>{fatMassDiff > 0 ? "+" : ""}{fatMassDiff}kg</b></div>}
+          </div>
+          {calorieFeedback && <div className="change-feedback-item" style={{ marginTop: 10 }}>{calorieFeedback}</div>}
+        </>
+      ) : (
+        <div className="analysis-empty-state">섭취 칼로리를 기록하면 체중 변화와 연결된 분석을 제공합니다.</div>
+      )}
+    </MCard>
+  );
+  const painVasCard = (
+    <MCard title="통증 변화 (VAS)">
+      {pain.rows.length > 0 ? (
+        <ResponsiveContainer width="100%" height={180}>
+          <LineChart data={pain.rows.map(r => ({ date: String(r.date).slice(5), vas: r.vas }))}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
+            <XAxis dataKey="date" tick={axTick} tickLine={false} />
+            <YAxis domain={[0, 10]} tick={axTick} tickLine={false} />
+            <Tooltip contentStyle={ttStyle} />
+            <Line dataKey="vas" name="VAS" stroke="#7C3AED" strokeWidth={3} dot={{ r: 4, fill: "#7C3AED", strokeWidth: 0 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <p style={{ color: "#8B949E", fontWeight: 800, margin: 0 }}>통증 기록이 없습니다.</p>
+      )}
+    </MCard>
+  );
+  // 목표별로 이미 primary 영역에서 보여준 항목은 "추가 데이터"에서 중복 표시하지 않는다
+  const primaryUses = {
+    diet: new Set(["weightChart", "kcalWeightCard"]),
+    bulk: new Set(["strength", "partVolume", "weightChart"]),
+    correction: new Set(["painVAS", "strength"]),
+    general: new Set(["weightChart", "compositionChart", "kcalWeightCard", "partVolume", "painVAS", "strength"]),
+  }[persona] || new Set();
+
   return (
     <>
       {/* 헤더 + 기간 필터 */}
@@ -1681,172 +1887,164 @@ function MemberAnalysis(p) {
         </div>
       </div>
 
-      {/* 1. 핵심 변화 요약 */}
-      <div className="analysis-kpi-grid">
-        <SummaryTile
-          title="체중 변화"
-          value={`${kgText(firstW)} → ${kgText(curW)}`}
-          sub={wDiff !== null ? `${wDiff > 0 ? "+" : ""}${wDiff}kg` : "-"}
-          delta={wDiff !== null && Number(firstW) ? `${wDiff <= 0 ? "▼" : "▲"} ${Math.abs(wDiff / Number(firstW) * 100).toFixed(1)}%` : "-"}
-          color={wDiff !== null && wDiff <= 0 ? "#16A34A" : "#F97316"}
-        />
-        <SummaryTile
-          title="체지방량 변화"
-          value={firstFatMass !== null && lastFatMass !== null ? `${firstFatMass.toFixed(1)} → ${lastFatMass.toFixed(1)}kg` : "기록 필요"}
-          sub={fatMassDiff !== null ? `${fatMassDiff > 0 ? "+" : ""}${fatMassDiff}kg` : allInbody.length === 0 ? "인바디 없음" : "1개 기록"}
-          delta={fatMassDiff !== null ? (fatMassDiff <= 0 ? "▼ 감소" : "▲ 증가") : ""}
-          color={fatMassDiff !== null ? (fatMassDiff <= 0 ? "#16A34A" : "#F97316") : "#94A3B8"}
-        />
-        <SummaryTile
-          title="골격근량 변화"
-          value={firstMM && lastMM ? `${firstMM.toFixed(1)} → ${lastMM.toFixed(1)}kg` : "기록 필요"}
-          sub={mmDiff !== null ? `${mmDiff > 0 ? "+" : ""}${mmDiff}kg` : allInbody.length === 0 ? "인바디 없음" : "1개 기록"}
-          delta={mmDiff !== null ? (mmDiff >= 0 ? "▲ 유지/증가" : "▼ 감소") : ""}
-          color={mmDiff !== null ? (mmDiff >= 0 ? "#2F73F6" : "#F97316") : "#94A3B8"}
-        />
-        <SummaryTile
-          title="신체나이 변화"
-          value={firstBodyAge !== null && lastBodyAge !== null ? `${firstBodyAge}세 → ${lastBodyAge}세` : !gender ? "성별 필요" : !hasPhaseAngle ? "위상각 필요" : "1개 기록"}
-          sub={bodyAgeDiff !== null ? (bodyAgeDiff < 0 ? `${Math.abs(bodyAgeDiff)}세 젊어졌습니다` : `${bodyAgeDiff}세 늘었습니다`) : ""}
-          delta=""
-          color={bodyAgeDiff !== null ? (bodyAgeDiff <= 0 ? "#16A34A" : "#F97316") : "#94A3B8"}
-        />
-      </div>
-      {lastInbody && <p className="inbody-last-date">최근 인바디 측정: {lastInbody.date}</p>}
-
-      {/* 2. 체중 변화 그래프 */}
-      <MCard title="체중 변화 추이">
-        <ResponsiveContainer width="100%" height={190}>
-          <LineChart data={weightData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
-            <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
-            <YAxis domain={["dataMin-2", "dataMax+2"]} tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" />
-            <Tooltip contentStyle={ttStyle} formatter={v => [`${v}kg`, "체중"]} />
-            <Line dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} />
-          </LineChart>
-        </ResponsiveContainer>
-      </MCard>
-
-      {/* 3. 체성분 변화 추이 */}
-      <MCard title="체성분 변화 추이">
-        {compositionData.length >= 2 ? (
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={compositionData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
-              <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
-              <YAxis tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" />
-              <Tooltip contentStyle={ttStyle} formatter={(v, n) => [v !== null ? `${v}kg` : "-", n === "muscleMass" ? "골격근량" : "체지방량"]} />
-              <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />
-              <Line dataKey="muscleMass" name="골격근량" stroke="#EF4444" strokeWidth={3} dot={{ r: 4, fill: "#EF4444", strokeWidth: 0 }} connectNulls />
-              <Line dataKey="fatMass" name="체지방량" stroke="#3B82F6" strokeWidth={3} dot={{ r: 4, fill: "#3B82F6", strokeWidth: 0 }} connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="analysis-empty-state">인바디 기록이 2회 이상 쌓이면 변화 그래프가 표시됩니다.</div>
-        )}
-      </MCard>
-
-      {/* 4. 신체나이 변화 (기본 접힘) */}
-      <CollapsibleSection label="신체나이 변화" defaultOpen={false}>
-        <section className="mcard">
-          {!gender ? (
-            <div className="analysis-empty-state">성별 정보 입력 시 신체나이 분석이 제공됩니다.</div>
-          ) : bodyAgeData.length >= 2 ? (
-            <>
-              <ResponsiveContainer width="100%" height={190}>
-                <LineChart data={bodyAgeData}>
+      {/* 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를 가장 먼저 표시 */}
+      {persona === "diet" && (
+        <>
+          {weightChart}
+          <MCard title="체중과 섭취 칼로리">
+            {comboData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <ComposedChart data={comboData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
                   <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
-                  <YAxis domain={["dataMin-5", "dataMax+5"]} tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="세" />
-                  <Tooltip contentStyle={ttStyle} formatter={v => [`${v}세`, "신체나이"]} />
-                  <Line dataKey="bodyAge" name="신체나이" stroke="#22C55E" strokeWidth={3} dot={{ r: 4, fill: "#22C55E", strokeWidth: 0 }} />
+                  <YAxis yAxisId="weight" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" domain={["dataMin-2", "dataMax+2"]} />
+                  <YAxis yAxisId="kcal" orientation="right" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kcal" />
+                  <Tooltip contentStyle={ttStyle} />
+                  <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />
+                  <Bar yAxisId="kcal" dataKey="kcal" name="섭취 칼로리" fill="#93C5FD" opacity={0.55} radius={[4, 4, 0, 0]} />
+                  <Line yAxisId="weight" dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} connectNulls />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="analysis-empty-state">체중과 칼로리를 함께 기록하면 관계를 비교해 보여드려요.</div>
+            )}
+          </MCard>
+          <div className="change-feedback-item">{dietInterpretation}</div>
+        </>
+      )}
+
+      {persona === "bulk" && (
+        <>
+          <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
+          {repMaxRows.length > 0 && (
+            <MCard title="5RM · 10RM 변화 (추정)">
+              <p className="notice soft" style={{ marginBottom: 10 }}>실측 1RM이 아닌, 기록된 무게·반복수 기반 추정값입니다.</p>
+              <div className="strength-list">
+                {repMaxRows.slice(0, 3).map((r, i) => (
+                  <div key={i} className="strength-row">
+                    <b>{r.name}</b>
+                    <span>5RM {r.rm5Before}kg → {r.rm5After}kg · 10RM {r.rm10Before}kg → {r.rm10After}kg</span>
+                  </div>
+                ))}
+              </div>
+            </MCard>
+          )}
+          <MCard title="총 운동량 변화">
+            {volumeTrendData.length >= 2 ? (
+              <ResponsiveContainer width="100%" height={190}>
+                <LineChart data={volumeTrendData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
+                  <XAxis dataKey="date" tick={axTick} tickLine={false} />
+                  <YAxis tick={axTick} tickLine={false} unit="kg" />
+                  <Tooltip contentStyle={ttStyle} formatter={v => [`${Number(v).toLocaleString()}kg`, "총 볼륨"]} />
+                  <Line dataKey="volume" name="총 볼륨" stroke="#7C3AED" strokeWidth={3} dot={{ r: 4, fill: "#7C3AED", strokeWidth: 0 }} />
                 </LineChart>
               </ResponsiveContainer>
-              {firstBodyAge !== null && lastBodyAge !== null && (
-                <div className="body-age-summary">
-                  <div className="body-age-compare">
-                    <div className="body-age-block"><span>처음</span><b>{firstBodyAge}세</b></div>
-                    <div className="body-age-arrow">→</div>
-                    <div className="body-age-block current"><span>현재</span><b>{lastBodyAge}세</b></div>
-                  </div>
-                  {bodyAgeDiff !== null && (
-                    <p className={`body-age-result ${bodyAgeDiff < 0 ? "good" : "warn"}`}>
-                      {bodyAgeDiff < 0 ? `${Math.abs(bodyAgeDiff)}세 젊어졌습니다.` : `${bodyAgeDiff}세 늘었습니다.`}
-                    </p>
-                  )}
-                  {lastPA !== null && <p className="body-age-pa">위상각 {lastPA}° 기준</p>}
-                </div>
-              )}
-            </>
-          ) : !hasPhaseAngle ? (
-            <div className="analysis-empty-state">인바디 위상각이 입력되면 신체나이 변화가 표시됩니다.</div>
-          ) : (
-            <div className="analysis-empty-state">위상각 기록이 2회 이상 쌓이면 그래프가 표시됩니다.</div>
+            ) : (
+              <div className="analysis-empty-state">수업 기록이 쌓이면 총 운동량 변화를 보여드려요.</div>
+            )}
+          </MCard>
+          <PartVolumeCard sessions={periodSessions} />
+          {weightChart}
+          {hasEnoughInbody && firstMM && lastMM && (
+            <MCard title="골격근량 변화">
+              <div className="grid2">
+                <Metric t="이전" v={`${firstMM.toFixed(1)}kg`} />
+                <Metric t="현재" v={`${lastMM.toFixed(1)}kg`} />
+              </div>
+              <div className="change-feedback-item" style={{ marginTop: 10 }}>
+                {mmDiff >= 0 ? `골격근량이 ${mmDiff}kg 늘었습니다.` : `골격근량이 ${Math.abs(mmDiff)}kg 줄었습니다. 단백질 섭취와 회복을 함께 점검해보세요.`}
+              </div>
+            </MCard>
           )}
-        </section>
-      </CollapsibleSection>
+          <div className="change-feedback-item">{bulkInterpretation}</div>
+        </>
+      )}
 
-      {/* 5. 최근 변화 요약 */}
-      <MCard title="최근 변화 요약">
-        {!hasEnoughInbody ? (
-          <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 변화 분석이 제공됩니다.</p>
-        ) : (
-          <div style={{ display: "grid", gap: 8 }}>
-            {feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
-          </div>
-        )}
-      </MCard>
+      {persona === "correction" && (
+        <>
+          {painVasCard}
+          <MCard title="가동범위 변화 (Before / After)">
+            <div className="analysis-empty-state">아직 등록된 가동범위 평가가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
+          </MCard>
+          <MCard title="기능 수행능력 변화">
+            <div className="analysis-empty-state">아직 등록된 기능 평가(오버헤드 스쿼트, 싱글레그 밸런스 등)가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
+          </MCard>
+          <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
+          <div className="change-feedback-item">{correctionInterpretation}</div>
+        </>
+      )}
 
-      {/* 6. 목표 전략 추천 */}
+      {persona === "general" && (
+        <>
+          {weightChart}
+          {compositionChart}
+          <MCard title="최근 변화 요약">
+            {!hasEnoughInbody ? (
+              <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 변화 분석이 제공됩니다.</p>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
+              </div>
+            )}
+          </MCard>
+          {kcalWeightCard}
+          <PartVolumeCard sessions={periodSessions} />
+          {painVasCard}
+          <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
+        </>
+      )}
+
+      {/* 공통: 목표까지 남은 변화 + 최근 변화 요약(체성분 기반) + 운동 지속 현황 */}
       <WeightGoalStrategyCard {...p} />
-
-      {/* 7. 섭취와 체중 변화 (항상 펼침) */}
-      <MCard title="섭취와 체중 변화">
-        {kcalRows.length > 0 ? (
-          <>
-            <CalorieTrendChart rows={kcalRows} chartRows={kcalRows} />
-            <div className="calorie-metric-grid">
-              <div className="calorie-metric-block"><span>목표 칼로리</span><b>{formatKcal(target.value)}</b></div>
-              <div className="calorie-metric-block"><span>최근 7일 평균</span><b style={{ color: calorieDiff !== null && Math.abs(calorieDiff) <= 150 ? "#16A34A" : "#F97316" }}>{formatKcal(avg7)}</b></div>
-              <div className="calorie-metric-block"><span>최근 14일 평균</span><b>{formatKcal(avg14)}</b></div>
-              <div className="calorie-metric-block"><span>목표 달성률</span><b style={{ color: (caloriePct||0) >= 85 ? "#16A34A" : "#F97316" }}>{caloriePct !== null ? `${caloriePct}%` : "-"}</b></div>
-              {wDiff !== null && <div className="calorie-metric-block"><span>체중 변화</span><b style={{ color: wDiff <= 0 ? "#16A34A" : "#F97316" }}>{wDiff > 0 ? "+" : ""}{wDiff}kg</b></div>}
-              {fatMassDiff !== null && <div className="calorie-metric-block"><span>체지방량 변화</span><b style={{ color: fatMassDiff <= 0 ? "#16A34A" : "#F97316" }}>{fatMassDiff > 0 ? "+" : ""}{fatMassDiff}kg</b></div>}
-            </div>
-            {calorieFeedback && <div className="change-feedback-item" style={{ marginTop: 10 }}>{calorieFeedback}</div>}
-          </>
-        ) : (
-          <div className="analysis-empty-state">섭취 칼로리를 기록하면 체중 변화와 연결된 분석을 제공합니다.</div>
-        )}
-      </MCard>
-
-      {/* 8. 부위별 운동량 (기본 접힘) */}
-      <CollapsibleSection label="부위별 운동량 변화" defaultOpen={false}>
-        <PartVolumeCard sessions={p.sessions.filter(inPeriod)} />
-      </CollapsibleSection>
-
-      {/* 9. 통증 변화 VAS (기본 접힘) */}
-      <CollapsibleSection label="통증 변화 (VAS)" defaultOpen={false}>
-        <MCard title="통증 변화 (VAS)">
-          {pain.rows.length > 0 ? (
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={pain.rows.map(r => ({ date: String(r.date).slice(5), vas: r.vas }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
-                <XAxis dataKey="date" tick={axTick} tickLine={false} />
-                <YAxis domain={[0, 10]} tick={axTick} tickLine={false} />
-                <Tooltip contentStyle={ttStyle} />
-                <Line dataKey="vas" name="VAS" stroke="#7C3AED" strokeWidth={3} dot={{ r: 4, fill: "#7C3AED", strokeWidth: 0 }} />
-              </LineChart>
-            </ResponsiveContainer>
+      {persona !== "general" && (
+        <MCard title="최근 변화 요약">
+          {!hasEnoughInbody ? (
+            <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 변화 분석이 제공됩니다.</p>
           ) : (
-            <p style={{ color: "#8B949E", fontWeight: 800, margin: 0 }}>통증 기록이 없습니다.</p>
+            <div style={{ display: "grid", gap: 8 }}>
+              {feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
+            </div>
           )}
         </MCard>
-      </CollapsibleSection>
+      )}
+      <WorkoutConsistencyCard sessions={p.sessions} totalReg={p.totalReg} remaining={p.remaining} attendance={p.attendance} />
 
-      {/* 10. 운동 수행능력 변화 (기본 접힘) */}
-      <CollapsibleSection label="운동 수행능력 변화" defaultOpen={false}>
-        <StrengthChangeCard sessions={p.sessions.filter(inPeriod)} allSessions={p.sessions} />
+      {/* 목표별로 이미 위에서 보여준 항목은 제외하고 나머지는 여기서 확인 가능 */}
+      {(!primaryUses.has("kcalWeightCard") || !primaryUses.has("partVolume") || !primaryUses.has("painVAS") || !primaryUses.has("strength")) && (
+        <CollapsibleSection label="추가 데이터" defaultOpen={false}>
+          <div style={{ display: "grid", gap: 16 }}>
+            {!primaryUses.has("kcalWeightCard") && kcalWeightCard}
+            {!primaryUses.has("partVolume") && <PartVolumeCard sessions={periodSessions} />}
+            {!primaryUses.has("painVAS") && painVasCard}
+            {!primaryUses.has("strength") && <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />}
+          </div>
+        </CollapsibleSection>
+      )}
+
+      {/* 전문 데이터(위상각/신체나이 등)는 하단에 접어두고, 관심 있는 회원만 펼쳐보게 함 */}
+      <CollapsibleSection label="건강 전문 분석" defaultOpen={false}>
+        <section className="mcard">
+          <div className="grid2" style={{ marginBottom: 14 }}>
+            <SummaryTile
+              title="체지방량 변화"
+              value={firstFatMass !== null && lastFatMass !== null ? `${firstFatMass.toFixed(1)} → ${lastFatMass.toFixed(1)}kg` : "기록 필요"}
+              sub={fatMassDiff !== null ? `${fatMassDiff > 0 ? "+" : ""}${fatMassDiff}kg` : allInbody.length === 0 ? "인바디 없음" : "1개 기록"}
+              delta={fatMassDiff !== null ? (fatMassDiff <= 0 ? "▼ 감소" : "▲ 증가") : ""}
+              color={fatMassDiff !== null ? (fatMassDiff <= 0 ? "#16A34A" : "#F97316") : "#94A3B8"}
+            />
+            <SummaryTile
+              title="골격근량 변화"
+              value={firstMM && lastMM ? `${firstMM.toFixed(1)} → ${lastMM.toFixed(1)}kg` : "기록 필요"}
+              sub={mmDiff !== null ? `${mmDiff > 0 ? "+" : ""}${mmDiff}kg` : allInbody.length === 0 ? "인바디 없음" : "1개 기록"}
+              delta={mmDiff !== null ? (mmDiff >= 0 ? "▲ 유지/증가" : "▼ 감소") : ""}
+              color={mmDiff !== null ? (mmDiff >= 0 ? "#2F73F6" : "#F97316") : "#94A3B8"}
+            />
+          </div>
+          {lastInbody && <p className="inbody-last-date">최근 인바디 측정: {lastInbody.date}</p>}
+          {persona !== "general" && compositionChart}
+          {bodyAgeSection}
+        </section>
       </CollapsibleSection>
     </>
   );

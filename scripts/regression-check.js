@@ -733,6 +733,43 @@ const checks = [
     app.includes('await p.saveCheck(); setJustSaved(true);') &&
     app.includes('await p.saveCardioEntry(d);')
   ],
+
+  // ── 변화분석 탭: 회원 목표(다이어트/벌크업/체형교정)에 따른 자동 재구성 ──
+  ['변화분석: 목표(다이어트/벌크업/체형교정/일반) 4종 페르소나 판별 함수 존재',
+    app.includes('function getAnalysisPersona(goal=""){') &&
+    app.includes('if(g.includes("체형교정")||g.includes("교정")) return "correction";') &&
+    app.includes('if(g.includes("벌크업")||g.includes("증량")||g.includes("근육 키우기")) return "bulk";') &&
+    app.includes('if(g.includes("다이어트")||g.includes("감량")) return "diet";')
+  ],
+  ['변화분석: 다이어트 회원 - 체중 그래프 + 체중·칼로리 결합 그래프 + 변화 해석이 최상단',
+    app.includes('{persona === "diet" && (') &&
+    app.includes('<MCard title="체중과 섭취 칼로리">') &&
+    app.includes('function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){')
+  ],
+  ['변화분석: 벌크업 회원 - 운동 볼륨/수행능력이 최상단, 5RM·10RM은 Epley 추정 + 예상값 문구 명시',
+    app.includes('{persona === "bulk" && (') &&
+    (() => { const i = app.indexOf('{persona === "bulk" && ('); return app.indexOf('<StrengthChangeCard', i) !== -1 && app.indexOf('<StrengthChangeCard', i) < app.indexOf('총 운동량 변화', i); })() &&
+    app.includes('function estimate1RM(weight,reps){const w=Number(weight),r=Number(reps); if(!w||!r) return null; return r<=1?w:w*(1+r/30);}') &&
+    app.includes('실측 1RM이 아닌, 기록된 무게·반복수 기반 추정값입니다.')
+  ],
+  ['변화분석: 체형교정 회원 - 통증(VAS)이 최상단, 가동범위/기능평가는 데이터 없음을 정직하게 표시(신규 Firestore 구조 추가 없음)',
+    app.includes('{persona === "correction" && (') &&
+    app.includes('아직 등록된 가동범위 평가가 없습니다.') &&
+    app.includes('아직 등록된 기능 평가(오버헤드 스쿼트, 싱글레그 밸런스 등)가 없습니다.')
+  ],
+  ['변화분석: 공통 섹션(목표까지 남은 변화/운동 지속 현황)은 모든 페르소나에 동일하게 표시',
+    app.includes('<WeightGoalStrategyCard {...p} />') &&
+    app.includes('function WorkoutConsistencyCard({sessions=[],totalReg,remaining,attendance=[]}){') &&
+    app.includes('<WorkoutConsistencyCard sessions={p.sessions} totalReg={p.totalReg} remaining={p.remaining} attendance={p.attendance} />')
+  ],
+  ['변화분석: 위상각/신체나이 등 전문 데이터는 "건강 전문 분석"로 통합, 기본 접힘',
+    app.includes('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>') &&
+    !app.includes('<CollapsibleSection label="신체나이 변화" defaultOpen={false}>')
+  ],
+  ['변화분석: 목표별 우선 표시 항목은 "추가 데이터"에서 중복 노출하지 않음(primaryUses로 제외)',
+    app.includes('const primaryUses = {') &&
+    app.includes('<CollapsibleSection label="추가 데이터" defaultOpen={false}>')
+  ],
 ];
 
 let failed = 0;

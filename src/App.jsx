@@ -9374,6 +9374,7 @@ function matchCategory(exName, keywords) {
 function LibraryScreen({ sessions, loading, onBack }) {
   const TABS = ["하체","등","가슴","어깨","팔-이두근","팔-삼두근","복근","코어","기능","기타"];
   const [selTop, setSelTop] = useState("하체");
+  const [q, setQ] = useState("");
 
   if (loading) return <div><SH title="📚 운동 라이브러리" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} /><Skel n={4} /></div>;
 
@@ -9397,13 +9398,30 @@ function LibraryScreen({ sessions, loading, onBack }) {
     });
   });
 
-  // 현재 탭에서 기록된 운동들
-  const recordedForTab = Object.values(recordMap).filter(e => e.muscleTop === selTop);
+  // 검색: 운동명 + 부위(대/소) + 기구 태그 대상, 검색어가 있으면 전체 운동에서 검색
+  const lq = q.trim().toLowerCase();
+  const searching = lq.length > 0;
+  const matchesQuery = e => [e.name, e.muscleTop, e.muscleSub, e.equipment]
+    .some(v => String(v||"").toLowerCase().includes(lq));
+
+  // 현재 탭(또는 검색어)에서 기록된 운동들
+  const recordedForTab = searching
+    ? Object.values(recordMap).filter(matchesQuery)
+    : Object.values(recordMap).filter(e => e.muscleTop === selTop);
   const gc = mColor(selTop);
-  const categoryDef = CATEGORY_ORDER[selTop];
+  const categoryDef = searching ? null : CATEGORY_ORDER[selTop];
 
   // 카테고리 순서에 따라 기록된 운동 분류
   function buildGroups() {
+    if (searching) {
+      // 검색 모드: 부위(대분류)별로 묶어서 표시
+      const byTop = {};
+      recordedForTab.forEach(e => { (byTop[e.muscleTop] ||= []).push(e); });
+      return TABS.filter(t => byTop[t]?.length).map(t => ({
+        label: t,
+        items: byTop[t].slice().sort((a,b)=>a.name.localeCompare(b.name,"ko")),
+      }));
+    }
     if (!categoryDef) {
       // 복근/기타: 기록 순서 그대로
       return recordedForTab.length > 0
@@ -9432,30 +9450,67 @@ function LibraryScreen({ sessions, loading, onBack }) {
     <div>
       <SH title="📚 운동 라이브러리" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
 
-      {/* 부위 탭 */}
-      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:16}}>
-        {TABS.map(top => {
-          const col    = mColor(top);
-          const cnt    = Object.values(recordMap).filter(e=>e.muscleTop===top).length;
-          const active = selTop === top;
-          return (
-            <button key={top} onClick={() => setSelTop(top)}
-              style={{padding:"6px 13px",borderRadius:20,border:"1px solid",
-                borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
-                color:active?col:"#54546a",fontSize:12,fontWeight:700,
-                display:"flex",alignItems:"center",gap:5}}>
-              {top}
-              {cnt > 0 && (
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"0 5px",
-                  borderRadius:8,background:active?col+"44":"rgba(255,255,255,0.08)",color:active?col:"#3a3a4a"}}>{cnt}</span>
-              )}
-            </button>
-          );
-        })}
+      {/* 검색창 */}
+      <div style={{position:"relative",marginBottom:14}}>
+        <input
+          type="search"
+          value={q}
+          onChange={e=>setQ(e.target.value)}
+          placeholder="운동 종목 검색"
+          style={{width:"100%",boxSizing:"border-box",padding:"11px 40px 11px 14px",fontSize:15}}
+        />
+        {q && (
+          <button type="button" onClick={()=>setQ("")}
+            aria-label="검색어 지우기"
+            style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",
+              width:26,height:26,borderRadius:"50%",border:"none",background:"rgba(255,255,255,0.08)",
+              color:"#8a8aa0",fontSize:13,lineHeight:"26px",padding:0,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        )}
       </div>
 
-      {/* 기록 없음 */}
-      {groups.length === 0 && (
+      {searching && (
+        <div style={{marginBottom:14,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#54546a"}}>
+          검색 결과 {recordedForTab.length}개
+        </div>
+      )}
+
+      {/* 부위 탭 (검색 중에는 숨김 — 검색어 삭제 시 복귀) */}
+      {!searching && (
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:16}}>
+          {TABS.map(top => {
+            const col    = mColor(top);
+            const cnt    = Object.values(recordMap).filter(e=>e.muscleTop===top).length;
+            const active = selTop === top;
+            return (
+              <button key={top} onClick={() => setSelTop(top)}
+                style={{padding:"6px 13px",borderRadius:20,border:"1px solid",
+                  borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
+                  color:active?col:"#54546a",fontSize:12,fontWeight:700,
+                  display:"flex",alignItems:"center",gap:5}}>
+                {top}
+                {cnt > 0 && (
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"0 5px",
+                    borderRadius:8,background:active?col+"44":"rgba(255,255,255,0.08)",color:active?col:"#3a3a4a"}}>{cnt}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 검색 결과 없음 */}
+      {searching && groups.length === 0 && (
+        <div style={{textAlign:"center",padding:"40px 20px",background:"#111827",
+          borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
+          <div style={{fontSize:32,marginBottom:8}}>🔍</div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#54546a"}}>
+            검색 결과가 없습니다.
+          </div>
+        </div>
+      )}
+
+      {/* 기록 없음 (탭 모드) */}
+      {!searching && groups.length === 0 && (
         <div style={{textAlign:"center",padding:"40px 20px",background:"#111827",
           borderRadius:12,border:"1px dashed rgba(255,255,255,0.08)"}}>
           <div style={{fontSize:32,marginBottom:8}}>📭</div>
@@ -9467,17 +9522,19 @@ function LibraryScreen({ sessions, loading, onBack }) {
       )}
 
       {/* 카테고리별 기록 표시 */}
-      {groups.map(group => (
+      {groups.map(group => {
+        const hc = searching ? mColor(group.label) : gc;
+        return (
         <div key={group.label} style={{marginBottom:18}}>
           {/* 카테고리 헤더 */}
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-            <div style={{height:1,flex:1,background:gc+"33"}} />
-            <div style={{padding:"4px 14px",borderRadius:20,background:gc+"18",border:"1px solid "+gc+"44",
+            <div style={{height:1,flex:1,background:hc+"33"}} />
+            <div style={{padding:"4px 14px",borderRadius:20,background:hc+"18",border:"1px solid "+hc+"44",
               display:"flex",alignItems:"center",gap:6}}>
-              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:gc}}>{group.label}</span>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:gc}}>{group.items.length}종</span>
+              <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:12,color:hc}}>{group.label}</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:hc}}>{group.items.length}종</span>
             </div>
-            <div style={{height:1,flex:1,background:gc+"33"}} />
+            <div style={{height:1,flex:1,background:hc+"33"}} />
           </div>
 
           {/* 운동 카드 */}
@@ -9512,7 +9569,8 @@ function LibraryScreen({ sessions, loading, onBack }) {
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

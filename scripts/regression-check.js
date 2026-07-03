@@ -682,7 +682,12 @@ const checks = [
 
   // ── 회원앱 건강 탭: 최근 건강 기록 하단 이동 + 기본 닫힘 ──
   ['건강 탭 순서: 유산소 섹션(CardioSection)이 최근 건강 기록보다 먼저 렌더링됨',
-    app.includes('<CardioSection {...p}/><RecentHealthRecords')
+    (() => {
+      const memberHealthFn = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function MemberHealth(p){') + 4000);
+      const iCardio = memberHealthFn.indexOf('<CardioSection {...p}/>');
+      const iRecent = memberHealthFn.indexOf('<RecentHealthRecords');
+      return iCardio !== -1 && iRecent !== -1 && iCardio < iRecent;
+    })()
   ],
   ['최근 건강 기록: CollapsibleSection으로 감싸 기본 닫힘(defaultOpen 미지정 시 false) + 펼치기 토글 재사용',
     app.includes('function RecentHealthRecords({checkins,body,nutrition,onDelete}){const rows=buildRecentHealthRecords({checkins,body,nutrition}); return <CollapsibleSection label="최근 건강 기록" defaultOpen={false}><section className="mcard">') &&
@@ -691,6 +696,42 @@ const checks = [
   ['최근 건강 기록: 삭제 기능(onDelete)과 데이터 조회(buildRecentHealthRecords)는 그대로 유지',
     app.includes('onClick={()=>onDelete?.(r.date)}') &&
     app.includes('function buildRecentHealthRecords({checkins=[],body,nutrition})')
+  ],
+
+  // ── 건강 탭 프리미엄 리디자인(동기부여 대시보드) ──
+  ['건강 탭: 오늘 건강 기록 + 유산소 운동이 하나의 health-hub 카드로 통합됨',
+    (() => {
+      const iHub = app.indexOf('<div className="health-hub">');
+      const iDivider = app.indexOf('<div className="health-hub-divider"/>');
+      const iCardio = app.indexOf('<CardioSection {...p}/>');
+      return iHub !== -1 && iDivider !== -1 && iCardio !== -1 && iHub < iDivider && iDivider < iCardio;
+    })()
+  ],
+  ['건강 탭: 상단 요약이 체중/이번주 운동/유산소/동적 하이라이트 4종으로 개편, 목표 카드 제거',
+    app.includes('function computeWeightCard(body)') &&
+    app.includes('function computeWeeklyWorkoutCard(attendance=[],onboarding={})') &&
+    app.includes('function pickHighlightStat(p)') &&
+    !app.includes('<Metric t="목표" v={p.onboarding.goal}/>')
+  ],
+  ['건강 탭: 동기부여 배너(buildHealthMotivation)가 기존 데이터만으로 계산됨(신규 저장 없음)',
+    app.includes('function buildHealthMotivation(p)') &&
+    app.includes('이번 주 목표까지 ${remain}회 남았습니다') &&
+    app.includes('function computeEngagementStreak(checkins=[],attendance=[],cardioLogs=[])')
+  ],
+  ['건강 탭: 유산소 섹션 내부가 MCard 대신 통일된 health-subcard 디자인 사용(1:1/관리자 MCard는 그대로 유지)',
+    !/CardioRecordTab[\s\S]{0,400}<MCard/.test(app) &&
+    app.includes('className="health-subcard"') &&
+    app.includes('function MCard({title,children}){return <section className="mcard">')
+  ],
+  ['건강 탭: 펼치기/접기·탭 전환에 150~250ms 트랜지션 애니메이션 적용',
+    app.includes('.health-collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease}') &&
+    app.includes('.cardio-tab-fade{animation:healthFadeIn .2s ease}') &&
+    app.includes('@keyframes healthFadeIn')
+  ],
+  ['건강 탭: 저장 완료 시 성공 플래시 애니메이션(.save-success), 기존 저장 함수(saveCheck/saveCardioEntry) 로직은 변경 없음',
+    app.includes('.primary.save-success,.ghost.save-success{background:#16C784') &&
+    app.includes('await p.saveCheck(); setJustSaved(true);') &&
+    app.includes('await p.saveCardioEntry(d);')
   ],
 ];
 

@@ -14775,6 +14775,114 @@ function mergeAssessments(...groups) {
 }
 
 // ════════════════════════════════════════════
+// 교정 PT 전용 평가 — 빠른 평가 / 유형별 평가 / 교차 평가
+// (기존 자유입력 "체형평가"와 별개로 추가되는, 5분 안에 끝내는 구조화 평가)
+// ════════════════════════════════════════════
+const QUICK_CHECK_ITEMS = [
+  {key:"pain",               label:"통증"},
+  {key:"romLimit",           label:"가동범위 제한"},
+  {key:"weakness",           label:"근력 저하"},
+  {key:"posture",            label:"자세 문제"},
+  {key:"gait",               label:"보행 문제"},
+  {key:"tingling",           label:"저림"},
+  {key:"painDuringExercise", label:"운동 시 통증"},
+  {key:"painDailyLife",      label:"일상생활 통증"},
+];
+const ASSESS_CATEGORIES = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥"];
+// 카테고리당 전문가들이 실제 많이 쓰는 필수 테스트 5개만 (설명은 15자 이내 한 줄)
+const CATEGORY_TESTS = {
+  "목": [
+    {key:"cx_flex",    label:"경추 굴곡",   desc:"턱을 가슴 쪽으로 숙입니다"},
+    {key:"cx_ext",     label:"경추 신전",   desc:"고개를 뒤로 젖힙니다"},
+    {key:"cx_rot",     label:"회전",        desc:"고개를 좌우로 돌립니다"},
+    {key:"cx_lat",     label:"측굴",        desc:"귀를 어깨 쪽으로 기울입니다"},
+    {key:"chin_tuck",  label:"턱 당기기",   desc:"턱을 당겨 이중턱을 만듭니다"},
+  ],
+  "어깨": [
+    {key:"sh_flex",     label:"굴곡",           desc:"팔을 앞으로 들어올립니다"},
+    {key:"sh_er",       label:"외회전",         desc:"팔꿈치 붙이고 밖으로 돌림"},
+    {key:"sh_ir",       label:"내회전",         desc:"팔을 등 뒤로 돌려 올립니다"},
+    {key:"apley",       label:"Apley Scratch", desc:"등 뒤에서 양손을 맞닿습니다"},
+    {key:"wall_slide",  label:"Wall Slide",    desc:"벽에 등 대고 팔 올립니다"},
+  ],
+  "팔꿈치": [
+    {key:"el_flex", label:"굴곡", desc:"팔꿈치를 완전히 구부립니다"},
+    {key:"el_ext",  label:"신전", desc:"팔꿈치를 완전히 폅니다"},
+    {key:"el_pron", label:"회내", desc:"손바닥을 아래로 돌립니다"},
+    {key:"el_sup",  label:"회외", desc:"손바닥을 위로 돌립니다"},
+    {key:"grip",    label:"그립", desc:"손을 강하게 쥐어봅니다"},
+  ],
+  "손목": [
+    {key:"wr_flex",   label:"굴곡", desc:"손목을 안쪽으로 굽힙니다"},
+    {key:"wr_ext",    label:"신전", desc:"손목을 바깥으로 젖힙니다"},
+    {key:"wr_pron",   label:"회내", desc:"손등이 위로 오게 돌립니다"},
+    {key:"wr_sup",    label:"회외", desc:"손바닥이 위로 오게 돌립니다"},
+    {key:"grip_str",  label:"악력", desc:"손을 강하게 쥐어봅니다"},
+  ],
+  "허리": [
+    {key:"lb_flex",    label:"굴곡",       desc:"상체를 앞으로 숙입니다"},
+    {key:"lb_ext",     label:"신전",       desc:"상체를 뒤로 젖힙니다"},
+    {key:"lb_rot",     label:"회전",       desc:"상체를 좌우로 돌립니다"},
+    {key:"side_bend",  label:"Side Bend", desc:"옆으로 상체를 기울입니다"},
+    {key:"slr",        label:"SLR",       desc:"누워서 다리를 들어올립니다"},
+  ],
+  "골반": [
+    {key:"hip_ir",         label:"Hip IR",             desc:"무릎 굽혀 안으로 돌립니다"},
+    {key:"hip_er",         label:"Hip ER",             desc:"무릎 굽혀 밖으로 돌립니다"},
+    {key:"bridge",         label:"Single Leg Bridge",  desc:"골반 기울어짐을 확인합니다"},
+    {key:"trendelenburg",  label:"Trendelenburg",      desc:"한 발로 서서 골반을 봅니다"},
+    {key:"hip_flex",       label:"Hip Flexion",        desc:"무릎을 가슴으로 들어올림"},
+  ],
+  "무릎": [
+    {key:"squat",         label:"스쿼트",       desc:"양발로 앉았다 일어납니다"},
+    {key:"single_squat",  label:"싱글스쿼트",   desc:"한 발로 앉았다 일어납니다"},
+    {key:"stair",         label:"계단",         desc:"계단을 오르내려 봅니다"},
+    {key:"lunge",         label:"런지",         desc:"한 발을 앞으로 내딛습니다"},
+    {key:"step_down",     label:"Step Down",   desc:"낮은 단에서 내려옵니다"},
+  ],
+  "발목": [
+    {key:"knee_wall",  label:"Knee To Wall", desc:"무릎을 벽에 닿게 이동합니다"},
+    {key:"df",         label:"DF",           desc:"발끝을 정강이로 당깁니다"},
+    {key:"pf",         label:"PF",           desc:"발끝을 아래로 뻗습니다"},
+    {key:"balance",    label:"한발 균형",     desc:"한 발로 서서 버팁니다"},
+    {key:"heel_raise", label:"Heel Raise",   desc:"까치발로 들어올립니다"},
+  ],
+  "발바닥": [
+    {key:"short_foot",     label:"Short Foot",     desc:"발바닥 아치를 끌어올립니다"},
+    {key:"windlass",       label:"Windlass",       desc:"엄지발가락을 젖혀봅니다"},
+    {key:"toe_raise",      label:"Toe Raise",      desc:"발가락만 들어올립니다"},
+    {key:"single_balance", label:"Single Balance", desc:"한 발로 서서 버팁니다"},
+    {key:"walking",        label:"Walking",        desc:"몇 걸음 걸어봅니다"},
+  ],
+};
+const TEST_RESULT_OPTS = ["정상","제한","통증"];
+// 카테고리별 교차 평가 추천 — categoryKey가 있으면 실제 탭 이동 가능, 없으면 안내용 라벨만 표시
+const CROSS_REFERRAL_MAP = {
+  "목":     [{label:"어깨",       categoryKey:"어깨"}, {label:"흉추",   categoryKey:null}],
+  "어깨":   [{label:"흉추",       categoryKey:null},   {label:"견갑",   categoryKey:null}, {label:"반대쪽 골반", categoryKey:"골반"}, {label:"고관절", categoryKey:"골반"}],
+  "팔꿈치": [{label:"손목",       categoryKey:"손목"}, {label:"어깨",   categoryKey:"어깨"}],
+  "손목":   [{label:"팔꿈치",     categoryKey:"팔꿈치"}],
+  "허리":   [{label:"고관절",     categoryKey:"골반"}, {label:"발목",   categoryKey:"발목"}, {label:"햄스트링", categoryKey:null}],
+  "골반":   [{label:"허리",       categoryKey:"허리"}, {label:"무릎",   categoryKey:"무릎"}],
+  "무릎":   [{label:"고관절",     categoryKey:"골반"}, {label:"발목",   categoryKey:"발목"}],
+  "발목":   [{label:"무릎",       categoryKey:"무릎"}, {label:"발바닥", categoryKey:"발바닥"}],
+  "발바닥": [{label:"발목",       categoryKey:"발목"}],
+};
+// 빠른 체크 이후 추천 카테고리 — 이 회원의 과거 평가 이력(빈도) 기반, 이력 없으면 전체 노출
+function getRecommendedCategories(records=[], limit=5) {
+  const freq = new Map();
+  records.forEach(r => {
+    (r.recommendedCategories||[]).forEach(c => freq.set(c,(freq.get(c)||0)+1));
+    Object.keys(r.categoryResults||{}).forEach(c => freq.set(c,(freq.get(c)||0)+1));
+  });
+  const sorted = [...freq.entries()].sort((a,b)=>b[1]-a[1]).map(([c])=>c);
+  return sorted.length ? sorted.slice(0,limit) : ASSESS_CATEGORIES.slice(0,limit);
+}
+function emptyCategoryResult() {
+  return { tests: [], crossReferrals: [], crossReferralsChecked: [] };
+}
+
+// ════════════════════════════════════════════
 // ASSESSMENT SCREEN
 // ════════════════════════════════════════════
 function AssessmentScreen({ member, onBack, showToast }) {
@@ -14783,10 +14891,48 @@ function AssessmentScreen({ member, onBack, showToast }) {
   // ── 기본 state ──────────────────────────────────────────────────────
   const [assDate,  setAssDate]  = useState(today);
   const [saving,   setSaving]   = useState(false);
-  const [viewMode, setViewMode] = useState("입력"); // 입력 | 기록 | 변화 분석
+  const [viewMode, setViewMode] = useState("빠른평가"); // 빠른평가 | 유형별평가 | 입력(상세) | 기록 | 변화 분석
   const [records,  setRecords]  = useState(() => loadLocalAssessmentRecords(member.id));
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [viewRec,  setViewRec]  = useState(null);
+
+  // ── 빠른 평가 / 유형별 평가 / 교차 평가 (신규 교정 PT 평가 흐름) ──────
+  const [quickCheck, setQuickCheck] = useState(() => Object.fromEntries(QUICK_CHECK_ITEMS.map(x=>[x.key,false])));
+  const [categoryResults, setCategoryResults] = useState({}); // { [category]: {tests, crossReferrals, crossReferralsChecked} }
+  const [activeCategory, setActiveCategory] = useState(null);
+  const toggleQuickCheck = (key) => setQuickCheck(prev => ({...prev, [key]: !prev[key]}));
+  const goToRecommendedCategories = () => {
+    const recs = getRecommendedCategories(records);
+    setActiveCategory(recs[0] || ASSESS_CATEGORIES[0]);
+    setViewMode("유형별평가");
+  };
+  const getCategoryResult = (cat) => categoryResults[cat] || emptyCategoryResult();
+  const setCategoryTestResult = (cat, testKey, patch) => {
+    setCategoryResults(prev => {
+      const cur = prev[cat] || emptyCategoryResult();
+      const tests = CATEGORY_TESTS[cat].map(t => {
+        const existing = cur.tests.find(x=>x.key===t.key) || { key:t.key, result:"", vas:{좌:0,우:0}, note:"" };
+        return t.key===testKey ? { ...existing, ...patch } : existing;
+      });
+      return { ...prev, [cat]: { ...cur, tests } };
+    });
+  };
+  const completeCategoryAssessment = (cat) => {
+    setCategoryResults(prev => {
+      const cur = prev[cat] || emptyCategoryResult();
+      const crossReferrals = (CROSS_REFERRAL_MAP[cat]||[]).map(r=>r.label);
+      return { ...prev, [cat]: { ...cur, crossReferrals } };
+    });
+  };
+  const bulkCheckCrossReferrals = (cat) => {
+    const referrals = CROSS_REFERRAL_MAP[cat]||[];
+    setCategoryResults(prev => {
+      const cur = prev[cat] || emptyCategoryResult();
+      return { ...prev, [cat]: { ...cur, crossReferralsChecked: referrals.map(r=>r.label) } };
+    });
+    const firstJumpable = referrals.find(r=>r.categoryKey);
+    if (firstJumpable) setActiveCategory(firstJumpable.categoryKey);
+  };
   const [aiResult, setAiResult] = useState("");
   const [aiLoading,setAiLoading]= useState(false);
 
@@ -14994,6 +15140,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
         evalMemo || "",
       ].filter(Boolean).join(" / ");
 
+      const hasQuickCheck = Object.values(quickCheck).some(Boolean);
+      const hasCategoryResults = Object.keys(categoryResults).length > 0;
       const rec = {
         id:"a"+Date.now(), date:assDate, savedAt:new Date().toISOString(),
         painList: [...painList],
@@ -15005,6 +15153,10 @@ function AssessmentScreen({ member, onBack, showToast }) {
         gaitMemo,
         evalMemo,
         summary,
+        // 빠른 평가 / 유형별 평가 (신규 교정 PT 평가 구조) — 사용한 경우에만 저장
+        quickCheck: hasQuickCheck ? {...quickCheck} : undefined,
+        recommendedCategories: hasQuickCheck ? getRecommendedCategories(records) : undefined,
+        categoryResults: hasCategoryResults ? {...categoryResults} : undefined,
         // AI 루틴용
         aiRoutine: aiResult || undefined,
       };
@@ -15187,6 +15339,31 @@ function AssessmentScreen({ member, onBack, showToast }) {
             <Mo c="#94a3b8" s={9} style={{lineHeight:1.7,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",display:"block"}}>{viewRec.aiRoutine}</Mo>
           </Card>
         )}
+        {viewRec.categoryResults && Object.keys(viewRec.categoryResults).length>0 && (
+          <Card title="🎯 유형별 평가" style={{marginBottom:8}}>
+            {Object.entries(viewRec.categoryResults).map(([cat,cr])=>{
+              const notable = (cr.tests||[]).filter(t=>t.result && t.result!=="정상");
+              if (!notable.length && !(cr.crossReferralsChecked||[]).length) return null;
+              return (
+                <div key={cat} style={{marginBottom:8}}>
+                  <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:3}}>{cat}</Mo>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {notable.map(t=>{
+                      const label = CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label || t.key;
+                      const vasTxt = t.result==="통증" ? ` VAS 좌${t.vas?.좌||0}/우${t.vas?.우||0}` : "";
+                      return <span key={t.key} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
+                        background:t.result==="통증"?"rgba(239,68,68,.1)":"rgba(255,209,102,.1)",
+                        color:t.result==="통증"?"#f87171":"#fcd34d"}}>{label} {t.result}{vasTxt}</span>;
+                    })}
+                    {(cr.crossReferralsChecked||[]).map(r=>(
+                      <span key={r} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,background:"rgba(162,155,254,.12)",color:"#a29bfe"}}>↳ {r}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        )}
       </div>
     );
   }
@@ -15198,7 +15375,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
         right={
           <div style={{display:"flex",gap:5}}>
             <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
-            {viewMode==="입력" && (
+            {viewMode!=="기록" && viewMode!=="변화 분석" && (
             <button onClick={handleSave} disabled={saving}
               style={{padding:"5px 12px",borderRadius:7,border:"none",cursor:"pointer",
                 background:saving?"rgba(255,255,255,.08)":"#5EEAD4",
@@ -15210,18 +15387,142 @@ function AssessmentScreen({ member, onBack, showToast }) {
         } />
 
       {/* ── 뷰 모드 탭 ─────────────────────────────────────────────── */}
-      <div style={{display:"flex",gap:4,marginBottom:12,borderBottom:"1px solid rgba(255,255,255,0.07)",paddingBottom:8}}>
-        {["입력","기록","변화 분석"].map(m=>(
-          <button key={m} onClick={()=>setViewMode(m)}
+      <div style={{display:"flex",gap:4,marginBottom:12,borderBottom:"1px solid rgba(255,255,255,0.07)",paddingBottom:8,flexWrap:"wrap"}}>
+        {[
+          {key:"빠른평가",  label:"⚡ 빠른 평가"},
+          {key:"유형별평가", label:"🎯 유형별 평가"},
+          {key:"입력",      label:"상세 입력"},
+          {key:"기록",      label:"기록"},
+          {key:"변화 분석", label:"📊 변화 분석"},
+        ].map(t=>(
+          <button key={t.key} onClick={()=>setViewMode(t.key)}
             style={{padding:"6px 14px",borderRadius:16,border:"1px solid",cursor:"pointer",
-              fontSize:11,fontWeight:viewMode===m?800:400,
-              borderColor:viewMode===m?"#5EEAD4":"rgba(255,255,255,0.1)",
-              background:viewMode===m?"rgba(94,234,212,.12)":"transparent",
-              color:viewMode===m?"#5EEAD4":"#94a3b8"}}>
-            {m==="변화 분석"?"📊 "+m:m}
+              fontSize:11,fontWeight:viewMode===t.key?800:400,
+              borderColor:viewMode===t.key?"#5EEAD4":"rgba(255,255,255,0.1)",
+              background:viewMode===t.key?"rgba(94,234,212,.12)":"transparent",
+              color:viewMode===t.key?"#5EEAD4":"#94a3b8"}}>
+            {t.label}
           </button>
         ))}
       </div>
+
+      {/* ── 빠른 평가 탭 (30초~2분) ──────────────────────────────────── */}
+      {viewMode==="빠른평가" && (
+        <div>
+          <input type="date" value={assDate} onChange={e=>setAssDate(e.target.value)}
+            style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:7,fontSize:12,
+              border:"1px solid rgba(255,255,255,0.1)",background:"#111827",color:"#ddddf0",marginBottom:12}} />
+          <Mo c="#94a3b8" s={10} style={{display:"block",marginBottom:10}}>해당하는 항목을 체크하세요. 체크 즉시 추천 평가 유형으로 이동할 수 있습니다.</Mo>
+          <div style={{display:"grid",gap:6,marginBottom:16}}>
+            {QUICK_CHECK_ITEMS.map(item=>(
+              <button key={item.key} onClick={()=>toggleQuickCheck(item.key)}
+                style={{display:"flex",alignItems:"center",gap:8,padding:"11px 12px",borderRadius:9,
+                  border:"1px solid "+(quickCheck[item.key]?"#5EEAD4":"rgba(255,255,255,.08)"),
+                  background:quickCheck[item.key]?"rgba(94,234,212,.1)":"rgba(255,255,255,.02)",cursor:"pointer",textAlign:"left"}}>
+                <span style={{width:18,height:18,borderRadius:5,flexShrink:0,
+                  border:"1.5px solid "+(quickCheck[item.key]?"#5EEAD4":"rgba(255,255,255,.2)"),
+                  background:quickCheck[item.key]?"#5EEAD4":"transparent",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#0B1120"}}>{quickCheck[item.key]?"✓":""}</span>
+                <Mo c={quickCheck[item.key]?"#e2e8f0":"#94a3b8"} s={12} style={{fontWeight:quickCheck[item.key]?700:400}}>{item.label}</Mo>
+              </button>
+            ))}
+          </div>
+          {Object.values(quickCheck).some(Boolean) && (
+            <button onClick={goToRecommendedCategories}
+              style={{width:"100%",padding:"13px",borderRadius:10,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:13,fontWeight:800}}>
+              → 추천 평가 유형으로 이동
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── 유형별 평가 탭 (증상 중심 카테고리, 카테고리당 필수 테스트 5개) ── */}
+      {viewMode==="유형별평가" && (() => {
+        const cat = activeCategory || ASSESS_CATEGORIES[0];
+        const result = getCategoryResult(cat);
+        const tests = CATEGORY_TESTS[cat];
+        const referrals = CROSS_REFERRAL_MAP[cat]||[];
+        return (
+          <div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
+              {ASSESS_CATEGORIES.map(c=>{
+                const done = (categoryResults[c]?.tests||[]).some(t=>t.result);
+                return (
+                  <button key={c} onClick={()=>setActiveCategory(c)}
+                    style={{padding:"6px 12px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:cat===c?800:400,
+                      borderColor:cat===c?"#a29bfe":done?"rgba(94,234,212,.4)":"rgba(255,255,255,0.1)",
+                      background:cat===c?"rgba(162,155,254,.15)":"transparent",
+                      color:cat===c?"#a29bfe":done?"#5EEAD4":"#94a3b8"}}>
+                    {c}{done?" ✓":""}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{display:"grid",gap:8,marginBottom:14}}>
+              {tests.map(t=>{
+                const row = result.tests.find(x=>x.key===t.key) || {result:"",vas:{좌:0,우:0}};
+                return (
+                  <div key={t.key} style={{padding:"11px 12px",borderRadius:9,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                      <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{t.label}</Mo>
+                    </div>
+                    <Mo c="#3a4a5a" s={9} style={{display:"block",marginBottom:7}}>{t.desc}</Mo>
+                    <div style={{display:"flex",gap:4,marginBottom:7}}>
+                      {TEST_RESULT_OPTS.map(opt=>(
+                        <button key={opt} onClick={()=>setCategoryTestResult(cat,t.key,{result:opt})}
+                          style={{flex:1,padding:"6px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                            borderColor:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="제한"?"#ffd166":"#ef4444"):"rgba(255,255,255,.08)",
+                            background:row.result===opt?(opt==="정상"?"rgba(94,234,212,.15)":opt==="제한"?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
+                            color:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="제한"?"#ffd166":"#f87171"):"#94a3b8"}}>
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                    {row.result==="통증" && (
+                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                        {["좌","우"].map(side=>(
+                          <div key={side} style={{display:"flex",alignItems:"center",gap:4}}>
+                            <Mo c="#94a3b8" s={9}>{side} VAS</Mo>
+                            <input type="number" min={0} max={10} value={row.vas?.[side]||0}
+                              onChange={e=>setCategoryTestResult(cat,t.key,{vas:{...(row.vas||{좌:0,우:0}),[side]:Math.max(0,Math.min(10,Number(e.target.value)||0))}})}
+                              style={{width:38,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",
+                                border:"1px solid rgba(239,68,68,.3)",background:"#111827",color:"#f87171"}} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={()=>completeCategoryAssessment(cat)}
+              style={{width:"100%",padding:"10px",borderRadius:9,border:"1px solid rgba(94,234,212,.3)",cursor:"pointer",
+                background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:11,fontWeight:700,marginBottom:10}}>
+              ✓ {cat} 평가 완료 — 교차 평가 추천 보기
+            </button>
+            {(getCategoryResult(cat).crossReferrals.length>0) && (
+              <div style={{padding:"11px 12px",borderRadius:9,background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.2)"}}>
+                <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:7}}>🔗 교차 평가 추천</Mo>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+                  {referrals.map(r=>(
+                    <span key={r.label} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:12,
+                      background:getCategoryResult(cat).crossReferralsChecked.includes(r.label)?"rgba(94,234,212,.15)":"rgba(162,155,254,.12)",
+                      color:getCategoryResult(cat).crossReferralsChecked.includes(r.label)?"#5EEAD4":"#a29bfe"}}>
+                      {r.label}{r.categoryKey?"":" (참고)"}
+                    </span>
+                  ))}
+                </div>
+                <button onClick={()=>bulkCheckCrossReferrals(cat)}
+                  style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:"pointer",
+                    background:"rgba(162,155,254,.18)",color:"#a29bfe",fontSize:10,fontWeight:700}}>
+                  한 번에 체크하고 이동
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── 변화 분석 탭 ─────────────────────────────────────────────── */}
       {viewMode==="변화 분석" && (
@@ -15238,6 +15539,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
               const tCnt=(r.muscleItems||[]).filter(m=>m.type==="tight").length;
               const wCnt=(r.muscleItems||[]).filter(m=>m.type==="weak").length;
               const pl  =(r.painList||[]).length;
+              const catCnt = Object.keys(r.categoryResults||{}).length;
               return (
                 <div key={r.id} onClick={()=>{setViewRec(r);}}
                   style={{display:"flex",justifyContent:"space-between",alignItems:"center",
@@ -15248,6 +15550,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
                     {r._migrated&&<Mo c="#3a4a5a" s={8} style={{marginLeft:5}}>구버전</Mo>}
                   </div>
                   <div style={{display:"flex",gap:4}}>
+                    {catCnt>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(162,155,254,.12)",color:"#a29bfe"}}>유형평가 {catCnt}</span>}
                     {pl>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(239,68,68,.12)",color:"#f87171"}}>통증 {pl}</span>}
                     {tCnt>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(239,68,68,.1)",color:"#f87171"}}>🔴{tCnt}</span>}
                     {wCnt>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(37,99,235,.1)",color:"#60a5fa"}}>🔵{wCnt}</span>}

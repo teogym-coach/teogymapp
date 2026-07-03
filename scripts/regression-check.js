@@ -793,6 +793,53 @@ const checks = [
     app.includes('const primaryUses = {') &&
     app.includes('<CollapsibleSection label="추가 데이터" defaultOpen={false}>')
   ],
+
+  // ── 체형평가 리뉴얼 Phase 1: 빠른 평가 / 유형별 평가 / 교차 평가 ──
+  ['체형평가: 빠른 평가 체크리스트 8개 항목 정의(통증/가동범위 제한/근력 저하/자세 문제/보행 문제/저림/운동 시 통증/일상생활 통증)',
+    app.includes('const QUICK_CHECK_ITEMS = [') &&
+    ['pain','romLimit','weakness','posture','gait','tingling','painDuringExercise','painDailyLife'].every(k=>app.includes(`key:"${k}"`))
+  ],
+  ['체형평가: 유형별 평가 카테고리 9개(목/어깨/팔꿈치/손목/허리/골반/무릎/발목/발바닥), 카테고리당 필수 테스트 5개',
+    app.includes('const ASSESS_CATEGORIES = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥"];') &&
+    (() => {
+      const start = app.indexOf('const CATEGORY_TESTS = {');
+      const end = app.indexOf('const TEST_RESULT_OPTS');
+      const block = app.slice(start, end);
+      const cats = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥"];
+      return cats.every((cat,i) => {
+        const catIdx = block.indexOf(`"${cat}": [`);
+        if (catIdx === -1) return false;
+        const nextCat = cats[i+1];
+        const nextCatIdx = nextCat ? block.indexOf(`"${nextCat}": [`, catIdx) : -1;
+        const section = block.slice(catIdx, nextCatIdx === -1 ? undefined : nextCatIdx);
+        return (section.match(/key:/g)||[]).length === 5 && (section.match(/desc:/g)||[]).length === 5;
+      });
+    })()
+  ],
+  ['체형평가: 테스트마다 정상/제한/통증 버튼 + 통증 시 좌우 VAS 입력',
+    app.includes('const TEST_RESULT_OPTS = ["정상","제한","통증"];') &&
+    app.includes('row.result==="통증" && (') &&
+    app.includes('{["좌","우"].map(side=>(')
+  ],
+  ['체형평가: 교차 평가 정적 매핑(어깨→흉추/견갑/반대쪽 골반/고관절, 허리→고관절/발목/햄스트링, 무릎→고관절/발목) + 일괄 체크',
+    app.includes('"어깨":   [{label:"흉추",       categoryKey:null},   {label:"견갑",   categoryKey:null}, {label:"반대쪽 골반", categoryKey:"골반"}, {label:"고관절", categoryKey:"골반"}],') &&
+    app.includes('"허리":   [{label:"고관절",     categoryKey:"골반"}, {label:"발목",   categoryKey:"발목"}, {label:"햄스트링", categoryKey:null}],') &&
+    app.includes('"무릎":   [{label:"고관절",     categoryKey:"골반"}, {label:"발목",   categoryKey:"발목"}],') &&
+    app.includes('const bulkCheckCrossReferrals = (cat) => {')
+  ],
+  ['체형평가: 빠른 평가 체크 시 회원의 과거 평가 이력(빈도) 기반으로 추천 카테고리 계산, 이력 없으면 전체 노출',
+    app.includes('function getRecommendedCategories(records=[], limit=5)') &&
+    app.includes('return sorted.length ? sorted.slice(0,limit) : ASSESS_CATEGORIES.slice(0,limit);')
+  ],
+  ['체형평가: 새 quickCheck/categoryResults는 실제 입력된 경우에만 저장(레거시 전용 저장 시 새 필드로 오염되지 않음)',
+    app.includes('const hasQuickCheck = Object.values(quickCheck).some(Boolean);') &&
+    app.includes('quickCheck: hasQuickCheck ? {...quickCheck} : undefined,') &&
+    app.includes('categoryResults: hasCategoryResults ? {...categoryResults} : undefined,')
+  ],
+  ['체형평가: 기존 자유입력(painList/muscleItems/mobility/gait/postureList) 탭과 기록 조회는 그대로 유지(레거시 데이터 손실 없음)',
+    app.includes('{key:"입력",      label:"상세 입력"},') &&
+    app.includes('{viewRec.categoryResults && Object.keys(viewRec.categoryResults).length>0 && (')
+  ],
 ];
 
 let failed = 0;

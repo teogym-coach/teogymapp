@@ -1469,7 +1469,7 @@ const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
   "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight",
   "targetWeight", "targetWeightKg", "targetPeriod", "targetPeriodCustom",
   "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
-  "agreedTermsAt", "agreedPrivacyAt",
+  "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate",
 ]);
 
 function sanitizeMemberOnboardingPayload(data = {}) {
@@ -1908,4 +1908,41 @@ export async function getAttendanceRecent(memberId, days = 90) {
     )
   );
   return snap.docs.map(d => d.data());
+}
+
+// ════════════════════════════════════════════
+// 유산소 기록 — members/{id}/cardioLogs/{logId}
+// ════════════════════════════════════════════
+export async function getCardioLogs(memberId, max = 60) {
+  requireUid();
+  const path = `members/${memberId}/cardioLogs`;
+  dbLog("getCardioLogs", "읽기 시작:", path);
+  try {
+    const snap = await getDocs(query(collection(db, "members", memberId, "cardioLogs"), orderBy("date", "desc"), limit(max)));
+    dbLog("getCardioLogs", `성공: ${snap.docs.length}건`);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error("[DB:getCardioLogs] read failed:", { path, collection: "cardioLogs", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
+}
+
+export async function saveCardioLog(memberId, data, logId = null) {
+  requireUid();
+  const payload = clean(data);
+  if (logId) {
+    const ref = doc(db, "members", memberId, "cardioLogs", logId);
+    await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+    return { id: logId, ...payload };
+  }
+  const ref = await addDoc(collection(db, "members", memberId, "cardioLogs"), {
+    ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+  });
+  try { await updateDoc(doc(db, "members", memberId), { memberLastInputAt: serverTimestamp() }); } catch {}
+  return { id: ref.id, ...payload };
+}
+
+export async function deleteCardioLog(memberId, logId) {
+  requireUid();
+  await deleteDoc(doc(db, "members", memberId, "cardioLogs", logId));
 }

@@ -154,7 +154,7 @@ service cloud.firestore {
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
         "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
-        "agreedTermsAt", "agreedPrivacyAt"
+        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"
       ]);
     }
 
@@ -166,7 +166,7 @@ service cloud.firestore {
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
         "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
-        "agreedTermsAt", "agreedPrivacyAt"
+        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"
       ]);
     }
 
@@ -236,6 +236,11 @@ service cloud.firestore {
       }
 
       match /memberCheckins/{checkinId} {
+        allow read, create, update: if canAccessMember(memberId);
+        allow delete: if canAccessMember(memberId);
+      }
+
+      match /cardioLogs/{logId} {
         allow read, create, update: if canAccessMember(memberId);
         allow delete: if canAccessMember(memberId);
       }

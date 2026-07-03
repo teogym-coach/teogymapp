@@ -589,6 +589,54 @@ describe("TEO GYM Firestore Rules v8", function () {
   });
 
   // ════════════════════════════════════════════════════
+  // 6-1. cardioLogs 컬렉션 (유산소 기록)
+  // ════════════════════════════════════════════════════
+  describe("6-1. cardioLogs", () => {
+    beforeEach(async () => {
+      await seedMembers({ "member_a": memberActive, "member_paused": memberPaused });
+      await seedSubcollection("member_a", "cardioLogs", "log1", {
+        date: "2026-07-01", activityType: "러닝", durationMinutes: 30, caloriesBurned: 300,
+      });
+    });
+
+    it("[관리자] cardioLogs read/write 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("cardioLogs").doc("log1").get());
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("cardioLogs").doc("log1").set({ date: "2026-07-01", activityType: "걷기" })
+      );
+    });
+
+    it("[진행중 회원] 본인 cardioLogs read/write 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("cardioLogs").doc("log1").get());
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("cardioLogs").add({
+          date: "2026-07-02", activityType: "빠른 걷기", durationMinutes: 40,
+        })
+      );
+    });
+
+    it("[진행중 회원] 본인 cardioLogs delete 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("cardioLogs").doc("log1").delete());
+    });
+
+    it("[휴식중 회원] cardioLogs read 차단", async () => {
+      const db = asUser(testEnv, "paused_uid");
+      await seedSubcollection("member_paused", "cardioLogs", "log1", { date: "2026-07-01", activityType: "러닝" });
+      await assertFails(db.collection("members").doc("member_paused").collection("cardioLogs").doc("log1").get());
+    });
+
+    it("[회원 A] 회원 B cardioLogs read 차단", async () => {
+      await seedMembers({ "member_b": memberB });
+      await seedSubcollection("member_b", "cardioLogs", "log1", { date: "2026-07-01", activityType: "러닝" });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("cardioLogs").doc("log1").get());
+    });
+  });
+
+  // ════════════════════════════════════════════════════
   // 7. attendance 컬렉션
   // ════════════════════════════════════════════════════
   describe("7. attendance", () => {

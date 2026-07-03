@@ -537,6 +537,51 @@ const checks = [
     app.includes('TEAM_STATUS_COLORS') &&
     app.includes('getTeamStatus(ps)')
   ],
+
+  // ── 유산소 기록 기능 ──
+  ['유산소 기록: Firestore 저장 구조 members/{id}/cardioLogs',
+    db.includes('export async function getCardioLogs(memberId') &&
+    db.includes('export async function saveCardioLog(memberId') &&
+    db.includes('export async function deleteCardioLog(memberId') &&
+    db.includes('collection(db, "members", memberId, "cardioLogs")')
+  ],
+  ['유산소 기록: Firestore Rules cardioLogs 회원 본인 read/write 허용',
+    firestoreRules.includes('match /cardioLogs/{logId}') &&
+    firestoreRules.includes('allow read, create, update: if canAccessMember(memberId);\n        allow delete: if canAccessMember(memberId);')
+  ],
+  ['유산소 기록: MET 기반 칼로리 계산(공식 재사용)',
+    app.includes('function getCardioMet(activityType, intensity)') &&
+    app.includes('function calcCardioCalories(met, weightKg, minutes)') &&
+    app.includes('met * 3.5 * w * m / 200')
+  ],
+  ['Zone2 심박수: 기본 방식(220-나이) + 개인화 방식(HRR) 둘 다 구현',
+    app.includes('function getZone2Range(age, restingHeartRate)') &&
+    app.includes('220 - safeAge') &&
+    app.includes('maxHR - rhr') &&
+    app.includes('"personalized"') &&
+    app.includes('"basic"')
+  ],
+  ['Zone2 달성 여부: 평균 심박수 없으면 unknown 처리',
+    app.includes('function classifyZone2(averageHeartRate, zone2)') &&
+    app.includes('return "unknown"')
+  ],
+  ['안정시 심박수: memberOnboarding 필드 화이트리스트에 포함(Rules + db.js)',
+    firestoreRules.includes('"agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"') &&
+    db.includes('"agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"')
+  ],
+  ['회원앱 건강 탭: 유산소 기록/Zone2 심박수/유산소 분석 메뉴 추가',
+    app.includes('function CardioSection(p)') &&
+    app.includes('["record","유산소 기록"]') &&
+    app.includes('["zone2","Zone2 심박수"]') &&
+    app.includes('["analysis","유산소 분석"]') &&
+    app.includes('function MemberHealth(p)') &&
+    app.includes('<CardioSection {...p}/>')
+  ],
+  ['관리자앱 건강관리 허브: 유산소 탭 연동(최근 기록/주간 요약/Zone2/체중 비교)',
+    app.includes('function AdminCardioSection(') &&
+    app.includes('{key:"유산소",   role:"cardio"') &&
+    app.includes('cur.role==="cardio" && <AdminCardioSection')
+  ],
 ];
 
 let failed = 0;

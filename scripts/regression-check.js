@@ -663,6 +663,22 @@ const checks = [
     db.includes('if (feedback.memo !== undefined) payload.memo = feedback.memo || "";') &&
     db.includes('await setDoc(ref, clean(payload), { merge: true });')
   ],
+
+  // ── 관리자앱 PC 로그인 화면 대비 개선 ──
+  ['관리자 로그인 버튼: 입력 전 약한 블루 틴트, 입력 완료 시 선명한 블루(#2F73F6)로 전환(Btn 공용 컴포넌트는 변경하지 않고 LoginScreen 인스턴스에만 style prop으로 override)',
+    app.includes('background:"rgba(47,115,246,.14)",color:"rgba(255,255,255,.5)",opacity:1,boxShadow:"none"') &&
+    app.includes('background:"#2F73F6",color:"#fff",opacity:1,boxShadow:"0 8px 20px rgba(47,115,246,.35)"') &&
+    app.includes('function Btn({ children, onClick, sm, full, disabled, ghost, style }) {') // 공용 Btn 컴포넌트 시그니처 불변 확인
+  ],
+  ['관리자앱 입력창/라벨/placeholder 대비 개선 — 회원앱(.member-shell/.member-login) DOM에는 :not(:has())로 매칭되지 않음',
+    app.includes('body:not(:has(.member-shell)):not(:has(.member-login)) label{color:#9ca8bb;}') &&
+    app.includes('background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#fff;') &&
+    app.includes('body:not(:has(.member-shell)):not(:has(.member-login)) input::placeholder,')
+  ],
+  ['회원앱 회귀 방지: .form-line/.login-form 등 회원 전용 input/label 스코프 규칙은 그대로 유지(관리자 대비 개선이 회원앱에 새지 않음)',
+    app.includes('.form-line label{font-weight:900;color:#66717C}') &&
+    app.includes('.login-form input:not([type="checkbox"]){width:100%;background:#fff;color:#20242A;')
+  ],
 ];
 
 let failed = 0;

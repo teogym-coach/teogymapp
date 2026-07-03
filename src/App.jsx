@@ -959,6 +959,13 @@ input::placeholder,textarea::placeholder{color:#2e2e3e;}
 select option{background:#111827;}
 textarea{resize:vertical;min-height:54px;}
 label{display:block;font-family:'DM Mono',monospace;font-size:10px;color:#54546a;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;}
+/* 관리자앱 PC 화면 대비 개선 — :has()로 회원앱(.member-shell/.member-login) DOM에는 절대 매칭되지 않도록 스코프 */
+body:not(:has(.member-shell)):not(:has(.member-login)) label{color:#9ca8bb;}
+body:not(:has(.member-shell)):not(:has(.member-login)) input,
+body:not(:has(.member-shell)):not(:has(.member-login)) textarea,
+body:not(:has(.member-shell)):not(:has(.member-login)) select{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#fff;}
+body:not(:has(.member-shell)):not(:has(.member-login)) input::placeholder,
+body:not(:has(.member-shell)):not(:has(.member-login)) textarea::placeholder{color:rgba(255,255,255,.4);}
 button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:transparent;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#0B1120;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.10);border-radius:4px;}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -1014,8 +1021,8 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
       <style>{CSS}</style>
       <div style={{width:"100%",maxWidth:340}}>
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{fontSize:52,marginBottom:10}}>🏋️</div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:"#fff",letterSpacing:"-1px"}}>TEO GYM</div>
+          <div style={{fontSize:58,marginBottom:10,opacity:1,filter:"none"}}>🏋️</div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:30,color:"#fff",letterSpacing:"-1px",opacity:1,filter:"none"}}>TEO GYM</div>
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#54546a",marginTop:4}}>{memberMode ? "회원 전용 운동 관리 앱" : "트레이너 로그인"}</div>
         </div>
         <Card>
@@ -1024,7 +1031,10 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
             <Field label="비밀번호" type="password" value={pw} onChange={setPw} placeholder="••••••••" />
             {error && <div style={{color:"#ff6b6b",fontFamily:"'DM Mono',monospace",fontSize:11,textAlign:"center"}}>{error}</div>}
             <div style={{marginTop:4}}>
-              <Btn full onClick={() => onLogin(email, pw)} disabled={loading || !email || !pw}>
+              <Btn full onClick={() => onLogin(email, pw)} disabled={loading || !email || !pw}
+                style={(loading||!email||!pw)
+                  ? {background:"rgba(47,115,246,.14)",color:"rgba(255,255,255,.5)",opacity:1,boxShadow:"none"}
+                  : {background:"#2F73F6",color:"#fff",opacity:1,boxShadow:"0 8px 20px rgba(47,115,246,.35)"}}>
                 {loading ? "로그인 중..." : (memberMode ? "회원 로그인" : "로그인 →")}
               </Btn>
             </div>

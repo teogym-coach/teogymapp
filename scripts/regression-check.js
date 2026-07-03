@@ -582,6 +582,23 @@ const checks = [
     app.includes('{key:"유산소",   role:"cardio"') &&
     app.includes('cur.role==="cardio" && <AdminCardioSection')
   ],
+
+  // ── 회원앱 PC 크롬 스크롤 고정 버그 재발 방지 ──
+  // 원인: 공용 admin CSS의 body{overscroll-behavior:none}이 .member-shell을
+  // 스크롤 컨테이너로 만드는 grid+overflow-x:hidden 조합과 겹치며 wheel 스크롤 체이닝을 완전히 막았다.
+  // 회원앱에서만 overscroll-behavior:auto로 되돌리고, .member-shell 자체의 overflow-x:hidden은 제거해
+  // 불필요한 내부 스크롤 컨테이너가 생기지 않게 한다. body/html 예외 처리는 :has()로 회원앱 DOM에만 스코프.
+  ['회원앱 스크롤 고정 버그 수정: body:has(.member-shell)/.member-login에서 overscroll-behavior 예외 처리',
+    app.includes('body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A;overflow-y:auto!important;overscroll-behavior:auto!important;height:auto!important}') &&
+    app.includes('html:has(.member-shell),html:has(.member-login){height:auto!important;overflow-y:auto!important}')
+  ],
+  ['회원앱 스크롤 고정 버그 수정: .member-shell에 불필요한 overflow-x:hidden 제거(내부 스크롤 컨테이너화 방지)',
+    !app.includes('.member-shell{min-height:100vh;min-height:100dvh;height:auto;background:#F6F7F9;color:#20242A;display:grid;place-items:start center;overflow-x:hidden}') &&
+    app.includes('.member-shell{min-height:100vh;min-height:100dvh;height:auto;background:#F6F7F9;color:#20242A;display:grid;place-items:start center}')
+  ],
+  ['관리자앱 body overscroll-behavior:none은 그대로 유지(회원앱 예외처리가 admin에 새지 않음)',
+    app.includes('overscroll-behavior:none;overflow-x:hidden;width:100%;max-width:100vw;')
+  ],
 ];
 
 let failed = 0;

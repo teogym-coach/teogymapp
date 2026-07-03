@@ -637,27 +637,32 @@ export async function saveSessionSoreness(memberId, sessionId, sorenessReport) {
   dbLog("saveSessionSoreness", "완료");
 }
 
+// 근육통(sorenessLevel/sorenessBodyParts)·RPE·메모는 서로 독립적으로 저장된다.
+// feedback 객체에 실제로 들어있는 필드만 payload에 담아 setDoc(..., {merge:true})로 쓰기 때문에,
+// 이번에 건드리지 않은 필드는 payload에 아예 없어 기존 저장값이 그대로 유지된다(덮어쓰기 방지).
 export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
   const uid = requireUid();
   const ref = doc(db, "members", memberId, "sessions", sessionId, "memberFeedback", uid);
   const snap = await getDoc(ref);
-  const rawParts = Array.isArray(feedback.sorenessBodyParts)
-    ? feedback.sorenessBodyParts
-    : (feedback.sorenessBodyPart ? [feedback.sorenessBodyPart] : []);
-  const sorenessBodyParts = [...new Set(rawParts.map(v => String(v || "").trim()).filter(Boolean))];
-  const payload = clean({
-    sorenessLevel: feedback.sorenessLevel || "없음",
-    sorenessBodyParts,
-    // 하위 호환: 기존 관리자/리포트가 단일 필드를 읽어도 첫 번째 선택 부위를 표시합니다.
-    sorenessBodyPart: sorenessBodyParts[0] || "",
-    rpe: Number(feedback.rpe),
-    memo: feedback.memo || "",
+  const payload = {
     source: "memberApp",
     updatedAt: serverTimestamp(),
     ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
-  });
-  await setDoc(ref, payload, { merge: true });
-  return { id: uid, ...feedback, sorenessBodyParts, sorenessBodyPart: sorenessBodyParts[0] || "", source: "memberApp" };
+  };
+  if (feedback.sorenessLevel !== undefined || feedback.sorenessBodyParts !== undefined || feedback.sorenessBodyPart !== undefined) {
+    const rawParts = Array.isArray(feedback.sorenessBodyParts)
+      ? feedback.sorenessBodyParts
+      : (feedback.sorenessBodyPart ? [feedback.sorenessBodyPart] : []);
+    const sorenessBodyParts = [...new Set(rawParts.map(v => String(v || "").trim()).filter(Boolean))];
+    payload.sorenessLevel = feedback.sorenessLevel || "없음";
+    payload.sorenessBodyParts = sorenessBodyParts;
+    // 하위 호환: 기존 관리자/리포트가 단일 필드를 읽어도 첫 번째 선택 부위를 표시합니다.
+    payload.sorenessBodyPart = sorenessBodyParts[0] || "";
+  }
+  if (feedback.rpe !== undefined) payload.rpe = Number(feedback.rpe);
+  if (feedback.memo !== undefined) payload.memo = feedback.memo || "";
+  await setDoc(ref, clean(payload), { merge: true });
+  return { id: uid, ...feedback, source: "memberApp" };
 }
 
 // ════════════════════════════════════════════════════

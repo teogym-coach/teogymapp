@@ -634,6 +634,35 @@ const checks = [
     app.includes('const [splitting, setSplitting] = useState(false);') &&
     (app.match(/const \[splitting, setSplitting\] = useState\(false\);/g) || []).length >= 2
   ],
+
+  // ── 회원앱 홈 "오늘 운동 완료" 버튼 리디자인 ──
+  ['홈 오늘 운동 완료 버튼: nowrap + 아이콘 정렬 + 44~48px 높이의 pill 버튼(.attendance-check-btn)',
+    app.includes('className="attendance-check-btn"') &&
+    app.includes('className="attendance-check-icon"') &&
+    app.includes('.attendance-check-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex-shrink:0;white-space:nowrap;height:46px;padding:0 20px;border-radius:999px;') &&
+    app.includes('.attendance-check-btn:active{transform:scale(.95)')
+  ],
+
+  // ── 수업 후 상태 메모 placeholder 제거 ──
+  ['수업 후 상태 메모: placeholder 제거(빈 입력창으로 표시)',
+    !app.includes('대표님께 전달할 내용을 입력해주세요.') &&
+    app.includes('<textarea value={d.memo} onChange={e=>{setD({...d,memo:e.target.value});setTouched(t=>({...t,memo:true}));}}/>')
+  ],
+
+  // ── 근육통/RPE/메모 독립 저장 ──
+  ['수업 후 상태: 근육통/RPE/메모를 touched 플래그로 추적해 건드린 항목만 저장',
+    app.includes('const [touched,setTouched]=useState({soreness:false,rpe:false,memo:false});') &&
+    app.includes('if(touched.soreness){payload.sorenessLevel=d.sorenessLevel; payload.sorenessBodyParts=d.sorenessBodyParts;}') &&
+    app.includes('if(touched.rpe)payload.rpe=d.rpe;') &&
+    app.includes('if(touched.memo)payload.memo=d.memo;') &&
+    app.includes('if(!Object.keys(payload).length){alert("저장할 내용이 없습니다.");return;}')
+  ],
+  ['Firestore 저장: saveSessionMemberFeedback이 건드린 필드만 setDoc(merge:true)로 반영, 나머지는 기존값 유지',
+    db.includes('if (feedback.sorenessLevel !== undefined || feedback.sorenessBodyParts !== undefined || feedback.sorenessBodyPart !== undefined) {') &&
+    db.includes('if (feedback.rpe !== undefined) payload.rpe = Number(feedback.rpe);') &&
+    db.includes('if (feedback.memo !== undefined) payload.memo = feedback.memo || "";') &&
+    db.includes('await setDoc(ref, clean(payload), { merge: true });')
+  ],
 ];
 
 let failed = 0;

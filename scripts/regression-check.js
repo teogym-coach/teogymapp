@@ -679,6 +679,19 @@ const checks = [
     app.includes('.form-line label{font-weight:900;color:#66717C}') &&
     app.includes('.login-form input:not([type="checkbox"]){width:100%;background:#fff;color:#20242A;')
   ],
+
+  // ── 회원앱 건강 탭: 최근 건강 기록 하단 이동 + 기본 닫힘 ──
+  ['건강 탭 순서: 유산소 섹션(CardioSection)이 최근 건강 기록보다 먼저 렌더링됨',
+    app.includes('<CardioSection {...p}/><RecentHealthRecords')
+  ],
+  ['최근 건강 기록: CollapsibleSection으로 감싸 기본 닫힘(defaultOpen 미지정 시 false) + 펼치기 토글 재사용',
+    app.includes('function RecentHealthRecords({checkins,body,nutrition,onDelete}){const rows=buildRecentHealthRecords({checkins,body,nutrition}); return <CollapsibleSection label="최근 건강 기록" defaultOpen={false}><section className="mcard">') &&
+    app.includes('function CollapsibleSection({ label, defaultOpen = false, children })')
+  ],
+  ['최근 건강 기록: 삭제 기능(onDelete)과 데이터 조회(buildRecentHealthRecords)는 그대로 유지',
+    app.includes('onClick={()=>onDelete?.(r.date)}') &&
+    app.includes('function buildRecentHealthRecords({checkins=[],body,nutrition})')
+  ],
 ];
 
 let failed = 0;

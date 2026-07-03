@@ -5598,179 +5598,6 @@ function removeDraft(key) {
   try { localStorage.removeItem(key); } catch {}
 }
 
-function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
-  allMembers=[] }) {
-  const isCorr = false;
-  const isEdit = !!(editData?.id);
-  const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
-
-  // ── 수업 형태 & 2:1 멤버 ────────────────────────────────────────────
-  const [sessionType, setSessionType] = useState(editData?.sessionType || "1:1");
-  const [member2Id,   setMember2Id]   = useState(editData?.memberBId || editData?.linkedMemberId || "");
-  const [showM2Picker, setShowM2Picker] = useState(false);
-  const member2 = allMembers.find(m => m.id === member2Id) || null;
-
-  // ── 임시저장 state ────────────────────────────────────────────────────
-  const draftType = isOwner(member) ? "selfwork" : "lesson";
-  const draftKey  = getDraftKey(draftType, member.id, new Date().toISOString().split("T")[0]);
-  const [draftStatus, setDraftStatus] = useState(""); // "저장됨 HH:MM" | "저장 중..." | ""
-  const [draftPopup,  setDraftPopup]  = useState(null); // draft 복원 팝업 데이터sessions.length > 0 ? sessions[sessions.length-1] : null;
-  const pRef   = useRef(null);
-
-  const [trainerName,    setTrainerName]    = useState(editData?.trainerName    || last?.trainerName    || "김태오");
-  const [gymName,        setGymName]        = useState(editData?.gymName        || last?.gymName        || "테오짐");
-  const [date,           setDate]           = useState(editData?.date           || new Date().toISOString().split("T")[0]);
-  const [sessionNo,      setSessionNo]      = useState(editData?.sessionNo !== undefined ? editData.sessionNo : (last ? Number(last.sessionNo||0)+1 : 1));
-  const [selectedTypes,  setSelectedTypes]  = useState(() => normalizeTypes(editData?.selectedTypes || editData?.type));
-  const [intensity,      setIntensity]      = useState(editData?.intensity      || "중강도");
-  const [condition,      setCondition]      = useState(editData?.condition      || "상");
-  const [exercises,      setExercises]      = useState(() => {
-    if (editData?.exercises) {
-      // 기존 저장 기록 열기: 저장된 내용 그대로
-      const baseExs = editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
-      // 2:1 세션 편집: B회원 운동 데이터(memberBExercises) → m2 필드로 복원
-      if (editData.sessionType === "2:1" && Array.isArray(editData.memberBExercises) && editData.memberBExercises.length > 0) {
-        return baseExs.map((e, i) => {
-          const bEx = editData.memberBExercises[i];
-          if (!bEx) return e;
-          return { ...e, m2: { sets: bEx.sets || [], rpe: bEx.sets?.[0]?.rpe, note: bEx.feedback || "" } };
-        });
-      }
-      return baseExs;
-    }
-    // 대표님 운동 기록: 빈 운동 종목 1개로 시작 (기능 운동 기본 생성 안 함)
-    if (isOwner(member)) {
-      return [mkEx()];
-    }
-    // 회원 수업 기록: 기능 카드 1개로 시작
-    const mkFuncEx = () => ({
-      ...mkEx(),
-      equipment: "기능",
-      muscleTop: "기능",
-      muscleSub: "기능",
-      sets: [{ weight:"", reps:"", durationSec:"", volume:0, recordType:"function" }],
-    });
-    return [mkFuncEx()];
-  });
-  const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
-  const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
-  const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
-  const [trainerComment2, setTrainerComment2] = useState(editData?.trainerComment2 || editData?.memberBComment || "");
-  // 대표님 전용 내부 메모 (회원 카드에 절대 미노출)
-  const [trainerOnlyNote, setTrainerOnlyNote] = useState(editData?.trainerOnlyNote || "");
-  // 유산소 기록
-  const [cardioType,      setCardioType]      = useState(editData?.cardio?.type      || "");
-  const [cardioMinutes,   setCardioMinutes]   = useState(editData?.cardio?.minutes   || "");
-  const [cardioCalories,  setCardioCalories]  = useState(editData?.cardio?.calories  || "");
-  const [cardioIntensity, setCardioIntensity] = useState(editData?.cardio?.intensity || "");
-  // 대표님 전용: 운동 시작/종료 시간
-  const [workoutStartTime, setWorkoutStartTime] = useState(editData?.workoutStartTime || "");
-  const [workoutEndTime,   setWorkoutEndTime]   = useState(editData?.workoutEndTime   || "");
-  const [refVideo,       setRefVideo]       = useState(editData?.referenceVideo || "");
-  // 수업 날짜 기준으로 바디체크 체중 자동 불러오기
-  const sessionDate  = editData?.date || new Date().toISOString().split("T")[0];
-  const bcWeightForDate = useMemo(() => {
-    const rec = (bodyData?.records||[]).find(r => r.date === sessionDate);
-    return rec?.weight ? String(rec.weight) : "";
-  }, [bodyData, sessionDate]);
-
-  const [bodyWeight,     setBodyWeight]     = useState(editData?.bodyWeight || bcWeightForDate || "");
-  const [calories,       setCalories]       = useState(editData?.calories       || "");
-  const [dietNote,       setDietNote]       = useState(editData?.dietNote       || "");
-  const [romData,        setRomData]        = useState(editData?.romData  || CPARTS.reduce((o,k) => ({...o,[k]:"정상"}), {}));
-  const [painData,       setPainData]       = useState(editData?.painData || CPARTS.reduce((o,k) => ({...o,[k]:0}), {}));
-  // 통증 기록 (운동 전/후)
-  const [painRecord,     setPainRecord]     = useState(editData?.painRecord || { before:{vas:0,part:"",situation:"",memo:""}, after:{vas:0,change:"",memo:""} });
-  const [showPainBefore, setShowPainBefore] = useState(!!(editData?.painRecord?.before?.vas > 0 || editData?.painRecord?.before?.part));
-  const [showPainAfter,  setShowPainAfter]  = useState(!!(editData?.painRecord?.after?.vas > 0 || editData?.painRecord?.after?.memo));
-  const [showCard,       setShowCard]       = useState(false);
-  const [activeCardIdx, setActiveCardIdx]   = useState(null); // 현재 입력 중인 카드
-
-  const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
-
-  // 드래그앤드롭 정렬 (Pointer Event 기반)
-  const [draggingIdx, setDraggingIdx] = useState(null);
-  const ptrSort = usePointerSort(setExercises);
-  function moveEx(from, to) {
-    if (from === to || to < 0 || to >= exercises.length) return;
-    setExercises(prev => {
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }
-
-  // ── 임시저장 복원 체크 (진입 시 1회) ────────────────────────────────
-  const draftTimerRef = useRef(null);
-  useEffect(() => {
-    if (isEdit) return;
-    const draft = loadDraft(draftKey);
-    if (draft && draft.exercises?.length > 0) {
-      setDraftPopup(draft);
-    }
-  }, []);
-
-  // ── 자동 임시저장 (state 변경 → 2초 후 저장) ────────────────────────
-  useEffect(() => {
-    if (isEdit) return;
-    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
-    draftTimerRef.current = setTimeout(() => {
-      const data = {
-        trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
-        exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
-        cardioType, cardioMinutes, cardioCalories, cardioIntensity,
-        workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
-      };
-      const ok = saveDraft(draftKey, data);
-      const now = new Date();
-      setDraftStatus(ok
-        ? `임시 저장됨 ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`
-        : "임시저장 실패");
-    }, 2000);
-    return () => clearTimeout(draftTimerRef.current);
-  }, [trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
-      exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
-      cardioType, cardioMinutes, cardioCalories, cardioIntensity,
-      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo]);
-
-  // ── 이탈 경고 ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (isEdit) return;
-    const handler = (e) => {
-      const draft = loadDraft(draftKey);
-      if (draft) { e.preventDefault(); e.returnValue = ""; }
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [draftKey]);
-
-  // 임시저장 복원 적용
-  function applyDraft(draft) {
-    if (draft.trainerName)     setTrainerName(draft.trainerName);
-    if (draft.gymName)         setGymName(draft.gymName);
-    if (draft.date)            setDate(draft.date);
-    if (draft.sessionNo)       setSessionNo(draft.sessionNo);
-    if (draft.selectedTypes)   setSelectedTypes(draft.selectedTypes);
-    if (draft.intensity)       setIntensity(draft.intensity);
-    if (draft.condition)       setCondition(draft.condition);
-    if (draft.exercises?.length>0) setExercises(draft.exercises);
-    if (draft.stretchNotes)    setStretchNotes(draft.stretchNotes);
-    if (draft.nextPlan)        setNextPlan(draft.nextPlan);
-    if (draft.trainerComment)  setTrainerComment(draft.trainerComment);
-    if (draft.trainerOnlyNote) setTrainerOnlyNote(draft.trainerOnlyNote);
-    if (draft.cardioType)      setCardioType(draft.cardioType);
-    if (draft.cardioMinutes)   setCardioMinutes(draft.cardioMinutes);
-    if (draft.cardioCalories)  setCardioCalories(draft.cardioCalories);
-    if (draft.cardioIntensity) setCardioIntensity(draft.cardioIntensity);
-    if (draft.bodyWeight)      setBodyWeight(draft.bodyWeight);
-    if (draft.calories)        setCalories(draft.calories);
-    if (draft.dietNote)        setDietNote(draft.dietNote);
-    if (draft.refVideo)        setRefVideo(draft.refVideo);
-    setDraftPopup(null);
-    showToast("이전 기록을 불러왔습니다 ✓");
-  }
-
   // ════════════════════════════════════════════
 // 운동 이름 → 부위/세부부위 자동 추천 매핑
 // ════════════════════════════════════════════
@@ -5957,6 +5784,180 @@ function suggestMuscle(name) {
   }
   return null;
 }
+
+function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
+  allMembers=[] }) {
+  const isCorr = false;
+  const isEdit = !!(editData?.id);
+  const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
+
+  // ── 수업 형태 & 2:1 멤버 ────────────────────────────────────────────
+  const [sessionType, setSessionType] = useState(editData?.sessionType || "1:1");
+  const [member2Id,   setMember2Id]   = useState(editData?.memberBId || editData?.linkedMemberId || "");
+  const [showM2Picker, setShowM2Picker] = useState(false);
+  const member2 = allMembers.find(m => m.id === member2Id) || null;
+
+  // ── 임시저장 state ────────────────────────────────────────────────────
+  const draftType = isOwner(member) ? "selfwork" : "lesson";
+  const draftKey  = getDraftKey(draftType, member.id, new Date().toISOString().split("T")[0]);
+  const [draftStatus, setDraftStatus] = useState(""); // "저장됨 HH:MM" | "저장 중..." | ""
+  const [draftPopup,  setDraftPopup]  = useState(null); // draft 복원 팝업 데이터sessions.length > 0 ? sessions[sessions.length-1] : null;
+  const pRef   = useRef(null);
+
+  const [trainerName,    setTrainerName]    = useState(editData?.trainerName    || last?.trainerName    || "김태오");
+  const [gymName,        setGymName]        = useState(editData?.gymName        || last?.gymName        || "테오짐");
+  const [date,           setDate]           = useState(editData?.date           || new Date().toISOString().split("T")[0]);
+  const [sessionNo,      setSessionNo]      = useState(editData?.sessionNo !== undefined ? editData.sessionNo : (last ? Number(last.sessionNo||0)+1 : 1));
+  const [selectedTypes,  setSelectedTypes]  = useState(() => normalizeTypes(editData?.selectedTypes || editData?.type));
+  const [intensity,      setIntensity]      = useState(editData?.intensity      || "중강도");
+  const [condition,      setCondition]      = useState(editData?.condition      || "상");
+  const [exercises,      setExercises]      = useState(() => {
+    if (editData?.exercises) {
+      // 기존 저장 기록 열기: 저장된 내용 그대로
+      const baseExs = editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+      // 2:1 세션 편집: B회원 운동 데이터(memberBExercises) → m2 필드로 복원
+      if (editData.sessionType === "2:1" && Array.isArray(editData.memberBExercises) && editData.memberBExercises.length > 0) {
+        return baseExs.map((e, i) => {
+          const bEx = editData.memberBExercises[i];
+          if (!bEx) return e;
+          return { ...e, m2: { sets: bEx.sets || [], rpe: bEx.sets?.[0]?.rpe, note: bEx.feedback || "" } };
+        });
+      }
+      return baseExs;
+    }
+    // 대표님 운동 기록: 빈 운동 종목 1개로 시작 (기능 운동 기본 생성 안 함)
+    if (isOwner(member)) {
+      return [mkEx()];
+    }
+    // 회원 수업 기록: 기능 카드 1개로 시작
+    const mkFuncEx = () => ({
+      ...mkEx(),
+      equipment: "기능",
+      muscleTop: "기능",
+      muscleSub: "기능",
+      sets: [{ weight:"", reps:"", durationSec:"", volume:0, recordType:"function" }],
+    });
+    return [mkFuncEx()];
+  });
+  const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
+  const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
+  const [trainerComment, setTrainerComment] = useState(editData?.trainerComment || "");
+  const [trainerComment2, setTrainerComment2] = useState(editData?.trainerComment2 || editData?.memberBComment || "");
+  // 대표님 전용 내부 메모 (회원 카드에 절대 미노출)
+  const [trainerOnlyNote, setTrainerOnlyNote] = useState(editData?.trainerOnlyNote || "");
+  // 유산소 기록
+  const [cardioType,      setCardioType]      = useState(editData?.cardio?.type      || "");
+  const [cardioMinutes,   setCardioMinutes]   = useState(editData?.cardio?.minutes   || "");
+  const [cardioCalories,  setCardioCalories]  = useState(editData?.cardio?.calories  || "");
+  const [cardioIntensity, setCardioIntensity] = useState(editData?.cardio?.intensity || "");
+  // 대표님 전용: 운동 시작/종료 시간
+  const [workoutStartTime, setWorkoutStartTime] = useState(editData?.workoutStartTime || "");
+  const [workoutEndTime,   setWorkoutEndTime]   = useState(editData?.workoutEndTime   || "");
+  const [refVideo,       setRefVideo]       = useState(editData?.referenceVideo || "");
+  // 수업 날짜 기준으로 바디체크 체중 자동 불러오기
+  const sessionDate  = editData?.date || new Date().toISOString().split("T")[0];
+  const bcWeightForDate = useMemo(() => {
+    const rec = (bodyData?.records||[]).find(r => r.date === sessionDate);
+    return rec?.weight ? String(rec.weight) : "";
+  }, [bodyData, sessionDate]);
+
+  const [bodyWeight,     setBodyWeight]     = useState(editData?.bodyWeight || bcWeightForDate || "");
+  const [calories,       setCalories]       = useState(editData?.calories       || "");
+  const [dietNote,       setDietNote]       = useState(editData?.dietNote       || "");
+  const [romData,        setRomData]        = useState(editData?.romData  || CPARTS.reduce((o,k) => ({...o,[k]:"정상"}), {}));
+  const [painData,       setPainData]       = useState(editData?.painData || CPARTS.reduce((o,k) => ({...o,[k]:0}), {}));
+  // 통증 기록 (운동 전/후)
+  const [painRecord,     setPainRecord]     = useState(editData?.painRecord || { before:{vas:0,part:"",situation:"",memo:""}, after:{vas:0,change:"",memo:""} });
+  const [showPainBefore, setShowPainBefore] = useState(!!(editData?.painRecord?.before?.vas > 0 || editData?.painRecord?.before?.part));
+  const [showPainAfter,  setShowPainAfter]  = useState(!!(editData?.painRecord?.after?.vas > 0 || editData?.painRecord?.after?.memo));
+  const [showCard,       setShowCard]       = useState(false);
+  const [activeCardIdx, setActiveCardIdx]   = useState(null); // 현재 입력 중인 카드
+
+  const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
+
+  // 드래그앤드롭 정렬 (Pointer Event 기반)
+  const [draggingIdx, setDraggingIdx] = useState(null);
+  const ptrSort = usePointerSort(setExercises);
+  function moveEx(from, to) {
+    if (from === to || to < 0 || to >= exercises.length) return;
+    setExercises(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
+
+  // ── 임시저장 복원 체크 (진입 시 1회) ────────────────────────────────
+  const draftTimerRef = useRef(null);
+  useEffect(() => {
+    if (isEdit) return;
+    const draft = loadDraft(draftKey);
+    if (draft && draft.exercises?.length > 0) {
+      setDraftPopup(draft);
+    }
+  }, []);
+
+  // ── 자동 임시저장 (state 변경 → 2초 후 저장) ────────────────────────
+  useEffect(() => {
+    if (isEdit) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      const data = {
+        trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
+        exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
+        cardioType, cardioMinutes, cardioCalories, cardioIntensity,
+        workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
+      };
+      const ok = saveDraft(draftKey, data);
+      const now = new Date();
+      setDraftStatus(ok
+        ? `임시 저장됨 ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`
+        : "임시저장 실패");
+    }, 2000);
+    return () => clearTimeout(draftTimerRef.current);
+  }, [trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
+      exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
+      cardioType, cardioMinutes, cardioCalories, cardioIntensity,
+      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo]);
+
+  // ── 이탈 경고 ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isEdit) return;
+    const handler = (e) => {
+      const draft = loadDraft(draftKey);
+      if (draft) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [draftKey]);
+
+  // 임시저장 복원 적용
+  function applyDraft(draft) {
+    if (draft.trainerName)     setTrainerName(draft.trainerName);
+    if (draft.gymName)         setGymName(draft.gymName);
+    if (draft.date)            setDate(draft.date);
+    if (draft.sessionNo)       setSessionNo(draft.sessionNo);
+    if (draft.selectedTypes)   setSelectedTypes(draft.selectedTypes);
+    if (draft.intensity)       setIntensity(draft.intensity);
+    if (draft.condition)       setCondition(draft.condition);
+    if (draft.exercises?.length>0) setExercises(draft.exercises);
+    if (draft.stretchNotes)    setStretchNotes(draft.stretchNotes);
+    if (draft.nextPlan)        setNextPlan(draft.nextPlan);
+    if (draft.trainerComment)  setTrainerComment(draft.trainerComment);
+    if (draft.trainerOnlyNote) setTrainerOnlyNote(draft.trainerOnlyNote);
+    if (draft.cardioType)      setCardioType(draft.cardioType);
+    if (draft.cardioMinutes)   setCardioMinutes(draft.cardioMinutes);
+    if (draft.cardioCalories)  setCardioCalories(draft.cardioCalories);
+    if (draft.cardioIntensity) setCardioIntensity(draft.cardioIntensity);
+    if (draft.bodyWeight)      setBodyWeight(draft.bodyWeight);
+    if (draft.calories)        setCalories(draft.calories);
+    if (draft.dietNote)        setDietNote(draft.dietNote);
+    if (draft.refVideo)        setRefVideo(draft.refVideo);
+    setDraftPopup(null);
+    showToast("이전 기록을 불러왔습니다 ✓");
+  }
+
 
 function updateEx(ei, key, val) {
     setExercises(prev => prev.map((ex,i) => {
@@ -8124,13 +8125,14 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
   const [trainerCommentB, setTrainerCommentB] = useState(editData?.trainerCommentB||"");
   const [saving, setSaving] = useState(false);
   const [confirmSplit, setConfirmSplit] = useState(false);
+  const [splitting, setSplitting] = useState(false);
 
   const mkPairSet = () => ({weight:"", reps:"", durationSec:""});
   const mkPairEx = () => ({
     name:"", muscleTop:"가슴", muscleSub:"윗가슴", equipment:"바벨",
     funcCategory:"", funcBodyPart:[], funcTool:"", movementPurpose:"",
-    setsA: [mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet()],
-    setsB: [mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet()],
+    setsA: [mkPairSet(),mkPairSet(),mkPairSet()],
+    setsB: [mkPairSet(),mkPairSet(),mkPairSet()],
     feedbackA:{rpe:"",stimRating:null,note:""},
     feedbackB:{rpe:"",stimRating:null,note:""},
   });
@@ -8176,7 +8178,27 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
     if (to<0||to>=exercises.length) return;
     setExercises(prev=>{ const n=[...prev]; const [m]=n.splice(from,1); n.splice(to,0,m); return n; });
   };
-  const updateEx = (ei, field, val) => setExercises(prev=>prev.map((e,i)=>i===ei?{...e,[field]:val}:e));
+  // 운동명 입력 시 기존 라이브러리/학습 매핑 데이터를 기준으로 부위·기구를 자동 채움.
+  // 사용자가 부위/기구를 직접 수정하면 _muscleManual/_equipManual 플래그를 세워 이후 이름 수정에도 덮어쓰지 않는다.
+  const updateEx = (ei, field, val) => setExercises(prev=>prev.map((e,i)=>{
+    if (i!==ei) return e;
+    const u = {...e, [field]:val};
+    if (field==="name") {
+      if (!e._muscleManual) {
+        const sug = suggestMuscle(val);
+        if (sug?.top) u.muscleTop = sug.top;
+      }
+      if (!e._equipManual) {
+        const sugEq = suggestEquipment(val);
+        if (sugEq) u.equipment = sugEq;
+      }
+    } else if (field==="muscleTop") {
+      u._muscleManual = true;
+    } else if (field==="equipment") {
+      u._equipManual = true;
+    }
+    return u;
+  }));
   const updateFeedback = (ei, who, field, val) => setExercises(prev=>prev.map((e,i)=>{
     if(i!==ei)return e;
     const key = who==="A"?"feedbackA":"feedbackB";
@@ -8627,19 +8649,28 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
         ))}
       </div>
 
-      {/* 저장 + 나눠서 기록 */}
+      {/* 목록으로 가기 + 저장 + 나눠서 기록 */}
       {!isSplitDone && (
-        <div style={{display:"flex",gap:8,marginBottom:16}}>
-          <button onClick={handleManualSave} disabled={saving}
-            style={{flex:1,padding:"13px",borderRadius:9,border:"1px solid rgba(255,209,102,.4)",
-              background:"rgba(255,209,102,.08)",color:"#ffd166",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+        <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+          <button onClick={onBack} disabled={saving||splitting}
+            style={{flex:"1 1 0",minWidth:0,padding:"13px 8px",borderRadius:9,border:"1px solid rgba(255,255,255,.12)",
+              background:"none",color:"#94a3b8",fontSize:12,fontWeight:700,cursor:(saving||splitting)?"not-allowed":"pointer",
+              opacity:(saving||splitting)?0.6:1}}>
+            목록으로 가기
+          </button>
+          <button onClick={handleManualSave} disabled={saving||splitting}
+            style={{flex:"1 1 0",minWidth:0,padding:"13px 8px",borderRadius:9,border:"1px solid rgba(255,209,102,.4)",
+              background:"rgba(255,209,102,.08)",color:"#ffd166",fontSize:12,fontWeight:800,
+              cursor:(saving||splitting)?"not-allowed":"pointer",opacity:(saving||splitting)?0.6:1}}>
             {saving?"저장 중...":"💾 저장"}
           </button>
           {isEdit && (
-            <button onClick={()=>setConfirmSplit(true)}
-              style={{flex:1,padding:"13px",borderRadius:9,border:"none",cursor:"pointer",
-                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:13,fontWeight:800}}>
-              나눠서 기록
+            <button onClick={()=>setConfirmSplit(true)} disabled={saving||splitting}
+              style={{flex:"2 1 0",minWidth:0,padding:"13px 8px",borderRadius:9,border:"none",
+                cursor:(saving||splitting)?"not-allowed":"pointer",
+                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:14,fontWeight:800,
+                opacity:(saving||splitting)?0.7:1}}>
+              {splitting?"처리 중...":"나눠서 기록"}
             </button>
           )}
         </div>
@@ -8648,7 +8679,7 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
       {/* 나눠서 기록 확인 모달 */}
       {confirmSplit && (
         <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
-          background:"rgba(0,0,0,.75)",padding:20}} onClick={e=>e.target===e.currentTarget&&setConfirmSplit(false)}>
+          background:"rgba(0,0,0,.75)",padding:20}} onClick={e=>e.target===e.currentTarget&&!splitting&&setConfirmSplit(false)}>
           <div style={{background:"#111827",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",
             border:"1px solid rgba(94,234,212,.3)"}}>
             <Mo c="#e2e8f0" s={14} style={{display:"block",textAlign:"center",fontWeight:800,marginBottom:10}}>나눠서 기록</Mo>
@@ -8659,18 +8690,22 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
               <span style={{color:"#64748b",fontSize:10}}>2:1 원본은 계속 보관됩니다.</span>
             </Mo>
             <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>setConfirmSplit(false)}
+              <button disabled={splitting} onClick={()=>setConfirmSplit(false)}
                 style={{flex:1,padding:11,borderRadius:9,border:"1px solid rgba(255,255,255,.1)",
-                  background:"transparent",color:"#64748b",fontSize:13,cursor:"pointer"}}>취소</button>
-              <button onClick={async()=>{
-                setConfirmSplit(false);
+                  background:"transparent",color:"#64748b",fontSize:13,cursor:splitting?"not-allowed":"pointer"}}>취소</button>
+              <button disabled={splitting} onClick={async()=>{
+                if (splitting) return;
+                setSplitting(true);
                 try {
                   await handleManualSave();
                   await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
+                  setConfirmSplit(false);
                 } catch(e){ showToast(e.message||"실패","err"); }
-              }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:"pointer",
-                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontWeight:800,fontSize:13}}>
-                나눠서 기록
+                finally { setSplitting(false); }
+              }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:splitting?"not-allowed":"pointer",
+                background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontWeight:800,fontSize:13,
+                opacity:splitting?0.7:1}}>
+                {splitting?"처리 중...":"나눠서 기록"}
               </button>
             </div>
           </div>

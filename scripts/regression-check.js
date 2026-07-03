@@ -599,6 +599,41 @@ const checks = [
   ['관리자앱 body overscroll-behavior:none은 그대로 유지(회원앱 예외처리가 admin에 새지 않음)',
     app.includes('overscroll-behavior:none;overflow-x:hidden;width:100%;max-width:100vw;')
   ],
+
+  // ── 2:1 수업 기록 화면 수정 ──
+  ['2:1 수업 기본 세트 3세트로 변경',
+    app.includes('setsA: [mkPairSet(),mkPairSet(),mkPairSet()],') &&
+    app.includes('setsB: [mkPairSet(),mkPairSet(),mkPairSet()],') &&
+    !app.includes('setsA: [mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet(),mkPairSet()],')
+  ],
+  ['2:1 수업 세트 추가/삭제: 최소 1세트 유지, 회원(A/B)별 독립 처리',
+    app.includes('if(sets.length<=1){showToast("최소 1세트 유지");return e;}') &&
+    app.includes('const key = who==="A"?"setsA":"setsB";')
+  ],
+  ['2:1 운동 종목 자동 매칭: 1:1과 동일한 매핑 함수(suggestMuscle/suggestEquipment)를 공용 스코프로 재사용',
+    app.includes('function suggestMuscle(name) {') &&
+    app.includes('function suggestEquipment(name) {') &&
+    (app.match(/function suggestMuscle\(name\) \{/g) || []).length === 1 &&
+    (app.match(/function suggestEquipment\(name\) \{/g) || []).length === 1
+  ],
+  ['2:1 자동 매칭: 이름 입력 시 부위/기구 자동 채움 + 수동 수정값은 이후 덮어쓰지 않음(_muscleManual/_equipManual)',
+    app.includes('if (!e._muscleManual) {') &&
+    app.includes('const sug = suggestMuscle(val);') &&
+    app.includes('if (sug?.top) u.muscleTop = sug.top;') &&
+    app.includes('if (!e._equipManual) {') &&
+    app.includes('const sugEq = suggestEquipment(val);') &&
+    app.includes('} else if (field==="muscleTop") {') &&
+    app.includes('} else if (field==="equipment") {')
+  ],
+  ['2:1 하단 버튼: 목록으로 가기 + 저장 + 나눠서 기록(나눠서 기록이 가장 넓은 영역)',
+    app.includes('목록으로 가기') &&
+    app.includes('onClick={onBack} disabled={saving||splitting}') &&
+    app.includes('flex:"2 1 0",minWidth:0,padding:"13px 8px",borderRadius:9,border:"none"')
+  ],
+  ['2:1 나눠서 기록: 처리 중 중복 클릭 방지(splitting 상태로 버튼 비활성화)',
+    app.includes('const [splitting, setSplitting] = useState(false);') &&
+    (app.match(/const \[splitting, setSplitting\] = useState\(false\);/g) || []).length >= 2
+  ],
 ];
 
 let failed = 0;

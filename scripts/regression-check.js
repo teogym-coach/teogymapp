@@ -840,6 +840,35 @@ const checks = [
     app.includes('{key:"입력",      label:"상세 입력"},') &&
     app.includes('{viewRec.categoryResults && Object.keys(viewRec.categoryResults).length>0 && (')
   ],
+
+  // ── 체형평가 리뉴얼 Phase 2: 교정 루틴 생성기 + 재평가 ──
+  ['체형평가: 교정 루틴 6단계(도수→호흡→가동성→활성화→패턴→근력) 템플릿, 유형별 평가에서 제한/통증 확인된 카테고리만 자동 시드',
+    app.includes('const ROUTINE_PHASES = ["도수","호흡","가동성","활성화","패턴","근력"];') &&
+    app.includes('function buildRoutineSeed(categoryResults={}) {') &&
+    app.includes('.filter(([,cr]) => (cr.tests||[]).some(t => t.result && t.result!=="정상"))')
+  ],
+  ['체형평가: 교정 루틴 운동은 자유 텍스트 입력(이름/세트/횟수/메모), 트레이너가 추가·삭제·수정 가능',
+    app.includes('function emptyCorrectiveExercise() { return { name:"", sets:"", reps:"", duration:"", memo:"" }; }') &&
+    app.includes('const updateRoutineExercise = (phaseIdx, exIdx, patch) => {') &&
+    app.includes('const addRoutineExercise = (phaseIdx) => {') &&
+    app.includes('const removeRoutineExercise = (phaseIdx, exIdx) => {')
+  ],
+  ['체형평가: 재평가는 유형별 평가에서 제한/통증이었던 테스트만 대상으로 하고, before/after를 좋아짐/유지/악화로 자동 비교',
+    app.includes('function buildRetestTargets(categoryResults={}) {') &&
+    app.includes('if (t.result && t.result!=="정상") targets.push(') &&
+    app.includes('function compareRetest(retestTargets=[], retestResults={}) {') &&
+    app.includes('const changeLabel = afterRank<beforeRank ? "좋아짐" : afterRank>beforeRank ? "악화" : "유지";')
+  ],
+  ['체형평가: 재평가는 VAS(통증) 비교도 별도로 산출(painCompare)',
+    app.includes('const painChange = afterVas<beforeVas ? "좋아짐" : afterVas>beforeVas ? "악화" : "유지";') &&
+    app.includes('painCompare.push({ category:target.category, testKey:target.testKey, label:target.label, side, before:beforeVas, after:afterVas, changeLabel:painChange });')
+  ],
+  ['체형평가: 교정 루틴/재평가는 생성·입력한 경우에만 저장, 기록 상세 뷰에서도 확인 가능',
+    app.includes('correctiveRoutine: routinePhases ? { phases: routinePhases } : undefined,') &&
+    app.includes('retest: Object.keys(retestResults).length>0 ? {') &&
+    app.includes('{viewRec.correctiveRoutine?.phases?.length>0 && (') &&
+    app.includes('{viewRec.retest?.done && (')
+  ],
 ];
 
 let failed = 0;

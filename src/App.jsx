@@ -14883,6 +14883,69 @@ function emptyCategoryResult() {
 }
 
 // ════════════════════════════════════════════
+// 교정 루틴 생성기 + 재평가 (Phase 2)
+// ════════════════════════════════════════════
+const ROUTINE_PHASES = ["도수","호흡","가동성","활성화","패턴","근력"];
+// 문제(제한/통증)가 확인된 카테고리에 한해 단계별로 넣어줄 시작 운동(트레이너가 자유롭게 수정 가능)
+const CATEGORY_ROUTINE_SEED = {
+  "목":     { "도수":["상부승모 릴리즈"],   "가동성":["경추 굴곡/신전 가동화"],  "활성화":["딥넥플렉서 활성화"] },
+  "어깨":   { "도수":["소흉근 릴리즈"],     "가동성":["흉추 회전 모빌리티"],     "활성화":["전거근 활성화"] },
+  "팔꿈치": { "도수":["전완 근막이완"],     "가동성":["팔꿈치 굴곡/신전 가동화"], "활성화":["그립 강화"] },
+  "손목":   { "도수":["전완 근막이완"],     "가동성":["손목 굴곡/신전 가동화"],   "활성화":["손목 안정화"] },
+  "허리":   { "도수":["요방형근 릴리즈"],   "가동성":["고관절 굴곡 모빌리티"],   "활성화":["코어 브레이싱"] },
+  "골반":   { "도수":["둔근 릴리즈"],       "가동성":["Hip IR/ER 모빌리티"],     "활성화":["둔근 활성화"] },
+  "무릎":   { "도수":["대퇴사두 릴리즈"],   "가동성":["발목 배측굴곡 모빌리티"], "활성화":["둔근 활성화"] },
+  "발목":   { "도수":["종아리 근막이완"],   "가동성":["Knee To Wall 모빌리티"],  "활성화":["단축성 발목 강화"] },
+  "발바닥": { "도수":["족저근막 릴리즈"],   "가동성":["토우 스프레드 모빌리티"], "활성화":["Short Foot 활성화"] },
+};
+function emptyCorrectiveExercise() { return { name:"", sets:"", reps:"", duration:"", memo:"" }; }
+// 유형별 평가에서 제한/통증이 확인된 카테고리만 골라 6단계 템플릿에 시드 운동을 자동 배치
+function buildRoutineSeed(categoryResults={}) {
+  const problemCats = Object.entries(categoryResults)
+    .filter(([,cr]) => (cr.tests||[]).some(t => t.result && t.result!=="정상"))
+    .map(([cat]) => cat);
+  return ROUTINE_PHASES.map(phase => {
+    const exercises = [];
+    problemCats.forEach(cat => {
+      (CATEGORY_ROUTINE_SEED[cat]?.[phase]||[]).forEach(name => exercises.push({ name, sets:"3", reps:"10", duration:"", memo:cat }));
+    });
+    if (!exercises.length) exercises.push(emptyCorrectiveExercise());
+    return { phase, exercises };
+  });
+}
+const RESULT_RANK = { "정상":0, "제한":1, "통증":2 };
+// 유형별 평가에서 제한/통증이었던 테스트만 재평가 대상 — before/after를 좋아짐/유지/악화로 자동 비교
+function buildRetestTargets(categoryResults={}) {
+  const targets = [];
+  Object.entries(categoryResults).forEach(([cat,cr]) => {
+    (cr.tests||[]).forEach(t => {
+      if (t.result && t.result!=="정상") targets.push({ category:cat, testKey:t.key, label:CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key, before:t.result, beforeVas:t.vas||{좌:0,우:0} });
+    });
+  });
+  return targets;
+}
+function compareRetest(retestTargets=[], retestResults={}) {
+  const compare = [];
+  const painCompare = [];
+  retestTargets.forEach(target => {
+    const after = retestResults[target.category]?.[target.testKey];
+    if (!after || !after.result) return;
+    const beforeRank = RESULT_RANK[target.before] ?? 1;
+    const afterRank = RESULT_RANK[after.result] ?? 1;
+    const changeLabel = afterRank<beforeRank ? "좋아짐" : afterRank>beforeRank ? "악화" : "유지";
+    compare.push({ category:target.category, testKey:target.testKey, label:target.label, before:target.before, after:after.result, changeLabel });
+    ["좌","우"].forEach(side => {
+      const beforeVas = target.beforeVas?.[side]||0, afterVas = after.vas?.[side]||0;
+      if (beforeVas||afterVas) {
+        const painChange = afterVas<beforeVas ? "좋아짐" : afterVas>beforeVas ? "악화" : "유지";
+        painCompare.push({ category:target.category, testKey:target.testKey, label:target.label, side, before:beforeVas, after:afterVas, changeLabel:painChange });
+      }
+    });
+  });
+  return { compare, painCompare };
+}
+
+// ════════════════════════════════════════════
 // ASSESSMENT SCREEN
 // ════════════════════════════════════════════
 function AssessmentScreen({ member, onBack, showToast }) {
@@ -14933,6 +14996,29 @@ function AssessmentScreen({ member, onBack, showToast }) {
     const firstJumpable = referrals.find(r=>r.categoryKey);
     if (firstJumpable) setActiveCategory(firstJumpable.categoryKey);
   };
+
+  // ── 교정 루틴 생성기 + 재평가 (Phase 2) ────────────────────────────
+  const [routinePhases, setRoutinePhases] = useState(null); // null이면 아직 생성 전
+  const [retestMode,    setRetestMode]    = useState(false);
+  const [retestResults, setRetestResults] = useState({}); // { [category]: { [testKey]: {result, vas} } }
+  const generateRoutine = () => setRoutinePhases(buildRoutineSeed(categoryResults));
+  const updateRoutineExercise = (phaseIdx, exIdx, patch) => {
+    setRoutinePhases(prev => prev.map((p,i) => i!==phaseIdx ? p : {
+      ...p, exercises: p.exercises.map((e,j) => j!==exIdx ? e : {...e, ...patch}),
+    }));
+  };
+  const addRoutineExercise = (phaseIdx) => {
+    setRoutinePhases(prev => prev.map((p,i) => i!==phaseIdx ? p : { ...p, exercises: [...p.exercises, emptyCorrectiveExercise()] }));
+  };
+  const removeRoutineExercise = (phaseIdx, exIdx) => {
+    setRoutinePhases(prev => prev.map((p,i) => i!==phaseIdx ? p : { ...p, exercises: p.exercises.filter((_,j)=>j!==exIdx) }));
+  };
+  const retestTargets = buildRetestTargets(categoryResults);
+  const setRetestResult = (cat, testKey, patch) => {
+    setRetestResults(prev => ({ ...prev, [cat]: { ...(prev[cat]||{}), [testKey]: { ...(prev[cat]?.[testKey]||{result:"",vas:{좌:0,우:0}}), ...patch } } }));
+  };
+  const retestSummary = Object.keys(retestResults).length>0 ? compareRetest(retestTargets, retestResults) : null;
+
   const [aiResult, setAiResult] = useState("");
   const [aiLoading,setAiLoading]= useState(false);
 
@@ -15157,6 +15243,12 @@ function AssessmentScreen({ member, onBack, showToast }) {
         quickCheck: hasQuickCheck ? {...quickCheck} : undefined,
         recommendedCategories: hasQuickCheck ? getRecommendedCategories(records) : undefined,
         categoryResults: hasCategoryResults ? {...categoryResults} : undefined,
+        // 교정 루틴 + 재평가 — 생성/입력한 경우에만 저장
+        correctiveRoutine: routinePhases ? { phases: routinePhases } : undefined,
+        retest: Object.keys(retestResults).length>0 ? {
+          done: true, retestedAt: new Date().toISOString(),
+          compare: retestSummary?.compare||[], painCompare: retestSummary?.painCompare||[],
+        } : undefined,
         // AI 루틴용
         aiRoutine: aiResult || undefined,
       };
@@ -15364,6 +15456,34 @@ function AssessmentScreen({ member, onBack, showToast }) {
             })}
           </Card>
         )}
+        {viewRec.correctiveRoutine?.phases?.length>0 && (
+          <Card title="🛠 교정 루틴" style={{marginBottom:8}}>
+            {viewRec.correctiveRoutine.phases.filter(p=>p.exercises.some(e=>e.name)).map(p=>(
+              <div key={p.phase} style={{marginBottom:6}}>
+                <Mo c="#5EEAD4" s={9} style={{fontWeight:700}}>{p.phase}</Mo>
+                {p.exercises.filter(e=>e.name).map((e,i)=>(
+                  <Mo key={i} c="#94a3b8" s={9} style={{display:"block",marginLeft:8}}>{e.name}{e.sets?` ${e.sets}세트`:""}{e.reps?` ${e.reps}회`:""}</Mo>
+                ))}
+              </div>
+            ))}
+          </Card>
+        )}
+        {viewRec.retest?.done && (
+          <Card title="🔁 재평가 결과" style={{marginBottom:8}}>
+            {(viewRec.retest.compare||[]).map((c,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                <Mo c="#e2e8f0" s={9}>{c.category} {c.label} {c.before}→{c.after}</Mo>
+                <Mo c={c.changeLabel==="좋아짐"?"#5EEAD4":c.changeLabel==="악화"?"#f87171":"#94a3b8"} s={9} style={{fontWeight:700}}>{c.changeLabel}</Mo>
+              </div>
+            ))}
+            {(viewRec.retest.painCompare||[]).map((c,i)=>(
+              <div key={"p"+i} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                <Mo c="#e2e8f0" s={9}>{c.category} {c.label} {c.side} VAS {c.before}→{c.after}</Mo>
+                <Mo c={c.changeLabel==="좋아짐"?"#5EEAD4":c.changeLabel==="악화"?"#f87171":"#94a3b8"} s={9} style={{fontWeight:700}}>{c.changeLabel}</Mo>
+              </div>
+            ))}
+          </Card>
+        )}
       </div>
     );
   }
@@ -15391,6 +15511,7 @@ function AssessmentScreen({ member, onBack, showToast }) {
         {[
           {key:"빠른평가",  label:"⚡ 빠른 평가"},
           {key:"유형별평가", label:"🎯 유형별 평가"},
+          {key:"교정루틴",  label:"🛠 교정 루틴"},
           {key:"입력",      label:"상세 입력"},
           {key:"기록",      label:"기록"},
           {key:"변화 분석", label:"📊 변화 분석"},
@@ -15523,6 +15644,114 @@ function AssessmentScreen({ member, onBack, showToast }) {
           </div>
         );
       })()}
+
+      {/* ── 교정 루틴 탭 (40분 교정 + 수업 마지막 5분 재평가) ──────────── */}
+      {viewMode==="교정루틴" && (
+        <div>
+          {!routinePhases ? (
+            <div style={{textAlign:"center",padding:"30px 10px"}}>
+              <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:14}}>유형별 평가 결과를 기반으로 6단계 교정 루틴을 자동 생성합니다.</Mo>
+              <button onClick={generateRoutine}
+                style={{padding:"13px 20px",borderRadius:10,border:"none",cursor:"pointer",
+                  background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:13,fontWeight:800}}>
+                🛠 40분 교정 루틴 생성하기
+              </button>
+            </div>
+          ) : (
+            <>
+              {routinePhases.map((p,phaseIdx)=>(
+                <div key={p.phase} style={{marginBottom:12,padding:"10px",borderRadius:8,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)"}}>
+                  <Mo c="#5EEAD4" s={11} style={{fontWeight:700,display:"block",marginBottom:7}}>{phaseIdx+1}. {p.phase}</Mo>
+                  {p.exercises.map((ex,exIdx)=>(
+                    <div key={exIdx} style={{display:"grid",gridTemplateColumns:"1fr 40px 40px 50px",gap:4,marginBottom:5,alignItems:"center"}}>
+                      <input value={ex.name} onChange={e=>updateRoutineExercise(phaseIdx,exIdx,{name:e.target.value})}
+                        placeholder="운동명" style={{padding:"6px 8px",borderRadius:6,fontSize:10,border:"1px solid rgba(255,255,255,.1)",background:"#111827",color:"#ddddf0"}} />
+                      <input value={ex.sets} onChange={e=>updateRoutineExercise(phaseIdx,exIdx,{sets:e.target.value})}
+                        placeholder="세트" style={{padding:"6px 4px",borderRadius:6,fontSize:10,textAlign:"center",border:"1px solid rgba(255,255,255,.1)",background:"#111827",color:"#ddddf0"}} />
+                      <input value={ex.reps} onChange={e=>updateRoutineExercise(phaseIdx,exIdx,{reps:e.target.value})}
+                        placeholder="횟수" style={{padding:"6px 4px",borderRadius:6,fontSize:10,textAlign:"center",border:"1px solid rgba(255,255,255,.1)",background:"#111827",color:"#ddddf0"}} />
+                      <button onClick={()=>removeRoutineExercise(phaseIdx,exIdx)}
+                        style={{padding:"6px 0",borderRadius:6,border:"none",cursor:"pointer",background:"rgba(239,68,68,.12)",color:"#f87171",fontSize:10}}>삭제</button>
+                    </div>
+                  ))}
+                  <input value={p.exercises[p.exercises.length-1]?.memo||""}
+                    onChange={e=>updateRoutineExercise(phaseIdx,p.exercises.length-1,{memo:e.target.value})}
+                    placeholder="메모(선택)" style={{width:"100%",boxSizing:"border-box",marginTop:2,padding:"6px 8px",borderRadius:6,fontSize:9,
+                      border:"1px solid rgba(255,255,255,.06)",background:"transparent",color:"#94a3b8"}} />
+                  <button onClick={()=>addRoutineExercise(phaseIdx)}
+                    style={{marginTop:6,padding:"5px 10px",borderRadius:6,border:"1px dashed rgba(94,234,212,.3)",cursor:"pointer",
+                      background:"transparent",color:"#5EEAD4",fontSize:9,fontWeight:700}}>+ 운동 추가</button>
+                </div>
+              ))}
+
+              {/* ── 재평가 (수업 마지막 5분) ───────────────────────────── */}
+              <div style={{marginTop:16,padding:"12px",borderRadius:9,background:"rgba(162,155,254,.05)",border:"1px solid rgba(162,155,254,.2)"}}>
+                <Mo c="#a29bfe" s={11} style={{fontWeight:700,display:"block",marginBottom:8}}>🔁 재평가</Mo>
+                {retestTargets.length===0 ? (
+                  <Mo c="#3a4a5a" s={10}>유형별 평가에서 제한/통증으로 기록된 테스트가 있어야 재평가할 수 있습니다.</Mo>
+                ) : !retestMode ? (
+                  <button onClick={()=>setRetestMode(true)}
+                    style={{padding:"9px 14px",borderRadius:8,border:"none",cursor:"pointer",background:"rgba(162,155,254,.18)",color:"#a29bfe",fontSize:11,fontWeight:700}}>
+                    재평가 시작 ({retestTargets.length}개 테스트)
+                  </button>
+                ) : (
+                  <div>
+                    {retestTargets.map(target=>{
+                      const row = retestResults[target.category]?.[target.testKey] || {result:"",vas:{좌:0,우:0}};
+                      return (
+                        <div key={target.category+target.testKey} style={{marginBottom:10,padding:"9px 10px",borderRadius:8,background:"rgba(255,255,255,.02)"}}>
+                          <Mo c="#e2e8f0" s={11} style={{fontWeight:700,display:"block",marginBottom:2}}>{target.category} · {target.label}</Mo>
+                          <Mo c="#3a4a5a" s={9} style={{display:"block",marginBottom:6}}>이전: {target.before}</Mo>
+                          <div style={{display:"flex",gap:4,marginBottom:6}}>
+                            {TEST_RESULT_OPTS.map(opt=>(
+                              <button key={opt} onClick={()=>setRetestResult(target.category,target.testKey,{result:opt})}
+                                style={{flex:1,padding:"6px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                                  borderColor:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="제한"?"#ffd166":"#ef4444"):"rgba(255,255,255,.08)",
+                                  background:row.result===opt?(opt==="정상"?"rgba(94,234,212,.15)":opt==="제한"?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
+                                  color:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="제한"?"#ffd166":"#f87171"):"#94a3b8"}}>
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                          {row.result==="통증" && (
+                            <div style={{display:"flex",gap:10}}>
+                              {["좌","우"].map(side=>(
+                                <div key={side} style={{display:"flex",alignItems:"center",gap:4}}>
+                                  <Mo c="#94a3b8" s={9}>{side} VAS</Mo>
+                                  <input type="number" min={0} max={10} value={row.vas?.[side]||0}
+                                    onChange={e=>setRetestResult(target.category,target.testKey,{vas:{...(row.vas||{좌:0,우:0}),[side]:Math.max(0,Math.min(10,Number(e.target.value)||0))}})}
+                                    style={{width:38,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",border:"1px solid rgba(239,68,68,.3)",background:"#111827",color:"#f87171"}} />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {retestSummary && (retestSummary.compare.length>0 || retestSummary.painCompare.length>0) && (
+                      <div style={{marginTop:10,padding:"9px 10px",borderRadius:8,background:"rgba(94,234,212,.06)"}}>
+                        <Mo c="#5EEAD4" s={10} style={{fontWeight:700,display:"block",marginBottom:6}}>자동 비교</Mo>
+                        {retestSummary.compare.map((c,i)=>(
+                          <div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                            <Mo c="#e2e8f0" s={9}>{c.category} {c.label} {c.before}→{c.after}</Mo>
+                            <Mo c={c.changeLabel==="좋아짐"?"#5EEAD4":c.changeLabel==="악화"?"#f87171":"#94a3b8"} s={9} style={{fontWeight:700}}>{c.changeLabel}</Mo>
+                          </div>
+                        ))}
+                        {retestSummary.painCompare.map((c,i)=>(
+                          <div key={"pain"+i} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                            <Mo c="#e2e8f0" s={9}>{c.category} {c.label} {c.side} VAS {c.before}→{c.after}</Mo>
+                            <Mo c={c.changeLabel==="좋아짐"?"#5EEAD4":c.changeLabel==="악화"?"#f87171":"#94a3b8"} s={9} style={{fontWeight:700}}>{c.changeLabel}</Mo>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── 변화 분석 탭 ─────────────────────────────────────────────── */}
       {viewMode==="변화 분석" && (

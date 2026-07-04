@@ -966,12 +966,14 @@ const checks = [
     app.includes('const MALE_SPLIT = ["하체","등","가슴","어깨","팔"];') &&
     app.includes('const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];')
   ],
-  ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위) 함수 존재',
-    app.includes('function getRecentPartSequence(sessions=[], n=10)') &&
-    app.includes('function inferActualSplit(sequence=[])')
+  ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위)이 최근 2~4주(windowDays) 안에서, 2~5분할(2분할 포함)까지 인식',
+    app.includes('function getRecentPartSequence(sessions=[], n=10, windowDays=28)') &&
+    app.includes('function inferActualSplit(sequence=[])') &&
+    app.includes('return (order.length>=2&&order.length<=5)?order:null;')
   ],
-  ['오늘의 운동 가이드: 다음 수업 날짜 역산 공식이 사이클 길이 이내에서만 적용(빈도 왜곡 방지, 3순위 게이트)',
-    app.includes('if(info.daysUntil!=null && info.daysUntil>=1 && info.daysUntil<=cycle.length){') &&
+  ['오늘의 운동 가이드: 다음 수업 날짜 역산 공식이 사이클 길이 이내 + 주당 빈도가 사이클 길이에 못 미치지 않을 때만 적용(3순위 게이트로 "주 2회에게 5회처럼" 추천 방지)',
+    app.includes('const freq=getWorkoutFrequencyNumber(profile);') &&
+    app.includes('if(info.daysUntil!=null && info.daysUntil>=1 && info.daysUntil<=cycle.length && freq>=cycle.length-1){') &&
     app.includes('const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;')
   ],
   ['오늘의 운동 가이드: getNextWorkoutInfo/normalizeWorkoutPart/getRecentPartCounts/getWorkoutFrequencyNumber 등 관리자앱 공유 함수는 본체 변경 없음',
@@ -984,6 +986,10 @@ const checks = [
   ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',
     app.includes('const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어");') &&
     app.includes('🧩 보조 운동')
+  ],
+  ['오늘의 운동 가이드: 팔 추천 시 전체 상위 4개가 아니라 이두 2개 + 삼두 2개로 균형있게 구성',
+    app.includes('const armBalanced=wantsArm?[...sorted.filter(isBicep).slice(0,2),...sorted.filter(isTricep).slice(0,2)]:[];') &&
+    app.includes('const routineList=armBalanced.length?armBalanced:sorted.slice(0,4);')
   ],
 ];
 

@@ -9490,6 +9490,9 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
                   await handleManualSave();
                   await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
                   setConfirmSplit(false);
+                  // 나눠서 기록 완료 후 이 화면(폼)의 운동종목/세트/중량 로컬 state가 리셋된 Firestore 문서와
+                  // 어긋나지 않도록, 목록으로 돌아가 다음에 재진입할 때 새로 초기화된 데이터로 시작하게 한다.
+                  onBack?.();
                 } catch(e){ showToast(e.message||"실패","err"); }
                 finally { setSplitting(false); }
               }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:splitting?"not-allowed":"pointer",

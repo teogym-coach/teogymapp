@@ -1963,6 +1963,10 @@ export async function updatePairSessionStatus(id, teamStatus) {
   await updateDoc(ref, { teamStatus, updatedAt: serverTimestamp() });
 }
 
+// 2:1 수업은 "그룹 관계"(memberAId/BId·이름·teamStatus)와 "이번 회차 기록 작성 상태"(exercises·splitDone 등)를 분리해서 다룬다.
+// 나눠서 기록을 완료하면 회원 개인 세션은 그대로 남기고, pairSessions 문서는 관계 필드만 보존한 채
+// 이번 회차 필드를 초기화해 같은 문서를 다음 회차 기록에 바로 재사용할 수 있게 한다(완료 이력은 남기지 않고,
+// 실제 기록 이력은 회원 개인 수업일지에 그대로 남아있다 — 회원별 히스토리에서 확인 가능).
 export async function splitPairSession(pairSessionId, memberASessionData, memberBSessionData) {
   const uid = requireUid();
   const pairRef = doc(db, "pairSessions", pairSessionId);
@@ -1980,11 +1984,18 @@ export async function splitPairSession(pairSessionId, memberASessionData, member
     { ...clean(withSessionDefaults(memberBSessionData)), createdAt: serverTimestamp() }
   );
   await updateDoc(pairRef, {
-    splitDone: true,
-    splitAt: serverTimestamp(),
-    status: "completed",
-    aSessionId: aRef.id,
-    bSessionId: bRef.id,
+    exercises: [],
+    trainerCommentA: "",
+    trainerCommentB: "",
+    intensity: "중강도",
+    type: "",
+    selectedTypes: [],
+    date: new Date().toISOString().slice(0, 10),
+    splitDone: false,
+    status: "draft",
+    lastSplitAt: serverTimestamp(),
+    lastASessionId: aRef.id,
+    lastBSessionId: bRef.id,
     updatedAt: serverTimestamp(),
   });
   return { aSessionId: aRef.id, bSessionId: bRef.id };

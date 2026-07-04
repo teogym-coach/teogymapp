@@ -664,6 +664,25 @@ const checks = [
     (app.match(/const \[splitting, setSplitting\] = useState\(false\);/g) || []).length >= 2
   ],
 
+  // ── 2:1 나눠서 기록 후 상태 초기화 (그룹 관계 유지 + 이번 회차 기록만 리셋) ──
+  ['2:1 나눠서 기록 후: pairSessions 문서의 이번 회차 필드(운동종목/코멘트/강도/타입)만 초기화',
+    db.includes('exercises: [],') &&
+    db.includes('trainerCommentA: "",') &&
+    db.includes('trainerCommentB: "",') &&
+    db.includes('splitDone: false,') &&
+    db.includes('status: "draft",') &&
+    db.includes('lastSplitAt: serverTimestamp(),')
+  ],
+  ['2:1 나눠서 기록 후: 회원 개인 세션 생성 로직은 그대로 유지(개인 히스토리 영향 없음)',
+    db.includes('const aRef = await addDoc(') &&
+    db.includes('const bRef = await addDoc(') &&
+    db.includes('return { aSessionId: aRef.id, bSessionId: bRef.id };')
+  ],
+  ['2:1 나눠서 기록 후: 폼 화면이 목록으로 돌아가 로컬 state(운동종목/세트/중량)가 리셋된 문서와 어긋나지 않게 처리',
+    app.includes('await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB,') &&
+    app.includes('onBack?.();')
+  ],
+
   // ── 회원앱 홈 "오늘 운동 완료" 버튼 리디자인 ──
   ['홈 오늘 운동 완료 버튼: nowrap + 아이콘 정렬 + 44~48px 높이의 pill 버튼(.attendance-check-btn)',
     app.includes('className="attendance-check-btn"') &&

@@ -495,7 +495,7 @@ const checks = [
     !app.includes('출석 랭킹')
   ],
   ['운동 체크: 이번 달 실제 운동 횟수(monthCount) 기반 피드백 문구 — 임의 순환이 아니라 실제 기록을 반영',
-    app.includes('monthCount>=15?"정말 꾸준히 운동하고 계세요!"') &&
+    app.includes('monthCount>=15?"정말 꾸준히 운동하고 계세요!') &&
     app.includes('꾸준히 기록이 쌓이고 있어요')
   ],
   ['출석 기능: saveAttendance 함수 존재 (db.js)',
@@ -785,7 +785,7 @@ const checks = [
   ],
   ['건강 탭: 동기부여 배너(buildHealthMotivation)가 기존 데이터만으로 계산됨(신규 저장 없음)',
     app.includes('function buildHealthMotivation(p)') &&
-    app.includes('이번 주 목표까지 ${remain}회 남았습니다') &&
+    app.includes('목표까지 ${remain}회 남았으니 다음 수업 전까지 채워보세요') &&
     app.includes('function computeEngagementStreak(checkins=[],attendance=[],cardioLogs=[])')
   ],
   ['건강 탭: 유산소 섹션 내부가 MCard 대신 통일된 health-subcard 디자인 사용(1:1/관리자 MCard는 그대로 유지)',
@@ -1165,14 +1165,15 @@ const checks = [
   ],
 
   // ── 기존 코멘트 개인화 (홈/건강 탭, 수업 탭은 제외) ──
-  ['개인화: 홈 탭 "건강 요약" 배너(buildHealthMotivation)가 통증/컨디션/체중기록빈도/칼로리기록 신호까지 반영(질책 표현 없이)',
+  ['개인화: 홈 탭 "건강 요약" 배너(buildHealthMotivation)가 통증/컨디션/체중/식단/유산소 순으로 "현재 상태 → 다음 행동 제안"까지 이어지는 문장(질책 표현 없이)',
     (() => {
       const i = app.indexOf('function buildHealthMotivation(p){');
-      const block = i !== -1 ? app.slice(i, i + 2200) : '';
-      return block.includes('무리하지 않게 컨디션을 조절해보세요') &&
-        block.includes('충분한 휴식과 회복을 챙겨보세요') &&
-        block.includes('체중 기록을 꾸준히 남기고 있어요') &&
-        block.includes('recentKcalCount===0') &&
+      const block = i !== -1 ? app.slice(i, i + 3200) : '';
+      return block.includes('오늘은 강도를 살짝 낮추고 무리하지 않게 진행해보세요') &&
+        block.includes('충분히 쉬고 회복에 집중해보면 좋습니다') &&
+        block.includes('지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다') &&
+        block.includes('오늘 한 끼만 기록해보면') &&
+        block.includes('오늘 20~30분 가볍게 걷기부터 시작해보면') &&
         !block.includes('부족합니다') && !block.includes('AI');
     })()
   ],
@@ -1180,12 +1181,27 @@ const checks = [
     !app.includes('<span>최근 자극이 좋았던 운동입니다.</span><span>통증 기록과 다음 PT 전 회복을 함께 고려했습니다.</span>') &&
     app.includes('rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`')
   ],
-  ['개인화: 홈 탭 "오늘 운동 체크" 피드백이 실제 이번 달 운동 횟수 구간(monthCount)에 따라 달라짐(임의 순환 아님)',
-    app.includes('monthCount>=15?"정말 꾸준히 운동하고 계세요!":monthCount>=8?"좋은 흐름으로 운동을 이어가고 있어요.":monthCount>=1?"꾸준히 기록이 쌓이고 있어요.":"오늘 첫 기록을 남겨보세요."')
+  ['개인화: 홈 탭 "오늘 운동 체크" 피드백이 실제 이번 달 운동 횟수 구간(monthCount)에 따라 달라지고, 다음 행동 제안까지 이어짐(임의 순환 아님)',
+    app.includes('monthCount>=15?"정말 꾸준히 운동하고 계세요! 이 페이스라면 다음 달 변화도 기대할 수 있어요."') &&
+    app.includes('이번 주도 이 페이스를 유지해보세요.')
   ],
   ['개인화: 수업 탭(SessionMini/MemberFeedbackForm)에는 개인화 코멘트·추천·코칭 문구를 추가하지 않음 — 수업일지 확인/근육통·RPE·메모 입력/지난 기록 확인만 유지',
     !app.includes('function buildSessionTabComment') &&
     !app.includes('function SessionCoachComment')
+  ],
+
+  // ── PT 코치형 3단계 코멘트(현재 상태 → 잘하고 있는 점 → 다음 행동 제안) ──
+  ['PT코치형: 홈 탭 "오늘의 운동 가이드"가 상태(다음 수업/남은 기간) 뒤에 실제 기록 기반 칭찬(praiseLine)을 넣고, 그 다음 추천 부위(다음 행동)로 마무리',
+    app.includes('const praiseLine=rec.goodStim.length?`최근 ${rec.goodStim[0].name} 운동에서 자극이 좋았어요.`') &&
+    app.includes('{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은')
+  ],
+  ['PT코치형: 다이어트 "이번 달 변화"/체형교정 "이번 달 변화" 문장이 상태 서술로 끝나지 않고 "지금처럼 ~하면/이어가면" 다음 행동으로 이어짐',
+    app.includes('체중이 꾸준히 감소하고 있습니다. 지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.') &&
+    app.includes('통증이 점점 줄어들고 있습니다. 지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.')
+  ],
+  ['PT코치형: 건강유지 대표 코멘트/최근 변화 요약이 상태 서술로 끝나지 않고 다음 행동 제안으로 마무리',
+    app.includes('지금 흐름을 유지하면 다음 달에도 안정적인 컨디션을 기대할 수 있습니다.') &&
+    app.includes('지금 페이스를 유지하면 안정적인 컨디션을 계속 이어갈 수 있어요.')
   ],
 ];
 

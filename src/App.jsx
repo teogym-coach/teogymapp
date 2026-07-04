@@ -1282,7 +1282,7 @@ function Choices({vals,cur,onPick,multi}){return <div className="choices">{vals.
 function SelectLine({label,value,opts,onChange,placeholder}){return <div className="form-line"><label>{label}</label><select value={value} onChange={e=>onChange(e.target.value)}>{placeholder!==undefined&&<option value="">{placeholder}</option>}{opts.map(o=><option key={o}>{o}</option>)}</select></div>}
 function InputLine({label,value,onChange,type="text"}){return <div className="form-line"><label>{label}</label><input type={type} value={value||""} onChange={e=>onChange(e.target.value)}/></div>}
 function NoticeCard({notices=[],onOpen,onAll}){const unread=notices.filter(n=>!n.isRead).length; const featured=notices.find(n=>n.isImportant)||notices[0]; if(!featured)return null; return <section className={`notice-card ${featured.isImportant?"important":""}`} onClick={()=>onOpen?.(featured)}><span>{unread?`📢 새로운 공지 ${unread}건`:featured.isImportant?"📌 중요 공지":"📢 공지사항"}</span><b>{featured.title}</b><button type="button" onClick={e=>{e.stopPropagation();onAll?.();}}>전체보기</button></section>}
-function AttendanceCard({attendance=[],onCheckin,saving}){const today=getKoreaDateString(); const isCheckedIn=attendance.some(a=>a.date===today); const ym=today.slice(0,7); const monthCount=attendance.filter(a=>String(a.date||"").startsWith(ym)).length; const feedback=monthCount>=15?"정말 꾸준히 운동하고 계세요!":monthCount>=8?"좋은 흐름으로 운동을 이어가고 있어요.":monthCount>=1?"꾸준히 기록이 쌓이고 있어요.":"오늘 첫 기록을 남겨보세요."; return <MCard title="오늘 운동 체크"><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}><div><div style={{fontSize:13,fontWeight:900,color:isCheckedIn?"#5EEAD4":"#20242A"}}>{isCheckedIn?"✅ 오늘 운동 완료":"아직 운동 체크 전이에요"}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>이번 달 운동 {monthCount}회</div>{isCheckedIn&&<div style={{fontSize:10,color:"#475569",marginTop:3}}>{feedback}</div>}</div>{!isCheckedIn&&<button type="button" className="attendance-check-btn" onClick={onCheckin} disabled={saving}><span className="attendance-check-icon">{saving?"⏳":"✓"}</span><span>{saving?"처리 중...":"오늘 운동 완료"}</span></button>}</div></MCard>;}
+function AttendanceCard({attendance=[],onCheckin,saving}){const today=getKoreaDateString(); const isCheckedIn=attendance.some(a=>a.date===today); const ym=today.slice(0,7); const monthCount=attendance.filter(a=>String(a.date||"").startsWith(ym)).length; const feedback=monthCount>=15?"정말 꾸준히 운동하고 계세요! 이 페이스라면 다음 달 변화도 기대할 수 있어요.":monthCount>=8?"좋은 흐름으로 운동을 이어가고 있어요. 이번 주도 이 페이스를 유지해보세요.":monthCount>=1?"꾸준히 기록이 쌓이고 있어요. 이번 주도 하나씩 채워가 보세요.":"오늘 첫 기록을 남겨보세요. 작은 시작이 좋은 습관을 만듭니다."; return <MCard title="오늘 운동 체크"><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}><div><div style={{fontSize:13,fontWeight:900,color:isCheckedIn?"#5EEAD4":"#20242A"}}>{isCheckedIn?"✅ 오늘 운동 완료":"아직 운동 체크 전이에요"}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>이번 달 운동 {monthCount}회</div>{isCheckedIn&&<div style={{fontSize:10,color:"#475569",marginTop:3}}>{feedback}</div>}</div>{!isCheckedIn&&<button type="button" className="attendance-check-btn" onClick={onCheckin} disabled={saving}><span className="attendance-check-icon">{saving?"⏳":"✓"}</span><span>{saving?"처리 중...":"오늘 운동 완료"}</span></button>}</div></MCard>;}
 function MemberHome(p){const done=p.sessions.length; const pct=p.totalReg?Math.min(100,Math.round(done/p.totalReg*100)):0; return <><h1>안녕하세요 {p.profile.name}님</h1><p className="sub">대표님이 관리하는 변화 리포트입니다 · 오늘 상태도 건강관리 탭에서 기록하세요</p><div className="hero-card pt-progress"><b>{p.totalReg?"남은 PT":"대표님과 함께한 수업"}</b><strong>{p.totalReg?`${p.remaining}회`:`${done}회`}</strong>{p.totalReg?<><em>진행 {done}/{p.totalReg}회 · {pct}%</em><i><small style={{width:`${pct}%`}}/></i></>:<em>누적 수업 기록이 쌓이고 있어요</em>}</div><div className="grid2 top-metrics"><ChangeReportMetric startW={p.startW} curW={p.curW}/><GoalMetric goal={p.onboarding.goal||"꾸준한 변화"}/><GoalWeightForecastCard {...p}/><NextWorkoutMetric profile={p.profile}/></div><ReviewRoutine {...p}/><NoticeCard notices={p.notices} onOpen={p.openNotice} onAll={()=>p.setTab("profile")}/><DailyConditioningCard items={p.dailyConditioning}/><AttendanceCard attendance={p.attendance||[]} onCheckin={p.saveAttendanceToday} saving={p.attendanceSaving}/></>}
 function HomeHealthStatus({checkins=[],body,nutrition,setTab}){const today=getKoreaDateString(); const todayCheck=(checkins||[]).find(c=>(c.date||c.id)===today)||{}; const hasWeight=getBodyWeightRecords(body).some(r=>r.date===today); const hasKcal=getKcalLogs(nutrition).some(r=>r.date===today); const done=hasWeight||hasKcal||todayCheck.steps||todayCheck.condition||todayCheck.painPart||todayCheck.painMemo; return <section className={`home-health-status ${done?"done":""}`}><div><span>오늘 건강기록</span><b>{done?"입력 완료":"오늘 건강기록을 입력해주세요."}</b></div><button type="button" onClick={()=>setTab?.("health")}>{done?"기록 보기":"입력"}</button></section>}
 function MemberWorkout({sessions,saveFeedback,readSessionIds,markSessionsAsRead}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState("__first__"); const [showAll,setShowAll]=useState(false); const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s,i)=>!!lq||(openId==="__first__"&&i===0)||openId===s.id; const toggleSess=(s,i)=>{setOpenId(prev=>(isExp(s,i)&&!lq)?null:s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);}; useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);},[]);  return <><h1>수업일지</h1><p className="sub">대표님이 공개한 수업 결과 리포트입니다.</p><div className="ex-search-wrap"><input type="search" className="ex-search" placeholder="🔍 운동 검색" value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")}>✕</button>}</div>{displayed.length?displayed.map((s,i)=>{const title=`${s.date} · ${formatTypes(s.selectedTypes||s.type)||'운동'}`; const expanded=isExp(s,i); const dateFmt=String(s.date||"").slice(5).replace(/-/g,"."); const typeName=formatTypes(s.selectedTypes||s.type)||'운동'; const exCount=(s.exercises||[]).filter(e=>e.name).length; if(!expanded)return <button key={s.id} type="button" className="session-collapsed-card" onClick={()=>toggleSess(s,i)}><span className="sess-col-left"><span className="sess-col-date">{dateFmt}</span><span className="sess-col-dot">·</span><span className="sess-col-type">{typeName}</span></span><span className="sess-col-meta">{exCount}개</span><span className="sess-col-arrow">▼</span></button>; return <MCard key={s.id} title={`${s.date} · ${typeName}`}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4}}><button type="button" onClick={()=>toggleSess(s,i)} style={{border:"1px solid #E8ECF1",background:"#F6F7F9",borderRadius:10,padding:"4px 10px",fontSize:12,fontWeight:900,color:"#8B949E",cursor:"pointer"}}>접기 ▲</button></div><SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/></MCard>;}):(lq?<p className="notice soft">검색 결과가 없습니다.</p>:null)}{!lq&&!showAll&&searched.length>5&&<button type="button" className="ghost" style={{marginTop:8}} onClick={()=>setShowAll(true)}>전체 수업 보기 ({searched.length}회)</button>}</>}
@@ -1341,32 +1341,48 @@ function pickHighlightStat(p){
   if(streak>0) return {icon:"✔",label:"연속 기록",value:`${streak}일`};
   return {icon:"💪",label:"이번 달 운동",value:`${rec.thisCount}회`};
 }
+// 건강 요약 배너 — 통증→컨디션→체중→식단→유산소 우선순위를 유지하되, 각 문장을 "현재 상태 → 다음 행동 제안"까지 이어지게 구성한다.
+// 질책형 표현("부족합니다" 등)은 쓰지 않고, 상태가 좋지 않을 때도 오늘 할 수 있는 긍정적 행동으로 마무리한다.
 function buildHealthMotivation(p){
   const msgs=[];
-  // 통증·컨디션 안내는 안전과 직결되므로 최우선으로 배치(무리하지 말라는 안내가 슬라이스에서 밀리지 않도록)
   const lastCheck=(p.checkins||[])[0]||{};
-  if(lastCheck.painPart&&lastCheck.painPart!=="없음") msgs.push("최근 통증 기록이 있어요. 무리하지 않게 컨디션을 조절해보세요.");
-  else if(["피곤","매우 피곤"].includes(lastCheck.condition)) msgs.push("최근 컨디션이 다소 저하되어 있어요. 충분한 휴식과 회복을 챙겨보세요.");
+  if(lastCheck.painPart&&lastCheck.painPart!=="없음"){
+    msgs.push("최근 통증을 잘 기록해주고 계세요. 오늘은 강도를 살짝 낮추고 무리하지 않게 진행해보세요.");
+  } else if(["피곤","매우 피곤"].includes(lastCheck.condition)){
+    msgs.push("최근 컨디션 기록을 꾸준히 남기고 있어요. 오늘은 평소보다 충분히 쉬고 회복에 집중해보면 좋습니다.");
+  }
+  const w=computeWeightCard(p.body);
   const recentWeightCount=getBodyWeightRecords(p.body).filter(r=>String(r.date||"")>=new Date(Date.now()-7*86400000).toISOString().slice(0,10)).length;
-  if(recentWeightCount>=3) msgs.push("체중 기록을 꾸준히 남기고 있어요. 좋은 기록 습관입니다.");
+  if(w.delta!=null&&Math.abs(w.delta)>=0.5){
+    msgs.push(`현재 체중은 최근 30일간 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}하며 좋은 흐름을 보이고 있어요. 지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다.`);
+  } else if(recentWeightCount>=3){
+    msgs.push("체중 기록을 꾸준히 남기고 있어요. 지금처럼 이어가면 변화 흐름을 더 정확하게 확인할 수 있습니다.");
+  }
+  const recentKcalCount=getKcalLogs(p.nutrition).filter(r=>r.date>=new Date(Date.now()-7*86400000).toISOString().slice(0,10)).length;
+  if(recentKcalCount>=5){
+    msgs.push("식단 기록을 꾸준히 남기고 있어요. 지금처럼 이어가면 체중 변화의 원인을 더 정확히 확인할 수 있습니다.");
+  } else {
+    msgs.push("식단 기록은 아직 적지만 지금부터 시작하면 충분해요. 오늘 한 끼만 기록해보면 변화 원인을 더 정확히 확인할 수 있습니다.");
+  }
+  const zoneWeek=getZone2Achievement(summarizeCardioWeek(p.cardioLogs||[]).logs);
+  if(zoneWeek.inZone>0){
+    msgs.push(`이번 주 Zone2 구간 유산소를 ${zoneWeek.inZone}회 기록하며 좋은 페이스를 유지하고 있어요. 이번 주도 이 흐름을 이어가 보세요.`);
+  } else {
+    msgs.push("이번 주는 유산소 기록이 아직 없어요. 오늘 20~30분 가볍게 걷기부터 시작해보면 컨디션 관리에 도움이 됩니다.");
+  }
   const weekly=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
   if(weekly.target>0){
     const remain=weekly.target-weekly.count;
-    if(remain>0) msgs.push(`이번 주 목표까지 ${remain}회 남았습니다.`);
-    else if(weekly.count>0) msgs.push("이번 주 운동 목표를 달성했습니다! 🎉");
+    if(remain>0) msgs.push(`이번 주 운동을 잘 이어가고 있어요. 목표까지 ${remain}회 남았으니 다음 수업 전까지 채워보세요.`);
+    else if(weekly.count>0) msgs.push("이번 주 운동 목표를 달성했습니다! 이 페이스를 다음 주에도 이어가 보세요. 🎉");
   }
   const stepsThis=getWeeklyStepsAvg(p.checkins,6,0), stepsLast=getWeeklyStepsAvg(p.checkins,13,7);
   if(stepsThis!=null&&stepsLast!=null&&stepsLast>0){
     const pct=Math.round((stepsThis-stepsLast)/stepsLast*100);
-    if(Math.abs(pct)>=10) msgs.push(`지난주보다 걸음수가 ${Math.abs(pct)}% ${pct>0?"증가":"감소"}했습니다.`);
+    if(pct>=10) msgs.push(`지난주보다 걸음수가 ${pct}% 늘었어요. 활동량이 좋아지고 있으니 이 흐름을 유지해보세요.`);
+    else if(pct<=-10) msgs.push(`지난주보다 걸음수가 ${Math.abs(pct)}% 줄었어요. 오늘은 짧게라도 걸어보면 활동량을 다시 끌어올릴 수 있어요.`);
   }
-  const w=computeWeightCard(p.body);
-  if(w.delta!=null&&Math.abs(w.delta)>=0.5) msgs.push(`체중이 최근 30일간 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}했습니다.`);
-  const zoneWeek=getZone2Achievement(summarizeCardioWeek(p.cardioLogs||[]).logs);
-  if(zoneWeek.inZone>0) msgs.push(`이번 주 Zone2 구간 유산소를 ${zoneWeek.inZone}회 기록했습니다.`);
-  const recentKcalCount=getKcalLogs(p.nutrition).filter(r=>r.date>=new Date(Date.now()-7*86400000).toISOString().slice(0,10)).length;
-  if(recentKcalCount===0) msgs.push("식단 기록을 남기면 체중 변화 원인을 더 잘 확인할 수 있어요.");
-  return msgs.slice(0,3);
+  return msgs.slice(0,4);
 }
 
 function MemberHealth(p){
@@ -1728,10 +1744,10 @@ function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){
 function buildDietGrowthLines({wDiff,kcalRows=[],forecast}){
   const lines=[];
   if(wDiff==null) lines.push("체중 기록이 쌓이면 변화 흐름을 보여드릴게요.");
-  else if(wDiff<-0.3) lines.push("체중이 꾸준히 감소하고 있습니다.");
+  else if(wDiff<-0.3) lines.push("체중이 꾸준히 감소하고 있습니다. 지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.");
   else if(wDiff>0.3) lines.push("체중이 다소 증가하는 흐름이에요. 식단과 활동량을 함께 점검해보면 좋아요.");
-  else lines.push("체중이 안정적으로 유지되고 있습니다.");
-  if(kcalRows.length>=5) lines.push("섭취 칼로리 기록이 꾸준히 쌓이면서 변화 흐름이 더 명확해지고 있습니다.");
+  else lines.push("체중이 안정적으로 유지되고 있습니다. 지금 페이스를 유지하며 다음 변화를 지켜봐도 좋아요.");
+  if(kcalRows.length>=5) lines.push("섭취 칼로리 기록이 꾸준히 쌓이면서 변화 흐름이 더 명확해지고 있습니다. 지금처럼 계속 기록해보세요.");
   else lines.push("섭취 칼로리를 조금 더 자주 기록하면 변화 흐름을 더 정확히 확인할 수 있어요.");
   if(forecast?.target && forecast?.risk!=="high") lines.push("현재 페이스를 유지하면 목표 체중에 가까워질 가능성이 높습니다.");
   else if(forecast?.target) lines.push("목표까지는 시간이 조금 더 필요하지만, 꾸준함이 가장 중요합니다.");
@@ -1786,12 +1802,12 @@ function buildCorrectionInterpretation(pain){
 function buildCorrectionGrowthLines({pain,latestSummary}){
   const lines=[];
   if(!pain?.rows?.length) lines.push("통증 기록이 쌓이면 변화 흐름을 더 정확히 확인할 수 있습니다.");
-  else if(pain.last<pain.first) lines.push("통증이 점점 줄어들고 있습니다.");
+  else if(pain.last<pain.first) lines.push("통증이 점점 줄어들고 있습니다. 지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.");
   else if(pain.last>pain.first) lines.push("최근 통증이 다소 늘었어요. 다음 수업에서 함께 점검해봐요.");
-  else lines.push("통증 정도가 안정적으로 유지되고 있습니다.");
-  if(latestSummary?.homeExercise?.length) lines.push("집에서 할 운동을 꾸준히 이어가고 있어 좋은 흐름입니다.");
+  else lines.push("통증 정도가 안정적으로 유지되고 있습니다. 지금 루틴을 유지하며 다음 평가에서 변화를 확인해봐요.");
+  if(latestSummary?.homeExercise?.length) lines.push("집에서 할 운동을 꾸준히 이어가고 있어 좋은 흐름입니다. 이대로 계속 이어가 보세요.");
   else lines.push("집에서 할 운동을 이어가면 다음 평가에서 변화를 확인하기 좋아요.");
-  lines.push("꾸준한 교정 관리가 이어지고 있습니다.");
+  lines.push("다음 수업에서 오늘까지의 변화를 함께 확인해드리겠습니다.");
   return lines.slice(0,3);
 }
 // 체형평가(assessments)의 재평가/교정 루틴 결과에서 회원에게 보여줄 "전문용어 없는" 요약만 추출.
@@ -2064,14 +2080,14 @@ function MemberAnalysis(p) {
     if (!hasEnoughInbody) return null;
     const msgs = [];
     if (fatMassDiff !== null && mmDiff !== null) {
-      if (fatMassDiff < -0.3 && mmDiff > 0.3) msgs.push("골격근량이 증가하면서 체지방량도 감소했습니다. 체성분 변화가 매우 긍정적입니다.");
-      else if (fatMassDiff < -0.3 && mmDiff >= -0.3) msgs.push("체지방량은 꾸준히 감소하고 골격근량은 유지되고 있습니다. 현재 좋은 감량 흐름입니다.");
+      if (fatMassDiff < -0.3 && mmDiff > 0.3) msgs.push("골격근량이 증가하면서 체지방량도 감소했습니다. 체성분 변화가 매우 긍정적이니 지금 하는 식단과 운동을 그대로 이어가 보세요.");
+      else if (fatMassDiff < -0.3 && mmDiff >= -0.3) msgs.push("체지방량은 꾸준히 감소하고 골격근량은 유지되고 있습니다. 현재 좋은 감량 흐름이니 이 페이스를 유지해보세요.");
       else if (wDiff !== null && wDiff < -0.5 && mmDiff < -0.5) msgs.push("체중은 줄었지만 골격근량도 함께 감소했습니다. 단백질 섭취와 근력운동 강도를 함께 점검해보세요.");
       else if (fatMassDiff > 0.5) msgs.push("체지방량이 다소 증가했습니다. 식단과 유산소 운동을 함께 점검해보세요.");
-      else msgs.push("체성분이 전반적으로 안정적으로 유지되고 있습니다.");
+      else msgs.push("체성분이 전반적으로 안정적으로 유지되고 있습니다. 지금 루틴을 유지하며 다음 변화를 지켜봐도 좋아요.");
     }
     if (bodyAgeDiff !== null) {
-      if (bodyAgeDiff < 0) msgs.push(`신체나이가 ${firstBodyAge}세에서 ${lastBodyAge}세로 개선되었습니다. 회복 상태와 세포 건강이 긍정적으로 변화하고 있습니다.`);
+      if (bodyAgeDiff < 0) msgs.push(`신체나이가 ${firstBodyAge}세에서 ${lastBodyAge}세로 개선되었습니다. 회복 상태와 세포 건강이 긍정적으로 변화하고 있으니 지금 습관을 계속 이어가 보세요.`);
       else if (bodyAgeDiff > 0) msgs.push("신체나이 지표가 다소 높아졌습니다. 충분한 수면과 회복, 영양 섭취를 점검해보세요.");
     }
     if (!msgs.length) msgs.push("현재 기록을 기반으로 지속적으로 분석하고 있습니다. 기록이 누적될수록 더 정확한 피드백을 제공합니다.");
@@ -2222,9 +2238,10 @@ function MemberAnalysis(p) {
       return `${l1} ${l2} ${l3}`;
     }
     if (!periodSessions.length && monthWorkoutCount === 0) return "기록이 조금 더 쌓이면 변화를 더욱 자세하게 분석할 수 있습니다.";
-    const l1 = monthWorkoutCount > 0 ? "운동 루틴을 꾸준히 유지하고 있습니다." : "운동 기록이 쌓이면 지속성 흐름을 더 잘 보여드릴게요.";
-    const l2 = monthWeightRange != null && monthWeightRange <= 1 ? "현재 체중도 안정적으로 관리되고 있으며 좋은 생활 습관이 이어지고 있습니다." : "체중 변화를 조금 더 지켜보면서 안정적인 흐름을 만들어가면 좋습니다.";
-    return `${l1} ${l2}`;
+    const l1 = monthWorkoutCount > 0 ? "운동 습관이 잘 자리 잡고 있습니다." : "운동 기록이 쌓이면 지속성 흐름을 더 잘 보여드릴게요.";
+    const l2 = monthWeightRange != null && monthWeightRange <= 1 ? "체중도 안정적인 범위에서 잘 관리되고 있어요." : "체중 변화를 조금 더 지켜보면서 안정적인 흐름을 만들어가면 좋습니다.";
+    const l3 = monthWorkoutCount > 0 ? "지금 흐름을 유지하면 다음 달에도 안정적인 컨디션을 기대할 수 있습니다." : "이번 주부터 운동 기록을 하나씩 남겨보세요.";
+    return `${l1} ${l2} ${l3}`;
   })();
 
   // ── 재사용 가능한 그래프/카드 조각(기존 마크업 그대로) — 목표별로 순서만 다르게 배치한다 ──
@@ -2510,7 +2527,7 @@ function MemberAnalysis(p) {
               : <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 체성분 변화 분석이 제공됩니다.</p>}
             {persona === "general" && (
               <div className="change-feedback-item">
-                {monthWorkoutCount > 0 ? "운동 루틴을 꾸준히 유지하고 있습니다." : "이번 달 운동 기록이 쌓이면 지속성 흐름도 함께 보여드릴게요."}
+                {monthWorkoutCount > 0 ? "운동 루틴을 꾸준히 유지하고 있습니다. 지금 페이스를 유지하면 안정적인 컨디션을 계속 이어갈 수 있어요." : "이번 달 운동 기록이 쌓이면 지속성 흐름도 함께 보여드릴게요. 이번 주부터 하나씩 기록해보세요."}
               </div>
             )}
           </div>
@@ -2755,7 +2772,7 @@ function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){const cla
   const armBalanced=wantsArm?[...sorted.filter(isBicep).slice(0,2),...sorted.filter(isTricep).slice(0,2)]:[];
   const routineList=armBalanced.length?armBalanced:sorted.slice(0,4);
   return {selectedPart,hasClassSessions:classSessions.length>0,hasData:list.length>0,goodStim:sorted.filter(e=>e.stim>0).slice(0,2),painFree:sorted.filter(e=>e.painFree>0).slice(0,2),practice:sorted.filter(e=>e.count<3||!e.recent).slice(0,2),routine:routineList.map(itemFor),comment:lower?'오늘은 컨디션을 고려해 세트 수와 강도를 낮췄어요.':'수업 기록에서 자극이 좋고 불편감이 없었던 운동 위주로 추천합니다.'};}
-function ReviewRoutine({profile,sessions,onboarding,checkins,routineRecommendations=[]}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions,onboarding); const recommendedParts=recommended.part.split(" · "); const [selected,setSelected]=useState(recommended.part); const [open,setOpen]=useState(false); const selectedParts=selected.split(" · "); const rec=buildReviewRoutine(sessions,onboarding,checkins,selectedParts); const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어"); const coreAccessory=coreRec.hasData?coreRec.routine[0]:null; const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>{recommended.reason}<br/>오늘은 <b>{recommended.part} 운동</b>을 추천합니다.</p></div><div className="part-pills">{["가슴","등","하체","어깨","팔"].map(x=><button key={x} className={selectedParts.includes(x)?"active":recommendedParts.includes(x)?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatParts(r)}</span></p>)}</div>}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{hasCoachRoutine?(coachExerciseCount?`대표 추천 운동 ${coachExerciseCount}개`:`대표 추천 부위 ${formatParts(publishedRoutine)}`):(rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다.")}</p></div>{(hasCoachRoutine||rec.hasData)&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&(hasCoachRoutine?<CoachRoutineCard routine={publishedRoutine}/>:<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>)}</div>{coreAccessory&&<div className="routine-row"><b>🧩 보조 운동 · {coreAccessory.name}</b><div className="routine-sets">{coreAccessory.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>}<div className="rec-reasons"><b>추천 이유</b><span>{rec.comment}</span><span>{rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`:rec.practice.length?`${rec.practice[0].name} 등은 기록이 조금 더 쌓이면 추천이 더 정교해져요.`:"수업 기록이 쌓이면 추천이 더 정교해집니다."}</span></div></>)}</MCard>;}
+function ReviewRoutine({profile,sessions,onboarding,checkins,routineRecommendations=[]}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions,onboarding); const recommendedParts=recommended.part.split(" · "); const [selected,setSelected]=useState(recommended.part); const [open,setOpen]=useState(false); const selectedParts=selected.split(" · "); const rec=buildReviewRoutine(sessions,onboarding,checkins,selectedParts); const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어"); const coreAccessory=coreRec.hasData?coreRec.routine[0]:null; const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} const praiseLine=rec.goodStim.length?`최근 ${rec.goodStim[0].name} 운동에서 자극이 좋았어요.`:(sessions.length>0?"수업을 꾸준히 이어가고 있어요.":""); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은 <b>{recommended.part} 운동</b>을 추천합니다.</p></div><div className="part-pills">{["가슴","등","하체","어깨","팔"].map(x=><button key={x} className={selectedParts.includes(x)?"active":recommendedParts.includes(x)?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatParts(r)}</span></p>)}</div>}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{hasCoachRoutine?(coachExerciseCount?`대표 추천 운동 ${coachExerciseCount}개`:`대표 추천 부위 ${formatParts(publishedRoutine)}`):(rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다.")}</p></div>{(hasCoachRoutine||rec.hasData)&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&(hasCoachRoutine?<CoachRoutineCard routine={publishedRoutine}/>:<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>)}</div>{coreAccessory&&<div className="routine-row"><b>🧩 보조 운동 · {coreAccessory.name}</b><div className="routine-sets">{coreAccessory.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>}<div className="rec-reasons"><b>추천 이유</b><span>{rec.comment}</span><span>{rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`:rec.practice.length?`${rec.practice[0].name} 등은 기록이 조금 더 쌓이면 추천이 더 정교해져요.`:"수업 기록이 쌓이면 추천이 더 정교해집니다."}</span></div></>)}</MCard>;}
 function buildPartVolumeChange(sessions=[]){const parts=['가슴','등','하체','어깨','팔','코어']; const sorted=[...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')); const first=sorted.slice(0,Math.min(3,sorted.length)); const recent=sorted.slice(-Math.min(3,sorted.length)); const sum=(list,part)=>list.reduce((a,s)=>a+(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0),0); return parts.map(part=>{const f=first.length?sum(first,part)/first.length:0; const r=recent.length?sum(recent,part)/recent.length:0; return {part,first:f,recent:r,delta:r-f};});}
 // 부위별 "최근 운동할 때마다의 볼륨"(누적이 아님) — 최근 5회까지 표시해 회원이 "지난번보다 늘었다"를 바로 느끼게 함
 function buildPartVolumeChart(sessions=[]){const parts=["등","가슴","어깨","하체","팔","코어"]; const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const volume=(s,part)=>(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop||e.type)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0); return parts.map(part=>{const records=sorted.map(s=>({label:String(s.date||"").slice(5)||`${s.sessionNo||""}회`,value:Math.round(volume(s,part))})).filter(r=>r.value>0).slice(-5); return {part,values:records};});}

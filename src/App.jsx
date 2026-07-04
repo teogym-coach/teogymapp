@@ -1,5 +1,5 @@
 // TEO GYM — v2026.05.23
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import {
   LineChart, Line, BarChart, Bar, ComposedChart, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -1690,6 +1690,27 @@ function calcBodyFatMass(r) { if (!r) return null; if (r.bodyFatMass != null && 
 function CollapsibleSection({ label, defaultOpen = false, children }) { const [open, setOpen] = useState(defaultOpen); return <div style={{margin:"6px 0"}}><button type="button" onClick={()=>setOpen(v=>!v)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1px solid #E8ECF1",borderRadius:22,padding:"14px 20px",cursor:"pointer",boxShadow:"0 6px 18px rgba(32,36,42,.04)",marginBottom:open?6:0,WebkitTapHighlightColor:"transparent",transition:"margin-bottom .2s ease"}}><span style={{fontWeight:900,fontSize:16,color:"#20242A"}}>{label}</span><span style={{color:"#A8B0BA",fontWeight:900,fontSize:13,flexShrink:0}}>{open?"▲ 접기":"▼ 펼치기"}</span></button><div className={`health-collapse${open?" open":""}`}><div className="health-collapse-inner">{children}</div></div></div>; }
 function SummaryTile({title,value,sub,delta,color="#2F73F6"}){return <div className="analysis-kpi" style={{borderColor:color+"33"}}><span style={{color}}>{title}</span><b>{value}</b>{sub&&<small>{sub}</small>}{delta&&<em style={{color}}>{delta}</em>}</div>}
 // "이번 달 BEST" — 성취감을 위한 하이라이트. 항목별로 데이터가 없으면 카드 전체를 숨기지 않고 항목 단위로 안내한다.
+// "가동범위 변화" — 체형교정 목표 전용, 통증 변화 분석(교정 결과/이번 달 변화)과는 완전히 별개 카드.
+// 관리자 체형평가에서 각도/거리/도달위치/시간으로 기록한 항목의 초기 대비 최근 변화를 회원이 이해하기 쉬운 문장으로 보여준다.
+// "진단/치료" 같은 의료 표현 없이 "가동범위/움직임 변화"로만 표현하고, "AI" 단어도 쓰지 않는다.
+function RomChangeCard({changes=[]}){
+  if(!changes || !changes.length){
+    return <MCard title="가동범위 변화"><div className="analysis-empty-state">가동범위 변화 기록이 쌓이면 여기에서 확인할 수 있어요.</div></MCard>;
+  }
+  return <MCard title="가동범위 변화">
+    <div style={{display:"grid",gap:10}}>
+      {changes.map((c,i)=>(
+        <div key={i} style={{paddingBottom:i<changes.length-1?10:0,borderBottom:i<changes.length-1?"1px solid #EEF1F4":"none"}}>
+          <div style={{fontWeight:800,fontSize:13,color:"#20242A",marginBottom:3}}>{c.sentence}</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <span style={{color:"#66717C",fontSize:11.5,fontWeight:700}}>{c.detail}</span>
+            <b style={{color:c.improved?"#16A34A":"#94A3B8",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>{c.changeText}</b>
+          </div>
+        </div>
+      ))}
+    </div>
+  </MCard>;
+}
 function MonthlyBestCard({items=[]}){
   return <MCard title="이번 달 BEST">
     <div style={{display:"grid",gap:10}}>
@@ -1852,6 +1873,19 @@ function buildMemberCorrectionFeedback(rec){
     homeExercise: [...new Set(homeExercise)].slice(0,3),
     nextGoal: caution.length ? "다음 수업에서 통증·불편한 부위를 다시 확인해요." : "현재 루틴을 유지하며 꾸준히 기록해요.",
   };
+}
+// 가동범위(ROM) 변화 카드를 회원이 이해하기 쉬운 문장으로 변환 — 통증 변화 분석(buildMemberCorrectionFeedback)과는 완전히 별개.
+// "진단/질환/병변/손상 확정/치료" 등 의료적 표현은 쓰지 않고 "움직임 변화/가동범위 변화/좌우 차이/개선 흐름"만 사용한다.
+function buildMemberRomSentences(cards=[]) {
+  const improved = cards.filter(c=>c.improved);
+  const picked = (improved.length ? improved : cards).slice(0,3);
+  return picked.map(c => ({
+    label: c.label,
+    sentence: `${c.label} 가동범위가 ${c.improved?"좋아졌습니다":"변화하고 있습니다"}.`,
+    detail: `초기 ${c.fromText} → 최근 ${c.toText}`,
+    changeText: c.changeText,
+    improved: c.improved,
+  }));
 }
 // 분석 탭 전용이었던 "운동 지속 현황"(누적 수업/이번 달 운동)은 홈 화면과 정보가 중복돼 제거됨.
 // 분석 탭은 "변화"를 보여주는 화면으로 유지한다.
@@ -2519,6 +2553,7 @@ function MemberAnalysis(p) {
                 {correctionGrowthLines.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
               </div>
             </MCard>
+            <RomChangeCard changes={latestSummary?.romChanges} />
             <MonthlyBestCard items={monthlyBestItems} />
           </>
         );
@@ -15597,74 +15632,241 @@ const QUICK_CHECK_ITEMS = [
   {key:"painDuringExercise", label:"운동 시 통증"},
   {key:"painDailyLife",      label:"일상생활 통증"},
 ];
-const ASSESS_CATEGORIES = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥"];
-// 카테고리당 전문가들이 실제 많이 쓰는 필수 테스트 5개만 (설명은 15자 이내 한 줄)
+const ASSESS_CATEGORIES = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥","보행"];
+// 카테고리당 전문가들이 실제 많이 쓰는 필수 테스트(설명은 한 줄, method/normal/limited/painCriteria는 "기준 보기"에서 펼쳐 봄)
 const CATEGORY_TESTS = {
   "목": [
-    {key:"cx_flex",    label:"경추 굴곡",   desc:"턱을 가슴 쪽으로 숙입니다"},
-    {key:"cx_ext",     label:"경추 신전",   desc:"고개를 뒤로 젖힙니다"},
-    {key:"cx_rot",     label:"회전",        desc:"고개를 좌우로 돌립니다"},
-    {key:"cx_lat",     label:"측굴",        desc:"귀를 어깨 쪽으로 기울입니다"},
-    {key:"chin_tuck",  label:"턱 당기기",   desc:"턱을 당겨 이중턱을 만듭니다"},
+    {key:"cx_flex",    label:"경추 굴곡",   desc:"턱을 가슴 쪽으로 숙입니다",
+      method:"턱을 가슴 쪽으로 천천히 숙입니다", normal:"턱이 가슴에 가깝게 접근하고 목 뒤쪽 당김만 있어야 합니다",
+      limited:"턱이 가슴에 닿지 않거나 상부승모근 긴장이 과하게 올라오면 제한 의심", painCriteria:"목 뒤, 어깨, 팔 저림이 있으면 통증으로 기록"},
+    {key:"cx_ext",     label:"경추 신전",   desc:"고개를 뒤로 젖힙니다",
+      method:"고개를 천천히 뒤로 젖힙니다", normal:"얼굴이 천장을 향하고 약 70도 정도 신전 가능",
+      limited:"턱만 들리고 목 뒤가 과하게 압박되면 제한 의심", painCriteria:"목 뒤 압박감이나 저림이 있으면 통증으로 기록"},
+    {key:"cx_rot",     label:"회전",        desc:"고개를 좌우로 돌립니다",
+      method:"고개를 좌우로 최대한 돌립니다", normal:"약 80도까지 좌우 회전 가능하고 좌우 차이가 적어야 합니다",
+      limited:"60도 이하이거나 좌우 차이가 크면 제한 의심", painCriteria:"회전 시 목/어깨 찌릿함이 있으면 통증으로 기록"},
+    {key:"cx_lat",     label:"측굴",        desc:"귀를 어깨 쪽으로 기울입니다",
+      method:"귀를 어깨 쪽으로 최대한 기울입니다", normal:"약 45도까지 측굴 가능",
+      limited:"30도 이하이거나 좌우 차이가 크면 제한 의심", painCriteria:"반대쪽 목/어깨 당김이 심하면 통증으로 기록"},
+    {key:"chin_tuck",  label:"턱 당기기",   desc:"턱을 당겨 이중턱을 만듭니다",
+      method:"턱을 뒤로 당겨 이중턱을 만들고 5초 유지합니다", normal:"부드럽게 턱을 당기고 유지할 수 있어야 합니다",
+      limited:"목 앞쪽 근육이 과하게 긴장되거나 유지가 안 되면 제한 의심", painCriteria:"목 앞쪽 통증이 있으면 통증으로 기록"},
   ],
   "어깨": [
-    {key:"sh_flex",     label:"굴곡",           desc:"팔을 앞으로 들어올립니다"},
-    {key:"sh_er",       label:"외회전",         desc:"팔꿈치 붙이고 밖으로 돌림"},
-    {key:"sh_ir",       label:"내회전",         desc:"팔을 등 뒤로 돌려 올립니다"},
-    {key:"apley",       label:"Apley Scratch", desc:"등 뒤에서 양손을 맞닿습니다"},
-    {key:"wall_slide",  label:"Wall Slide",    desc:"벽에 등 대고 팔 올립니다"},
+    {key:"sh_flex",     label:"굴곡",           desc:"팔을 앞으로 들어올립니다",
+      method:"팔을 정면으로 들어 최대한 위로 올립니다", normal:"팔을 귀 옆까지 올릴 수 있어야 하며 약 170~180도",
+      limited:"허리가 꺾이거나 갈비뼈가 들리면서 올리면 보상 패턴 의심", painCriteria:"어깨 앞/옆 통증이 있으면 통증으로 기록"},
+    {key:"sh_abd",      label:"외전",           desc:"팔을 옆으로 들어올립니다",
+      method:"팔을 옆으로 들어 최대한 위로 올립니다", normal:"약 170~180도까지 외전 가능",
+      limited:"어깨가 으쓱 올라가거나 몸통이 기울면 보상 패턴 의심", painCriteria:"외전 중간범위(60~120도)에서 통증이 있으면 통증으로 기록"},
+    {key:"sh_er",       label:"외회전",         desc:"팔꿈치 붙이고 밖으로 돌림",
+      method:"팔꿈치를 몸통에 붙이고 90도로 구부린 뒤 바깥으로 돌립니다", normal:"팔꿈치 90도 기준 약 80~90도 외회전 가능",
+      limited:"팔꿈치가 벌어지거나 어깨 앞쪽이 불편하면 제한 의심", painCriteria:"회전 끝범위에서 통증이 있으면 통증으로 기록"},
+    {key:"sh_ir",       label:"내회전",         desc:"팔을 등 뒤로 돌려 올립니다",
+      method:"손등을 등 뒤로 올려 최대한 높이 올립니다", normal:"손등이 등 뒤로 올라가며 대략 T7~T12 부위 접근",
+      limited:"허리 아래에서 멈추거나 어깨 앞쪽 통증이 있으면 제한 의심", painCriteria:"어깨 앞쪽 통증이 있으면 통증으로 기록"},
+    {key:"sleeper_test", label:"Sleeper Test(내회전 각도)", desc:"옆으로 누워 내회전 각도를 잽니다",
+      method:"옆으로 누워 아래팔을 90도로 구부린 채 바닥 쪽으로 내회전시킵니다", normal:"약 60~90도 내회전 가능",
+      limited:"각도가 작거나 좌우 차이가 크면 후방관절낭 긴장 의심", painCriteria:"어깨 뒤쪽 통증이 있으면 통증으로 기록"},
+    {key:"apley",       label:"Apley Scratch", desc:"등 뒤에서 양손을 맞닿습니다",
+      method:"한 손은 위에서 아래로, 반대 손은 아래에서 위로 등 뒤에서 맞닿게 합니다", normal:"양손 손가락이 서로 닿거나 가까이 접근",
+      limited:"손 간격이 넓거나 좌우 차이가 크면 제한 의심 — 도달 위치로 기록", painCriteria:"어깨 앞/뒤 통증이 있으면 통증으로 기록"},
+    {key:"wall_slide",  label:"Wall Slide",    desc:"벽에 등 대고 팔 올립니다",
+      method:"등과 팔을 벽에 붙인 채 팔을 위로 밀어 올립니다", normal:"팔과 등이 벽에서 떨어지지 않고 끝까지 올라감",
+      limited:"팔이나 허리가 벽에서 떨어지면 흉추/어깨 가동성 제한 의심", painCriteria:"어깨 통증으로 동작이 제한되면 통증으로 기록"},
   ],
   "팔꿈치": [
-    {key:"el_flex", label:"굴곡", desc:"팔꿈치를 완전히 구부립니다"},
-    {key:"el_ext",  label:"신전", desc:"팔꿈치를 완전히 폅니다"},
-    {key:"el_pron", label:"회내", desc:"손바닥을 아래로 돌립니다"},
-    {key:"el_sup",  label:"회외", desc:"손바닥을 위로 돌립니다"},
-    {key:"grip",    label:"그립", desc:"손을 강하게 쥐어봅니다"},
+    {key:"el_flex", label:"굴곡", desc:"팔꿈치를 완전히 구부립니다",
+      method:"팔꿈치를 최대한 구부립니다", normal:"약 140~150도까지 굴곡 가능, 손이 어깨에 닿을 정도",
+      limited:"120도 이하이면 제한 의심", painCriteria:"구부릴 때 통증이 있으면 통증으로 기록"},
+    {key:"el_ext",  label:"신전", desc:"팔꿈치를 완전히 폅니다",
+      method:"팔꿈치를 최대한 곧게 폅니다", normal:"0도(완전 신전) 또는 약간의 과신전 가능",
+      limited:"펴지지 않고 굴곡 구축이 있으면 제한 의심", painCriteria:"펼 때 통증이 있으면 통증으로 기록"},
+    {key:"el_pron", label:"회내", desc:"손바닥을 아래로 돌립니다",
+      method:"팔꿈치를 90도로 구부린 상태로 손바닥을 아래로 돌립니다", normal:"약 80~90도 회내 가능",
+      limited:"60도 이하이면 제한 의심", painCriteria:"손목/팔꿈치 통증이 있으면 통증으로 기록"},
+    {key:"el_sup",  label:"회외", desc:"손바닥을 위로 돌립니다",
+      method:"팔꿈치를 90도로 구부린 상태로 손바닥을 위로 돌립니다", normal:"약 80~90도 회외 가능",
+      limited:"60도 이하이면 제한 의심", painCriteria:"손목/팔꿈치 통증이 있으면 통증으로 기록"},
+    {key:"grip",    label:"그립", desc:"손을 강하게 쥐어봅니다",
+      method:"최대한 강하게 주먹을 쥐어봅니다", normal:"좌우 힘이 비슷하고 통증 없이 쥘 수 있어야 합니다",
+      limited:"힘이 약하거나 좌우 차이가 크면 제한 의심", painCriteria:"쥘 때 손목/팔꿈치 통증이 있으면 통증으로 기록"},
   ],
   "손목": [
-    {key:"wr_flex",   label:"굴곡", desc:"손목을 안쪽으로 굽힙니다"},
-    {key:"wr_ext",    label:"신전", desc:"손목을 바깥으로 젖힙니다"},
-    {key:"wr_pron",   label:"회내", desc:"손등이 위로 오게 돌립니다"},
-    {key:"wr_sup",    label:"회외", desc:"손바닥이 위로 오게 돌립니다"},
-    {key:"grip_str",  label:"악력", desc:"손을 강하게 쥐어봅니다"},
+    {key:"wr_flex",   label:"굴곡", desc:"손목을 안쪽으로 굽힙니다",
+      method:"손목을 안쪽으로 최대한 굽힙니다", normal:"약 80도까지 굴곡 가능",
+      limited:"60도 이하면 제한 의심", painCriteria:"굴곡 시 통증이 있으면 통증으로 기록"},
+    {key:"wr_ext",    label:"신전", desc:"손목을 바깥으로 젖힙니다",
+      method:"손목을 바깥으로 최대한 젖힙니다", normal:"약 70도까지 신전 가능",
+      limited:"50도 이하면 제한 의심", painCriteria:"신전 시 통증이 있으면 통증으로 기록"},
+    {key:"wr_pron",   label:"회내", desc:"손등이 위로 오게 돌립니다",
+      method:"손등이 위로 오게 손목을 돌립니다", normal:"약 80~90도 회내 가능",
+      limited:"60도 이하면 제한 의심", painCriteria:"회내 시 통증이 있으면 통증으로 기록"},
+    {key:"wr_sup",    label:"회외", desc:"손바닥이 위로 오게 돌립니다",
+      method:"손바닥이 위로 오게 손목을 돌립니다", normal:"약 80~90도 회외 가능",
+      limited:"60도 이하면 제한 의심", painCriteria:"회외 시 통증이 있으면 통증으로 기록"},
+    {key:"grip_str",  label:"악력", desc:"손을 강하게 쥐어봅니다",
+      method:"최대한 강하게 손을 쥐어봅니다", normal:"좌우 힘이 비슷하고 통증 없이 쥘 수 있어야 합니다",
+      limited:"힘이 약하거나 좌우 차이가 크면 제한 의심", painCriteria:"쥘 때 손목 통증이 있으면 통증으로 기록"},
   ],
   "허리": [
-    {key:"lb_flex",    label:"굴곡",       desc:"상체를 앞으로 숙입니다"},
-    {key:"lb_ext",     label:"신전",       desc:"상체를 뒤로 젖힙니다"},
-    {key:"lb_rot",     label:"회전",       desc:"상체를 좌우로 돌립니다"},
-    {key:"side_bend",  label:"Side Bend", desc:"옆으로 상체를 기울입니다"},
-    {key:"slr",        label:"SLR",       desc:"누워서 다리를 들어올립니다"},
+    {key:"lb_flex",    label:"굴곡",       desc:"상체를 앞으로 숙입니다",
+      method:"무릎을 편 채 상체를 앞으로 숙입니다", normal:"무릎을 편 상태에서 손끝이 발목 또는 바닥에 가까워짐",
+      limited:"햄스트링 당김이 과하거나 허리만 둥글게 말리면 제한 의심", painCriteria:"허리/다리 저림이 있으면 통증으로 기록"},
+    {key:"lb_ext",     label:"신전",       desc:"상체를 뒤로 젖힙니다",
+      method:"골반을 고정한 채 상체를 뒤로 젖힙니다", normal:"골반 고정 후 상체가 약 20~30도 신전 가능",
+      limited:"허리 한 부위만 꺾이거나 통증이 있으면 제한 의심", painCriteria:"신전 시 찌릿한 통증이 있으면 통증으로 기록"},
+    {key:"lb_rot",     label:"회전",       desc:"상체를 좌우로 돌립니다",
+      method:"골반을 고정한 채 상체를 좌우로 최대한 돌립니다", normal:"약 30~45도까지 회전 가능하고 좌우 차이가 적어야 합니다",
+      limited:"20도 이하이거나 좌우 차이가 크면 제한 의심", painCriteria:"회전 시 허리 통증이 있으면 통증으로 기록"},
+    {key:"side_bend",  label:"Side Bend", desc:"옆으로 상체를 기울입니다",
+      method:"옆으로 상체를 최대한 기울입니다", normal:"약 25~30도까지 측굴 가능",
+      limited:"15도 이하이거나 좌우 차이가 크면 제한 의심", painCriteria:"측굴 시 허리 통증이 있으면 통증으로 기록"},
+    {key:"open_book",  label:"오픈북(흉추 회전)", desc:"누워서 팔을 벌려 상체를 회전합니다",
+      method:"옆으로 누워 무릎을 굽힌 채 위쪽 팔을 반대 방향으로 열어 상체를 회전합니다", normal:"어깨가 바닥에 가깝게 닿을 정도로 회전 가능",
+      limited:"어깨가 바닥에서 많이 뜨거나 좌우 차이가 크면 흉추 회전 제한 의심", painCriteria:"회전 시 허리/어깨 통증이 있으면 통증으로 기록"},
+    {key:"slr",        label:"SLR",       desc:"누워서 다리를 들어올립니다",
+      method:"누워서 무릎을 편 채 다리를 들어올립니다", normal:"무릎을 편 상태로 다리를 약 70~90도까지 올릴 수 있음",
+      limited:"70도 미만이거나 좌우 차이가 크면 햄스트링/신경 긴장도 의심", painCriteria:"다리 뒤쪽 저림이나 방사통이 있으면 통증으로 기록"},
   ],
   "골반": [
-    {key:"hip_ir",         label:"Hip IR",             desc:"무릎 굽혀 안으로 돌립니다"},
-    {key:"hip_er",         label:"Hip ER",             desc:"무릎 굽혀 밖으로 돌립니다"},
-    {key:"bridge",         label:"Single Leg Bridge",  desc:"골반 기울어짐을 확인합니다"},
-    {key:"trendelenburg",  label:"Trendelenburg",      desc:"한 발로 서서 골반을 봅니다"},
-    {key:"hip_flex",       label:"Hip Flexion",        desc:"무릎을 가슴으로 들어올림"},
+    {key:"hip_ir",         label:"Hip IR",             desc:"무릎 굽혀 안으로 돌립니다",
+      method:"무릎을 90도로 굽힌 채 정강이를 바깥으로 돌려 고관절을 안으로 돌립니다", normal:"약 30~40도",
+      limited:"20도 이하이거나 좌우 차이가 크면 제한 의심", painCriteria:"고관절 앞쪽 통증이 있으면 통증으로 기록"},
+    {key:"hip_er",         label:"Hip ER",             desc:"무릎 굽혀 밖으로 돌립니다",
+      method:"무릎을 90도로 굽힌 채 정강이를 안으로 돌려 고관절을 밖으로 돌립니다", normal:"약 40~50도",
+      limited:"30도 이하이거나 골반이 같이 움직이면 제한 의심", painCriteria:"고관절 통증이 있으면 통증으로 기록"},
+    {key:"bridge",         label:"Single Leg Bridge",  desc:"골반 기울어짐을 확인합니다",
+      method:"한 다리로 브릿지 자세를 유지합니다", normal:"골반이 수평을 유지하며 통증 없이 버팀",
+      limited:"골반이 한쪽으로 기울거나 허리로 보상하면 제한 의심", painCriteria:"허리/햄스트링 통증이 있으면 통증으로 기록"},
+    {key:"trendelenburg",  label:"Trendelenburg",      desc:"한 발로 서서 골반을 봅니다",
+      method:"한 발로 서서 반대쪽 골반 높이를 관찰합니다", normal:"골반이 수평을 유지함",
+      limited:"반대쪽 골반이 떨어지면 중둔근 약화 의심", painCriteria:"지지하는 다리 쪽 통증이 있으면 통증으로 기록"},
+    {key:"hip_flex",       label:"Hip Flexion",        desc:"무릎을 가슴으로 들어올림",
+      method:"누운 상태에서 무릎을 가슴 쪽으로 당깁니다", normal:"누운 상태에서 무릎을 가슴 쪽으로 약 110~120도 이상 당길 수 있음",
+      limited:"골반이 말리거나 반대쪽 다리가 들리면 제한 의심", painCriteria:"고관절/허리 통증이 있으면 통증으로 기록"},
+    {key:"thomas_test",    label:"Thomas Test",        desc:"누워서 반대쪽 다리 처짐을 봅니다",
+      method:"테이블 끝에 누워 한쪽 무릎을 가슴에 당기고 반대쪽 다리가 자연스럽게 내려가는지 확인합니다", normal:"반대쪽 허벅지가 테이블에 닿을 정도로 내려감",
+      limited:"반대쪽 다리가 들리거나 무릎이 펴지면 장요근/대퇴직근 단축 의심", painCriteria:"고관절 앞쪽 통증이 있으면 통증으로 기록"},
+    {key:"faber",          label:"FABER",              desc:"4자 모양으로 다리를 놓고 무릎 높이를 봅니다",
+      method:"발목을 반대쪽 무릎 위에 올려 4자 모양을 만들고 무릎을 바닥 쪽으로 눌러봅니다", normal:"무릎이 반대쪽과 비슷한 높이까지 편안하게 내려감",
+      limited:"무릎이 높게 뜨거나 좌우 차이가 크면 고관절/천장관절 제한 의심", painCriteria:"사타구니나 엉치 쪽 통증이 있으면 통증으로 기록"},
   ],
   "무릎": [
-    {key:"squat",         label:"스쿼트",       desc:"양발로 앉았다 일어납니다"},
-    {key:"single_squat",  label:"싱글스쿼트",   desc:"한 발로 앉았다 일어납니다"},
-    {key:"stair",         label:"계단",         desc:"계단을 오르내려 봅니다"},
-    {key:"lunge",         label:"런지",         desc:"한 발을 앞으로 내딛습니다"},
-    {key:"step_down",     label:"Step Down",   desc:"낮은 단에서 내려옵니다"},
+    {key:"squat",         label:"스쿼트",       desc:"양발로 앉았다 일어납니다",
+      method:"양발로 앉았다 일어납니다", normal:"무릎이 발끝 방향과 비슷하게 이동하고 통증 없이 앉았다 일어남",
+      limited:"무릎이 안쪽으로 모이거나 뒤꿈치가 들리면 제한 의심", painCriteria:"앉거나 일어날 때 무릎 통증이 있으면 통증으로 기록"},
+    {key:"single_squat",  label:"싱글스쿼트",   desc:"한 발로 앉았다 일어납니다",
+      method:"한 발로 앉았다 일어납니다", normal:"무릎이 발끝 방향을 유지하고 골반이 수평을 유지함",
+      limited:"무릎 안쪽 붕괴나 골반 기울어짐이 있으면 제한 의심", painCriteria:"무릎/고관절 통증이 있으면 통증으로 기록"},
+    {key:"stair",         label:"계단",         desc:"계단을 오르내려 봅니다",
+      method:"계단을 오르내려 봅니다", normal:"통증 없이 자연스럽게 오르내림",
+      limited:"무릎이 흔들리거나 통증을 피하는 동작이 보이면 제한 의심", painCriteria:"오르내릴 때 무릎 통증이 있으면 통증으로 기록"},
+    {key:"lunge",         label:"런지",         desc:"한 발을 앞으로 내딛습니다",
+      method:"한 발을 앞으로 내딛어 런지 자세를 취합니다", normal:"앞무릎이 발끝 방향을 유지하고 골반이 좌우로 흔들리지 않음",
+      limited:"무릎 안쪽 붕괴, 골반 틀어짐, 발목 불안정이 보이면 제한 의심", painCriteria:"무릎/고관절 통증이 있으면 통증으로 기록"},
+    {key:"step_down",     label:"Step Down",   desc:"낮은 단에서 내려옵니다",
+      method:"낮은 단 위에서 한 발로 천천히 내려옵니다", normal:"무릎과 골반이 안정적으로 유지되며 통증 없이 내려옴",
+      limited:"무릎이 안쪽으로 무너지거나 골반이 떨어지면 제한 의심", painCriteria:"내려올 때 무릎 통증이 있으면 통증으로 기록"},
   ],
   "발목": [
-    {key:"knee_wall",  label:"Knee To Wall", desc:"무릎을 벽에 닿게 이동합니다"},
-    {key:"df",         label:"DF",           desc:"발끝을 정강이로 당깁니다"},
-    {key:"pf",         label:"PF",           desc:"발끝을 아래로 뻗습니다"},
-    {key:"balance",    label:"한발 균형",     desc:"한 발로 서서 버팁니다"},
-    {key:"heel_raise", label:"Heel Raise",   desc:"까치발로 들어올립니다"},
+    {key:"knee_wall",  label:"Knee To Wall", desc:"무릎을 벽에 닿게 이동합니다",
+      method:"발끝을 벽에서 일정 거리에 두고 무릎을 벽 쪽으로 이동합니다", normal:"발끝에서 벽까지 약 8~10cm 거리에서 무릎이 벽에 닿음",
+      limited:"8cm 미만이거나 뒤꿈치가 들리면 발목 배측굴곡 제한 의심", painCriteria:"종아리/발목 통증이 있으면 통증으로 기록"},
+    {key:"df",         label:"DF",           desc:"발끝을 정강이로 당깁니다",
+      method:"발끝을 정강이 쪽으로 당깁니다", normal:"약 15~20도 배측굴곡 가능",
+      limited:"종아리 당김이 심하거나 발이 바깥으로 틀어지면 제한 의심", painCriteria:"발목 앞쪽 통증이 있으면 통증으로 기록"},
+    {key:"pf",         label:"PF",           desc:"발끝을 아래로 뻗습니다",
+      method:"발끝을 아래로 최대한 뻗습니다", normal:"약 40~50도 저측굴곡 가능",
+      limited:"20도 이하면 제한 의심", painCriteria:"발목 통증이 있으면 통증으로 기록"},
+    {key:"balance",    label:"한발 균형",     desc:"한 발로 서서 버팁니다",
+      method:"한 발로 서서 버팁니다", normal:"한 발로 20~30초 이상 안정적으로 버팀",
+      limited:"골반이 흔들리거나 발가락을 과하게 움켜쥐면 균형/발 안정성 저하 의심", painCriteria:"버티는 동안 통증이 있으면 통증으로 기록"},
+    {key:"heel_raise", label:"Heel Raise",   desc:"까치발로 들어올립니다",
+      method:"까치발로 들어올립니다", normal:"통증 없이 완전히 까치발로 올라가고 반복 가능",
+      limited:"높이가 낮거나 좌우 차이, 통증 회피가 보이면 제한 의심", painCriteria:"종아리/발목 통증이 있으면 통증으로 기록"},
   ],
   "발바닥": [
-    {key:"short_foot",     label:"Short Foot",     desc:"발바닥 아치를 끌어올립니다"},
-    {key:"windlass",       label:"Windlass",       desc:"엄지발가락을 젖혀봅니다"},
-    {key:"toe_raise",      label:"Toe Raise",      desc:"발가락만 들어올립니다"},
-    {key:"single_balance", label:"Single Balance", desc:"한 발로 서서 버팁니다"},
-    {key:"walking",        label:"Walking",        desc:"몇 걸음 걸어봅니다"},
+    {key:"short_foot",     label:"Short Foot",     desc:"발바닥 아치를 끌어올립니다",
+      method:"발가락을 펴고 발바닥 아치를 끌어올립니다", normal:"발가락을 과하게 말지 않고 아치를 만들 수 있음",
+      limited:"발가락을 구부려야만 아치가 생기면 발 내재근 기능 저하 의심", painCriteria:"아치를 만들 때 통증이 있으면 통증으로 기록"},
+    {key:"windlass",       label:"Windlass",       desc:"엄지발가락을 젖혀봅니다",
+      method:"엄지발가락을 젖혀봅니다", normal:"엄지를 젖히면 아치가 자연스럽게 올라감",
+      limited:"아치가 거의 안 올라가면 족저근막 기능 저하 의심", painCriteria:"발바닥 통증이 있으면 통증으로 기록"},
+    {key:"toe_raise",      label:"Toe Raise",      desc:"발가락만 들어올립니다",
+      method:"발가락만 들어올립니다", normal:"발가락을 발바닥에서 부드럽게 들어올릴 수 있음",
+      limited:"발가락이 잘 안 들리거나 함께 말리면 제한 의심", painCriteria:"발가락/발바닥 통증이 있으면 통증으로 기록"},
+    {key:"single_balance", label:"Single Balance", desc:"한 발로 서서 버팁니다",
+      method:"한 발로 서서 버팁니다", normal:"한 발로 20~30초 이상 안정적으로 버팀",
+      limited:"골반이 흔들리거나 발가락을 과하게 움켜쥐면 균형/발 안정성 저하 의심", painCriteria:"버티는 동안 통증이 있으면 통증으로 기록"},
+    {key:"walking",        label:"Walking",        desc:"몇 걸음 걸어봅니다",
+      method:"몇 걸음 걸어봅니다", normal:"발 착지와 밀어내기가 자연스럽고 통증이 없음",
+      limited:"발을 끌거나 한쪽으로 체중을 피하면 제한 의심", painCriteria:"걷는 동안 통증이 있으면 통증으로 기록"},
+  ],
+  "보행": [
+    {key:"gait_head_pos",       label:"머리 위치",           desc:"머리가 몸통보다 앞으로 나가는지 확인", group:"측면",
+      method:"옆에서 보행을 관찰하며 귀와 어깨선의 위치를 비교합니다", normal:"귀가 어깨선과 비슷한 위치를 유지합니다",
+      limited:"귀가 어깨선보다 과하게 앞으로 나가면 전방머리 자세 의심", painCriteria:"보행 중 목/어깨 불편감이 있으면 통증으로 기록"},
+    {key:"gait_thorax_pelvis",  label:"흉곽과 골반 정렬",     desc:"갈비뼈·골반 전방경사 여부 확인", group:"측면",
+      method:"옆에서 갈비뼈와 골반 정렬을 관찰합니다", normal:"갈비뼈와 골반이 중립 정렬을 유지합니다",
+      limited:"보행 중 허리가 과하게 꺾이거나 배가 앞으로 밀리면 보상 패턴 의심", painCriteria:"보행 중 허리 통증이 있으면 통증으로 기록"},
+    {key:"gait_arm_swing",      label:"팔 흔들림",           desc:"팔이 자연스럽게 앞뒤로 움직이는지 확인", group:"측면",
+      method:"옆에서 팔의 앞뒤 흔들림과 몸통 회전을 관찰합니다", normal:"팔이 자연스럽게 앞뒤로 움직입니다",
+      limited:"한쪽 팔 흔들림이 뚜렷하게 작거나 몸통 회전이 부족하면 흉추/견갑 움직임 제한 의심", painCriteria:"어깨 통증으로 흔들림이 제한되면 통증으로 기록"},
+    {key:"gait_hip_ext",        label:"고관절 신전",         desc:"뒤로 보내는 다리의 고관절 신전 확인", group:"측면",
+      method:"뒤로 보내는 다리의 고관절 신전 정도를 관찰합니다", normal:"뒤꿈치가 떨어질 때 고관절이 충분히 펴집니다",
+      limited:"뒤꿈치가 떨어질 때 고관절이 충분히 펴지지 않고 허리가 꺾이면 장요근/고관절 신전 제한 의심", painCriteria:"고관절 앞쪽 통증이 있으면 통증으로 기록"},
+    {key:"gait_stride",         label:"보폭",               desc:"좌우 보폭이 비슷한지 확인", group:"측면",
+      method:"좌우 보폭을 비교합니다", normal:"좌우 보폭이 비슷합니다",
+      limited:"한쪽 보폭이 짧거나 발을 끌면 고관절/발목/균형 문제 의심", painCriteria:"보행 중 통증으로 보폭이 줄어들면 통증으로 기록"},
+    {key:"gait_heel_toe",       label:"뒤꿈치 착지와 발끝 밀기", desc:"착지·밀어내기 패턴 확인", group:"측면",
+      method:"착지와 밀어내기 패턴을 관찰합니다", normal:"뒤꿈치로 착지하고 발끝으로 밀어냅니다",
+      limited:"발 전체로 쿵 찍거나 발끝 밀기가 약하면 발목 가동성 또는 종아리 기능 저하 의심", painCriteria:"착지/밀기 시 통증이 있으면 통증으로 기록"},
+    {key:"gait_pelvis_drop",    label:"골반 좌우 흔들림",     desc:"골반이 한쪽으로 과하게 떨어지는지 확인", group:"후면",
+      method:"뒤에서 걸을 때 골반 높이 변화를 관찰합니다", normal:"골반이 크게 떨어지지 않고 수평에 가깝게 유지됩니다",
+      limited:"한쪽 골반이 반복적으로 떨어지면 중둔근 약화 또는 골반 안정성 저하 의심", painCriteria:"지지하는 다리 쪽 통증이 있으면 통증으로 기록"},
+    {key:"gait_knee_dir",       label:"무릎 방향",           desc:"무릎이 안쪽으로 무너지는지 확인", group:"후면",
+      method:"뒤에서 무릎이 모이는지 관찰합니다", normal:"무릎이 발 방향과 비슷하게 유지됩니다",
+      limited:"보행 중 무릎이 안쪽으로 모이면 고관절 외회전/중둔근 기능 저하 의심", painCriteria:"무릎 통증이 있으면 통증으로 기록"},
+    {key:"gait_foot_pronation", label:"발의 회내/회외",       desc:"발이 안쪽·바깥쪽으로 무너지는지 확인", group:"후면",
+      method:"뒤에서 발과 뒤꿈치의 움직임을 관찰합니다", normal:"발이 자연스러운 범위에서 움직입니다",
+      limited:"과회내는 아치 저하, 과회외는 충격 흡수 부족 가능성", painCriteria:"발/발목 통증이 있으면 통증으로 기록"},
+    {key:"gait_heel_align",     label:"뒤꿈치 정렬",         desc:"뒤꿈치가 안/밖으로 기울어지는지 확인", group:"후면",
+      method:"뒤꿈치가 기울어지는 방향을 관찰합니다", normal:"뒤꿈치가 중립에 가깝게 착지합니다",
+      limited:"뒤꿈치가 안쪽으로 많이 기울면 과회내, 바깥쪽으로 기울면 회외 패턴 의심", painCriteria:"뒤꿈치/발목 통증이 있으면 통증으로 기록"},
+    {key:"gait_weight_shift",   label:"좌우 체중 이동",       desc:"한쪽으로 체중이 더 오래 머무는지 확인", group:"후면",
+      method:"좌우 체중 지지 시간을 비교합니다", normal:"양쪽에 비슷한 시간 체중을 싣습니다",
+      limited:"한쪽 체중 지지가 짧거나 회피하면 통증 또는 안정성 문제 의심", painCriteria:"체중을 실을 때 통증이 있으면 통증으로 기록"},
+    {key:"gait_stance_width",   label:"발 간격",             desc:"양발 간격이 너무 좁거나 넓은지 확인", group:"후면",
+      method:"걸을 때 양발 간격을 관찰합니다", normal:"적당한 발 간격을 유지합니다",
+      limited:"지나치게 좁으면 균형 불안정, 지나치게 넓으면 고관절/체간 안정성 문제 의심", painCriteria:"균형 문제로 인한 불편감이 있으면 통증으로 기록"},
   ],
 };
 const TEST_RESULT_OPTS = ["정상","제한","통증"];
+// 카테고리별 결과 버튼 라벨 오버라이드 — "보행"은 "제한" 대신 "이상 패턴"이 더 적절
+const CATEGORY_RESULT_OPTS = { "보행": ["정상","이상 패턴","통증"] };
+// 도달 위치 선택형(Apley Scratch 등) 공통 단계 — 순서가 곧 개선 방향(인덱스가 클수록 좋음)
+const REACH_LEVELS = ["도달 안 됨","엉덩이","천골","요추","흉요추 경계","견갑골 하각","견갑골 중앙","견갑골 상각 이상"];
+// 가동범위 수치 입력이 필요한 항목만 등록 — 없는 항목은 기존처럼 정상/제한/통증만 사용(하위 호환)
+const TEST_ROM_CONFIG = {
+  sh_flex:        {type:"angle",      unit:"도", min:0, max:180, sides:true},
+  sh_abd:         {type:"angle",      unit:"도", min:0, max:180, sides:true},
+  sh_er:          {type:"angle",      unit:"도", min:0, max:90,  sides:true},
+  sleeper_test:   {type:"angle",      unit:"도", min:0, max:90,  sides:true},
+  sh_ir:          {type:"reachLevel", sides:true},
+  apley:          {type:"reachLevel", sides:true},
+  hip_flex:       {type:"angle",      unit:"도", min:0, max:130, sides:true},
+  hip_ir:         {type:"angle",      unit:"도", min:0, max:45,  sides:true},
+  hip_er:         {type:"angle",      unit:"도", min:0, max:60,  sides:true},
+  slr:            {type:"angle",      unit:"도", min:0, max:90,  sides:true},
+  df:             {type:"angle",      unit:"도", min:0, max:30,  sides:true},
+  cx_rot:         {type:"angle",      unit:"도", min:0, max:80,  sides:true},
+  cx_lat:         {type:"angle",      unit:"도", min:0, max:45,  sides:true},
+  lb_flex:        {type:"distance",   unit:"cm", min:0, max:40,  sides:false, direction:"down"}, // 손끝-바닥 거리는 작을수록 유연성 개선
+  knee_wall:      {type:"distance",   unit:"cm", min:0, max:15,  sides:true},
+  balance:        {type:"time",       unit:"초", min:0, max:60,  sides:true},
+  single_balance: {type:"time",       unit:"초", min:0, max:60,  sides:true},
+};
 // 카테고리별 교차 평가 추천 — categoryKey가 있으면 실제 탭 이동 가능, 없으면 안내용 라벨만 표시
 const CROSS_REFERRAL_MAP = {
   "목":     [{label:"어깨",       categoryKey:"어깨"}, {label:"흉추",   categoryKey:null}],
@@ -15724,11 +15926,84 @@ function buildRoutineSeed(categoryResults={}) {
 }
 const RESULT_RANK = { "정상":0, "제한":1, "통증":2 };
 // 유형별 평가에서 제한/통증이었던 테스트만 재평가 대상 — before/after를 좋아짐/유지/악화로 자동 비교
+// 카테고리별 테스트 타임라인 — {"카테고리|테스트키" -> [{date,category,testKey,label,result,vas,measure}, ...]} (오래된 순)
+// 관리자 변화분석(AssessmentAnalysisView)과 회원앱 노출용 romChanges 계산(handleSave) 양쪽에서 재사용
+function buildCatTimeline(records=[]) {
+  const catTimeline = {};
+  [...records].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(r => {
+    Object.entries(r.categoryResults||{}).forEach(([cat,cr]) => {
+      (cr.tests||[]).forEach(t => {
+        const measure = TEST_ROM_CONFIG[t.key] ? getTestMeasure(t) : null;
+        if (!t.result && !measure) return;
+        const key = cat+"|"+t.key;
+        (catTimeline[key] = catTimeline[key]||[]).push({
+          date:r.date, category:cat, testKey:t.key,
+          label:CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key,
+          result:t.result, vas:t.vas, measure,
+        });
+      });
+    });
+  });
+  return catTimeline;
+}
+// 가동범위(ROM) 변화 카드 — TEST_ROM_CONFIG 등록 항목 중 측정값이 2회 이상 있는 타임라인만 첫 값 vs 마지막 값 비교.
+// 기존 통증/제한 변화 분석(topRomImprove 등)과는 완전히 별개 데이터로, 통증 변화 분석에는 영향을 주지 않는다.
+function buildRomChangeCards(catTimeline={}) {
+  const cards = [];
+  Object.values(catTimeline).forEach(timeline => {
+    const testKey = timeline[0]?.testKey;
+    const rom = TEST_ROM_CONFIG[testKey];
+    if (!rom) return;
+    const withMeasure = timeline.filter(t => t.measure);
+    if (withMeasure.length < 2) return;
+    const first = withMeasure[0], last = withMeasure[withMeasure.length-1];
+    const label = `${first.category} ${first.label}`;
+    const isImproved = delta => rom.direction==="down" ? delta<0 : delta>0;
+    if (rom.type==="reachLevel") {
+      const idx = v => v ? REACH_LEVELS.indexOf(v) : -1;
+      const sideKeys = rom.sides ? [["좌","leftReachLevel"],["우","rightReachLevel"]] : [["","reachLevel"]];
+      const parts = sideKeys.map(([side,key]) => {
+        const fi = idx(first.measure[key]), li = idx(last.measure[key]);
+        return (fi>=0 && li>=0 && fi!==li) ? { side, from:first.measure[key], to:last.measure[key], delta:li-fi } : null;
+      }).filter(Boolean);
+      if (!parts.length) return;
+      const best = parts.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0];
+      const sidePrefix = best.side ? best.side+" " : "";
+      cards.push({ label, category:first.category, testKey, type:"reachLevel",
+        fromText:`${sidePrefix}${best.from}`, toText:`${sidePrefix}${best.to}`,
+        changeText:`${sidePrefix}${best.delta>0?"+":""}${best.delta}단계 ${isImproved(best.delta)?"개선":"변화"}`,
+        improved: isImproved(best.delta) });
+      return;
+    }
+    const sideKeys = rom.sides ? [["좌","leftValue"],["우","rightValue"]] : [["","value"]];
+    const parts = sideKeys.map(([side,key]) => {
+      const fv = first.measure[key], lv = last.measure[key];
+      return (fv!=null && lv!=null && fv!==lv) ? { side, from:fv, to:lv, delta:+(lv-fv).toFixed(1) } : null;
+    }).filter(Boolean);
+    if (!parts.length) return;
+    const best = parts.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0];
+    const sidePrefix = best.side ? best.side+" " : "";
+    cards.push({ label, category:first.category, testKey, type:rom.type, unit:rom.unit,
+      fromText:`${sidePrefix}${best.from}${rom.unit}`, toText:`${sidePrefix}${best.to}${rom.unit}`,
+      changeText:`${sidePrefix}${best.delta>0?"+":""}${best.delta}${rom.unit} ${isImproved(best.delta)?"개선":"변화"}`,
+      improved: isImproved(best.delta) });
+  });
+  return cards;
+}
+// 테스트 결과 객체에서 가동범위 수치만 뽑아냄(측정값이 하나도 없으면 null) — TEST_ROM_CONFIG 등록 항목에만 의미가 있음
+function getTestMeasure(t={}) {
+  const m = { value:t.value, leftValue:t.leftValue, rightValue:t.rightValue, reachLevel:t.reachLevel, leftReachLevel:t.leftReachLevel, rightReachLevel:t.rightReachLevel };
+  const hasAny = Object.values(m).some(v => v!==undefined && v!==null && v!=="");
+  return hasAny ? m : null;
+}
 function buildRetestTargets(categoryResults={}) {
   const targets = [];
   Object.entries(categoryResults).forEach(([cat,cr]) => {
     (cr.tests||[]).forEach(t => {
-      if (t.result && t.result!=="정상") targets.push({ category:cat, testKey:t.key, label:CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key, before:t.result, beforeVas:t.vas||{좌:0,우:0} });
+      const beforeMeasure = TEST_ROM_CONFIG[t.key] ? getTestMeasure(t) : null;
+      if ((t.result && t.result!=="정상") || beforeMeasure) {
+        targets.push({ category:cat, testKey:t.key, label:CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key, before:t.result||"정상", beforeVas:t.vas||{좌:0,우:0}, beforeMeasure });
+      }
     });
   });
   return targets;
@@ -15738,11 +16013,15 @@ function compareRetest(retestTargets=[], retestResults={}) {
   const painCompare = [];
   retestTargets.forEach(target => {
     const after = retestResults[target.category]?.[target.testKey];
-    if (!after || !after.result) return;
-    const beforeRank = RESULT_RANK[target.before] ?? 1;
-    const afterRank = RESULT_RANK[after.result] ?? 1;
-    const changeLabel = afterRank<beforeRank ? "좋아짐" : afterRank>beforeRank ? "악화" : "유지";
-    compare.push({ category:target.category, testKey:target.testKey, label:target.label, before:target.before, after:after.result, changeLabel });
+    if (!after) return;
+    const afterMeasure = TEST_ROM_CONFIG[target.testKey] ? getTestMeasure(after) : null;
+    if (after.result || afterMeasure) {
+      const beforeRank = RESULT_RANK[target.before] ?? 1;
+      const afterRank = RESULT_RANK[after.result||target.before] ?? 1;
+      const changeLabel = afterRank<beforeRank ? "좋아짐" : afterRank>beforeRank ? "악화" : "유지";
+      compare.push({ category:target.category, testKey:target.testKey, label:target.label, before:target.before, after:after.result||target.before, changeLabel,
+        beforeMeasure: target.beforeMeasure||undefined, afterMeasure: afterMeasure||undefined });
+    }
     ["좌","우"].forEach(side => {
       const beforeVas = target.beforeVas?.[side]||0, afterVas = after.vas?.[side]||0;
       if (beforeVas||afterVas) {
@@ -15772,6 +16051,8 @@ function AssessmentScreen({ member, onBack, showToast }) {
   const [quickCheck, setQuickCheck] = useState(() => Object.fromEntries(QUICK_CHECK_ITEMS.map(x=>[x.key,false])));
   const [categoryResults, setCategoryResults] = useState({}); // { [category]: {tests, crossReferrals, crossReferralsChecked} }
   const [activeCategory, setActiveCategory] = useState(null);
+  const [openCriteria, setOpenCriteria] = useState(() => new Set()); // "기준 보기" 펼침 상태 — 카테고리 이동해도 유지
+  const toggleCriteria = (key) => setOpenCriteria(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const toggleQuickCheck = (key) => setQuickCheck(prev => ({...prev, [key]: !prev[key]}));
   const goToRecommendedCategories = () => {
     const recs = getRecommendedCategories(records);
@@ -16071,7 +16352,9 @@ function AssessmentScreen({ member, onBack, showToast }) {
       if (hasCategoryResults || rec.retest) {
         try {
           const feedback = buildMemberCorrectionFeedback(rec);
-          await saveCorrectionSummary(member.id, { id: savedRec.id, date: assDate, ...feedback, visibleToMember: true });
+          // 가동범위(ROM) 변화 — 통증 변화 분석(feedback)과 별개로, 전체 이력(next)에서 초기 대비 최근 변화를 뽑아 회원 문장으로 변환
+          const romChanges = buildMemberRomSentences(buildRomChangeCards(buildCatTimeline(next)));
+          await saveCorrectionSummary(member.id, { id: savedRec.id, date: assDate, ...feedback, romChanges, visibleToMember: true });
         } catch(e) {
           console.error("[TEO GYM] 교정 결과 요약 저장 오류:", e);
         }
@@ -16399,39 +16682,114 @@ function AssessmentScreen({ member, onBack, showToast }) {
               })}
             </div>
             <div style={{display:"grid",gap:8,marginBottom:14}}>
-              {tests.map(t=>{
+              {tests.map((t,i)=>{
                 const row = result.tests.find(x=>x.key===t.key) || {result:"",vas:{좌:0,우:0}};
+                const resultOpts = CATEGORY_RESULT_OPTS[cat] || TEST_RESULT_OPTS;
+                const rom = TEST_ROM_CONFIG[t.key];
+                const criteriaKey = cat+"|"+t.key;
+                const criteriaOpen = openCriteria.has(criteriaKey);
+                const hasCriteria = t.method || t.normal || t.limited || t.painCriteria;
+                const showGroupHeader = t.group && t.group !== (tests[i-1]?.group);
                 return (
-                  <div key={t.key} style={{padding:"11px 12px",borderRadius:9,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                      <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{t.label}</Mo>
-                    </div>
-                    <Mo c="#3a4a5a" s={9} style={{display:"block",marginBottom:7}}>{t.desc}</Mo>
-                    <div style={{display:"flex",gap:4,marginBottom:7}}>
-                      {TEST_RESULT_OPTS.map(opt=>(
-                        <button key={opt} onClick={()=>setCategoryTestResult(cat,t.key,{result:opt})}
-                          style={{flex:1,padding:"6px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                            borderColor:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="제한"?"#ffd166":"#ef4444"):"rgba(255,255,255,.08)",
-                            background:row.result===opt?(opt==="정상"?"rgba(94,234,212,.15)":opt==="제한"?"rgba(255,209,102,.15)":"rgba(239,68,68,.15)"):"transparent",
-                            color:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="제한"?"#ffd166":"#f87171"):"#94a3b8"}}>
-                          {opt}
+                  <Fragment key={t.key}>
+                    {showGroupHeader && (
+                      <Mo c="#a29bfe" s={11} style={{fontWeight:800,marginTop:i?6:0,marginBottom:-2}}>
+                        {t.group==="측면"?"↔️ 측면 보행 분석":"↕️ 후면 보행 분석"}
+                      </Mo>
+                    )}
+                    <div style={{padding:"11px 12px",borderRadius:9,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <Mo c="#e2e8f0" s={12} style={{fontWeight:700}}>{t.label}</Mo>
+                      </div>
+                      <Mo c="#3a4a5a" s={9} style={{display:"block",marginBottom:7}}>{t.desc}</Mo>
+                      {hasCriteria && (
+                        <button onClick={()=>toggleCriteria(criteriaKey)}
+                          style={{border:"none",background:"transparent",cursor:"pointer",padding:0,marginBottom:7,
+                            color:"#a29bfe",fontSize:9,fontWeight:700,textDecoration:"underline"}}>
+                          {criteriaOpen?"기준 접기 ▲":"기준 보기 ▼"}
                         </button>
-                      ))}
-                    </div>
-                    {row.result==="통증" && (
-                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                        {["좌","우"].map(side=>(
-                          <div key={side} style={{display:"flex",alignItems:"center",gap:4}}>
-                            <Mo c="#94a3b8" s={9}>{side} VAS</Mo>
-                            <input type="number" min={0} max={10} value={row.vas?.[side]||0}
-                              onChange={e=>setCategoryTestResult(cat,t.key,{vas:{...(row.vas||{좌:0,우:0}),[side]:Math.max(0,Math.min(10,Number(e.target.value)||0))}})}
-                              style={{width:38,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",
-                                border:"1px solid rgba(239,68,68,.3)",background:"#111827",color:"#f87171"}} />
-                          </div>
+                      )}
+                      {criteriaOpen && (
+                        <div style={{marginBottom:8,padding:"8px 10px",borderRadius:7,background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.15)",display:"grid",gap:4}}>
+                          {t.method  && <Mo c="#c4b5fd" s={9}><b>평가 방법</b> · {t.method}</Mo>}
+                          {t.normal  && <Mo c="#5EEAD4" s={9}><b>정상 기준</b> · {t.normal}</Mo>}
+                          {t.limited && <Mo c="#ffd166" s={9}><b>제한 의심</b> · {t.limited}</Mo>}
+                          {t.painCriteria && <Mo c="#f87171" s={9}><b>통증 체크</b> · {t.painCriteria}</Mo>}
+                        </div>
+                      )}
+                      <div style={{display:"flex",gap:4,marginBottom:7}}>
+                        {resultOpts.map(opt=>(
+                          <button key={opt} onClick={()=>setCategoryTestResult(cat,t.key,{result:opt})}
+                            style={{flex:1,padding:"6px 0",borderRadius:7,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
+                              borderColor:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="통증"?"#ef4444":"#ffd166"):"rgba(255,255,255,.08)",
+                              background:row.result===opt?(opt==="정상"?"rgba(94,234,212,.15)":opt==="통증"?"rgba(239,68,68,.15)":"rgba(255,209,102,.15)"):"transparent",
+                              color:row.result===opt?(opt==="정상"?"#5EEAD4":opt==="통증"?"#f87171":"#ffd166"):"#94a3b8"}}>
+                            {opt}
+                          </button>
                         ))}
                       </div>
-                    )}
-                  </div>
+                      {row.result==="통증" && (
+                        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:rom?7:0}}>
+                          {["좌","우"].map(side=>(
+                            <div key={side} style={{display:"flex",alignItems:"center",gap:4}}>
+                              <Mo c="#94a3b8" s={9}>{side} VAS</Mo>
+                              <input type="number" min={0} max={10} value={row.vas?.[side]||0}
+                                onChange={e=>setCategoryTestResult(cat,t.key,{vas:{...(row.vas||{좌:0,우:0}),[side]:Math.max(0,Math.min(10,Number(e.target.value)||0))}})}
+                                style={{width:38,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",
+                                  border:"1px solid rgba(239,68,68,.3)",background:"#111827",color:"#f87171"}} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {rom && (rom.type==="angle"||rom.type==="distance"||rom.type==="time") && (
+                        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                          {rom.sides ? ["좌","우"].map(side=>(
+                            <div key={side} style={{display:"flex",alignItems:"center",gap:4}}>
+                              <Mo c="#94a3b8" s={9}>{side} {rom.unit}</Mo>
+                              <input type="number" min={rom.min} max={rom.max}
+                                value={(side==="좌"?row.leftValue:row.rightValue) ?? ""}
+                                onChange={e=>setCategoryTestResult(cat,t.key,{[side==="좌"?"leftValue":"rightValue"]:e.target.value===""?undefined:Math.max(rom.min,Math.min(rom.max,Number(e.target.value)||0))})}
+                                style={{width:44,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",
+                                  border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4"}} />
+                            </div>
+                          )) : (
+                            <div style={{display:"flex",alignItems:"center",gap:4}}>
+                              <Mo c="#94a3b8" s={9}>측정값 {rom.unit}</Mo>
+                              <input type="number" min={rom.min} max={rom.max} value={row.value ?? ""}
+                                onChange={e=>setCategoryTestResult(cat,t.key,{value:e.target.value===""?undefined:Math.max(rom.min,Math.min(rom.max,Number(e.target.value)||0))})}
+                                style={{width:44,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",
+                                  border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4"}} />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {rom && rom.type==="reachLevel" && (
+                        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                          {rom.sides ? ["좌","우"].map(side=>(
+                            <div key={side} style={{display:"flex",alignItems:"center",gap:4}}>
+                              <Mo c="#94a3b8" s={9}>{side} 도달</Mo>
+                              <select value={(side==="좌"?row.leftReachLevel:row.rightReachLevel) || ""}
+                                onChange={e=>setCategoryTestResult(cat,t.key,{[side==="좌"?"leftReachLevel":"rightReachLevel"]:e.target.value||undefined})}
+                                style={{padding:"3px 5px",borderRadius:5,fontSize:9,border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4"}}>
+                                <option value="">선택</option>
+                                {REACH_LEVELS.map(lv=><option key={lv} value={lv}>{lv}</option>)}
+                              </select>
+                            </div>
+                          )) : (
+                            <div style={{display:"flex",alignItems:"center",gap:4}}>
+                              <Mo c="#94a3b8" s={9}>도달 위치</Mo>
+                              <select value={row.reachLevel || ""}
+                                onChange={e=>setCategoryTestResult(cat,t.key,{reachLevel:e.target.value||undefined})}
+                                style={{padding:"3px 5px",borderRadius:5,fontSize:9,border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4"}}>
+                                <option value="">선택</option>
+                                {REACH_LEVELS.map(lv=><option key={lv} value={lv}>{lv}</option>)}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Fragment>
                 );
               })}
             </div>
@@ -16543,6 +16901,37 @@ function AssessmentScreen({ member, onBack, showToast }) {
                               ))}
                             </div>
                           )}
+                          {TEST_ROM_CONFIG[target.testKey] && (() => {
+                            const rom = TEST_ROM_CONFIG[target.testKey];
+                            if (rom.type==="reachLevel") return (
+                              <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>
+                                {(rom.sides?["좌","우"]:[""]).map(side=>(
+                                  <div key={side||"v"} style={{display:"flex",alignItems:"center",gap:4}}>
+                                    {side && <Mo c="#94a3b8" s={9}>{side} 도달</Mo>}
+                                    <select value={row[side==="좌"?"leftReachLevel":side==="우"?"rightReachLevel":"reachLevel"]||""}
+                                      onChange={e=>setRetestResult(target.category,target.testKey,{[side==="좌"?"leftReachLevel":side==="우"?"rightReachLevel":"reachLevel"]:e.target.value||undefined})}
+                                      style={{padding:"3px 5px",borderRadius:5,fontSize:9,border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4"}}>
+                                      <option value="">선택</option>
+                                      {REACH_LEVELS.map(lv=><option key={lv} value={lv}>{lv}</option>)}
+                                    </select>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                            return (
+                              <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>
+                                {(rom.sides?["좌","우"]:[""]).map(side=>(
+                                  <div key={side||"v"} style={{display:"flex",alignItems:"center",gap:4}}>
+                                    {side && <Mo c="#94a3b8" s={9}>{side} {rom.unit}</Mo>}
+                                    <input type="number" min={rom.min} max={rom.max}
+                                      value={row[side==="좌"?"leftValue":side==="우"?"rightValue":"value"] ?? ""}
+                                      onChange={e=>setRetestResult(target.category,target.testKey,{[side==="좌"?"leftValue":side==="우"?"rightValue":"value"]:e.target.value===""?undefined:Math.max(rom.min,Math.min(rom.max,Number(e.target.value)||0))})}
+                                      style={{width:44,padding:"3px 5px",borderRadius:5,fontSize:10,textAlign:"center",border:"1px solid rgba(94,234,212,.3)",background:"#111827",color:"#5EEAD4"}} />
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
@@ -17244,21 +17633,9 @@ function AssessmentAnalysisView({ records=[], member }) {
   const FUNC_LABEL={sh_flex:"어깨 굴곡",sh_er:"어깨 외회전",sh_ir:"어깨 내회전",hip_flex:"고관절 굴곡",hip_er:"고관절 외회전",knee_sq:"무릎 기능",slr:"햄스트링 SLR",glute_fn:"둔근 기능",balance:"한발 서기",thoracic:"흉추 회전",df:"발목 가동성"};
 
   // ── 유형별 평가 / 재평가 기반 강화 분석(Phase 3) ──────────────────
-  // 카테고리별 테스트 타임라인: {"카테고리|테스트키" -> [{date,result,vas}, ...]} (오래된 순)
-  const catTimeline = {};
-  [...records].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(r => {
-    Object.entries(r.categoryResults||{}).forEach(([cat,cr]) => {
-      (cr.tests||[]).forEach(t => {
-        if (!t.result) return;
-        const key = cat+"|"+t.key;
-        (catTimeline[key] = catTimeline[key]||[]).push({
-          date:r.date, category:cat, testKey:t.key,
-          label:CATEGORY_TESTS[cat]?.find(x=>x.key===t.key)?.label||t.key,
-          result:t.result, vas:t.vas,
-        });
-      });
-    });
-  });
+  const catTimeline = buildCatTimeline(records);
+  // 가동범위(ROM) 변화 — 기존 통증/제한 분석과 완전히 별개(신규)
+  const romChangeCards = buildRomChangeCards(catTimeline);
   // ROM 증가 TOP5 — 재평가에서 "좋아짐"으로 판정된 항목 빈도
   const romImproveFreq = {};
   records.forEach(r => (r.retest?.compare||[]).forEach(c => {
@@ -17511,6 +17888,25 @@ function AssessmentAnalysisView({ records=[], member }) {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 5-1b. 가동범위(ROM) 변화 — 통증 변화 분석과 완전히 별개의 신규 카드. 초기 vs 최근 측정값(각도/거리/도달위치/시간) 비교 */}
+      {romChangeCards.length>0 && (
+        <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
+          background:"rgba(162,155,254,.05)",border:"1px solid rgba(162,155,254,.18)"}}>
+          <AACTitle color="#a29bfe">🦵 가동범위 변화</AACTitle>
+          {romChangeCards.slice(0,6).map((c,i)=>(
+            <div key={c.category+c.testKey} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,
+              marginBottom:i<romChangeCards.length-1?7:0,paddingBottom:i<romChangeCards.length-1?7:0,
+              borderBottom:i<Math.min(romChangeCards.length,6)-1?"1px solid rgba(255,255,255,.06)":"none"}}>
+              <div>
+                <Mo c="#e2e8f0" s={10} style={{fontWeight:700,display:"block"}}>{c.label}</Mo>
+                <Mo c="#3a4a5a" s={9}>초기 {c.fromText} → 최근 {c.toText}</Mo>
+              </div>
+              <AATag c={c.improved?"#5EEAD4":"#94a3b8"} bg={c.improved?"rgba(94,234,212,.12)":"rgba(255,255,255,.06)"}>{c.changeText}</AATag>
+            </div>
+          ))}
         </div>
       )}
 

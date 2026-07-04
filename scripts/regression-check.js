@@ -973,27 +973,46 @@ const checks = [
     app.includes('const QUICK_CHECK_ITEMS = [') &&
     ['pain','romLimit','weakness','posture','gait','tingling','painDuringExercise','painDailyLife'].every(k=>app.includes(`key:"${k}"`))
   ],
-  ['체형평가: 유형별 평가 카테고리 9개(목/어깨/팔꿈치/손목/허리/골반/무릎/발목/발바닥), 카테고리당 필수 테스트 5개',
-    app.includes('const ASSESS_CATEGORIES = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥"];') &&
+  ['체형평가: 유형별 평가 카테고리 10개(기존 9개 + 보행), 기존 9개는 필수 테스트 5개 이상 유지(축소 없음)',
+    app.includes('const ASSESS_CATEGORIES = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥","보행"];') &&
     (() => {
       const start = app.indexOf('const CATEGORY_TESTS = {');
       const end = app.indexOf('const TEST_RESULT_OPTS');
       const block = app.slice(start, end);
-      const cats = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥"];
+      const cats = ["목","어깨","팔꿈치","손목","허리","골반","무릎","발목","발바닥","보행"];
       return cats.every((cat,i) => {
         const catIdx = block.indexOf(`"${cat}": [`);
         if (catIdx === -1) return false;
         const nextCat = cats[i+1];
         const nextCatIdx = nextCat ? block.indexOf(`"${nextCat}": [`, catIdx) : -1;
         const section = block.slice(catIdx, nextCatIdx === -1 ? undefined : nextCatIdx);
-        return (section.match(/key:/g)||[]).length === 5 && (section.match(/desc:/g)||[]).length === 5;
+        return (section.match(/key:/g)||[]).length >= 5;
       });
     })()
   ],
-  ['체형평가: 테스트마다 정상/제한/통증 버튼 + 통증 시 좌우 VAS 입력',
+  ['체형평가: 보행 카테고리는 측면/후면 12항목 + "이상 패턴" 라벨, 나머지 카테고리는 기존처럼 정상/제한/통증 버튼 + 통증 시 좌우 VAS 입력',
     app.includes('const TEST_RESULT_OPTS = ["정상","제한","통증"];') &&
+    app.includes('const CATEGORY_RESULT_OPTS = { "보행": ["정상","이상 패턴","통증"] };') &&
+    app.includes('group:"측면"') && app.includes('group:"후면"') &&
     app.includes('row.result==="통증" && (') &&
     app.includes('{["좌","우"].map(side=>(')
+  ],
+  ['체형평가: 모든 테스트 항목에 평가방법(method)/정상기준(normal)/제한의심(limited)/통증체크(painCriteria) 필드 + "기준 보기" 접이식 UI',
+    app.includes('const [openCriteria, setOpenCriteria] = useState(') &&
+    app.includes('{criteriaOpen?"기준 접기 ▲":"기준 보기 ▼"}') &&
+    (() => {
+      const start = app.indexOf('const CATEGORY_TESTS = {');
+      const end = app.indexOf('const TEST_RESULT_OPTS');
+      const block = app.slice(start, end);
+      return (block.match(/method:/g)||[]).length >= 60 && (block.match(/normal:/g)||[]).length >= 60;
+    })()
+  ],
+  ['체형평가: 가동범위(ROM) 입력 — TEST_ROM_CONFIG/REACH_LEVELS 존재, 각도/거리/도달위치/시간 + 좌우 기록 지원',
+    app.includes('const REACH_LEVELS = ["도달 안 됨","엉덩이","천골","요추","흉요추 경계","견갑골 하각","견갑골 중앙","견갑골 상각 이상"];') &&
+    app.includes('const TEST_ROM_CONFIG = {') &&
+    app.includes('sh_flex:        {type:"angle"') &&
+    app.includes('apley:          {type:"reachLevel"') &&
+    app.includes('leftValue') && app.includes('rightValue')
   ],
   ['체형평가: 교차 평가 정적 매핑(어깨→흉추/견갑/반대쪽 골반/고관절, 허리→고관절/발목/햄스트링, 무릎→고관절/발목) + 일괄 체크',
     app.includes('"어깨":   [{label:"흉추",       categoryKey:null},   {label:"견갑",   categoryKey:null}, {label:"반대쪽 골반", categoryKey:"골반"}, {label:"고관절", categoryKey:"골반"}],') &&
@@ -1027,9 +1046,9 @@ const checks = [
     app.includes('const addRoutineExercise = (phaseIdx) => {') &&
     app.includes('const removeRoutineExercise = (phaseIdx, exIdx) => {')
   ],
-  ['체형평가: 재평가는 유형별 평가에서 제한/통증이었던 테스트만 대상으로 하고, before/after를 좋아짐/유지/악화로 자동 비교',
+  ['체형평가: 재평가는 유형별 평가에서 제한/통증이었던 테스트(+가동범위 수치가 있는 테스트)를 대상으로 하고, before/after를 좋아짐/유지/악화로 자동 비교',
     app.includes('function buildRetestTargets(categoryResults={}) {') &&
-    app.includes('if (t.result && t.result!=="정상") targets.push(') &&
+    app.includes('if ((t.result && t.result!=="정상") || beforeMeasure) {') &&
     app.includes('function compareRetest(retestTargets=[], retestResults={}) {') &&
     app.includes('const changeLabel = afterRank<beforeRank ? "좋아짐" : afterRank>beforeRank ? "악화" : "유지";')
   ],
@@ -1081,10 +1100,21 @@ const checks = [
     db.includes('export async function saveCorrectionSummary(memberId, data) {') &&
     db.includes('doc(db, "members", memberId, "correctionSummaries", summaryId)')
   ],
-  ['체형평가 저장: 유형별 평가/재평가 데이터가 있을 때만 회원용 교정 결과 요약을 별도 컬렉션에 추가 저장(전문용어 없는 문장만)',
+  ['체형평가 저장: 유형별 평가/재평가 데이터가 있을 때만 회원용 교정 결과 요약(+가동범위 변화 romChanges)을 별도 컬렉션에 추가 저장(전문용어 없는 문장만)',
     app.includes('function buildMemberCorrectionFeedback(rec){') &&
     app.includes('if (hasCategoryResults || rec.retest) {') &&
-    app.includes('await saveCorrectionSummary(member.id, { id: savedRec.id, date: assDate, ...feedback, visibleToMember: true });')
+    app.includes('const romChanges = buildMemberRomSentences(buildRomChangeCards(buildCatTimeline(next)));') &&
+    app.includes('await saveCorrectionSummary(member.id, { id: savedRec.id, date: assDate, ...feedback, romChanges, visibleToMember: true });')
+  ],
+  ['체형평가: 가동범위 변화(buildRomChangeCards/buildMemberRomSentences)는 통증 변화 분석과 별개 — 의료 표현("진단/질환/병변/치료") 없이 "가동범위/움직임 변화"로만 표현, "AI" 단어 없음, 데이터 없으면 자연스러운 안내',
+    (() => {
+      const i = app.indexOf('function buildRomChangeCards');
+      const j = app.indexOf('function RomChangeCard');
+      const block = app.slice(i, j+1200);
+      return i!==-1 && j!==-1 && !block.includes('AI') &&
+        !/진단|질환|병변|손상 확정/.test(block) &&
+        app.includes('가동범위 변화 기록이 쌓이면 여기에서 확인할 수 있어요.');
+    })()
   ],
   ['회원앱: correctionSummaries를 다른 컬렉션과 동일한 readStep 패턴으로 로딩하고 common prop으로 전달, 실패해도 다른 데이터 로딩을 막지 않음',
     app.includes('readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[])') &&

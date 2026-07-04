@@ -903,7 +903,7 @@ const checks = [
     app.includes('calorieAnalysis.bmr ? `${Math.round(calorieAnalysis.bmr)}kcal`')
   ],
   ['성장 리포트: "이번 달 변화" 카드(다이어트/체형교정 신규, PT 효과 체감 톤)와 건강유지 지속성 문장 추가',
-    app.includes('function buildDietGrowthLines({wDiff,kcalRows=[],forecast})') &&
+    app.includes('function buildDietGrowthLines({wDiff,kcalRows=[],forecast,periodLabel="최근"})') &&
     app.includes('function buildCorrectionGrowthLines({pain,latestSummary})') &&
     app.includes('운동 루틴을 꾸준히 유지하고 있습니다.')
   ],
@@ -1191,17 +1191,37 @@ const checks = [
   ],
 
   // ── PT 코치형 3단계 코멘트(현재 상태 → 잘하고 있는 점 → 다음 행동 제안) ──
-  ['PT코치형: 홈 탭 "오늘의 운동 가이드"가 상태(다음 수업/남은 기간) 뒤에 실제 기록 기반 칭찬(praiseLine)을 넣고, 그 다음 추천 부위(다음 행동)로 마무리',
-    app.includes('const praiseLine=rec.goodStim.length?`최근 ${rec.goodStim[0].name} 운동에서 자극이 좋았어요.`') &&
+  ['PT코치형: 홈 탭 "오늘의 운동 가이드"가 상태(다음 수업/남은 기간) 뒤에 이전 기록 대비 중량 향상(비교) 또는 실제 기록 기반 칭찬을 넣고, 그 다음 추천 부위(다음 행동)로 마무리',
+    app.includes('const recentBiggestGain=[...recentTopEx].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0]; const praiseLine=recentBiggestGain?`이전 기록보다') &&
     app.includes('{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은')
   ],
-  ['PT코치형: 다이어트 "이번 달 변화"/체형교정 "이번 달 변화" 문장이 상태 서술로 끝나지 않고 "지금처럼 ~하면/이어가면" 다음 행동으로 이어짐',
-    app.includes('체중이 꾸준히 감소하고 있습니다. 지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.') &&
-    app.includes('통증이 점점 줄어들고 있습니다. 지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.')
+  ['PT코치형: 다이어트 "이번 달 변화"/체형교정 "이번 달 변화" 문장이 처음/이전 기록과 비교한 뒤 "지금처럼 ~하면/이어가면" 다음 행동으로 이어짐',
+    app.includes('처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. 지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.') &&
+    app.includes('이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. 지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.')
   ],
   ['PT코치형: 건강유지 대표 코멘트/최근 변화 요약이 상태 서술로 끝나지 않고 다음 행동 제안으로 마무리',
-    app.includes('지금 흐름을 유지하면 다음 달에도 안정적인 컨디션을 기대할 수 있습니다.') &&
+    app.includes('이번 주도 현재 루틴을 유지하면서 컨디션 기록을 함께 남기면 더 정확한 관리가 가능합니다.') &&
     app.includes('지금 페이스를 유지하면 안정적인 컨디션을 계속 이어갈 수 있어요.')
+  ],
+
+  // ── 변화를 기억하는 PT 코치형(이전 기록 대비 비교 → 잘하고 있는 점 → 다음 행동) ──
+  ['비교형: 건강 요약 배너가 통증/컨디션/체중/식단/유산소 각각 이전 기록(이전 체크인·지난주)과 비교한 문구를 포함(비교 불가 시 조용히 생략, 억지 비교 없음)',
+    app.includes('const prevPainCheck=checkinList.slice(1).find(c=>c.painPart&&c.painPart!=="없음");') &&
+    app.includes('이전 기록보다 통증이 줄었어요. ') &&
+    app.includes('지난 기록보다 컨디션이 다소 떨어졌어요. ') &&
+    app.includes('지난주보다 체중 기록이 더 꾸준해졌어요. ') &&
+    app.includes('지난주보다 식단 기록이 더 늘었어요. ') &&
+    app.includes('지난주보다 유산소 기록이 더 좋아졌어요. ')
+  ],
+  ['비교형: 홈 탭 "오늘 운동 체크"가 지난달 같은 기간 대비 운동 횟수 비교 문구를 포함(비교 데이터 없으면 생략)',
+    app.includes('const lastMonthSameDayCount=attendance.filter(a=>{const d=String(a.date||""); return d.startsWith(prevYm)&&Number(d.slice(8,10))<=dayOfMonth;}).length;') &&
+    app.includes('지난달 같은 기간보다 운동 횟수가 늘었어요. ')
+  ],
+  ['비교형: 대표 코멘트(diet/bulk/correction)가 "처음 기록 대비/이전 기록 대비/지난 기록" 비교로 시작해 잘하고 있는 점 → 다음 행동으로 이어짐, 데이터 부족 시 억지 비교 없이 안내',
+    app.includes('return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";') &&
+    app.includes('처음 기록 대비 체중이 더 안정적으로 감소하고 있습니다.') &&
+    app.includes('이전 기록 대비 ${biggestGainPeriod.name} 수행능력이 ${biggestGainPeriod.before} → ${biggestGainPeriod.after}로 더 안정적으로 향상되고 있습니다.') &&
+    app.includes('지난 기록(VAS ${pain.first}) 대비 통증 강도가 ${pain.last}로 낮아지고 있습니다.')
   ],
 ];
 

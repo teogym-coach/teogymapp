@@ -494,9 +494,9 @@ const checks = [
     !app.includes('출석 달성률') &&
     !app.includes('출석 랭킹')
   ],
-  ['운동 체크: 긍정 피드백 문구 존재',
-    app.includes('꾸준히 기록이 쌓이고 있어요') &&
-    app.includes('좋은 습관이 만들어지고 있어요')
+  ['운동 체크: 이번 달 실제 운동 횟수(monthCount) 기반 피드백 문구 — 임의 순환이 아니라 실제 기록을 반영',
+    app.includes('monthCount>=15?"정말 꾸준히 운동하고 계세요!"') &&
+    app.includes('꾸준히 기록이 쌓이고 있어요')
   ],
   ['출석 기능: saveAttendance 함수 존재 (db.js)',
     db.includes('export async function saveAttendance(memberId, dateKey)') &&
@@ -1162,6 +1162,30 @@ const checks = [
     db.includes('activities.push({ type: "condition", label: "컨디션", value: data.condition, dateKey });') &&
     db.includes('activities.push({ type: "pain", label: "통증", value, dateKey });') &&
     app.includes('"memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps"')
+  ],
+
+  // ── 기존 코멘트 개인화 (홈/건강 탭, 수업 탭은 제외) ──
+  ['개인화: 홈 탭 "건강 요약" 배너(buildHealthMotivation)가 통증/컨디션/체중기록빈도/칼로리기록 신호까지 반영(질책 표현 없이)',
+    (() => {
+      const i = app.indexOf('function buildHealthMotivation(p){');
+      const block = i !== -1 ? app.slice(i, i + 2200) : '';
+      return block.includes('무리하지 않게 컨디션을 조절해보세요') &&
+        block.includes('충분한 휴식과 회복을 챙겨보세요') &&
+        block.includes('체중 기록을 꾸준히 남기고 있어요') &&
+        block.includes('recentKcalCount===0') &&
+        !block.includes('부족합니다') && !block.includes('AI');
+    })()
+  ],
+  ['개인화: 홈 탭 "오늘의 운동 가이드" 추천 이유가 항상 같은 고정 문구("최근 자극이 좋았던 운동입니다"/"통증 기록과...") 대신 실제 기록(goodStim/practice) 기반으로 표시',
+    !app.includes('<span>최근 자극이 좋았던 운동입니다.</span><span>통증 기록과 다음 PT 전 회복을 함께 고려했습니다.</span>') &&
+    app.includes('rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`')
+  ],
+  ['개인화: 홈 탭 "오늘 운동 체크" 피드백이 실제 이번 달 운동 횟수 구간(monthCount)에 따라 달라짐(임의 순환 아님)',
+    app.includes('monthCount>=15?"정말 꾸준히 운동하고 계세요!":monthCount>=8?"좋은 흐름으로 운동을 이어가고 있어요.":monthCount>=1?"꾸준히 기록이 쌓이고 있어요.":"오늘 첫 기록을 남겨보세요."')
+  ],
+  ['개인화: 수업 탭(SessionMini/MemberFeedbackForm)에는 개인화 코멘트·추천·코칭 문구를 추가하지 않음 — 수업일지 확인/근육통·RPE·메모 입력/지난 기록 확인만 유지',
+    !app.includes('function buildSessionTabComment') &&
+    !app.includes('function SessionCoachComment')
   ],
 ];
 

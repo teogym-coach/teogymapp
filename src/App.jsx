@@ -1636,6 +1636,45 @@ function getInbodyRecords(body, since) { const list = (body?.inbody || []).filte
 function calcBodyFatMass(r) { if (!r) return null; if (r.bodyFatMass != null && Number.isFinite(Number(r.bodyFatMass))) return parseFloat(Number(r.bodyFatMass).toFixed(1)); const w = Number(r.weight), bf = Number(r.bodyFat); if (w > 0 && bf > 0) return parseFloat((w * bf / 100).toFixed(1)); return null; }
 function CollapsibleSection({ label, defaultOpen = false, children }) { const [open, setOpen] = useState(defaultOpen); return <div style={{margin:"6px 0"}}><button type="button" onClick={()=>setOpen(v=>!v)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1px solid #E8ECF1",borderRadius:22,padding:"14px 20px",cursor:"pointer",boxShadow:"0 6px 18px rgba(32,36,42,.04)",marginBottom:open?6:0,WebkitTapHighlightColor:"transparent",transition:"margin-bottom .2s ease"}}><span style={{fontWeight:900,fontSize:16,color:"#20242A"}}>{label}</span><span style={{color:"#A8B0BA",fontWeight:900,fontSize:13,flexShrink:0}}>{open?"▲ 접기":"▼ 펼치기"}</span></button><div className={`health-collapse${open?" open":""}`}><div className="health-collapse-inner">{children}</div></div></div>; }
 function SummaryTile({title,value,sub,delta,color="#2F73F6"}){return <div className="analysis-kpi" style={{borderColor:color+"33"}}><span style={{color}}>{title}</span><b>{value}</b>{sub&&<small>{sub}</small>}{delta&&<em style={{color}}>{delta}</em>}</div>}
+// "이번 달 BEST" — 성취감을 위한 하이라이트. 항목별로 데이터가 없으면 카드 전체를 숨기지 않고 항목 단위로 안내한다.
+function MonthlyBestCard({items=[]}){
+  return <MCard title="이번 달 BEST">
+    <div style={{display:"grid",gap:10}}>
+      {items.map((it,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+          <span style={{color:"#66717C",fontWeight:800,fontSize:12.5}}>{it.label}</span>
+          <b style={{color:it.value!=null?"#2F73F6":"#94A3B8",fontSize:13,fontWeight:800,textAlign:"right"}}>{it.value ?? "기록이 더 쌓이면 표시돼요"}</b>
+        </div>
+      ))}
+    </div>
+  </MCard>;
+}
+// "이번 달 성장 리포트" — 숫자·별점을 늘어놓기보다 "잘한 점/개선점"을 자연스러운 문장으로 먼저 보여준다. 별점은 가벼운 보조 표시.
+function GrowthReportCard({report}){
+  if(!report?.hasEnoughData){
+    return <MCard title="이번 달 성장 리포트"><div className="analysis-empty-state">아직 등급을 매기기엔 기록이 부족해요. 기록이 쌓이면 성장 리포트가 완성돼요.</div></MCard>;
+  }
+  return <MCard title="이번 달 성장 리포트">
+    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+      <div style={{width:48,height:48,borderRadius:14,background:"linear-gradient(135deg,#2F73F6,#7C6FFF)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:900,color:"#fff",flexShrink:0}}>{report.grade}</div>
+      <div><b style={{display:"block",fontSize:15,color:"#20242A"}}>이번 달 등급 {report.grade}</b><span style={{fontSize:11,color:"#8B949E",fontWeight:800}}>기록을 바탕으로 정리한 이번 달 리포트</span></div>
+    </div>
+    <div className="change-feedback-item" style={{marginBottom:8}}>👍 이번 달 가장 잘한 점<br/>{report.bestPoint}</div>
+    <div className="change-feedback-item" style={{marginBottom:14,background:"#FFF7ED",color:"#C2410C"}}>🌱 조금 더 노력하면 좋아질 점<br/>{report.improvePoint}</div>
+    <div style={{display:"grid",gap:6,marginBottom:14}}>
+      {report.stars.map((s,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+          <span style={{color:"#66717C",fontWeight:800}}>{s.label}</span>
+          <span style={{color:"#F59E0B",letterSpacing:1}}>{"★".repeat(s.score)}{"☆".repeat(5-s.score)}</span>
+        </div>
+      ))}
+    </div>
+    <div className="goal-mini">
+      <span>다음 달 목표 <b>{report.nextGoal}</b></span>
+      <span>예상 달성률 <b>{report.expectedRate}</b></span>
+    </div>
+  </MCard>;
+}
 
 // ════════════════════════════════════════════════════
 // 변화분석 탭 — 회원 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를
@@ -1668,6 +1707,19 @@ function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){
   if(wDiff!=null&&Math.abs(wDiff)<0.3) return "체중이 정체되고 있어요. 섭취 칼로리와 활동량을 함께 점검하면 정체 원인을 더 정확히 파악할 수 있습니다.";
   if(wDiff!=null&&wDiff>0.3) return "체중이 증가하는 추세입니다. 최근 섭취 칼로리가 늘지 않았는지 함께 확인해보세요.";
   return "체중과 칼로리 변화 패턴을 계속 지켜보고 있어요.";
+}
+// "이번 달 변화" — 수치를 그대로 읽어주기보다 PT 효과를 체감하게 하는 흐름 문장(최대 3줄). 구체적 수치는 "이번 달 BEST" 카드에서 별도로 보여준다.
+function buildDietGrowthLines({wDiff,kcalRows=[],forecast}){
+  const lines=[];
+  if(wDiff==null) lines.push("체중 기록이 쌓이면 변화 흐름을 보여드릴게요.");
+  else if(wDiff<-0.3) lines.push("체중이 꾸준히 감소하고 있습니다.");
+  else if(wDiff>0.3) lines.push("체중이 다소 증가하는 흐름이에요. 식단과 활동량을 함께 점검해보면 좋아요.");
+  else lines.push("체중이 안정적으로 유지되고 있습니다.");
+  if(kcalRows.length>=5) lines.push("섭취 칼로리 기록이 꾸준히 쌓이면서 변화 흐름이 더 명확해지고 있습니다.");
+  else lines.push("섭취 칼로리를 조금 더 자주 기록하면 변화 흐름을 더 정확히 확인할 수 있어요.");
+  if(forecast?.target && forecast?.risk!=="high") lines.push("현재 페이스를 유지하면 목표 체중에 가까워질 가능성이 높습니다.");
+  else if(forecast?.target) lines.push("목표까지는 시간이 조금 더 필요하지만, 꾸준함이 가장 중요합니다.");
+  return lines.slice(0,3);
 }
 // 최근 기록에서 가장 자주 수행한 운동(빈도 기준)을 자동 선정 — 대표 운동은 회원마다 다르게 나타남
 function buildTopExercisesByFrequency(sessions=[],limit=5){
@@ -1714,6 +1766,18 @@ function buildCorrectionInterpretation(pain){
   }
   return "통증 변화를 계속 지켜보고 있어요.";
 }
+// "이번 달 변화"(체형교정) — 통증 흐름 + 교정 운동 유지 여부를 격려 톤으로(최대 3줄)
+function buildCorrectionGrowthLines({pain,latestSummary}){
+  const lines=[];
+  if(!pain?.rows?.length) lines.push("통증 기록이 쌓이면 변화 흐름을 더 정확히 확인할 수 있습니다.");
+  else if(pain.last<pain.first) lines.push("통증이 점점 줄어들고 있습니다.");
+  else if(pain.last>pain.first) lines.push("최근 통증이 다소 늘었어요. 다음 수업에서 함께 점검해봐요.");
+  else lines.push("통증 정도가 안정적으로 유지되고 있습니다.");
+  if(latestSummary?.homeExercise?.length) lines.push("집에서 할 운동을 꾸준히 이어가고 있어 좋은 흐름입니다.");
+  else lines.push("집에서 할 운동을 이어가면 다음 평가에서 변화를 확인하기 좋아요.");
+  lines.push("꾸준한 교정 관리가 이어지고 있습니다.");
+  return lines.slice(0,3);
+}
 // 체형평가(assessments)의 재평가/교정 루틴 결과에서 회원에게 보여줄 "전문용어 없는" 요약만 추출.
 // 테스트 이름(Hip IR, SLR 등)은 절대 포함하지 않고, 부위명(어깨/허리 등)과 통증 수치만 사용한다.
 function buildMemberCorrectionFeedback(rec){
@@ -1738,6 +1802,107 @@ function buildMemberCorrectionFeedback(rec){
 }
 // 분석 탭 전용이었던 "운동 지속 현황"(누적 수업/이번 달 운동)은 홈 화면과 정보가 중복돼 제거됨.
 // 분석 탭은 "변화"를 보여주는 화면으로 유지한다.
+
+// "이번 달 성장 리포트" — 축별 1~5점은 화면에 숫자로 노출하지 않고, 등급/잘한점/개선점/별점을 뽑아내는 내부 계산에만 쓴다.
+// 축 라벨별 문장 템플릿(회원 톤 — 질책 없이 격려 위주)
+const GROWTH_AXIS_COPY = {
+  "체중관리":     { good: "체중 관리가 목표 방향으로 잘 진행되고 있어요.", improve: "체중 변화가 아직 뚜렷하지 않아요. 식단과 운동 강도를 함께 점검해봐요." },
+  "식단기록":     { good: "식단 기록을 꾸준히 남기고 있어 변화 파악에 큰 도움이 되고 있어요.", improve: "식단 기록을 조금 더 자주 남기면 변화를 더 정확히 볼 수 있어요." },
+  "유산소지속":   { good: "유산소 운동을 꾸준히 이어가고 있어요.", improve: "유산소 기록을 조금 더 자주 남기면 좋아요." },
+  "운동지속성":   { good: "이번 달은 운동 지속성이 특히 좋았어요.", improve: "운동 빈도를 조금 더 늘리면 변화가 더 빨라질 수 있어요." },
+  "운동볼륨":     { good: "운동 볼륨이 꾸준히 늘고 있어 성장이 뚜렷해요.", improve: "운동 볼륨을 조금씩 늘려가면 더 좋은 흐름을 만들 수 있어요." },
+  "수행능력":     { good: "여러 운동에서 수행 능력이 골고루 좋아지고 있어요.", improve: "아직 수행 능력 변화가 크지 않아요. 대표 운동 중심으로 꾸준히 기록해봐요." },
+  "중량증가":     { good: "주요 운동 중량이 눈에 띄게 늘었어요.", improve: "중량 증가 폭이 아직 작아요. 점진적으로 늘려가면 좋아요." },
+  "통증관리":     { good: "통증이 잘 줄어들고 있어요.", improve: "통증 변화가 아직 뚜렷하지 않아요. 교정 운동을 꾸준히 이어가봐요." },
+  "교정운동유지": { good: "집에서 할 운동을 꾸준히 이어가고 있어요.", improve: "집에서 할 운동을 조금 더 챙기면 회복이 더 빨라질 수 있어요." },
+  "가동범위개선": { good: "움직임과 가동범위가 좋아지고 있어요.", improve: "아직 평가 데이터가 부족해요. 다음 평가에서 더 정확히 확인해봐요." },
+  "수업참여":     { good: "수업 참여가 꾸준히 이어지고 있어요.", improve: "수업 참여 빈도를 조금 더 늘리면 좋아요." },
+  "체중안정성":   { good: "체중이 안정적인 범위에서 잘 유지되고 있어요.", improve: "체중 변동이 조금 있어요. 식사량을 일정하게 유지해봐요." },
+  "유산소활동":   { good: "유산소 활동을 꾸준히 이어가고 있어요.", improve: "유산소 활동을 조금 더 챙기면 좋아요." },
+  "컨디션안정성": { good: "컨디션이 전반적으로 안정적이에요.", improve: "컨디션 기록을 조금 더 남기면 상태를 더 잘 확인할 수 있어요." },
+};
+function scoreByCount(n, t5, t4, t3, t2) { return n >= t5 ? 5 : n >= t4 ? 4 : n >= t3 ? 3 : n >= t2 ? 2 : n > 0 ? 1 : null; }
+function computeGrowthReport(persona, ctx) {
+  const { wDiff, kcalRowsLen, cardioCount, monthWorkoutCount, periodSessionsLen, partVolumeData, topExercises, pain, latestSummary, forecast, calorieAnalysis } = ctx;
+  let axes = [];
+  let nextGoal = "현재 루틴 유지";
+  let expectedRate = "-";
+  if (persona === "diet") {
+    axes = [
+      { label: "체중관리", score: wDiff == null ? null : wDiff < -1 ? 5 : wDiff < -0.3 ? 4 : Math.abs(wDiff) <= 0.3 ? 3 : 2 },
+      { label: "식단기록", score: scoreByCount(kcalRowsLen, 20, 10, 5, 1) },
+      { label: "유산소지속", score: scoreByCount(cardioCount, 8, 4, 2, 1) },
+      { label: "운동지속성", score: scoreByCount(monthWorkoutCount, 12, 8, 4, 1) },
+    ];
+    nextGoal = forecast?.target && forecast?.recommended ? `체중 -${Math.abs(+(forecast.recommended * 4).toFixed(1))}kg` : "현재 체중 유지";
+    expectedRate = forecast?.target ? (forecast.risk === "high" ? "60%" : forecast.risk === "medium" ? "75%" : "87%") : "-";
+  } else if (persona === "bulk") {
+    const upPart = partVolumeData.filter(d => d.values.length >= 2).some(d => d.values.at(-1).value > d.values[0].value);
+    const posRatio = topExercises.length ? topExercises.filter(r => r.delta > 0).length / topExercises.length : null;
+    const biggestGain = [...topExercises].filter(r => r.delta > 0).sort((a, b) => b.delta - a.delta)[0];
+    axes = [
+      { label: "운동볼륨", score: partVolumeData.some(d => d.values.length) ? (upPart ? 5 : 3) : null },
+      { label: "수행능력", score: posRatio == null ? null : posRatio >= 0.6 ? 5 : posRatio >= 0.3 ? 4 : posRatio > 0 ? 3 : 2 },
+      { label: "중량증가", score: biggestGain ? (biggestGain.delta >= 10 ? 5 : biggestGain.delta >= 5 ? 4 : 3) : null },
+      { label: "운동지속성", score: scoreByCount(periodSessionsLen, 12, 8, 4, 1) },
+    ];
+    nextGoal = "근육량 +0.5~0.6kg";
+    expectedRate = posRatio != null && posRatio >= 0.3 ? "85%" : "70%";
+  } else if (persona === "correction") {
+    axes = [
+      { label: "통증관리", score: pain?.first != null && pain?.last != null ? (pain.last < pain.first ? 5 : pain.last === pain.first ? 3 : 2) : null },
+      { label: "교정운동유지", score: latestSummary?.homeExercise?.length ? 5 : (latestSummary ? 3 : null) },
+      { label: "가동범위개선", score: latestSummary ? (latestSummary.good.length > latestSummary.caution.length ? 5 : latestSummary.caution.length ? 3 : 4) : null },
+      { label: "수업참여", score: scoreByCount(periodSessionsLen, 8, 4, 2, 1) },
+    ];
+    nextGoal = "다음 평가에서 움직임 변화 확인";
+    expectedRate = "다음 평가 시 확인";
+  } else {
+    const wStd = ctx.monthWeightRange;
+    axes = [
+      { label: "체중안정성", score: wStd == null ? null : wStd <= 1 ? 5 : wStd <= 2 ? 4 : 3 },
+      { label: "운동지속성", score: scoreByCount(monthWorkoutCount, 12, 8, 4, 1) },
+      { label: "유산소활동", score: scoreByCount(cardioCount, 8, 4, 2, 1) },
+      { label: "컨디션안정성", score: calorieAnalysis?.bmr ? 4 : null },
+    ];
+    nextGoal = "현재 루틴 유지";
+    expectedRate = "안정 유지 가능성 높음";
+  }
+  const valid = axes.filter(a => a.score != null);
+  if (valid.length < 2) return { hasEnoughData: false };
+  const avg = valid.reduce((s, a) => s + a.score, 0) / valid.length;
+  const grade = avg >= 4.5 ? "A+" : avg >= 4 ? "A" : avg >= 3 ? "B" : avg >= 2 ? "C" : "C-";
+  const sorted = [...valid].sort((a, b) => b.score - a.score);
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  return {
+    hasEnoughData: true,
+    grade,
+    bestPoint: GROWTH_AXIS_COPY[best.label]?.good || "꾸준히 잘 관리되고 있어요.",
+    improvePoint: worst.score >= 4 ? "이번 달은 전반적으로 고르게 잘 관리됐어요." : (GROWTH_AXIS_COPY[worst.label]?.improve || "꾸준히 기록해주시면 더 정확한 리포트를 보여드릴게요."),
+    stars: axes.map(a => ({ label: a.label, score: a.score ?? 3 })),
+    nextGoal,
+    expectedRate,
+  };
+}
+// "다음 변화 예상" — 목표 전략 추천과 연결되는 짧은 기대 문구(페르소나별 템플릿, 1~2문장)
+function buildFuturePrediction(persona, { forecast, topExercises = [], latestSummary }) {
+  if (persona === "diet") {
+    if (forecast?.target && forecast?.estimatedDate) return `현재 페이스를 유지하면 ${forecast.estimatedDate} 전후 목표 체중에 가까워질 수 있습니다.`;
+    return "체중과 칼로리 기록을 꾸준히 남기면 다음 변화를 더 정확히 예상할 수 있어요.";
+  }
+  if (persona === "bulk") {
+    const hasGain = topExercises.some(r => r.delta > 0);
+    return hasGain ? "현재 운동량을 유지하면 다음 달에도 주요 운동 중량 상승을 기대할 수 있습니다." : "지금처럼 꾸준히 기록하면 다음 달에는 중량 상승을 기대할 수 있어요.";
+  }
+  if (persona === "correction") {
+    return latestSummary ? "통증 기록과 교정 운동을 유지하면 다음 평가에서 움직임 변화를 더 명확히 확인할 수 있습니다." : "통증과 교정 운동 기록을 꾸준히 남기면 다음 평가에서 변화를 더 정확히 확인할 수 있어요.";
+  }
+  return "현재 루틴을 유지하면 체중 유지 범위 안에서 안정적으로 관리될 가능성이 높습니다.";
+}
+function FuturePredictionCard({ text }) {
+  return <MCard title="다음 변화 예상"><p style={{ margin: 0, fontSize: 13, color: "#20242A", fontWeight: 700, lineHeight: 1.6 }}>{text}</p></MCard>;
+}
 function MemberAnalysis(p) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
   const handleSetPeriod = k => { setPeriod(k); try { localStorage.setItem("teogym_analysis_period", k); } catch {} };
@@ -1770,6 +1935,12 @@ function MemberAnalysis(p) {
   const firstMM = firstInbody ? toPositiveNumber(firstInbody.muscleMass) : null;
   const lastMM = lastInbody ? toPositiveNumber(lastInbody.muscleMass) : null;
   const mmDiff = differentRecords && firstMM && lastMM ? +(lastMM - firstMM).toFixed(1) : null;
+
+  // BMI — 체중(인바디 우선, 없으면 bodyData)과 키(onboarding/profile)로 즉시 계산. 별도 입력 항목 없이 기존 데이터만 재사용.
+  const heightCm = toPositiveNumber(p.onboarding?.heightCm || p.onboarding?.height || p.profile?.height);
+  const bmiOf = r => { const w = r ? toPositiveNumber(r.weight) : null; if (!w || !heightCm) return null; return +(w / ((heightCm / 100) ** 2)).toFixed(1); };
+  const lastBMI = bmiOf(lastInbody) ?? (heightCm && curW ? bmiOf({ weight: curW }) : null);
+  const bmiLabel = v => v == null ? "" : v < 18.5 ? "저체중" : v < 23 ? "표준 범위" : v < 25 ? "과체중 경계" : "비만 범위";
 
   // 신체나이 (위상각 기반)
   const hasPhaseAngle = allInbody.some(r => r.phaseAngle != null && Number(r.phaseAngle) > 0);
@@ -1852,6 +2023,73 @@ function MemberAnalysis(p) {
   const repEndurance = buildRepEnduranceChanges(periodSessions, topExercises.map(r => r.name));
   const bulkGrowthSummary = buildBulkGrowthSummary({ partVolumeData, topExercises, repEndurance, periodLabel: opt.label });
   const correctionInterpretation = buildCorrectionInterpretation(pain);
+  // 성장 리포트/미래 예측용 — WeightGoalStrategyCard와 동일한 함수를 재사용(재계산 없음)
+  const forecast = getWeightForecast(p);
+  const latestCorrectionSummary = [...(p.correctionSummaries || [])].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0] || null;
+  const dietGrowthLines = buildDietGrowthLines({ wDiff, kcalRows, forecast });
+  const correctionGrowthLines = buildCorrectionGrowthLines({ pain, latestSummary: latestCorrectionSummary });
+
+  // 이번 달 BEST — 선택한 기간(period)이 아니라 달력상 "이번 달" 고정 기준. 기존 함수를 월 단위 입력으로만 다시 호출해 재사용한다.
+  const monthKey = getKoreaDateString().slice(0, 7);
+  const inMonth = r => String(r?.date || "").startsWith(monthKey);
+  const monthWeights = getBodyWeightRecords(p.body).filter(inMonth);
+  const monthCardio = (p.cardioLogs || []).filter(inMonth);
+  const monthSessions = p.sessions.filter(inMonth);
+  const monthWeightRange = monthWeights.length >= 2 ? +(Math.max(...monthWeights.map(r => r.weight)) - Math.min(...monthWeights.map(r => r.weight))).toFixed(1) : null;
+  const monthlyBestItems = (() => {
+    if (persona === "diet") {
+      const minW = monthWeights.length ? Math.min(...monthWeights.map(r => r.weight)) : null;
+      const monthWDiff = monthWeights.length >= 2 ? +(monthWeights.at(-1).weight - monthWeights[0].weight).toFixed(1) : null;
+      const maxCardioMin = monthCardio.length ? Math.max(...monthCardio.map(l => Number(l.durationMinutes) || 0)) : null;
+      return [
+        { label: "이번 달 최저 체중", value: minW != null ? `${minW}kg` : null },
+        { label: "이번 달 체중 변화", value: monthWDiff != null ? `${monthWDiff > 0 ? "+" : ""}${monthWDiff}kg` : null },
+        { label: "이번 달 유산소 최고 기록", value: maxCardioMin ? `${maxCardioMin}분` : null },
+      ];
+    }
+    if (persona === "bulk") {
+      const monthTop = buildTopExercisesByFrequency(monthSessions, 5);
+      const biggestGain = [...monthTop].filter(r => r.delta > 0).sort((a, b) => b.delta - a.delta)[0];
+      const monthPartVolume = buildPartVolumeChart(monthSessions);
+      const bestVolume = monthPartVolume.flatMap(d => d.values.map(v => ({ part: d.part, ...v }))).sort((a, b) => b.value - a.value)[0];
+      // PR: 이번 달 최고 중량이 해당 종목의 전체 기간 최고 중량과 같거나 그 이상인 경우
+      const allTop = buildTopExercisesByFrequency(p.sessions, 10);
+      const monthPR = monthTop.find(r => {
+        const allRow = allTop.find(a => a.name === r.name);
+        if (!allRow) return false;
+        const rAfter = Number(String(r.after).replace(/[^0-9.]/g, ""));
+        const allAfter = Number(String(allRow.after).replace(/[^0-9.]/g, ""));
+        return rAfter > 0 && rAfter >= allAfter;
+      });
+      return [
+        { label: "이번 달 가장 많이 증가한 운동", value: biggestGain ? `${biggestGain.name} ${biggestGain.before} → ${biggestGain.after}` : null },
+        { label: "이번 달 최고 운동량", value: bestVolume ? `${bestVolume.part} ${bestVolume.value.toLocaleString()}kg` : null },
+        { label: "이번 달 PR", value: monthPR ? `${monthPR.name} 최고 중량 갱신` : null },
+      ];
+    }
+    if (persona === "correction") {
+      const monthPain = getPainSummary(p.checkins.filter(inMonth));
+      const painDrop = monthPain?.first != null && monthPain?.last != null && monthPain.last < monthPain.first ? `VAS ${monthPain.first} → ${monthPain.last}` : null;
+      return [
+        { label: "통증 감소", value: painDrop },
+        { label: "가장 많이 개선된 부분", value: latestCorrectionSummary?.good?.[0] || null },
+        { label: "집에서 할 운동 기록", value: latestCorrectionSummary?.homeExercise?.length ? "꾸준히 유지 중" : null },
+      ];
+    }
+    const maxCardioMin = monthCardio.length ? Math.max(...monthCardio.map(l => Number(l.durationMinutes) || 0)) : null;
+    return [
+      { label: "이번 달 유산소 최고 기록", value: maxCardioMin ? `${maxCardioMin}분` : null },
+      { label: "이번 달 최다 운동", value: monthWorkoutCount > 0 ? `${monthWorkoutCount}회` : null },
+      { label: "체중 안정도", value: monthWeightRange != null ? (monthWeightRange <= 1 ? "안정적으로 유지" : `변동 ${monthWeightRange}kg`) : null },
+    ];
+  })();
+
+  const growthReport = computeGrowthReport(persona, {
+    wDiff, kcalRowsLen: kcalRows.length, cardioCount: cardioInPeriod.length, monthWorkoutCount,
+    periodSessionsLen: periodSessions.length, partVolumeData, topExercises, pain,
+    latestSummary: latestCorrectionSummary, forecast, calorieAnalysis, monthWeightRange,
+  });
+  const futurePrediction = buildFuturePrediction(persona, { forecast, topExercises, latestSummary: latestCorrectionSummary });
 
   // ── 재사용 가능한 그래프/카드 조각(기존 마크업 그대로) — 목표별로 순서만 다르게 배치한다 ──
   const weightChart = (
@@ -2015,6 +2253,12 @@ function MemberAnalysis(p) {
             )}
           </MCard>
           <div className="change-feedback-item">{dietInterpretation}</div>
+          <MCard title="이번 달 변화">
+            <div style={{ display: "grid", gap: 8 }}>
+              {dietGrowthLines.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
+            </div>
+          </MCard>
+          <MonthlyBestCard items={monthlyBestItems} />
         </>
       )}
 
@@ -2054,6 +2298,7 @@ function MemberAnalysis(p) {
 
           {/* ④ 체중 변화 — 운동 수행능력보다 뒤에 보조 지표로 배치. 골격근량/체지방 변화는 "건강 전문 분석"(하단 접힘)에서 확인 */}
           {weightChart}
+          <MonthlyBestCard items={monthlyBestItems} />
         </>
       )}
 
@@ -2089,6 +2334,12 @@ function MemberAnalysis(p) {
             </MCard>
             <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
             <div className="change-feedback-item">{correctionInterpretation}</div>
+            <MCard title="이번 달 변화">
+              <div style={{ display: "grid", gap: 8 }}>
+                {correctionGrowthLines.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
+              </div>
+            </MCard>
+            <MonthlyBestCard items={monthlyBestItems} />
           </>
         );
       })()}
@@ -2099,20 +2350,26 @@ function MemberAnalysis(p) {
           {weightChart}
           <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
           {cardioActivityCard}
+          <MonthlyBestCard items={monthlyBestItems} />
         </>
       )}
 
-      {/* 공통: 목표까지 남은 변화 + 최근 변화 요약(체성분 기반) */}
+      {/* 공통: 목표까지 남은 변화 + 이번 달 성장 리포트 + 최근 변화 요약(체성분 기반) */}
       <WeightGoalStrategyCard {...p} />
+      <FuturePredictionCard text={futurePrediction} />
+      <GrowthReportCard report={growthReport} />
       {(persona === "diet" || persona === "general") && (
         <MCard title="최근 변화 요약">
-          {!hasEnoughInbody ? (
-            <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 변화 분석이 제공됩니다.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 8 }}>
-              {feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
-            </div>
-          )}
+          <div style={{ display: "grid", gap: 8 }}>
+            {hasEnoughInbody
+              ? feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)
+              : <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 체성분 변화 분석이 제공됩니다.</p>}
+            {persona === "general" && (
+              <div className="change-feedback-item">
+                {monthWorkoutCount > 0 ? "운동 루틴을 꾸준히 유지하고 있습니다." : "이번 달 운동 기록이 쌓이면 지속성 흐름도 함께 보여드릴게요."}
+              </div>
+            )}
+          </div>
         </MCard>
       )}
 
@@ -2146,10 +2403,35 @@ function MemberAnalysis(p) {
               delta={mmDiff !== null ? (mmDiff >= 0 ? "▲ 유지/증가" : "▼ 감소") : ""}
               color={mmDiff !== null ? (mmDiff >= 0 ? "#2F73F6" : "#F97316") : "#94A3B8"}
             />
+            <SummaryTile
+              title="BMI"
+              value={lastBMI != null ? `${lastBMI}` : "기록 필요"}
+              sub={lastBMI != null ? bmiLabel(lastBMI) : (heightCm ? "체중 기록 필요" : "키 정보 필요")}
+              color={lastBMI != null ? (lastBMI >= 18.5 && lastBMI < 23 ? "#16A34A" : "#F97316") : "#94A3B8"}
+            />
+            <SummaryTile
+              title="BMR(기초대사량)"
+              value={calorieAnalysis.bmr ? `${Math.round(calorieAnalysis.bmr)}kcal` : "기록 필요"}
+              sub="평상시 필요한 최소 열량"
+              color="#2F73F6"
+            />
           </div>
           {lastInbody && <p className="inbody-last-date">최근 인바디 측정: {lastInbody.date}</p>}
           {compositionChart}
           {bodyAgeSection}
+          {allInbody.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <b style={{ display: "block", marginBottom: 8, fontSize: 13, color: "#20242A" }}>인바디 히스토리</b>
+              <div style={{ display: "grid", gap: 6 }}>
+                {[...allInbody].reverse().slice(0, 8).map((r, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: "#66717C", borderBottom: "1px solid #EEF1F4", paddingBottom: 6 }}>
+                    <span>{r.date}</span>
+                    <span>{r.weight ? `${r.weight}kg` : "-"} · 체지방 {r.bodyFat ? `${r.bodyFat}%` : "-"} · 골격근 {r.muscleMass ? `${r.muscleMass}kg` : "-"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </CollapsibleSection>
     </>

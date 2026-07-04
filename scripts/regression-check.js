@@ -859,8 +859,50 @@ const checks = [
   ['변화분석: 체성분 변화 추이(compositionChart)는 건강 전문 분석에서 페르소나 구분 없이 항상 표시',
     (() => {
       const i = app.indexOf('<CollapsibleSection label="건강 전문 분석"');
-      return app.slice(i, i + 1500).includes('{compositionChart}') &&
-        !app.slice(i, i + 1500).includes('persona !== "general" && compositionChart');
+      return app.slice(i, i + 2500).includes('{compositionChart}') &&
+        !app.slice(i, i + 2500).includes('persona !== "general" && compositionChart');
+    })()
+  ],
+
+  // ── 성장 리포트 기능 추가 ──
+  ['성장 리포트: 화면 어디에도 "AI" 문자열이 없음(변화요약/BEST/성장리포트/미래예측 영역)',
+    (() => {
+      const start = app.indexOf('function computeGrowthReport');
+      const end = app.indexOf('function CardioSection');
+      return start !== -1 && end !== -1 && !app.slice(start, end).includes('AI');
+    })()
+  ],
+  ['성장 리포트: 건강 전문 분석에 BMI/BMR/인바디 히스토리만 추가(내장지방·체수분·부위별 근육량은 언급하지 않음 — 미입력 항목 노출 금지)',
+    app.includes('title="BMI"') &&
+    app.includes('title="BMR(기초대사량)"') &&
+    app.includes('인바디 히스토리') &&
+    !app.includes('내장지방') && !app.includes('체수분') && !app.includes('부위별 근육량')
+  ],
+  ['성장 리포트: BMI는 체중+키로 계산(신규 입력 없이 재사용), BMR은 estimateMaintenance 결과 재사용',
+    app.includes('const bmiOf = r => {') &&
+    app.includes('calorieAnalysis.bmr ? `${Math.round(calorieAnalysis.bmr)}kcal`')
+  ],
+  ['성장 리포트: "이번 달 변화" 카드(다이어트/체형교정 신규, PT 효과 체감 톤)와 건강유지 지속성 문장 추가',
+    app.includes('function buildDietGrowthLines({wDiff,kcalRows=[],forecast})') &&
+    app.includes('function buildCorrectionGrowthLines({pain,latestSummary})') &&
+    app.includes('운동 루틴을 꾸준히 유지하고 있습니다.')
+  ],
+  ['성장 리포트: "이번 달 BEST" 카드 — 페르소나별 3개 통계, 달력상 이번 달 기준(선택 기간과 무관), 데이터 부족 시 항목별 안내',
+    app.includes('function MonthlyBestCard({items=[]})') &&
+    app.includes('const monthKey = getKoreaDateString().slice(0, 7);') &&
+    app.includes('기록이 더 쌓이면 표시돼요')
+  ],
+  ['성장 리포트: "성장 리포트" 카드 — 등급 + 잘한점/개선점 자연어 문장 우선, 별점은 보조 표시, 데이터 부족 시 등급 대신 안내',
+    app.includes('function GrowthReportCard({report})') &&
+    app.includes('아직 등급을 매기기엔 기록이 부족해요') &&
+    app.includes('이번 달 가장 잘한 점') &&
+    app.includes('조금 더 노력하면 좋아질 점')
+  ],
+  ['성장 리포트: "다음 변화 예상" 카드 — 목표 전략 추천 바로 아래 배치, 페르소나별 템플릿',
+    (() => {
+      const i = app.indexOf('<WeightGoalStrategyCard {...p} />');
+      return app.slice(i, i + 200).includes('<FuturePredictionCard') &&
+        app.includes('function buildFuturePrediction(persona, { forecast, topExercises = [], latestSummary })');
     })()
   ],
   ['변화분석: 위상각/신체나이 등 전문 데이터는 "건강 전문 분석"로 통합, 기본 접힘',

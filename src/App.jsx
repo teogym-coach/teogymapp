@@ -2214,14 +2214,77 @@ function GoalMetric({goal}){return <div className="metric goal-metric"><span>현
 function CurrentWeightMetric({curW}){return <div className="metric"><span>현재 체중</span><b>{formatWeightValue(curW)}</b></div>}
 function NextWorkoutMetric({profile}){const info=getNextWorkoutInfo(profile); return <div className="metric next-workout-metric"><span>다음 수업 운동</span><b>{info.part||"미정"}</b><small>{info.dateText}</small><em>{info.dDay}</em></div>}
 function normalizeWorkoutPart(part){if(["팔-이두근","팔-삼두근","이두","삼두"].includes(part))return "팔"; if(part==="복근")return "코어"; if(["기능","스트레칭/이동성"].includes(part))return "교정"; return part||"";}
-function exerciseMatchesPart(e,part){const vals=[e.muscleTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); return vals.includes(part)||String(e.name||"").includes(part);}
+function exerciseMatchesPart(e,part){const vals=[e.muscleTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));}
 function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume));}
 function formatExerciseDose(e,lower){const src=getFilledSets(e); const source=src.length?src:[]; const count=Math.max(3,Math.min(4,(source.length||3)-(lower?1:0))); const sets=Array.from({length:count},(_,i)=>{const st=source[i]||source[source.length-1]||{}; const w=st.weight?`${st.weight}kg`:(source.length?"가능한 중량":(i===0?"가볍게 시작":"가능한 중량")); const reps=st.reps||([20,15,12,10][i]||10); return {label:`${i+1}세트`,weight:w,reps:`${reps}회`};}); return {sets};}
 function isTrainerMarkedExercise(e){return !!(e.isFavorite||e.favorite||e.isRecommended||e.recommended||e.memberAppRecommended);}
 function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; sessions.filter(s=>String(s.date||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(e.muscleTop||e.type); if(part)counts[part]=(counts[part]||0)+1;})); return counts;}
 function getWorkoutFrequencyNumber(profile={}){const raw=String(profile.workoutFrequency||profile.weeklyWorkoutCount||""); const n=Number(raw.match(/\d+/)?.[0]); return Number.isFinite(n)&&n>0?n:3;}
 function getPreSessionWarmup(part){const map={"하체":["발바닥/종아리 근막이완","고관절 가동성","둔근 활성화","발목 가동성"],"가슴":["흉추 회전","소흉근/대흉근 이완","견갑 안정화","전거근 활성화"],"등":["광배/대원근 이완","흉추 신전","견갑 하강/후인 연습","호흡 패턴 정리"],"어깨":["흉추 회전","상부승모 과긴장 완화","전거근 활성화","회전근개 준비운동"],"팔":["상완 근막이완","전완 스트레칭","손목 가동성","팔꿈치 준비운동"],"코어":["횡격막 호흡","골반 중립 찾기","Dead Bug 준비","플랭크 활성화"]}; return map[part]||["전신 가동성 운동","호흡 준비","근막이완","동적 스트레칭"];}
-function getRecommendedPart(profile,sessions=[]){const info=getNextWorkoutInfo(profile); const days=info.daysUntil; const CONFLICT={"하체":"등","등":"하체","가슴":"어깨","어깨":"가슴"}; const parts=["가슴","등","하체","어깨","코어"]; const avoid=new Set(); if(days!==null&&days<=1)avoid.add(info.part); if(days!==null&&days<=2){const c=CONFLICT[info.part]; if(c)avoid.add(c);} const recent=sessions.slice().reverse().slice(0,3).map(s=>normalizeWorkoutPart((s.selectedTypes||[s.type])[0]||"")); if(recent[0]){avoid.add(recent[0]); const c2=CONFLICT[recent[0]]; if(c2)avoid.add(c2);} const counts=getRecentPartCounts(sessions); return parts.filter(p=>!avoid.has(p)).sort((a,b)=>(counts[a]||0)-(counts[b]||0))[0]||parts.find(p=>!avoid.has(p))||parts[0];}
+// 성별 기본 분할 — 회원 실제 기록이 부족할 때의 기준선(5순위). "가슴 · 어깨"는 formatTypes와 동일한 구분자 관례.
+const MALE_SPLIT = ["하체","등","가슴","어깨","팔"];
+const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];
+
+// 최근 세션의 대표 부위만 최신순으로 추출 — 연속 중복 제거, 코어/교정은 "하루 전체 분할"이 아니므로 제외
+function getRecentPartSequence(sessions=[], n=10){
+  const sorted=[...sessions].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+  const seq=[];
+  for(const s of sorted){
+    const part=normalizeWorkoutPart((s.selectedTypes||[s.type])[0]||"");
+    if(!part||part==="코어"||part==="교정")continue;
+    if(seq[seq.length-1]!==part)seq.push(part);
+    if(seq.length>=n)break;
+  }
+  return seq;
+}
+
+// 1순위: 실제 수업일지에서 반복되는 분할 패턴 추정 — 최근 6개 안의 고유 부위를 등장 순서대로, 3~5개면 사이클로 채택
+function inferActualSplit(sequence=[]){
+  if(sequence.length<4)return null;
+  const chrono=[...sequence].reverse().slice(-6);
+  const order=[];
+  chrono.forEach(p=>{if(!order.includes(p))order.push(p);});
+  return (order.length>=3&&order.length<=5)?order:null;
+}
+
+function getRecommendedPart(profile,sessions=[],onboarding={}){
+  const gender=onboarding?.gender||profile?.gender||"남성";
+  const baseCycle=gender==="여성"?FEMALE_SPLIT:MALE_SPLIT;
+  const sequence=getRecentPartSequence(sessions);
+  const inferred=inferActualSplit(sequence);
+  const cycle=inferred||baseCycle;
+  const info=getNextWorkoutInfo(profile);
+  const CONFLICT={"하체":"등","등":"하체","가슴":"어깨","어깨":"가슴"};
+  // 콤보 항목("가슴 · 어깨")도 하위 부위로 조회/회피 판정할 수 있도록
+  const findCycleIndex=p=>cycle.findIndex(c=>c===p||c.split(" · ").includes(p));
+  const overlapsAvoid=(p,avoid)=>p.split(" · ").some(x=>avoid.has(x));
+
+  let part=null, reason="";
+
+  // 2·3순위: 다음 수업 날짜 역산 — 사이클 길이를 넘는 날짜는 매일 운동한다고 가정하는 셈이라 스킵(주당 빈도 왜곡 방지)
+  if(info.daysUntil!=null && info.daysUntil>=1 && info.daysUntil<=cycle.length){
+    const idxNext=findCycleIndex(info.part);
+    if(idxNext!==-1){
+      const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;
+      part=cycle[idxToday];
+      reason=inferred?"최근 수업 흐름을 기준으로":"다음 수업까지 남은 일정을 고려해";
+    }
+  }
+
+  // 4순위: 최근 부위·회복 간격 — 위에서 정한 부위가 최근에 했거나 상극 부위면 회피
+  const lastPart=sequence[0];
+  const avoid=new Set();
+  if(lastPart){avoid.add(lastPart); const c=CONFLICT[lastPart]; if(c)avoid.add(c);}
+  if(!part||overlapsAvoid(part,avoid)){
+    const counts=getRecentPartCounts(sessions);
+    const candidates=cycle.filter(p=>!overlapsAvoid(p,avoid));
+    part=candidates.sort((a,b)=>(counts[a]||0)-(counts[b]||0))[0]||cycle.find(p=>!overlapsAvoid(p,avoid))||cycle[0];
+    reason="최근 운동 부위와 회복을 고려해";
+  }
+  if(!reason)reason=inferred?"최근 수업 흐름을 기준으로":"기본 분할 기준으로";
+
+  return {part, reason, cycle, info};
+}
 
 function formatRoutineSet(st,j){const w=st.weight?`${st.weight}kg`:"중량 자유"; const r=st.reps?`${st.reps}회`:(st.durationSec?`${st.durationSec}초`:"횟수 자유"); return `${j+1}세트 ${w} × ${r}`;}
 function CoachRoutineCard({routine}){if(!routine)return null; const exercises=(routine.exercises||[]).filter(ex=>String(ex.name||"").trim()); return <div className="coach-routine-card"><h3>대표 추천 루틴</h3><p>{String(routine.date||"").slice(5)} · {formatParts(routine)}</p>{exercises.length===0&&<p><b>추천 부위:</b> {formatParts(routine)}</p>}{exercises.map((ex,i)=><div className="routine-row coach" key={i}><b>{ex.name||"운동"}</b><div className="routine-sets">{(ex.sets||[]).map((st,j)=><span key={j}>{formatRoutineSet(st,j)}</span>)}</div></div>)}{routine.coachComment&&<p className="coach-comment"><b>대표 메모:</b><br/>{routine.coachComment}</p>}</div>}
@@ -2230,7 +2293,7 @@ function DailyConditioningCard({items=[]}){const today=getKoreaDateString(); con
 function hasRoutineCautionText(value){return /주의|불편|통증|제외|아픔|저림|안 좋|안좋|힘듦|힘듬|부정|나쁨|악화/i.test(String(value||""));}
 function isNegativeExerciseRecord(e={},session={}){const texts=[e.feedback,e.memo,e.note,e.comment,e.trainerComment,e.representativeComment,e.coachComment,session.trainerComment,session.representativeComment].join(" "); const feedback=String(e.feedback||""); const rpe=Number(e.rpe??e.feedbackRpe??e.memberRpe); return hasRoutineCautionText(texts)||/자극\s*(없|안|낮|별로)|별로|불안|무리/i.test(feedback)||(Number.isFinite(rpe)&&rpe>=9);}
 function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){const classSessions=(sessions||[]).filter(s=>s?.isPublished===true||s.status==="published"); const lastCheck=checkins?.[0]||{}; const lower=['강함','매우 강함','심함'].includes(lastCheck.soreness)||String(lastCheck.condition).includes('피곤'); const cutoff=new Date(Date.now()-14*86400000).toISOString().slice(0,10); const map=new Map(); classSessions.forEach(s=>(s.exercises||[]).forEach(e=>{const filled=getFilledSets(e); if(!e.name||!exerciseMatchesPart(e,selectedPart)||isNegativeExerciseRecord(e,s)||(!isTrainerMarkedExercise(e)&&filled.length<3))return; const prev=map.get(e.name)||{...e,count:0,recent:false,stim:0,painFree:0,hasSets:0,latestDate:""}; const feedback=String(e.feedback||e.stimMemo||""); const rating=Number(e.stimRating||0); const stim=rating>=4||(/자극|좋|잘|우수|높/.test(feedback)&&!/안 좋|안좋|별로|없/.test(feedback))?1:0; map.set(e.name,{...prev,...e,count:prev.count+1,recent:prev.recent||(s.date||"")>=cutoff,stim:prev.stim+stim,painFree:prev.painFree+1,hasSets:prev.hasSets+(filled.length?1:0),marked:prev.marked||isTrainerMarkedExercise(e),latestDate:String(s.date||prev.latestDate)});})); const list=[...map.values()]; const sorted=[...list].sort((a,b)=>(b.marked-a.marked)||(b.stim-a.stim)||(b.painFree-a.painFree)||(b.hasSets-a.hasSets)||((b.latestDate||"").localeCompare(a.latestDate||""))||(b.count-a.count)); const itemFor=e=>({name:e.name,...formatExerciseDose(e,lower)}); return {selectedPart,hasClassSessions:classSessions.length>0,hasData:list.length>0,goodStim:sorted.filter(e=>e.stim>0).slice(0,2),painFree:sorted.filter(e=>e.painFree>0).slice(0,2),practice:sorted.filter(e=>e.count<3||!e.recent).slice(0,2),routine:sorted.slice(0,4).map(itemFor),comment:lower?'오늘은 컨디션을 고려해 세트 수와 강도를 낮췄어요.':'수업 기록에서 자극이 좋고 불편감이 없었던 운동 위주로 추천합니다.'};}
-function ReviewRoutine({profile,sessions,onboarding,checkins,routineRecommendations=[]}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions); const [selected,setSelected]=useState(recommended); const [open,setOpen]=useState(false); const rec=buildReviewRoutine(sessions,onboarding,checkins,selected||recommended); const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>오늘 추천은 <b>{selected} 운동</b>입니다.<br/>{info.part} 수업 전 충분한 회복을 위해<br/>오늘 컨디션에 맞는 부위를 선택해주세요.</p></div><div className="part-pills">{["가슴","등","하체","어깨","이두","삼두","코어"].map(x=><button key={x} className={selected===x?"active":recommended===x?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatParts(r)}</span></p>)}</div>}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{hasCoachRoutine?(coachExerciseCount?`대표 추천 운동 ${coachExerciseCount}개`:`대표 추천 부위 ${formatParts(publishedRoutine)}`):(rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다.")}</p></div>{(hasCoachRoutine||rec.hasData)&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&(hasCoachRoutine?<CoachRoutineCard routine={publishedRoutine}/>:<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>)}</div><div className="rec-reasons"><b>추천 이유</b><span>최근 자극이 좋았던 운동입니다.</span><span>통증 기록과 다음 PT 전 회복을 함께 고려했습니다.</span><span>{rec.comment}</span></div></>)}</MCard>;}
+function ReviewRoutine({profile,sessions,onboarding,checkins,routineRecommendations=[]}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions,onboarding); const recommendedParts=recommended.part.split(" · "); const [selected,setSelected]=useState(recommended.part); const [open,setOpen]=useState(false); const selectedParts=selected.split(" · "); const rec=buildReviewRoutine(sessions,onboarding,checkins,selectedParts); const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어"); const coreAccessory=coreRec.hasData?coreRec.routine[0]:null; const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>{recommended.reason}<br/>오늘은 <b>{recommended.part} 운동</b>을 추천합니다.</p></div><div className="part-pills">{["가슴","등","하체","어깨","팔"].map(x=><button key={x} className={selectedParts.includes(x)?"active":recommendedParts.includes(x)?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatParts(r)}</span></p>)}</div>}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{hasCoachRoutine?(coachExerciseCount?`대표 추천 운동 ${coachExerciseCount}개`:`대표 추천 부위 ${formatParts(publishedRoutine)}`):(rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다.")}</p></div>{(hasCoachRoutine||rec.hasData)&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&(hasCoachRoutine?<CoachRoutineCard routine={publishedRoutine}/>:<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>)}</div>{coreAccessory&&<div className="routine-row"><b>🧩 보조 운동 · {coreAccessory.name}</b><div className="routine-sets">{coreAccessory.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div></div>}<div className="rec-reasons"><b>추천 이유</b><span>최근 자극이 좋았던 운동입니다.</span><span>통증 기록과 다음 PT 전 회복을 함께 고려했습니다.</span><span>{rec.comment}</span></div></>)}</MCard>;}
 function buildPartVolumeChange(sessions=[]){const parts=['가슴','등','하체','어깨','팔','코어']; const sorted=[...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')); const first=sorted.slice(0,Math.min(3,sorted.length)); const recent=sorted.slice(-Math.min(3,sorted.length)); const sum=(list,part)=>list.reduce((a,s)=>a+(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0),0); return parts.map(part=>{const f=first.length?sum(first,part)/first.length:0; const r=recent.length?sum(recent,part)/recent.length:0; return {part,first:f,recent:r,delta:r-f};});}
 // 부위별 "최근 운동할 때마다의 볼륨"(누적이 아님) — 최근 5회까지 표시해 회원이 "지난번보다 늘었다"를 바로 느끼게 함
 function buildPartVolumeChart(sessions=[]){const parts=["등","가슴","어깨","하체","팔","코어"]; const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const volume=(s,part)=>(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop||e.type)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0); return parts.map(part=>{const records=sorted.map(s=>({label:String(s.date||"").slice(5)||`${s.sessionNo||""}회`,value:Math.round(volume(s,part))})).filter(r=>r.value>0).slice(-5); return {part,values:records};});}

@@ -956,6 +956,35 @@ const checks = [
         testSrc.includes('[휴식중 회원] correctionSummaries read 차단');
     })()
   ],
+
+  // ── 오늘의 운동 가이드 추천 로직 개편 ──
+  ['오늘의 운동 가이드: 부위 pill이 팔로 통합되고 코어가 단독 추천 후보에서 제거됨',
+    app.includes('["가슴","등","하체","어깨","팔"].map(x=>') &&
+    !/const parts=\["가슴","등","하체","어깨","코어"\]/.test(app)
+  ],
+  ['오늘의 운동 가이드: 성별 기본 분할 상수(남자 5분할/여자 3분할) 정의',
+    app.includes('const MALE_SPLIT = ["하체","등","가슴","어깨","팔"];') &&
+    app.includes('const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];')
+  ],
+  ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위) 함수 존재',
+    app.includes('function getRecentPartSequence(sessions=[], n=10)') &&
+    app.includes('function inferActualSplit(sequence=[])')
+  ],
+  ['오늘의 운동 가이드: 다음 수업 날짜 역산 공식이 사이클 길이 이내에서만 적용(빈도 왜곡 방지, 3순위 게이트)',
+    app.includes('if(info.daysUntil!=null && info.daysUntil>=1 && info.daysUntil<=cycle.length){') &&
+    app.includes('const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;')
+  ],
+  ['오늘의 운동 가이드: getNextWorkoutInfo/normalizeWorkoutPart/getRecentPartCounts/getWorkoutFrequencyNumber 등 관리자앱 공유 함수는 본체 변경 없음',
+    app.includes('function getNextWorkoutInfo(profile){const part=getNextPtPart(profile);') &&
+    app.includes('function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10);')
+  ],
+  ['오늘의 운동 가이드: exerciseMatchesPart가 배열(콤보 부위)도 하위호환으로 지원',
+    app.includes('const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
+  ],
+  ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',
+    app.includes('const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어");') &&
+    app.includes('🧩 보조 운동')
+  ],
 ];
 
 let failed = 0;

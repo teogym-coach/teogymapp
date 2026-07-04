@@ -4356,9 +4356,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                   {!isEnded && recentActivity.length > 0 && (
                     <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:"flex-end",marginBottom:2,maxWidth:150}}>
                       {recentActivity.map((a,i) => (
-                        <div key={i} style={{display:"flex",alignItems:"center",gap:4,fontSize:9,whiteSpace:"nowrap",overflow:"hidden",maxWidth:150}}>
-                          <span style={{color:"#cbd5e1",overflow:"hidden",textOverflow:"ellipsis"}}>{a.value}</span>
-                          <span>{ACTIVITY_ICON[a.type]}</span>
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:4,fontSize:9,maxWidth:150,minWidth:0}}>
+                          <span style={{color:"#cbd5e1",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:"0 1 auto"}}>{a.value}</span>
+                          <span style={{flexShrink:0}}>{ACTIVITY_ICON[a.type]}</span>
                           <span style={{color:"#475569",fontSize:8,flexShrink:0}}>{formatActivityTime(a.at)}</span>
                         </div>
                       ))}

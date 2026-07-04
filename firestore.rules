@@ -134,7 +134,7 @@ service cloud.firestore {
         "workoutFrequency", "weeklyWorkoutCount", "height", "startWeight", "currentWeight", "targetWeight", "targetWeightKg", "goal", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "memberAppLastLoginAt", "updatedAt",
         "birthYear", "birthMonth", "birthDay", "birthYearMonth", "birthSource",
         "fcmToken", "fcmTokenUpdatedAt",
-        "memberLastInputAt",
+        "memberLastInputAt", "todayInputTypes", "recentActivityLog",
         "survey"
       ]) && memberSurveySyncKeysAllowed();
     }

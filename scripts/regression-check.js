@@ -421,6 +421,15 @@ const checks = [
   ['NEW 배지: saveMemberCheckin이 memberLastInputAt 갱신',
     db.includes('memberLastInputAt: serverTimestamp()')
   ],
+  // ── 최근 활동 요약 (todayInputTypes/recentActivityLog) ──
+  ['최근 활동: Firestore Rules가 회원 본인 쓰기 허용 (todayInputTypes/recentActivityLog)',
+    firestoreRules.includes('"todayInputTypes"') &&
+    firestoreRules.includes('"recentActivityLog"')
+  ],
+  ['최근 활동: touchMemberActivities가 체중·칼로리·걸음수/수업피드백(근육통·RPE·메모)/유산소 저장 시 호출됨',
+    db.includes('export async function touchMemberActivities(memberId, activities = [])') &&
+    (db.match(/await touchMemberActivities\(/g) || []).length >= 3
+  ],
   ['NEW 배지: hasNewMemberInput + ADMIN_INPUT_READ_KEY',
     app.includes('ADMIN_INPUT_READ_KEY') &&
     app.includes('function hasNewMemberInput(m)') &&
@@ -651,9 +660,13 @@ const checks = [
 
   // ── 근육통/RPE/메모 독립 저장 (3개 섹션 + 저장 버튼 각각 분리) ──
   ['수업 후 상태: 근육통/RPE/메모가 독립된 3개 섹션으로 분리되어 각각 저장',
-    app.includes('onSave?.(s.id,{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts});setOpenSection(null);') &&
-    app.includes('onSave?.(s.id,{rpe});setOpenSection(null);') &&
-    app.includes('onSave?.(s.id,{memo});setOpenSection(null);')
+    app.includes('saveSection("soreness",{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts})') &&
+    app.includes('saveSection("rpe",{rpe})') &&
+    app.includes('saveSection("memo",{memo})')
+  ],
+  ['수업 후 상태: 저장 중 중복 클릭 방지 (savingSection)',
+    app.includes('if(savingSection)return;') &&
+    app.includes('disabled={!!savingSection}')
   ],
   ['Firestore 저장: saveSessionMemberFeedback이 건드린 필드만 setDoc(merge:true)로 반영, 나머지는 기존값 유지',
     db.includes('if (feedback.sorenessLevel !== undefined || feedback.sorenessBodyParts !== undefined || feedback.sorenessBodyPart !== undefined) {') &&

@@ -1538,6 +1538,7 @@ function MemberFeedbackForm({s,onSave}){
   const [memo,setMemo]=useState(existing.memo||"");
   // 근육통/RPE/메모는 서로 독립된 섹션으로 각자 저장 버튼을 가진다 — 한 번에 저장/덮어쓰기 되지 않는다.
   const [openSection,setOpenSection]=useState(null); // "soreness" | "rpe" | "memo" | null
+  const [savingSection,setSavingSection]=useState(null); // 저장 중 중복 클릭 방지
   useEffect(()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing)});
     setRpe(Number.isFinite(Number(existing.rpe))?Number(existing.rpe):5);
@@ -1546,6 +1547,12 @@ function MemberFeedbackForm({s,onSave}){
   },[s.id,existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.rpe,existing.memo]);
   const togglePart=part=>setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));
   const toggleSection=key=>{setOpenSection(v=>v===key?null:key); scrollMemberAppToTop();};
+  const saveSection=async(key,payload)=>{
+    if(savingSection)return;
+    setSavingSection(key);
+    try{ await onSave?.(s.id,payload); setOpenSection(null); }
+    finally{ setSavingSection(null); }
+  };
   const hasSoreness=!!existing.sorenessLevel;
   const hasRpe=existing.rpe!=null;
   const hasMemo=!!existing.memo;
@@ -1560,7 +1567,7 @@ function MemberFeedbackForm({s,onSave}){
           <div className="choice-buttons">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
         </div>
         <SelectLine label="근육통 세기" value={soreness.level} opts={SORENESS_LEVELS} onChange={v=>setSoreness(prev=>({...prev,level:v}))}/>
-        <button className="primary compact" onClick={()=>{onSave?.(s.id,{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts});setOpenSection(null);}}>저장</button>
+        <button className="primary compact" disabled={!!savingSection} onClick={()=>saveSection("soreness",{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts})}>{savingSection==="soreness"?"저장 중...":"저장"}</button>
       </div>}
     </div>
     <div className="member-feedback-form compact-feedback">
@@ -1572,7 +1579,7 @@ function MemberFeedbackForm({s,onSave}){
         <div className="form-line"><label>RPE <details><summary>RPE란?</summary><small>운동이 얼마나 힘들게 느껴졌는지 0~10점으로 표시합니다. 0은 매우 쉬움, 10은 더 반복하기 어려움입니다.</small></details></label>
           <div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(rpe)===i?"active":""} onClick={()=>setRpe(i)}>{i}</button>)}</div>
         </div>
-        <button className="primary compact" onClick={()=>{onSave?.(s.id,{rpe});setOpenSection(null);}}>저장</button>
+        <button className="primary compact" disabled={!!savingSection} onClick={()=>saveSection("rpe",{rpe})}>{savingSection==="rpe"?"저장 중...":"저장"}</button>
       </div>}
     </div>
     <div className="member-feedback-form compact-feedback">
@@ -1584,7 +1591,7 @@ function MemberFeedbackForm({s,onSave}){
         <div className="form-line"><label>대표님께 전달할 메모 <small>이 수업일지 카드와 관리자 회원앱 소통에 표시됩니다.</small></label>
           <textarea value={memo} onChange={e=>setMemo(e.target.value)}/>
         </div>
-        <button className="primary compact" onClick={()=>{onSave?.(s.id,{memo});setOpenSection(null);}}>저장</button>
+        <button className="primary compact" disabled={!!savingSection} onClick={()=>saveSection("memo",{memo})}>{savingSection==="memo"?"저장 중...":"저장"}</button>
       </div>}
     </div>
   </>;
@@ -2482,12 +2489,18 @@ export default function App() {
 
   // 관리자가 현재 열어둔 회원의 새 입력이 실시간으로 감지되면 새로고침 없이 hub/히스토리 화면을 갱신
   const lastSyncedInputAtRef = useRef(null);
+  const syncedMemberIdRef = useRef(null);
   useEffect(() => {
-    if (!member?.id) { lastSyncedInputAtRef.current = null; return; }
+    if (!member?.id) { lastSyncedInputAtRef.current = null; syncedMemberIdRef.current = null; return; }
     const live = liveMembersById[member.id];
     const lastMs = live?.memberLastInputAt?.toMillis?.() || (live?.memberLastInputAt?.seconds ? live.memberLastInputAt.seconds * 1000 : 0);
     if (!lastMs) return;
-    if (lastSyncedInputAtRef.current === null) { lastSyncedInputAtRef.current = lastMs; return; }
+    // 회원이 바뀌면(다른 회원 선택) 이전 회원의 타임스탬프와 비교하지 않도록 기준을 새로 잡는다
+    if (syncedMemberIdRef.current !== member.id) {
+      syncedMemberIdRef.current = member.id;
+      lastSyncedInputAtRef.current = lastMs;
+      return;
+    }
     if (lastMs > lastSyncedInputAtRef.current) {
       lastSyncedInputAtRef.current = lastMs;
       loadMemberData(member.id);
@@ -4277,10 +4290,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(239,68,68,.2)",color:"#EF4444",fontWeight:700}}>🔴 NEW 입력</span>
                       )}
-                      {!isEnded && todayInputTypes.map(t => (
+                      {/* 오늘 입력 배지 — 다른 상태 배지와 함께 너무 복잡해지지 않도록 우선순위 상위 3개만, 나머지는 +N으로 요약 (상세는 우측 최근활동 참고) */}
+                      {!isEnded && todayInputTypes.slice(0,3).map(t => (
                         <span key={t} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(94,234,212,.10)",color:"#5EEAD4",fontWeight:700}}>{ACTIVITY_ICON[t]} {ACTIVITY_LABEL[t]}</span>
                       ))}
+                      {!isEnded && todayInputTypes.length > 3 && (
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(94,234,212,.06)",color:"#5EEAD4",fontWeight:700}}>+{todayInputTypes.length - 3}</span>
+                      )}
                       {!isEnded && (() => {
                         const draftSess = (sessionsMap[m.id] || []).find(s =>
                           s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId

@@ -1736,10 +1736,8 @@ function buildMemberCorrectionFeedback(rec){
     nextGoal: caution.length ? "다음 수업에서 통증·불편한 부위를 다시 확인해요." : "현재 루틴을 유지하며 꾸준히 기록해요.",
   };
 }
-function WorkoutConsistencyCard({sessions=[],totalReg,remaining,attendance=[]}){
-  const monthCount=attendance.filter(a=>String(a.date||"").startsWith(getKoreaDateString().slice(0,7))).length;
-  return <MCard title="운동 지속 현황"><div className="grid2"><Metric t="누적 수업" v={`${sessions.length}회`}/>{totalReg?<Metric t="남은 PT" v={`${remaining}회`}/>:<Metric t="이번 달 운동" v={`${monthCount}회`}/>}</div></MCard>;
-}
+// 분석 탭 전용이었던 "운동 지속 현황"(누적 수업/이번 달 운동)은 홈 화면과 정보가 중복돼 제거됨.
+// 분석 탭은 "변화"를 보여주는 화면으로 유지한다.
 function MemberAnalysis(p) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
   const handleSetPeriod = k => { setPeriod(k); try { localStorage.setItem("teogym_analysis_period", k); } catch {} };
@@ -1803,6 +1801,11 @@ function MemberAnalysis(p) {
   const avg14 = averageKcalLogs(getRecentKcalLogsByDays(p.nutrition, 14));
   const calorieDiff = avg7 !== null && target.value ? Math.round(avg7 - target.value) : null;
   const caloriePct = avg7 !== null && target.value ? Math.round(avg7 / target.value * 100) : null;
+
+  // 유산소·활동량 (건강유지/체중유지 목표용) — 선택한 기간 기준, 기존 cardioLogs/attendance 데이터만 재사용
+  const cardioInPeriod = (p.cardioLogs || []).filter(inPeriod);
+  const cardioMinutes = cardioInPeriod.reduce((s, l) => s + (Number(l.durationMinutes) || 0), 0);
+  const monthWorkoutCount = (p.attendance || []).filter(a => String(a.date || "").startsWith(getKoreaDateString().slice(0, 7))).length;
 
   // 변화 분석 피드백
   const feedbackMsgs = (() => {
@@ -1958,12 +1961,25 @@ function MemberAnalysis(p) {
       )}
     </MCard>
   );
+  const cardioActivityCard = (
+    <MCard title="유산소·활동량 변화">
+      {cardioInPeriod.length > 0 || monthWorkoutCount > 0 ? (
+        <div className="grid2">
+          <Metric t="유산소 시간" v={`${cardioMinutes}분`} />
+          <Metric t="유산소 기록 횟수" v={`${cardioInPeriod.length}회`} />
+          <Metric t="이번 달 운동" v={`${monthWorkoutCount}회`} />
+        </div>
+      ) : (
+        <div className="analysis-empty-state">유산소 기록이나 운동 체크가 쌓이면 활동량 변화를 보여드려요.</div>
+      )}
+    </MCard>
+  );
   // 목표별로 이미 primary 영역에서 보여준 항목은 "추가 데이터"에서 중복 표시하지 않는다
   const primaryUses = {
     diet: new Set(["weightChart", "kcalWeightCard"]),
     bulk: new Set(["partVolume", "weightChart"]),
     correction: new Set(["painVAS", "strength"]),
-    general: new Set(["weightChart", "compositionChart", "kcalWeightCard", "partVolume", "painVAS", "strength"]),
+    general: new Set(["weightChart", "strength", "cardio"]),
   }[persona] || new Set();
 
   return (
@@ -2036,32 +2052,8 @@ function MemberAnalysis(p) {
             </div>
           </MCard>
 
-          {/* ④ 체중 변화 / ⑤ 골격근량 변화 / ⑥ 체지방 변화 — 운동 수행능력보다 뒤에 보조 지표로 배치 */}
+          {/* ④ 체중 변화 — 운동 수행능력보다 뒤에 보조 지표로 배치. 골격근량/체지방 변화는 "건강 전문 분석"(하단 접힘)에서 확인 */}
           {weightChart}
-          {hasEnoughInbody && firstMM && lastMM && (
-            <MCard title="골격근량 변화">
-              <div className="grid2">
-                <Metric t="이전" v={`${firstMM.toFixed(1)}kg`} />
-                <Metric t="현재" v={`${lastMM.toFixed(1)}kg`} />
-              </div>
-              <div className="change-feedback-item" style={{ marginTop: 10 }}>
-                {mmDiff >= 0 ? `골격근량이 ${mmDiff}kg 늘었습니다.` : `골격근량이 ${Math.abs(mmDiff)}kg 줄었습니다. 단백질 섭취와 회복을 함께 점검해보세요.`}
-              </div>
-            </MCard>
-          )}
-          {hasEnoughInbody && firstFatMass !== null && lastFatMass !== null && (
-            <MCard title="체지방 변화">
-              <div className="grid2">
-                <Metric t="이전" v={`${firstFatMass.toFixed(1)}kg`} />
-                <Metric t="현재" v={`${lastFatMass.toFixed(1)}kg`} />
-              </div>
-              {fatMassDiff !== null && (
-                <div className="change-feedback-item" style={{ marginTop: 10 }}>
-                  {fatMassDiff <= 0 ? `체지방량이 ${Math.abs(fatMassDiff)}kg 줄었습니다.` : `체지방량이 ${fatMassDiff}kg 늘었습니다. 벌크업 중에는 자연스러운 변화이니 골격근량 증가와 함께 확인해보세요.`}
-                </div>
-              )}
-            </MCard>
-          )}
         </>
       )}
 
@@ -2103,27 +2095,16 @@ function MemberAnalysis(p) {
 
       {persona === "general" && (
         <>
+          {/* 건강유지/체중유지: ①체중 유지 범위 ②운동 수행능력 변화 ③유산소·활동량 변화 — 안정적 유지와 지속성이 핵심 */}
           {weightChart}
-          {compositionChart}
-          <MCard title="최근 변화 요약">
-            {!hasEnoughInbody ? (
-              <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 변화 분석이 제공됩니다.</p>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
-              </div>
-            )}
-          </MCard>
-          {kcalWeightCard}
-          <PartVolumeCard sessions={periodSessions} />
-          {painVasCard}
           <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
+          {cardioActivityCard}
         </>
       )}
 
-      {/* 공통: 목표까지 남은 변화 + 최근 변화 요약(체성분 기반) + 운동 지속 현황 */}
+      {/* 공통: 목표까지 남은 변화 + 최근 변화 요약(체성분 기반) */}
       <WeightGoalStrategyCard {...p} />
-      {persona !== "general" && (
+      {(persona === "diet" || persona === "general") && (
         <MCard title="최근 변화 요약">
           {!hasEnoughInbody ? (
             <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 변화 분석이 제공됩니다.</p>
@@ -2134,7 +2115,6 @@ function MemberAnalysis(p) {
           )}
         </MCard>
       )}
-      <WorkoutConsistencyCard sessions={p.sessions} totalReg={p.totalReg} remaining={p.remaining} attendance={p.attendance} />
 
       {/* 목표별로 이미 위에서 보여준 항목은 제외하고 나머지는 여기서 확인 가능 */}
       {(!primaryUses.has("kcalWeightCard") || !primaryUses.has("partVolume") || !primaryUses.has("painVAS") || !primaryUses.has("strength")) && (
@@ -2168,7 +2148,7 @@ function MemberAnalysis(p) {
             />
           </div>
           {lastInbody && <p className="inbody-last-date">최근 인바디 측정: {lastInbody.date}</p>}
-          {persona !== "general" && compositionChart}
+          {compositionChart}
           {bodyAgeSection}
         </section>
       </CollapsibleSection>

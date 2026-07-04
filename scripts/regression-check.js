@@ -816,13 +816,18 @@ const checks = [
     app.includes('<div className="part-volume-tabs">') &&
     app.includes('최근 {current.part} 운동 {current.values.length}회')
   ],
-  ['변화분석: 벌크업 회원 - 체중·골격근량·체지방은 운동 수행능력보다 뒤(보조 지표)에 배치',
+  ['변화분석: 벌크업 회원 - 체중 변화는 운동 수행능력·변화 요약보다 뒤(보조 지표)에 배치, 골격근량/체지방은 건강 전문 분석에서만 확인(카드 중복 제거)',
     (() => {
       const i = app.indexOf('{persona === "bulk" && (');
+      const partVolIdx = app.indexOf('<PartVolumeCard', i);
+      const perfIdx = app.indexOf('title="운동 수행능력 변화"', i);
+      const summaryIdx = app.indexOf('title="변화 요약"', i);
       const weightIdx = app.indexOf('{weightChart}', i);
-      const mmIdx = app.indexOf('title="골격근량 변화"', i);
-      const fatIdx = app.indexOf('title="체지방 변화"', i);
-      return weightIdx !== -1 && mmIdx !== -1 && fatIdx !== -1 && weightIdx < mmIdx && mmIdx < fatIdx;
+      const bulkBlockEnd = app.indexOf('{persona === "correction"', i);
+      const mmIdxInBulk = app.slice(i, bulkBlockEnd).indexOf('title="골격근량 변화"');
+      return partVolIdx !== -1 && perfIdx !== -1 && summaryIdx !== -1 && weightIdx !== -1 &&
+        partVolIdx < perfIdx && perfIdx < summaryIdx && summaryIdx < weightIdx &&
+        mmIdxInBulk === -1; // 벌크업 primary 영역에는 더 이상 골격근량/체지방 카드가 없음(건강 전문 분석으로 일원화)
     })()
   ],
   ['변화분석: 체형교정 회원 - 통증(VAS)이 최상단, 교정 결과는 correctionSummaries 실데이터로 표시(없으면 정직한 안내)',
@@ -830,10 +835,33 @@ const checks = [
     app.includes('const latestSummary = [...(p.correctionSummaries||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))[0];') &&
     app.includes('아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.')
   ],
-  ['변화분석: 공통 섹션(목표까지 남은 변화/운동 지속 현황)은 모든 페르소나에 동일하게 표시',
+  ['변화분석: 공통 섹션(목표까지 남은 변화)은 모든 페르소나에 동일하게 표시, "운동 지속 현황"(홈과 중복)은 제거됨',
     app.includes('<WeightGoalStrategyCard {...p} />') &&
-    app.includes('function WorkoutConsistencyCard({sessions=[],totalReg,remaining,attendance=[]}){') &&
-    app.includes('<WorkoutConsistencyCard sessions={p.sessions} totalReg={p.totalReg} remaining={p.remaining} attendance={p.attendance} />')
+    !app.includes('function WorkoutConsistencyCard(') &&
+    !app.includes('<WorkoutConsistencyCard')
+  ],
+  ['변화분석: 건강유지/체중유지(general) 회원 - 체중 유지 범위→운동 수행능력→유산소·활동량 순으로 배치, 유산소·활동량 변화 카드 신규',
+    (() => {
+      const i = app.indexOf('{persona === "general" && (');
+      const weightIdx = app.indexOf('{weightChart}', i);
+      const strengthIdx = app.indexOf('<StrengthChangeCard', i);
+      const cardioIdx = app.indexOf('{cardioActivityCard}', i);
+      return weightIdx !== -1 && strengthIdx !== -1 && cardioIdx !== -1 &&
+        weightIdx < strengthIdx && strengthIdx < cardioIdx &&
+        app.includes('const cardioActivityCard = (') &&
+        app.includes('<MCard title="유산소·활동량 변화">');
+    })()
+  ],
+  ['변화분석: "최근 변화 요약"(체성분 기반)은 다이어트/건강유지에만 표시 — 벌크업(자체 변화요약)·체형교정(자체 교정결과)은 중복 노출 안 함',
+    app.includes('{(persona === "diet" || persona === "general") && (') &&
+    app.includes('<MCard title="최근 변화 요약">')
+  ],
+  ['변화분석: 체성분 변화 추이(compositionChart)는 건강 전문 분석에서 페르소나 구분 없이 항상 표시',
+    (() => {
+      const i = app.indexOf('<CollapsibleSection label="건강 전문 분석"');
+      return app.slice(i, i + 1500).includes('{compositionChart}') &&
+        !app.slice(i, i + 1500).includes('persona !== "general" && compositionChart');
+    })()
   ],
   ['변화분석: 위상각/신체나이 등 전문 데이터는 "건강 전문 분석"로 통합, 기본 접힘',
     app.includes('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>') &&

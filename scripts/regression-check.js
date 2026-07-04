@@ -597,13 +597,14 @@ const checks = [
     firestoreRules.includes('"agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"') &&
     db.includes('"agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"')
   ],
-  ['회원앱 건강 탭: 유산소 기록/Zone2 심박수/유산소 분석 메뉴 추가',
+  ['회원앱 건강 탭: 유산소 기록/유산소 분석 메뉴(Zone2는 별도 탭 대신 분석 안 보조 지표로 통합, 줄바꿈 방지)',
     app.includes('function CardioSection(p)') &&
     app.includes('["record","유산소 기록"]') &&
-    app.includes('["zone2","Zone2 심박수"]') &&
     app.includes('["analysis","유산소 분석"]') &&
+    !app.includes('["zone2","Zone2 심박수"]') &&
     app.includes('function MemberHealth(p)') &&
-    app.includes('<CardioSection {...p}/>')
+    app.includes('<CardioSection {...p}/>') &&
+    app.includes('const zone2Section=<CardioZone2Tab {...p}/>;')
   ],
   ['관리자앱 건강관리 허브: 유산소 탭 연동(최근 기록/주간 요약/Zone2/체중 비교)',
     app.includes('function AdminCardioSection(') &&
@@ -713,7 +714,7 @@ const checks = [
   // ── 회원앱 건강 탭: 최근 건강 기록 하단 이동 + 기본 닫힘 ──
   ['건강 탭 순서: 유산소 섹션(CardioSection)이 최근 건강 기록보다 먼저 렌더링됨',
     (() => {
-      const memberHealthFn = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function MemberHealth(p){') + 4000);
+      const memberHealthFn = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function MemberHealth(p){') + 6000);
       const iCardio = memberHealthFn.indexOf('<CardioSection {...p}/>');
       const iRecent = memberHealthFn.indexOf('<RecentHealthRecords');
       return iCardio !== -1 && iRecent !== -1 && iCardio < iRecent;
@@ -995,6 +996,29 @@ const checks = [
   ['오늘의 운동 가이드: 팔 추천 시 전체 상위 4개가 아니라 이두 2개 + 삼두 2개로 균형있게 구성',
     app.includes('const armBalanced=wantsArm?[...sorted.filter(isBicep).slice(0,2),...sorted.filter(isTricep).slice(0,2)]:[];') &&
     app.includes('const routineList=armBalanced.length?armBalanced:sorted.slice(0,4);')
+  ],
+
+  // ── 건강 탭: 컨디션/통증 독립 저장 ──
+  ['건강 탭: 컨디션/통증이 체중·칼로리·걸음수와 분리된 독립 저장 함수(saveCondition/savePain)로 존재',
+    app.includes('const saveCondition=async()=>{') &&
+    app.includes('const savePain=async()=>{') &&
+    !app.includes('if(form.condition)checkinPatch.condition=form.condition;')
+  ],
+  ['건강 탭: saveCheck(체중·칼로리·걸음수)는 컨디션/통증을 더 이상 건드리지 않음',
+    app.includes('await saveMemberHealthInputs(profile.id,dateKey,{weight:weightValue,kcal:kcalValue,steps:stepsValue});') &&
+    !app.includes('await saveMemberCheckin(profile.id,dateKey,checkinPatch); await saveMemberHealthInputs')
+  ],
+  ['건강 탭: 컨디션/통증 저장 버튼이 각각 저장 중 상태로 중복 클릭 방지 + 저장 완료 표시',
+    app.includes('if(conditionSaving)return;') &&
+    app.includes('if(painSaving)return;') &&
+    app.includes('justSavedCondition?"컨디션 저장 완료 ✓"') &&
+    app.includes('justSavedPain?"통증 저장 완료 ✓"')
+  ],
+  ['건강 탭: 컨디션/통증 저장이 관리자앱 최근 활동에 반영되도록 touchMemberActivities 호출 + 활동 타입 등록',
+    db.includes("if (data.condition) {") &&
+    db.includes('activities.push({ type: "condition", label: "컨디션", value: data.condition, dateKey });') &&
+    db.includes('activities.push({ type: "pain", label: "통증", value, dateKey });') &&
+    app.includes('"memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps"')
   ],
 ];
 

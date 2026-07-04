@@ -1489,6 +1489,16 @@ export async function saveMemberCheckin(memberId, dateKey, data) {
   await setDoc(ref, { ...payload, date: dateKey, updatedAt: serverTimestamp(), createdBy: auth.currentUser.uid }, { merge: true });
   // 걸음수 활동 기록은 saveMemberHealthInputs에서 처리한다 — 회원앱 저장 흐름상 항상 함께 호출되므로
   // 여기서도 기록하면 최근 활동 피드에 같은 입력이 중복으로 쌓인다.
+  const activities = [];
+  if (data.condition) {
+    activities.push({ type: "condition", label: "컨디션", value: data.condition, dateKey });
+  }
+  if (data.painPart !== undefined) {
+    const noPain = data.painPart === "없음";
+    const value = noPain ? "통증 없음" : `${data.painPart}${data.painSide && data.painSide !== "해당 없음" ? " · " + data.painSide : ""} · VAS ${data.painVas ?? 0}`;
+    activities.push({ type: "pain", label: "통증", value, dateKey });
+  }
+  await touchMemberActivities(memberId, activities);
   return { skipped: false };
 }
 

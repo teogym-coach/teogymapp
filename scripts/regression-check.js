@@ -918,12 +918,19 @@ const checks = [
     app.includes('이번 달 가장 잘한 점') &&
     app.includes('조금 더 노력하면 좋아질 점')
   ],
-  ['성장 리포트: "다음 변화 예상" 카드 — 목표 전략 추천 바로 아래 배치, 페르소나별 템플릿',
+  ['성장 리포트: "다음 변화 예상" 카드 — 목표 전략 추천 바로 아래 배치(다이어트는 체크리스트로 대체), 페르소나별 템플릿',
     (() => {
       const i = app.indexOf('<WeightGoalStrategyCard {...p} />');
-      return app.slice(i, i + 200).includes('<FuturePredictionCard') &&
+      return app.slice(i, i + 300).includes('<FuturePredictionCard') &&
+        app.slice(i, i + 300).includes('<NextClassChecklistCard') &&
         app.includes('function buildFuturePrediction(persona, { forecast, topExercises = [], latestSummary })');
     })()
+  ],
+  ['V3: 다이어트만 "다음 변화 예상" 대신 "다음 수업 전까지" 단기 실행 체크리스트로 대체(목표 전략 추천의 장기 예상일 반복과 중복 제거), 다른 목표는 기존 그대로',
+    app.includes('function buildNextClassChecklist({ recentKcalCount, recentCardioCount })') &&
+    app.includes('function NextClassChecklistCard({ items = [], closing })') &&
+    app.includes('? <NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />') &&
+    app.includes(': <FuturePredictionCard text={futurePrediction} />')
   ],
   ['변화분석: 위상각/신체나이 등 전문 데이터는 "건강 전문 분석"로 통합, 기본 접힘',
     app.includes('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>') &&

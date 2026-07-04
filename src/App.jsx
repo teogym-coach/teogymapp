@@ -1911,6 +1911,41 @@ function buildFuturePrediction(persona, { forecast, topExercises = [], latestSum
 function FuturePredictionCard({ text }) {
   return <MCard title="다음 변화 예상"><p style={{ margin: 0, fontSize: 13, color: "#20242A", fontWeight: 700, lineHeight: 1.6 }}>{text}</p></MCard>;
 }
+// 다이어트 전용 "다음 수업 전까지" — "목표 전략 추천"(장기 방향)과 겹치지 않도록, 목표 도달일을 반복하지 않고
+// 다음 수업까지의 단기 실행 체크리스트만 보여준다. 최근 7일 기록 상태를 기준으로 우선순위를 정한다(선택한 기간 필터와 무관).
+function buildNextClassChecklist({ recentKcalCount, recentCardioCount }) {
+  const dietLacking = recentKcalCount < 3;
+  const cardioLacking = recentCardioCount < 1;
+  if (dietLacking) {
+    return {
+      items: ["식단 기록 3회 이상", "체중 기록 2회 이상", "유산소 20분 1~2회"],
+      closing: "식단 기록이 쌓이면 체중 변화 원인을 더 정확히 확인할 수 있습니다.",
+    };
+  }
+  if (cardioLacking) {
+    return {
+      items: ["유산소 20~30분 2회", "평균 섭취 칼로리 유지", "걸음수 목표 유지"],
+      closing: "유산소 기록이 쌓이면 감량 흐름을 더 명확히 확인할 수 있습니다.",
+    };
+  }
+  return {
+    items: ["유산소 20~30분 2회", "평균 섭취 칼로리 유지", "체중 기록 3회 이상"],
+    closing: "다음 수업에서 이번 주 변화를 함께 확인해드리겠습니다.",
+  };
+}
+function NextClassChecklistCard({ items = [], closing }) {
+  return <MCard title="다음 수업 전까지">
+    <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+      {items.map((it, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: "#16A34A", fontWeight: 900, fontSize: 14 }}>✓</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "#20242A" }}>{it}</span>
+        </div>
+      ))}
+    </div>
+    <div className="change-feedback-item">{closing}</div>
+  </MCard>;
+}
 // "대표 코멘트" — 대표가 회원 데이터를 보고 직접 남긴 것처럼 짧고 따뜻하게. 화면에 "AI"라는 단어는 쓰지 않는다.
 function CoachCommentCard({ text }) {
   return <MCard title="대표 코멘트">
@@ -2128,6 +2163,11 @@ function MemberAnalysis(p) {
     latestSummary: latestCorrectionSummary, forecast, calorieAnalysis, monthWeightRange,
   });
   const futurePrediction = buildFuturePrediction(persona, { forecast, topExercises, latestSummary: latestCorrectionSummary });
+  // 다이어트 전용 "다음 수업 전까지" 체크리스트 — 최근 7일(선택한 기간 필터와 무관) 기준
+  const last7Key = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const recentKcalCount = getKcalLogs(p.nutrition).filter(r => r.date >= last7Key).length;
+  const recentCardioCount = (p.cardioLogs || []).filter(l => String(l.date || "") >= last7Key).length;
+  const nextClassChecklist = buildNextClassChecklist({ recentKcalCount, recentCardioCount });
 
   // Before → After — 페르소나별 "가장 중요한 변화" 하나만 골라 숫자 나열 대신 전후 비교로 보여준다.
   const periodText = opt.days ? `최근 ${opt.label}` : "전체 기간";
@@ -2447,11 +2487,13 @@ function MemberAnalysis(p) {
         </>
       )}
 
-      {/* 공통: ⑤성장 리포트 → ⑥대표 코멘트 → ⑦목표 전략 추천·다음 변화 예상 → (최근 변화 요약) */}
+      {/* 공통: ⑤성장 리포트 → ⑥대표 코멘트 → ⑦목표 전략 추천(장기)·다음 변화 예상(단기 실행, 다이어트만 체크리스트로 분리) → (최근 변화 요약) */}
       <GrowthReportCard report={growthReport} />
       <CoachCommentCard text={coachComment} />
       <WeightGoalStrategyCard {...p} />
-      <FuturePredictionCard text={futurePrediction} />
+      {persona === "diet"
+        ? <NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />
+        : <FuturePredictionCard text={futurePrediction} />}
       {(persona === "diet" || persona === "general") && (
         <MCard title="최근 변화 요약">
           <div style={{ display: "grid", gap: 8 }}>

@@ -1165,15 +1165,15 @@ const checks = [
   ],
 
   // ── 기존 코멘트 개인화 (홈/건강 탭, 수업 탭은 제외) ──
-  ['개인화: 홈 탭 "건강 요약" 배너(buildHealthMotivation)가 통증/컨디션/체중/식단/유산소 순으로 "현재 상태 → 다음 행동 제안"까지 이어지는 문장(질책 표현 없이)',
+  ['개인화: 홈 탭 "건강 요약" 배너(buildHealthMotivation)가 통증/컨디션/체중/식단/유산소 순으로 "비교 → 이유 → 다음 행동 제안"까지 이어지는 문장(질책 표현 없이)',
     (() => {
       const i = app.indexOf('function buildHealthMotivation(p){');
-      const block = i !== -1 ? app.slice(i, i + 3200) : '';
-      return block.includes('오늘은 강도를 살짝 낮추고 무리하지 않게 진행해보세요') &&
-        block.includes('충분히 쉬고 회복에 집중해보면 좋습니다') &&
+      const block = i !== -1 ? app.slice(i, i + 4200) : '';
+      return block.includes('오늘은 강도를 살짝 낮추고 진행하는 것이 회복에 도움이 됩니다') &&
+        block.includes('오늘 충분히 쉬어야 다음 수업에서 컨디션을 온전히 끌어올릴 수 있으니') &&
         block.includes('지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다') &&
-        block.includes('오늘 한 끼만 기록해보면') &&
-        block.includes('오늘 20~30분 가볍게 걷기부터 시작해보면') &&
+        block.includes('오늘 한 끼만 남겨보세요') &&
+        block.includes('최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어요') &&
         !block.includes('부족합니다') && !block.includes('AI');
     })()
   ],
@@ -1195,12 +1195,12 @@ const checks = [
     app.includes('const recentBiggestGain=[...recentTopEx].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0]; const praiseLine=recentBiggestGain?`이전 기록보다') &&
     app.includes('{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은')
   ],
-  ['PT코치형: 다이어트 "이번 달 변화"/체형교정 "이번 달 변화" 문장이 처음/이전 기록과 비교한 뒤 "지금처럼 ~하면/이어가면" 다음 행동으로 이어짐',
-    app.includes('처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. 지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.') &&
-    app.includes('이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. 지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.')
+  ['PT코치형: 다이어트 "이번 달 변화"/체형교정 "이번 달 변화" 문장이 처음/이전 기록과 비교한 뒤 변화 이유(식단·운동/교정 운동 유지)까지 짧게 설명',
+    app.includes('처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. ${kcalRows.length>=5?"식단 기록과 운동을 함께 이어온 것이 이 흐름으로 연결되고 있어요.":') &&
+    app.includes('이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. ${latestSummary?.homeExercise?.length?"교정 운동을 꾸준히 이어온 것이 이런 변화로 연결되고 있는 것으로 보입니다.":')
   ],
   ['PT코치형: 건강유지 대표 코멘트/최근 변화 요약이 상태 서술로 끝나지 않고 다음 행동 제안으로 마무리',
-    app.includes('이번 주도 현재 루틴을 유지하면서 컨디션 기록을 함께 남기면 더 정확한 관리가 가능합니다.') &&
+    app.includes('이번 주도 현재 루틴을 유지하면 건강 관리 흐름을 안정적으로 이어갈 수 있습니다.') &&
     app.includes('지금 페이스를 유지하면 안정적인 컨디션을 계속 이어갈 수 있어요.')
   ],
 
@@ -1222,6 +1222,27 @@ const checks = [
     app.includes('처음 기록 대비 체중이 더 안정적으로 감소하고 있습니다.') &&
     app.includes('이전 기록 대비 ${biggestGainPeriod.name} 수행능력이 ${biggestGainPeriod.before} → ${biggestGainPeriod.after}로 더 안정적으로 향상되고 있습니다.') &&
     app.includes('지난 기록(VAS ${pain.first}) 대비 통증 강도가 ${pain.last}로 낮아지고 있습니다.')
+  ],
+
+  // ── 원인과 추천 이유까지 설명하는 PT 코치형(비교 → 변화 이유 → 잘하는 점 → 다음 행동 → 추천 이유) ──
+  ['원인설명형: 홈 탭 "오늘의 운동 가이드" 추천 이유(getRecommendedPart)가 모두 완결된 문장으로 "왜 이 부위/순서를 추천하는지"를 설명(문장이 <br/>에서 끊기지 않음)',
+    app.includes('"다음 수업까지 남은 일정을 고려한 추천입니다."') &&
+    app.includes('reason=`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;') &&
+    app.includes('reason="최근 운동 부위와 회복 간격을 고려한 추천입니다.";') &&
+    app.includes('reason=inferred?`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:"기본 분할 기준을 따른 추천입니다.";')
+  ],
+  ['원인설명형: 건강 요약 배너가 체중 변화 이유(식단·유산소 신호를 교차 참조)와, 유산소 부족 시 "체중 변화는 좋지만 유산소가 줄어서" 같은 교차 원인 기반 추천 이유를 포함',
+    app.includes('const reason=recentKcalCount>=5&&zoneWeek.inZone>0?"최근 식단과 유산소 기록이 함께 이어진 것이 이런 변화로 연결되고 있어요.":') &&
+    app.includes('최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어요. 감량 흐름을 안정적으로 유지할 수 있도록 오늘 20~30분 가볍게 유산소를 추가해보세요.')
+  ],
+  ['원인설명형: 다이어트 "다음 수업 전까지" 체크리스트 안내문이 왜 이 항목을 추천하는지(식단 기록 부족/유산소 기록 감소) 이유를 포함',
+    app.includes('최근 식단 기록이 뜸해 체중 변화의 원인을 정확히 짚기 어려웠어요.') &&
+    app.includes('최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어, 감량 흐름을 안정적으로 유지하기 위해 추천드려요.')
+  ],
+  ['원인설명형: 대표 코멘트가 변화의 이유(식단+유산소 병행/운동 볼륨 증가/교정 운동 유지)를 잘하는 점과 함께 설명',
+    app.includes('최근 식단 기록과 유산소 운동을 꾸준히 이어온 것이 좋은 흐름으로 연결되고 있습니다.') &&
+    app.includes('최근 ${biggestGainPeriod.name} 운동 볼륨이 꾸준히 늘면서 중량도 함께 올라가는 좋은 흐름입니다.') &&
+    app.includes('최근 교정 운동을 꾸준히 이어온 것이 움직임 개선으로 이어지고 있는 것으로 보입니다.')
   ],
 ];
 

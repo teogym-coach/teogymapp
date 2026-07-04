@@ -1341,49 +1341,55 @@ function pickHighlightStat(p){
   if(streak>0) return {icon:"✔",label:"연속 기록",value:`${streak}일`};
   return {icon:"💪",label:"이번 달 운동",value:`${rec.thisCount}회`};
 }
-// 건강 요약 배너 — 통증→컨디션→체중→식단→유산소 우선순위를 유지하되, 각 문장을 "이전 기록과 비교한 변화 → 현재 잘되고 있는 점 → 다음 행동 제안"까지 이어지게 구성한다.
+// 건강 요약 배너 — 통증→컨디션→체중→식단→유산소 우선순위를 유지하되, 각 문장을
+// "이전 기록과 비교한 변화 → 변화가 생긴 이유 → 다음 행동 제안(+ 추천 이유)"까지 이어지게 구성한다.
 // 질책형 표현("부족합니다" 등)은 쓰지 않고, 상태가 좋지 않을 때도 오늘 할 수 있는 긍정적 행동으로 마무리한다.
 function buildHealthMotivation(p){
   const msgs=[];
   const checkinList=p.checkins||[];
   const lastCheck=checkinList[0]||{};
   const prevPainCheck=checkinList.slice(1).find(c=>c.painPart&&c.painPart!=="없음");
-  if(lastCheck.painPart&&lastCheck.painPart!=="없음"){
-    const prevVas=Number(prevPainCheck?.painVas);
-    const curVas=Number(lastCheck.painVas);
-    const painCompare=Number.isFinite(prevVas)&&Number.isFinite(curVas)&&curVas<prevVas?"이전 기록보다 통증이 줄었어요. ":"";
-    msgs.push(`${painCompare}최근 통증을 잘 기록해주고 계세요. 오늘은 강도를 살짝 낮추고 무리하지 않게 진행해보세요.`);
-  } else if(["피곤","매우 피곤"].includes(lastCheck.condition)){
-    const prevCondition=checkinList[1]?.condition;
-    const conditionCompare=["좋음","보통"].includes(prevCondition)?"지난 기록보다 컨디션이 다소 떨어졌어요. ":"";
-    msgs.push(`${conditionCompare}최근 컨디션 기록을 꾸준히 남기고 있어요. 오늘은 평소보다 충분히 쉬고 회복에 집중해보면 좋습니다.`);
-  }
-  const w=computeWeightCard(p.body);
-  const recentWeightCount=getBodyWeightRecords(p.body).filter(r=>String(r.date||"")>=new Date(Date.now()-7*86400000).toISOString().slice(0,10)).length;
-  const prevWeightCount=getBodyWeightRecords(p.body).filter(r=>{const d=String(r.date||""); return d>=new Date(Date.now()-14*86400000).toISOString().slice(0,10)&&d<new Date(Date.now()-7*86400000).toISOString().slice(0,10);}).length;
-  if(w.delta!=null&&Math.abs(w.delta)>=0.5){
-    msgs.push(`현재 체중은 최근 30일간 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}하며 좋은 흐름을 보이고 있어요. 지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다.`);
-  } else if(recentWeightCount>=3){
-    const weightCompare=recentWeightCount>prevWeightCount?"지난주보다 체중 기록이 더 꾸준해졌어요. ":"";
-    msgs.push(`${weightCompare}체중 기록을 꾸준히 남기고 있어요. 지금처럼 이어가면 변화 흐름을 더 정확하게 확인할 수 있습니다.`);
-  }
+  // 체중/식단/유산소 신호를 먼저 계산해두고, 통증·체중 메시지의 "이유" 설명에 서로 참조한다(교차 원인 설명).
   const last7Key=new Date(Date.now()-7*86400000).toISOString().slice(0,10), last14Key=new Date(Date.now()-14*86400000).toISOString().slice(0,10);
   const kcalLogs=getKcalLogs(p.nutrition);
   const recentKcalCount=kcalLogs.filter(r=>r.date>=last7Key).length;
   const prevKcalCount=kcalLogs.filter(r=>r.date>=last14Key&&r.date<last7Key).length;
+  const zoneWeek=getZone2Achievement(summarizeCardioWeek(p.cardioLogs||[]).logs);
+  const zonePrevWeek=getZone2Achievement(summarizeCardioWeek(p.cardioLogs||[],new Date(Date.now()-7*86400000)).logs);
+  const w=computeWeightCard(p.body);
+
+  if(lastCheck.painPart&&lastCheck.painPart!=="없음"){
+    const prevVas=Number(prevPainCheck?.painVas);
+    const curVas=Number(lastCheck.painVas);
+    const painCompare=Number.isFinite(prevVas)&&Number.isFinite(curVas)&&curVas<prevVas?"이전 기록보다 통증이 줄었어요. ":"";
+    msgs.push(`${painCompare}최근 통증을 잘 기록해주고 계세요. 무리하면 회복이 늦어질 수 있어, 오늘은 강도를 살짝 낮추고 진행하는 것이 회복에 도움이 됩니다.`);
+  } else if(["피곤","매우 피곤"].includes(lastCheck.condition)){
+    const prevCondition=checkinList[1]?.condition;
+    const conditionCompare=["좋음","보통"].includes(prevCondition)?"지난 기록보다 컨디션이 다소 떨어졌어요. ":"";
+    msgs.push(`${conditionCompare}최근 컨디션 기록을 꾸준히 남기고 있어요. 오늘 충분히 쉬어야 다음 수업에서 컨디션을 온전히 끌어올릴 수 있으니 회복에 집중해보세요.`);
+  }
+  const recentWeightCount=getBodyWeightRecords(p.body).filter(r=>String(r.date||"")>=last7Key).length;
+  const prevWeightCount=getBodyWeightRecords(p.body).filter(r=>{const d=String(r.date||""); return d>=last14Key&&d<last7Key;}).length;
+  if(w.delta!=null&&Math.abs(w.delta)>=0.5){
+    const reason=recentKcalCount>=5&&zoneWeek.inZone>0?"최근 식단과 유산소 기록이 함께 이어진 것이 이런 변화로 연결되고 있어요.":recentKcalCount>=5?"최근 식단 기록을 꾸준히 남긴 것이 이런 변화로 연결되고 있어요.":"꾸준한 기록과 관리가 이런 변화로 이어지고 있어요.";
+    msgs.push(`현재 체중은 최근 30일간 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}하며 좋은 흐름을 보이고 있어요. ${reason} 지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다.`);
+  } else if(recentWeightCount>=3){
+    const weightCompare=recentWeightCount>prevWeightCount?"지난주보다 체중 기록이 더 꾸준해졌어요. ":"";
+    msgs.push(`${weightCompare}체중 기록을 꾸준히 남기고 있어요. 기록이 쌓일수록 변화 흐름과 원인을 더 정확하게 확인할 수 있으니 지금처럼 이어가 보세요.`);
+  }
   if(recentKcalCount>=5){
     const kcalCompare=recentKcalCount>prevKcalCount?"지난주보다 식단 기록이 더 늘었어요. ":"";
     msgs.push(`${kcalCompare}식단 기록을 꾸준히 남기고 있어요. 지금처럼 이어가면 체중 변화의 원인을 더 정확히 확인할 수 있습니다.`);
   } else {
-    msgs.push("식단 기록은 아직 적지만 지금부터 시작하면 충분해요. 오늘 한 끼만 기록해보면 변화 원인을 더 정확히 확인할 수 있습니다.");
+    msgs.push("식단 기록은 아직 적지만 지금부터 시작하면 충분해요. 기록이 쌓이면 체중 변화의 원인을 더 정확하게 확인할 수 있으니 오늘 한 끼만 남겨보세요.");
   }
-  const zoneWeek=getZone2Achievement(summarizeCardioWeek(p.cardioLogs||[]).logs);
-  const zonePrevWeek=getZone2Achievement(summarizeCardioWeek(p.cardioLogs||[],new Date(Date.now()-7*86400000)).logs);
   if(zoneWeek.inZone>0){
     const cardioCompare=zoneWeek.inZone>zonePrevWeek.inZone?"지난주보다 유산소 기록이 더 좋아졌어요. ":"";
-    msgs.push(`${cardioCompare}이번 주 Zone2 구간 유산소를 ${zoneWeek.inZone}회 기록하며 좋은 페이스를 유지하고 있어요. 이번 주도 이 흐름을 이어가 보세요.`);
+    msgs.push(`${cardioCompare}이번 주 Zone2 구간 유산소를 ${zoneWeek.inZone}회 기록하며 좋은 페이스를 유지하고 있어요. 유산소는 체중과 컨디션 관리에 함께 도움이 되니 이번 주도 이 흐름을 이어가 보세요.`);
+  } else if(w.delta!=null&&w.delta<0){
+    msgs.push("최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어요. 감량 흐름을 안정적으로 유지할 수 있도록 오늘 20~30분 가볍게 유산소를 추가해보세요.");
   } else {
-    msgs.push("이번 주는 유산소 기록이 아직 없어요. 오늘 20~30분 가볍게 걷기부터 시작해보면 컨디션 관리에 도움이 됩니다.");
+    msgs.push("이번 주는 유산소 기록이 아직 없어요. 유산소는 체중과 컨디션 관리에 도움이 되니 오늘 20~30분 가볍게 걷기부터 시작해보세요.");
   }
   const weekly=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
   if(weekly.target>0){
@@ -1759,7 +1765,7 @@ function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){
 function buildDietGrowthLines({wDiff,kcalRows=[],forecast,periodLabel="최근"}){
   const lines=[];
   if(wDiff==null) lines.push("체중 기록이 쌓이면 처음 기록 대비 변화 흐름을 보여드릴게요.");
-  else if(wDiff<-0.3) lines.push(`처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. 지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.`);
+  else if(wDiff<-0.3) lines.push(`처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. ${kcalRows.length>=5?"식단 기록과 운동을 함께 이어온 것이 이 흐름으로 연결되고 있어요.":"지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요."}`);
   else if(wDiff>0.3) lines.push("처음 기록 대비 체중이 다소 증가하는 흐름이에요. 식단과 활동량을 함께 점검해보면 좋아요.");
   else lines.push(`처음 기록 대비 ${periodLabel} 동안 체중이 안정적으로 유지되고 있습니다. 지금 페이스를 유지하며 다음 변화를 지켜봐도 좋아요.`);
   if(kcalRows.length>=5) lines.push("이전보다 섭취 칼로리 기록이 꾸준히 쌓이면서 변화 흐름이 더 명확해지고 있습니다. 지금처럼 계속 기록해보세요.");
@@ -1817,7 +1823,7 @@ function buildCorrectionInterpretation(pain){
 function buildCorrectionGrowthLines({pain,latestSummary}){
   const lines=[];
   if(!pain?.rows?.length) lines.push("통증 기록이 쌓이면 이전 기록과 비교한 변화 흐름을 더 정확히 확인할 수 있습니다.");
-  else if(pain.last<pain.first) lines.push(`이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. 지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요.`);
+  else if(pain.last<pain.first) lines.push(`이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. ${latestSummary?.homeExercise?.length?"교정 운동을 꾸준히 이어온 것이 이런 변화로 연결되고 있는 것으로 보입니다.":"지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요."}`);
   else if(pain.last>pain.first) lines.push("이전 기록보다 통증이 다소 늘었어요. 다음 수업에서 함께 점검해봐요.");
   else lines.push("이전 기록과 비교해 통증 정도가 안정적으로 유지되고 있습니다. 지금 루틴을 유지하며 다음 평가에서 변화를 확인해봐요.");
   if(latestSummary?.homeExercise?.length) lines.push("지난 평가 이후로 집에서 할 운동을 꾸준히 이어가고 있어 좋은 흐름입니다. 이대로 계속 이어가 보세요.");
@@ -1958,13 +1964,13 @@ function buildNextClassChecklist({ recentKcalCount, recentCardioCount }) {
   if (dietLacking) {
     return {
       items: ["식단 기록 3회 이상", "체중 기록 2회 이상", "유산소 20분 1~2회"],
-      closing: "식단 기록이 쌓이면 체중 변화 원인을 더 정확히 확인할 수 있습니다.",
+      closing: "최근 식단 기록이 뜸해 체중 변화의 원인을 정확히 짚기 어려웠어요. 기록이 쌓이면 체중 변화 원인을 더 정확히 확인할 수 있습니다.",
     };
   }
   if (cardioLacking) {
     return {
       items: ["유산소 20~30분 2회", "평균 섭취 칼로리 유지", "걸음수 목표 유지"],
-      closing: "유산소 기록이 쌓이면 감량 흐름을 더 명확히 확인할 수 있습니다.",
+      closing: "최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어, 감량 흐름을 안정적으로 유지하기 위해 추천드려요.",
     };
   }
   return {
@@ -2232,32 +2238,32 @@ function MemberAnalysis(p) {
   const trackedParts = partVolumeData.filter(d => d.values.length > 0);
   const weakestPart = trackedParts.length ? [...trackedParts].sort((a, b) => a.values.length - b.values.length)[0].part : null;
   const coachComment = (() => {
-    // 각 페르소나 1문장: 이전 기록과 비교한 변화 → 2문장: 현재 잘되고 있는 점 → 3문장: 다음 행동 제안
+    // 각 페르소나 1문장: 이전 기록과 비교한 변화 → 2문장: 변화가 생긴 이유(=현재 잘되고 있는 점) → 3문장: 다음 행동 제안 + 추천 이유
     if (persona === "diet") {
       if (weights.length < 2 && kcalRows.length === 0) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
       const l1 = wDiff == null ? "체중 기록이 쌓이면 처음 기록 대비 변화를 더 정확히 보여드릴게요." : wDiff < -0.3 ? `처음 기록 대비 체중이 더 안정적으로 감소하고 있습니다.` : "처음 기록 대비 체중이 안정적으로 관리되고 있습니다.";
-      const l2 = kcalRows.length >= 10 ? "최근 식단 기록과 운동 흐름이 함께 이어지고 있어 좋은 감량 흐름입니다." : "식단 기록을 조금 더 남기면 흐름을 더 잘 확인할 수 있습니다.";
-      const l3 = cardioInPeriod.length < 4 ? "다음 수업 전까지 유산소를 1~2회만 더 추가하면 현재 페이스를 더 안정적으로 유지할 수 있습니다." : "지금처럼 유산소 운동을 이어가면 목표 체중에 더욱 가까워질 수 있습니다.";
+      const l2 = kcalRows.length >= 10 && cardioInPeriod.length >= 4 ? "최근 식단 기록과 유산소 운동을 꾸준히 이어온 것이 좋은 흐름으로 연결되고 있습니다." : kcalRows.length >= 10 ? "최근 식단 기록을 꾸준히 이어온 것이 이 흐름으로 연결되고 있습니다." : "식단 기록을 조금 더 남기면 흐름을 더 잘 확인할 수 있습니다.";
+      const l3 = cardioInPeriod.length < 4 ? "최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어, 다음 수업 전까지 유산소를 1~2회만 더 추가하면 현재 감량 흐름을 더 안정적으로 유지하는 데 도움이 됩니다." : "지금처럼 유산소 운동을 이어가면 목표 체중에 더욱 가까워질 수 있습니다.";
       return `${l1} ${l2} ${l3}`;
     }
     if (persona === "bulk") {
       if (!periodSessions.length) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
       const l1 = biggestGainPeriod ? `이전 기록 대비 ${biggestGainPeriod.name} 수행능력이 ${biggestGainPeriod.before} → ${biggestGainPeriod.after}로 더 안정적으로 향상되고 있습니다.` : "운동 루틴을 꾸준히 이어가고 있습니다.";
-      const l2 = "최근 수업에서 주요 운동 중량이 올라가고 있어 좋은 성장 흐름입니다.";
-      const l3 = weakestPart ? `다음 수업에서는 같은 흐름이 ${weakestPart} 운동에서도 이어지는지 함께 확인하기 좋습니다.` : "다음 수업에서 같은 흐름이 다른 부위에서도 이어지는지 함께 확인하기 좋습니다.";
+      const l2 = biggestGainPeriod ? `최근 ${biggestGainPeriod.name} 운동 볼륨이 꾸준히 늘면서 중량도 함께 올라가는 좋은 흐름입니다.` : "최근 수업에서 운동 볼륨이 꾸준히 이어지고 있어 좋은 성장 흐름입니다.";
+      const l3 = weakestPart ? `다음 수업에서는 같은 흐름이 ${weakestPart} 운동에서도 이어지는지 함께 확인해보겠습니다.` : "다음 수업에서 같은 흐름이 다른 부위에서도 이어지는지 함께 확인해보겠습니다.";
       return `${l1} ${l2} ${l3}`;
     }
     if (persona === "correction") {
       if (!pain?.rows?.length && !latestCorrectionSummary) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
       const l1 = pain?.first != null && pain?.last != null && pain.last < pain.first ? `지난 기록(VAS ${pain.first}) 대비 통증 강도가 ${pain.last}로 낮아지고 있습니다.` : pain?.rows?.length ? "지난 기록과 비교해 통증 정도가 안정적으로 유지되고 있습니다." : "통증 기록이 쌓이면 이전 기록과 비교한 변화를 더 정확히 보여드릴게요.";
-      const l2 = latestCorrectionSummary?.homeExercise?.length ? "최근 교정 운동도 꾸준히 이어지고 있어 몸이 조금씩 적응하는 흐름입니다." : "교정 운동을 조금 더 챙기면 움직임 개선에 도움이 됩니다.";
-      const l3 = "다음 평가 전까지 집에서 할 운동을 유지하면 움직임 변화를 더 명확히 확인할 수 있습니다.";
+      const l2 = latestCorrectionSummary?.homeExercise?.length ? "최근 교정 운동을 꾸준히 이어온 것이 움직임 개선으로 이어지고 있는 것으로 보입니다." : "교정 운동을 조금 더 챙기면 움직임 개선에 도움이 됩니다.";
+      const l3 = "다음 평가 전까지 집에서 할 운동을 유지하면 가동범위 변화도 더 명확하게 확인할 수 있습니다.";
       return `${l1} ${l2} ${l3}`;
     }
     if (!periodSessions.length && monthWorkoutCount === 0) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
-    const l1 = monthWorkoutCount > 0 ? "최근 몇 주 동안 운동 습관이 잘 자리 잡고 있습니다." : "운동 기록이 쌓이면 지속성 흐름을 더 잘 보여드릴게요.";
-    const l2 = monthWeightRange != null && monthWeightRange <= 1 ? "체중도 크게 무너지지 않고 안정적인 범위에서 이어지고 있어 좋은 관리 흐름입니다." : "체중 변화를 조금 더 지켜보면서 안정적인 흐름을 만들어가면 좋습니다.";
-    const l3 = monthWorkoutCount > 0 ? "이번 주도 현재 루틴을 유지하면서 컨디션 기록을 함께 남기면 더 정확한 관리가 가능합니다." : "이번 주부터 운동 기록을 하나씩 남겨보세요.";
+    const l1 = monthWorkoutCount > 0 ? "최근 운동 빈도가 안정적으로 유지되고 있습니다." : "운동 기록이 쌓이면 지속성 흐름을 더 잘 보여드릴게요.";
+    const l2 = monthWeightRange != null && monthWeightRange <= 1 ? "체중도 크게 흔들리지 않고 있어 현재 생활 습관이 잘 자리 잡고 있는 것으로 보입니다." : "체중 변화를 조금 더 지켜보면서 안정적인 흐름을 만들어가면 좋습니다.";
+    const l3 = monthWorkoutCount > 0 ? "이번 주도 현재 루틴을 유지하면 건강 관리 흐름을 안정적으로 이어갈 수 있습니다." : "이번 주부터 운동 기록을 하나씩 남겨보세요.";
     return `${l1} ${l2} ${l3}`;
   })();
 
@@ -2748,7 +2754,7 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
     if(idxNext!==-1){
       const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;
       part=cycle[idxToday];
-      reason=inferred?`최근 수업 흐름을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:"다음 수업까지 남은 일정을 고려해";
+      reason=inferred?`최근 수업 흐름을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:"다음 수업까지 남은 일정을 고려한 추천입니다.";
     }
   }
 
@@ -2758,7 +2764,7 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
     const idxLast=findCycleIndex(lastPart);
     if(idxLast!==-1){
       part=cycle[(idxLast+1)%cycle.length];
-      reason=`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에`;
+      reason=`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;
     }
   }
 
@@ -2769,9 +2775,9 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
     const counts=getRecentPartCounts(sessions);
     const candidates=cycle.filter(p=>!overlapsAvoid(p,avoid));
     part=candidates.sort((a,b)=>(counts[a]||0)-(counts[b]||0))[0]||cycle.find(p=>!overlapsAvoid(p,avoid))||cycle[0];
-    reason="최근 운동 부위와 회복을 고려해";
+    reason="최근 운동 부위와 회복 간격을 고려한 추천입니다.";
   }
-  if(!reason)reason=inferred?`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:"기본 분할 기준으로";
+  if(!reason)reason=inferred?`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:"기본 분할 기준을 따른 추천입니다.";
 
   return {part, reason, cycle, info};
 }

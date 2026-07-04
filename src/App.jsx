@@ -1903,6 +1903,36 @@ function buildFuturePrediction(persona, { forecast, topExercises = [], latestSum
 function FuturePredictionCard({ text }) {
   return <MCard title="다음 변화 예상"><p style={{ margin: 0, fontSize: 13, color: "#20242A", fontWeight: 700, lineHeight: 1.6 }}>{text}</p></MCard>;
 }
+// "대표 코멘트" — 대표가 회원 데이터를 보고 직접 남긴 것처럼 짧고 따뜻하게. 화면에 "AI"라는 단어는 쓰지 않는다.
+function CoachCommentCard({ text }) {
+  return <MCard title="대표 코멘트">
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+      <span style={{ fontSize: 20, flexShrink: 0 }}>💬</span>
+      <p style={{ margin: 0, fontSize: 13, color: "#20242A", fontWeight: 700, lineHeight: 1.7 }}>{text}</p>
+    </div>
+  </MCard>;
+}
+// "Before → After" — 숫자를 나열하기보다 전후 비교를 수직으로 크게 보여줘 한눈에 변화를 느끼게 한다.
+// goodDirection: "down"(작을수록 좋음, 체중·통증) | "up"(클수록 좋음, 중량) | "stable"(변동이 작을수록 좋음, 체중 유지)
+function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, goodDirection = "down", emptyText }) {
+  if (before == null || after == null || !Number.isFinite(Number(before)) || !Number.isFinite(Number(after))) {
+    return <MCard title="Before → After"><div className="analysis-empty-state">{emptyText || "기록이 조금 더 쌓이면 전후 비교를 보여드릴게요."}</div></MCard>;
+  }
+  const delta = +(Number(after) - Number(before)).toFixed(1);
+  const isGood = goodDirection === "up" ? delta >= 0 : goodDirection === "stable" ? Math.abs(delta) <= 1 : delta <= 0;
+  return (
+    <MCard title="Before → After">
+      <div style={{ textAlign: "center" }}>
+        {metricLabel && <div style={{ fontWeight: 800, color: "#66717C", fontSize: 13, marginBottom: 10 }}>{metricLabel}</div>}
+        <div style={{ fontSize: 20, fontWeight: 900, color: "#94A3B8" }}>{before}{unit}</div>
+        <div style={{ fontSize: 18, color: "#C0C8D3", margin: "2px 0", lineHeight: 1 }}>↓</div>
+        <div style={{ fontSize: 27, fontWeight: 900, color: "#2F73F6" }}>{after}{unit}</div>
+        <div style={{ marginTop: 8, fontSize: 15, fontWeight: 800, color: isGood ? "#16A34A" : "#F97316" }}>{delta > 0 ? "+" : ""}{delta}{unit}</div>
+        {periodText && <div style={{ marginTop: 6, fontSize: 11, color: "#8B949E", fontWeight: 800 }}>{periodText}</div>}
+      </div>
+    </MCard>
+  );
+}
 function MemberAnalysis(p) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
   const handleSetPeriod = k => { setPeriod(k); try { localStorage.setItem("teogym_analysis_period", k); } catch {} };
@@ -2091,6 +2121,56 @@ function MemberAnalysis(p) {
   });
   const futurePrediction = buildFuturePrediction(persona, { forecast, topExercises, latestSummary: latestCorrectionSummary });
 
+  // Before → After — 페르소나별 "가장 중요한 변화" 하나만 골라 숫자 나열 대신 전후 비교로 보여준다.
+  const periodText = opt.days ? `최근 ${opt.label}` : "전체 기간";
+  const biggestGainPeriod = [...topExercises].filter(r => r.delta > 0).sort((a, b) => b.delta - a.delta)[0];
+  const beforeAfter = (() => {
+    if (persona === "bulk") {
+      if (!biggestGainPeriod) return { metricLabel: null, before: null, after: null };
+      return {
+        metricLabel: biggestGainPeriod.name,
+        before: Number(String(biggestGainPeriod.before).replace(/[^0-9.]/g, "")),
+        after: Number(String(biggestGainPeriod.after).replace(/[^0-9.]/g, "")),
+        unit: "kg", goodDirection: "up",
+      };
+    }
+    if (persona === "correction") {
+      return { metricLabel: "통증 (VAS)", before: pain?.first ?? null, after: pain?.last ?? null, unit: "", goodDirection: "down" };
+    }
+    // diet, general 모두 체중 기준 — general은 "변동이 작을수록 좋음"으로 해석
+    return { metricLabel: "체중", before: firstW, after: curW, unit: "kg", goodDirection: persona === "general" ? "stable" : "down" };
+  })();
+
+  // 대표 코멘트 — 실제 데이터를 근거로 칭찬 + 다음 제안을 짧고 따뜻한 문장으로. 절대 질책 톤 사용 안 함.
+  const trackedParts = partVolumeData.filter(d => d.values.length > 0);
+  const weakestPart = trackedParts.length ? [...trackedParts].sort((a, b) => a.values.length - b.values.length)[0].part : null;
+  const coachComment = (() => {
+    if (persona === "diet") {
+      if (weights.length < 2 && kcalRows.length === 0) return "기록이 조금 더 쌓이면 변화를 더욱 자세하게 분석할 수 있습니다.";
+      const l1 = wDiff == null ? "체중 기록이 쌓이면 변화를 더 정확히 보여드릴게요." : wDiff < -0.3 ? "체중이 꾸준히 감소하고 있습니다." : "체중이 안정적으로 관리되고 있습니다.";
+      const l2 = kcalRows.length >= 10 ? "현재 식단 기록도 잘 유지되고 있어 좋은 흐름을 이어가고 있습니다." : "식단 기록을 조금 더 남기면 흐름을 더 잘 확인할 수 있습니다.";
+      const l3 = cardioInPeriod.length < 4 ? "다음 달에는 유산소 운동을 조금만 더 늘리면 목표 체중에 더욱 가까워질 수 있습니다." : "지금처럼 유산소 운동을 이어가면 목표 체중에 더욱 가까워질 수 있습니다.";
+      return `${l1} ${l2} ${l3}`;
+    }
+    if (persona === "bulk") {
+      if (!periodSessions.length) return "기록이 조금 더 쌓이면 변화를 더욱 자세하게 분석할 수 있습니다.";
+      const l1 = biggestGainPeriod ? `최근 운동 루틴을 꾸준히 유지하면서 ${biggestGainPeriod.name} 수행능력이 크게 향상되었습니다.` : "운동 루틴을 꾸준히 이어가고 있습니다.";
+      const l2 = weakestPart ? `다음 달에는 ${weakestPart} 운동 볼륨을 조금 더 높이면 더 좋은 변화를 기대할 수 있습니다.` : "지금 흐름을 유지하면 다음 달에도 좋은 변화를 기대할 수 있습니다.";
+      return `${l1} ${l2}`;
+    }
+    if (persona === "correction") {
+      if (!pain?.rows?.length && !latestCorrectionSummary) return "기록이 조금 더 쌓이면 변화를 더욱 자세하게 분석할 수 있습니다.";
+      const l1 = pain?.first != null && pain?.last != null && pain.last < pain.first ? "최근 통증이 꾸준히 감소하고 있습니다." : pain?.rows?.length ? "통증 정도가 안정적으로 유지되고 있습니다." : "통증 기록이 쌓이면 변화를 더 정확히 보여드릴게요.";
+      const l2 = latestCorrectionSummary?.homeExercise?.length ? "교정 운동도 잘 이어지고 있어 움직임이 점차 좋아지는 흐름입니다." : "교정 운동을 조금 더 챙기면 움직임 개선에 도움이 됩니다.";
+      const l3 = "집에서 할 운동을 계속 유지하면 다음 평가에서 더 좋은 결과를 기대할 수 있습니다.";
+      return `${l1} ${l2} ${l3}`;
+    }
+    if (!periodSessions.length && monthWorkoutCount === 0) return "기록이 조금 더 쌓이면 변화를 더욱 자세하게 분석할 수 있습니다.";
+    const l1 = monthWorkoutCount > 0 ? "운동 루틴을 꾸준히 유지하고 있습니다." : "운동 기록이 쌓이면 지속성 흐름을 더 잘 보여드릴게요.";
+    const l2 = monthWeightRange != null && monthWeightRange <= 1 ? "현재 체중도 안정적으로 관리되고 있으며 좋은 생활 습관이 이어지고 있습니다." : "체중 변화를 조금 더 지켜보면서 안정적인 흐름을 만들어가면 좋습니다.";
+    return `${l1} ${l2}`;
+  })();
+
   // ── 재사용 가능한 그래프/카드 조각(기존 마크업 그대로) — 목표별로 순서만 다르게 배치한다 ──
   const weightChart = (
     <MCard title="체중 변화 추이">
@@ -2252,6 +2332,7 @@ function MemberAnalysis(p) {
               <div className="analysis-empty-state">체중과 칼로리를 함께 기록하면 관계를 비교해 보여드려요.</div>
             )}
           </MCard>
+          <BeforeAfterCard {...beforeAfter} periodText={periodText} />
           <div className="change-feedback-item">{dietInterpretation}</div>
           <MCard title="이번 달 변화">
             <div style={{ display: "grid", gap: 8 }}>
@@ -2289,6 +2370,8 @@ function MemberAnalysis(p) {
             )}
           </MCard>
 
+          <BeforeAfterCard {...beforeAfter} periodText={periodText} />
+
           {/* ③ 변화 요약 — 부위별 볼륨/대표 운동 중량·반복수 변화를 근거로 "확실히 성장하고 있다"를 문장으로 전달 */}
           <MCard title="변화 요약">
             <div style={{ display: "grid", gap: 8 }}>
@@ -2307,6 +2390,7 @@ function MemberAnalysis(p) {
         return (
           <>
             {painVasCard}
+            <BeforeAfterCard {...beforeAfter} periodText={periodText} />
             <MCard title="교정 결과">
               {latestSummary ? (
                 <>
@@ -2348,16 +2432,18 @@ function MemberAnalysis(p) {
         <>
           {/* 건강유지/체중유지: ①체중 유지 범위 ②운동 수행능력 변화 ③유산소·활동량 변화 — 안정적 유지와 지속성이 핵심 */}
           {weightChart}
+          <BeforeAfterCard {...beforeAfter} periodText={periodText} />
           <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
           {cardioActivityCard}
           <MonthlyBestCard items={monthlyBestItems} />
         </>
       )}
 
-      {/* 공통: 목표까지 남은 변화 + 이번 달 성장 리포트 + 최근 변화 요약(체성분 기반) */}
+      {/* 공통: ⑤성장 리포트 → ⑥대표 코멘트 → ⑦목표 전략 추천·다음 변화 예상 → (최근 변화 요약) */}
+      <GrowthReportCard report={growthReport} />
+      <CoachCommentCard text={coachComment} />
       <WeightGoalStrategyCard {...p} />
       <FuturePredictionCard text={futurePrediction} />
-      <GrowthReportCard report={growthReport} />
       {(persona === "diet" || persona === "general") && (
         <MCard title="최근 변화 요약">
           <div style={{ display: "grid", gap: 8 }}>

@@ -909,6 +909,33 @@ const checks = [
     app.includes('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>') &&
     !app.includes('<CollapsibleSection label="신체나이 변화" defaultOpen={false}>')
   ],
+
+  // ── 성장 리포트 V2: Before→After + 대표 코멘트 + 카드 순서 ──
+  ['V2: Before → After 카드 — 숫자 나열 대신 전후 비교(다이어트/건강유지=체중, 벌크업=대표 운동 중량, 체형교정=통증 VAS), 데이터 부족 시 안내',
+    app.includes('function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, goodDirection = "down", emptyText })') &&
+    app.includes('const beforeAfter = (() => {') &&
+    (app.match(/<BeforeAfterCard \{\.\.\.beforeAfter\} periodText=\{periodText\} \/>/g) || []).length >= 4
+  ],
+  ['V2: 대표 코멘트 카드 — 실제 데이터 기반, 질책 표현 없이 칭찬+제안 톤, "AI" 단어 없음',
+    (() => {
+      const i = app.indexOf('const coachComment = (() => {');
+      const commentBlock = i !== -1 ? app.slice(i, i + 3000) : '';
+      return app.includes('function CoachCommentCard({ text })') &&
+        i !== -1 &&
+        !commentBlock.includes('부족합니다') && !commentBlock.includes('좋지 않습니다') && !commentBlock.includes('문제가 있습니다') &&
+        !commentBlock.includes('AI');
+    })()
+  ],
+  ['V2: 카드 순서 — 성장 리포트 → 대표 코멘트 → 목표 전략 추천 → 다음 변화 예상',
+    (() => {
+      const iGrowth = app.indexOf('<GrowthReportCard report={growthReport} />');
+      const iCoach = app.indexOf('<CoachCommentCard text={coachComment} />');
+      const iStrategy = app.indexOf('<WeightGoalStrategyCard {...p} />');
+      const iFuture = app.indexOf('<FuturePredictionCard text={futurePrediction} />');
+      return [iGrowth, iCoach, iStrategy, iFuture].every(i => i !== -1) &&
+        iGrowth < iCoach && iCoach < iStrategy && iStrategy < iFuture;
+    })()
+  ],
   ['변화분석: 목표별 우선 표시 항목은 "추가 데이터"에서 중복 노출하지 않음(primaryUses로 제외)',
     app.includes('const primaryUses = {') &&
     app.includes('<CollapsibleSection label="추가 데이터" defaultOpen={false}>')

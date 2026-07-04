@@ -16,6 +16,7 @@
 import {
   collection, doc, getDocs, addDoc, updateDoc, deleteDoc,
   query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit, deleteField,
+  onSnapshot,
 } from "firebase/firestore";
 import { db, auth } from "./firebase-config";
 
@@ -236,6 +237,17 @@ export async function getMembers() {
     memberStatus: m.memberStatus || m.status || (m.isActive === false ? "inactive" : "active"),
     trainerUid: m.trainerUid || uid,
   }));
+}
+
+// 회원 카드 실시간 배지/최근활동용 — getMembers()와 동일한 범위를 실시간 구독.
+// 기존 getMembers()/loadMembers 1회성 흐름은 그대로 두고, 이 구독은 별도 라이브 오버레이로만 사용한다.
+export function subscribeToMembers(onChange) {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return () => {};
+  const q = query(collection(db, "members"), where("trainerUid", "==", uid));
+  return onSnapshot(q, snap => {
+    onChange(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  }, e => console.warn("[DB:subscribeToMembers]", e?.code || e?.message || e));
 }
 
 // ── 관리자 전용 private 서브컬렉션 (회원이 읽을 수 없음) ──────────────────
@@ -662,6 +674,18 @@ export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
   if (feedback.rpe !== undefined) payload.rpe = Number(feedback.rpe);
   if (feedback.memo !== undefined) payload.memo = feedback.memo || "";
   await setDoc(ref, clean(payload), { merge: true });
+
+  const activities = [];
+  if (payload.sorenessLevel !== undefined) {
+    activities.push({ type: "soreness", label: "근육통", value: `${payload.sorenessBodyParts.join("/") || "-"} · ${payload.sorenessLevel}` });
+  }
+  if (payload.rpe !== undefined) {
+    activities.push({ type: "rpe", label: "RPE", value: `${payload.rpe}` });
+  }
+  if (payload.memo !== undefined && payload.memo) {
+    activities.push({ type: "memo", label: "메모", value: "입력됨" });
+  }
+  await touchMemberActivities(memberId, activities);
   return { id: uid, ...feedback, source: "memberApp" };
 }
 
@@ -1058,6 +1082,36 @@ export async function markSessionsRead(memberId, sessionIds) {
   }
 }
 
+// ════════════════════════════════════════════════════
+// 회원 활동 요약 (관리자앱 회원 카드/히스토리 실시간 표시용)
+// members/{id}.todayInputTypes / recentActivityLog 필드만 추가 — 기존 저장 경로는 그대로 둔다.
+// ════════════════════════════════════════════════════
+export async function touchMemberActivities(memberId, activities = []) {
+  if (!memberId || !activities.length) return;
+  try {
+    const ref = doc(db, "members", memberId);
+    const snap = await getDoc(ref);
+    const data = snap.exists() ? snap.data() : {};
+    const todayKey = activities[0].dateKey || new Date().toISOString().slice(0, 10);
+    const prevTypes = data.todayInputTypes?.date === todayKey ? (data.todayInputTypes.types || []) : [];
+    const types = [...new Set([...prevTypes, ...activities.map(a => a.type)])];
+    const prevLog = Array.isArray(data.recentActivityLog) ? data.recentActivityLog : [];
+    const now = Date.now();
+    const newEntries = activities.map(a => ({
+      type: a.type, label: a.label, value: a.value,
+      dateKey: a.dateKey || todayKey, at: now,
+    }));
+    const recentActivityLog = [...newEntries, ...prevLog].slice(0, 15);
+    await updateDoc(ref, {
+      todayInputTypes: { date: todayKey, types },
+      recentActivityLog,
+      memberLastInputAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("[DB:touchMemberActivities]", e?.code || e?.message || e);
+  }
+}
+
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   requireUid();
   const batch = writeBatch(db);
@@ -1108,10 +1162,18 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   }
 
   await batch.commit();
-  // 회원 입력 타임스탬프 갱신 (관리자앱 NEW 배지용)
-  try {
-    await updateDoc(doc(db, "members", memberId), { memberLastInputAt: serverTimestamp() });
-  } catch {}
+
+  const activities = [];
+  if (weight !== null && Number.isFinite(weight) && weight > 0) {
+    activities.push({ type: "weight", label: "체중 입력", value: `${weight}kg`, dateKey });
+  }
+  if (data.kcal !== undefined && String(data.kcal).trim() !== "") {
+    activities.push({ type: "kcal", label: "칼로리 입력", value: `${Number(data.kcal).toLocaleString()}kcal`, dateKey });
+  }
+  if (data.steps !== undefined && String(data.steps).trim() !== "") {
+    activities.push({ type: "steps", label: "걸음수", value: `${Number(data.steps).toLocaleString()}보`, dateKey });
+  }
+  await touchMemberActivities(memberId, activities);
 }
 
 function upsertRecordByDate(records = [], rec = {}) {
@@ -1420,10 +1482,11 @@ export async function saveMemberCheckin(memberId, dateKey, data) {
   if (!Object.keys(payload).length) return { skipped: true };
   const ref = doc(db, "members", memberId, "memberCheckins", dateKey);
   await setDoc(ref, { ...payload, date: dateKey, updatedAt: serverTimestamp(), createdBy: auth.currentUser.uid }, { merge: true });
-  // 회원 입력 타임스탬프 갱신 (관리자앱 NEW 배지용)
-  try {
-    await updateDoc(doc(db, "members", memberId), { memberLastInputAt: serverTimestamp() });
-  } catch {}
+  const activities = [];
+  if (data.steps !== undefined && String(data.steps).trim() !== "") {
+    activities.push({ type: "steps", label: "걸음수", value: `${Number(data.steps).toLocaleString()}보`, dateKey });
+  }
+  await touchMemberActivities(memberId, activities);
   return { skipped: false };
 }
 
@@ -1985,7 +2048,11 @@ export async function saveCardioLog(memberId, data, logId = null) {
   const ref = await addDoc(collection(db, "members", memberId, "cardioLogs"), {
     ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
   });
-  try { await updateDoc(doc(db, "members", memberId), { memberLastInputAt: serverTimestamp() }); } catch {}
+  await touchMemberActivities(memberId, [{
+    type: "cardio", label: "유산소",
+    value: payload.durationMinutes ? `${payload.durationMinutes}분` : "기록됨",
+    dateKey: payload.date,
+  }]);
   return { id: ref.id, ...payload };
 }
 

@@ -26,6 +26,7 @@ import {
   getReadSessionIds, markSessionsRead, SESSION_UNREAD_CUTOFF,
   saveAttendance, getAttendanceRecent,
   getCardioLogs, saveCardioLog, deleteCardioLog,
+  subscribeToMembers,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -1532,28 +1533,62 @@ function formatSorenessBodyParts(feedback={}){const parts=memberFeedbackParts(fe
 function MemberFeedbackForm({s,onSave}){
   const existing=s.memberFeedback||{};
   const sorenessBodyPartsKey=JSON.stringify(existing.sorenessBodyParts||[]);
-  const makeState=()=>({sorenessLevel:existing.sorenessLevel||"없음",sorenessBodyParts:memberFeedbackParts(existing),rpe:Number.isFinite(Number(existing.rpe))?Number(existing.rpe):5,memo:existing.memo||""});
-  const [d,setD]=useState(makeState);
-  // 근육통/RPE/메모를 서로 독립적으로 저장하기 위해 "이번 편집에서 실제로 건드린 항목"만 추적한다.
-  // 건드리지 않은 항목은 저장 시 아예 payload에서 제외해 기존 값을 그대로 유지시킨다.
-  const [touched,setTouched]=useState({soreness:false,rpe:false,memo:false});
-  const [open,setOpen]=useState(false);
-  useEffect(()=>{setD(makeState());setTouched({soreness:false,rpe:false,memo:false});},[s.id,existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.rpe,existing.memo]);
-  const togglePart=part=>{
-    setD(prev=>({ ...prev, sorenessBodyParts: prev.sorenessBodyParts.includes(part)?prev.sorenessBodyParts.filter(x=>x!==part):[...prev.sorenessBodyParts,part] }));
-    setTouched(t=>({...t,soreness:true}));
-  };
-  const hasFeedback=!!(existing.updatedAt||existing.createdAt||existing.rpe||existing.sorenessLevel);
-  const save=()=>{
-    const payload={};
-    if(touched.soreness){payload.sorenessLevel=d.sorenessLevel; payload.sorenessBodyParts=d.sorenessBodyParts;}
-    if(touched.rpe)payload.rpe=d.rpe;
-    if(touched.memo)payload.memo=d.memo;
-    if(!Object.keys(payload).length){alert("저장할 내용이 없습니다.");return;}
-    onSave?.(s.id,payload);
-    setTouched({soreness:false,rpe:false,memo:false});
-  };
-  return <div className="member-feedback-form compact-feedback"><div className="feedback-summary"><div>{hasFeedback?<><b>수업 후 상태</b><span>근육통: {formatSorenessBodyParts(existing)} · {existing.sorenessLevel||"미입력"}</span><span>RPE {existing.rpe??"-"}</span>{existing.memo&&<span className="feedback-compact-line">대표님께 전달할 메모: {existing.memo}</span>}</>:<><b>수업 후 상태</b><span>수업 후 상태 기록하기</span></>}</div><button type="button" className="ghost compact" onClick={()=>{setOpen(v=>!v); scrollMemberAppToTop();}}>{open?"닫기":(hasFeedback?"기록 수정":"기록하기")}</button></div>{open&&<div className="feedback-edit"><div className="form-line"><label>근육통 부위 <small>복수 선택 후 강도를 선택해주세요.</small></label><div className="choice-buttons">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={d.sorenessBodyParts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div></div><SelectLine label="근육통 세기" value={d.sorenessLevel} opts={SORENESS_LEVELS} onChange={v=>{setD({...d,sorenessLevel:v});setTouched(t=>({...t,soreness:true}));}}/><div className="form-line"><label>RPE <details><summary>RPE란?</summary><small>운동이 얼마나 힘들게 느껴졌는지 0~10점으로 표시합니다. 0은 매우 쉬움, 10은 더 반복하기 어려움입니다.</small></details></label><div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(d.rpe)===i?"active":""} onClick={()=>{setD({...d,rpe:i});setTouched(t=>({...t,rpe:true}));}}>{i}</button>)}</div></div><div className="form-line"><label>대표님께 전달할 메모 <small>이 수업일지 카드와 관리자 회원앱 소통에 표시됩니다.</small></label><textarea value={d.memo} onChange={e=>{setD({...d,memo:e.target.value});setTouched(t=>({...t,memo:true}));}}/></div><button className="primary compact" onClick={save}>저장</button></div>}</div>}
+  const [soreness,setSoreness]=useState({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing)});
+  const [rpe,setRpe]=useState(Number.isFinite(Number(existing.rpe))?Number(existing.rpe):5);
+  const [memo,setMemo]=useState(existing.memo||"");
+  // 근육통/RPE/메모는 서로 독립된 섹션으로 각자 저장 버튼을 가진다 — 한 번에 저장/덮어쓰기 되지 않는다.
+  const [openSection,setOpenSection]=useState(null); // "soreness" | "rpe" | "memo" | null
+  useEffect(()=>{
+    setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing)});
+    setRpe(Number.isFinite(Number(existing.rpe))?Number(existing.rpe):5);
+    setMemo(existing.memo||"");
+    setOpenSection(null);
+  },[s.id,existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.rpe,existing.memo]);
+  const togglePart=part=>setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));
+  const toggleSection=key=>{setOpenSection(v=>v===key?null:key); scrollMemberAppToTop();};
+  const hasSoreness=!!existing.sorenessLevel;
+  const hasRpe=existing.rpe!=null;
+  const hasMemo=!!existing.memo;
+  return <>
+    <div className="member-feedback-form compact-feedback">
+      <div className="feedback-summary">
+        <div><b>💪 근육통</b><span>{hasSoreness?`${formatSorenessBodyParts(existing)} · ${existing.sorenessLevel}`:"미입력"}</span></div>
+        <button type="button" className="ghost compact" onClick={()=>toggleSection("soreness")}>{openSection==="soreness"?"닫기":(hasSoreness?"수정":"기록하기")}</button>
+      </div>
+      {openSection==="soreness"&&<div className="feedback-edit">
+        <div className="form-line"><label>근육통 부위 <small>복수 선택 후 강도를 선택해주세요.</small></label>
+          <div className="choice-buttons">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
+        </div>
+        <SelectLine label="근육통 세기" value={soreness.level} opts={SORENESS_LEVELS} onChange={v=>setSoreness(prev=>({...prev,level:v}))}/>
+        <button className="primary compact" onClick={()=>{onSave?.(s.id,{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts});setOpenSection(null);}}>저장</button>
+      </div>}
+    </div>
+    <div className="member-feedback-form compact-feedback">
+      <div className="feedback-summary">
+        <div><b>😊 RPE</b><span>{hasRpe?existing.rpe:"미입력"}</span></div>
+        <button type="button" className="ghost compact" onClick={()=>toggleSection("rpe")}>{openSection==="rpe"?"닫기":(hasRpe?"수정":"기록하기")}</button>
+      </div>
+      {openSection==="rpe"&&<div className="feedback-edit">
+        <div className="form-line"><label>RPE <details><summary>RPE란?</summary><small>운동이 얼마나 힘들게 느껴졌는지 0~10점으로 표시합니다. 0은 매우 쉬움, 10은 더 반복하기 어려움입니다.</small></details></label>
+          <div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(rpe)===i?"active":""} onClick={()=>setRpe(i)}>{i}</button>)}</div>
+        </div>
+        <button className="primary compact" onClick={()=>{onSave?.(s.id,{rpe});setOpenSection(null);}}>저장</button>
+      </div>}
+    </div>
+    <div className="member-feedback-form compact-feedback">
+      <div className="feedback-summary">
+        <div><b>📝 메모</b><span className={hasMemo?"feedback-compact-line":""}>{hasMemo?existing.memo:"미입력"}</span></div>
+        <button type="button" className="ghost compact" onClick={()=>toggleSection("memo")}>{openSection==="memo"?"닫기":(hasMemo?"수정":"기록하기")}</button>
+      </div>
+      {openSection==="memo"&&<div className="feedback-edit">
+        <div className="form-line"><label>대표님께 전달할 메모 <small>이 수업일지 카드와 관리자 회원앱 소통에 표시됩니다.</small></label>
+          <textarea value={memo} onChange={e=>setMemo(e.target.value)}/>
+        </div>
+        <button className="primary compact" onClick={()=>{onSave?.(s.id,{memo});setOpenSection(null);}}>저장</button>
+      </div>}
+    </div>
+  </>;
+}
 const ANALYSIS_PERIODS=[{key:"1m",label:"1개월",days:30},{key:"3m",label:"3개월",days:90},{key:"6m",label:"6개월",days:180},{key:"1y",label:"1년",days:365},{key:"all",label:"전체",days:null}];
 function kgText(v){return Number.isFinite(Number(v))?`${Number(v).toFixed(1)}kg`:"-";}
 function pctText(v){return Number.isFinite(Number(v))?`${v>0?"+":""}${Math.round(v)}%`:"-";}
@@ -2409,6 +2444,8 @@ export default function App() {
   const [editSess, setEditSess] = useState(null);
   const [bodyData,  setBodyData]  = useState(null);
   const [nutritionData, setNutritionData] = useState(null);
+  const [cardioLogs, setCardioLogs] = useState([]);
+  const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [loading,  setLoading]  = useState(false);
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
@@ -2433,6 +2470,29 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, u => setUser(u || null));
     return unsub;
   }, []);
+
+  // 회원 카드 실시간 배지/최근활동 — members 컬렉션 실시간 구독 (기존 1회성 getMembers 흐름은 그대로 유지)
+  useEffect(() => {
+    if (!user || memberMode) return;
+    const unsub = subscribeToMembers(rows => {
+      setLiveMembersById(Object.fromEntries(rows.map(m => [m.id, m])));
+    });
+    return unsub;
+  }, [user, memberMode]);
+
+  // 관리자가 현재 열어둔 회원의 새 입력이 실시간으로 감지되면 새로고침 없이 hub/히스토리 화면을 갱신
+  const lastSyncedInputAtRef = useRef(null);
+  useEffect(() => {
+    if (!member?.id) { lastSyncedInputAtRef.current = null; return; }
+    const live = liveMembersById[member.id];
+    const lastMs = live?.memberLastInputAt?.toMillis?.() || (live?.memberLastInputAt?.seconds ? live.memberLastInputAt.seconds * 1000 : 0);
+    if (!lastMs) return;
+    if (lastSyncedInputAtRef.current === null) { lastSyncedInputAtRef.current = lastMs; return; }
+    if (lastMs > lastSyncedInputAtRef.current) {
+      lastSyncedInputAtRef.current = lastMs;
+      loadMemberData(member.id);
+    }
+  }, [liveMembersById, member?.id]);
 
   // 회원앱 공식 주소를 /member로 정리 — 과거 ?app=member 쿼리 링크로 들어와도 주소창을 /member로 교체한다.
   useEffect(() => {
@@ -2509,17 +2569,19 @@ export default function App() {
   async function loadMemberData(memberId) {
     console.log("[TEO GYM] loadMemberData:", memberId);
     try {
-      const [ss, bc, nt, priv] = await Promise.all([
+      const [ss, bc, nt, priv, cl] = await Promise.all([
         getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
         getMemberPrivate(memberId).catch(() => ({})),
+        getCardioLogs(memberId).catch(e => { console.error("[TEO GYM] getCardioLogs error:", e); return []; }),
       ]);
       console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
       setSessions(ss);
       setBodyData(bc);
       setNutritionData(nt);
       setMemberPrivateData(priv);
+      setCardioLogs(cl);
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -2533,6 +2595,7 @@ export default function App() {
     setBodyData(null);
     setNutritionData(null);
     setMemberPrivateData(null);
+    setCardioLogs([]);
     setScreen("hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
@@ -3118,7 +3181,7 @@ export default function App() {
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} />}
-        {screen==="members"    && <MembersScreen members={members} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
@@ -3126,7 +3189,7 @@ export default function App() {
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} />}
-        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="consultReport" && member && (
@@ -3806,7 +3869,20 @@ const TEST_MEMBER_PRESETS = [
   { key:"test", name:"🧪 TEST MEMBER", email:"teogymapptest@gmail.com", status:"active" },
 ];
 
-function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {
+// 회원 카드 "오늘 입력" 배지/최근 활동 표시 우선순위 (스펙: 메모>근육통>RPE>체중>유산소>칼로리>걸음수)
+const ACTIVITY_PRIORITY = ["memo","soreness","rpe","weight","cardio","kcal","steps"];
+const ACTIVITY_ICON = { memo:"📝", soreness:"💪", rpe:"😊", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟" };
+const ACTIVITY_LABEL = { memo:"메모", soreness:"근육통", rpe:"RPE", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수" };
+function sortByActivityPriority(types) {
+  return [...types].sort((a,b) => ACTIVITY_PRIORITY.indexOf(a) - ACTIVITY_PRIORITY.indexOf(b));
+}
+function formatActivityTime(at) {
+  if (!at) return "";
+  try { return new Date(at).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }); }
+  catch { return ""; }
+}
+
+function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {
   const today = new Date().toISOString().split("T")[0];
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
@@ -4113,7 +4189,12 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
               (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
             );
             const isBirthday = isTodayBirthday(m);
-            const isNewInput = hasNewMemberInput(m);
+            // 실시간 활동 요약 — liveMembersById(onSnapshot)가 있으면 우선 사용, 없으면 기존 members 값으로 폴백
+            const live = liveMembersById[m.id];
+            const liveMember = live ? { ...m, ...live } : m;
+            const isNewInput = hasNewMemberInput(liveMember);
+            const todayInputTypes = liveMember.todayInputTypes?.date === today ? sortByActivityPriority(liveMember.todayInputTypes.types || []) : [];
+            const recentActivity = (liveMember.recentActivityLog || []).slice(0, 4);
 
             const status    = mStatus(m);
             const isEnded   = status === "ended";
@@ -4196,6 +4277,10 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(239,68,68,.2)",color:"#EF4444",fontWeight:700}}>🔴 NEW 입력</span>
                       )}
+                      {!isEnded && todayInputTypes.map(t => (
+                        <span key={t} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
+                          background:"rgba(94,234,212,.10)",color:"#5EEAD4",fontWeight:700}}>{ACTIVITY_ICON[t]} {ACTIVITY_LABEL[t]}</span>
+                      ))}
                       {!isEnded && (() => {
                         const draftSess = (sessionsMap[m.id] || []).find(s =>
                           s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId
@@ -4248,7 +4333,19 @@ function MembersScreen({ members, sessionsMap, loading, onSelect, onAdd, onAddTe
                   </div>
                 </div>
                 {/* 우측 버튼 영역 */}
-                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,marginLeft:8,alignItems:"flex-end"}}>
+                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,marginLeft:8,alignItems:"flex-end",maxWidth:150}}>
+                  {/* 최근 활동 — 회원이 오늘 무엇을 입력했는지 5초 안에 파악하기 위한 영역 */}
+                  {!isEnded && recentActivity.length > 0 && (
+                    <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:"flex-end",marginBottom:2,maxWidth:150}}>
+                      {recentActivity.map((a,i) => (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:4,fontSize:9,whiteSpace:"nowrap",overflow:"hidden",maxWidth:150}}>
+                          <span style={{color:"#cbd5e1",overflow:"hidden",textOverflow:"ellipsis"}}>{a.value}</span>
+                          <span>{ACTIVITY_ICON[a.type]}</span>
+                          <span style={{color:"#475569",fontSize:8,flexShrink:0}}>{formatActivityTime(a.at)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {/* 상태 변경 버튼 */}
                   <button onClick={e=>{e.stopPropagation();setStatusMenu(statusMenu===m.id?null:m.id);}}
                     style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
@@ -9227,8 +9324,24 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member }) {
+function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioLogs=[], loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
+  // 세션 날짜(YYYY-MM-DD) 기준으로 그날 회원이 입력한 체중/칼로리/유산소를 매칭 — 새 저장 경로 없이 기존 기록만 조회
+  const weightByDate = useMemo(() => {
+    const map = new Map();
+    getBodyWeightRecords(bodyData).forEach(r => map.set(r.date, r.weight));
+    return map;
+  }, [bodyData]);
+  const kcalByDate = useMemo(() => {
+    const map = new Map();
+    getKcalLogs(nutritionData).forEach(r => map.set(r.date, r.kcal));
+    return map;
+  }, [nutritionData]);
+  const cardioByDate = useMemo(() => {
+    const map = new Map();
+    (cardioLogs || []).forEach(l => { if (l.date) map.set(l.date, l); });
+    return map;
+  }, [cardioLogs]);
   const [reportSession, setReportSession] = useState(null);
   const [confirmPair, setConfirmPair] = useState(null);
   const [splitting, setSplitting] = useState(false);
@@ -9451,6 +9564,28 @@ function HistoryScreen({ sessions: rawSessions, bodyData, loading, onBack, onEdi
                       {s.intensity && <Bdg color={ic}>{s.intensity}</Bdg>}
                       {s.condition && <Bdg color={cc.color}>{cc.emoji} {s.condition}</Bdg>}
                     </div>
+                    {/* 회원 입력 상태 — 그날 회원이 입력한 근육통/RPE/메모/유산소/체중/칼로리를 한눈에 확인 */}
+                    {(() => {
+                      const feedback = s.memberFeedback;
+                      const weight = weightByDate.get(s.date);
+                      const kcal = kcalByDate.get(s.date);
+                      const cardio = cardioByDate.get(s.date);
+                      const memoText = feedback?.memo ? (feedback.memo.length > 20 ? feedback.memo.slice(0,20)+"…" : feedback.memo) : "";
+                      const hasAny = (feedback?.sorenessLevel && feedback.sorenessLevel !== "없음") || feedback?.rpe != null || memoText || cardio || weight || kcal;
+                      if (!hasAny) return null;
+                      return (
+                        <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:"flex-end",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+                          {feedback?.sorenessLevel && feedback.sorenessLevel !== "없음" && (
+                            <Mo c="#ff9f43" s={8}>💪 {formatSorenessBodyParts(feedback)} · {feedback.sorenessLevel}</Mo>
+                          )}
+                          {feedback?.rpe != null && <Mo c="#818cf8" s={8}>😊 RPE {feedback.rpe}</Mo>}
+                          {memoText && <Mo c="#22E0C2" s={8}>📝 {memoText}</Mo>}
+                          {cardio && <Mo c="#fdba74" s={8}>❤️ {cardio.durationMinutes ? `${cardio.durationMinutes}분` : "기록됨"}</Mo>}
+                          {weight != null && <Mo c="#94a3b8" s={8}>⚖️ {weight}kg</Mo>}
+                          {kcal != null && <Mo c="#94a3b8" s={8}>🍚 {Number(kcal).toLocaleString()}kcal</Mo>}
+                        </div>
+                      );
+                    })()}
                     <Mo c="#3a3a5a" s={8} style={{marginTop:4}}>📋 리포트 보기</Mo>
                   </div>
                 </div>

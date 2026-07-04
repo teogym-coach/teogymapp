@@ -427,7 +427,7 @@ const checks = [
     app.includes('markAdminInputRead')
   ],
   ['NEW 배지: 회원 카드에 🔴 NEW 입력 배지 표시',
-    app.includes('isNewInput = hasNewMemberInput(m)') &&
+    app.includes('isNewInput = hasNewMemberInput(liveMember)') &&
     app.includes('🔴 NEW 입력')
   ],
   ['NEW 배지: 카드 클릭 시 읽음 처리',
@@ -646,16 +646,14 @@ const checks = [
   // ── 수업 후 상태 메모 placeholder 제거 ──
   ['수업 후 상태 메모: placeholder 제거(빈 입력창으로 표시)',
     !app.includes('대표님께 전달할 내용을 입력해주세요.') &&
-    app.includes('<textarea value={d.memo} onChange={e=>{setD({...d,memo:e.target.value});setTouched(t=>({...t,memo:true}));}}/>')
+    app.includes('<textarea value={memo} onChange={e=>setMemo(e.target.value)}/>')
   ],
 
-  // ── 근육통/RPE/메모 독립 저장 ──
-  ['수업 후 상태: 근육통/RPE/메모를 touched 플래그로 추적해 건드린 항목만 저장',
-    app.includes('const [touched,setTouched]=useState({soreness:false,rpe:false,memo:false});') &&
-    app.includes('if(touched.soreness){payload.sorenessLevel=d.sorenessLevel; payload.sorenessBodyParts=d.sorenessBodyParts;}') &&
-    app.includes('if(touched.rpe)payload.rpe=d.rpe;') &&
-    app.includes('if(touched.memo)payload.memo=d.memo;') &&
-    app.includes('if(!Object.keys(payload).length){alert("저장할 내용이 없습니다.");return;}')
+  // ── 근육통/RPE/메모 독립 저장 (3개 섹션 + 저장 버튼 각각 분리) ──
+  ['수업 후 상태: 근육통/RPE/메모가 독립된 3개 섹션으로 분리되어 각각 저장',
+    app.includes('onSave?.(s.id,{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts});setOpenSection(null);') &&
+    app.includes('onSave?.(s.id,{rpe});setOpenSection(null);') &&
+    app.includes('onSave?.(s.id,{memo});setOpenSection(null);')
   ],
   ['Firestore 저장: saveSessionMemberFeedback이 건드린 필드만 setDoc(merge:true)로 반영, 나머지는 기존값 유지',
     db.includes('if (feedback.sorenessLevel !== undefined || feedback.sorenessBodyParts !== undefined || feedback.sorenessBodyPart !== undefined) {') &&

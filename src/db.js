@@ -1086,13 +1086,18 @@ export async function markSessionsRead(memberId, sessionIds) {
 // 회원 활동 요약 (관리자앱 회원 카드/히스토리 실시간 표시용)
 // members/{id}.todayInputTypes / recentActivityLog 필드만 추가 — 기존 저장 경로는 그대로 둔다.
 // ════════════════════════════════════════════════════
+// 한국 시간 기준 오늘 날짜 — dateKey 미전달 시 폴백으로만 사용 (UTC 기준으로 계산하면 KST 00~09시에 하루 밀림)
+function koreaDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
 export async function touchMemberActivities(memberId, activities = []) {
   if (!memberId || !activities.length) return;
   try {
     const ref = doc(db, "members", memberId);
     const snap = await getDoc(ref);
     const data = snap.exists() ? snap.data() : {};
-    const todayKey = activities[0].dateKey || new Date().toISOString().slice(0, 10);
+    const todayKey = activities[0].dateKey || koreaDateKey();
     const prevTypes = data.todayInputTypes?.date === todayKey ? (data.todayInputTypes.types || []) : [];
     const types = [...new Set([...prevTypes, ...activities.map(a => a.type)])];
     const prevLog = Array.isArray(data.recentActivityLog) ? data.recentActivityLog : [];

@@ -3895,17 +3895,43 @@ function formatActivityTime(at) {
   catch { return ""; }
 }
 
+// 회원 목록 상단 "오늘 활동" 필터 — 걸음수는 스펙에 없어 제외
+const ACTIVITY_FILTERS = [
+  { key: "all",      label: "전체" },
+  { key: "memo",     label: "오늘 메모" },
+  { key: "weight",   label: "오늘 체중" },
+  { key: "kcal",     label: "오늘 칼로리" },
+  { key: "cardio",   label: "오늘 유산소" },
+  { key: "soreness", label: "오늘 근육통" },
+  { key: "rpe",      label: "오늘 RPE" },
+  { key: "none",     label: "오늘 입력 없음" },
+];
+
 function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {
   const today = new Date().toISOString().split("T")[0];
+  const todayKST = getKoreaDateString(); // 오늘 활동 필터/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
   const [filter,     setFilter]     = useState("active");
+  const [activityFilter, setActivityFilter] = useState("all"); // 오늘 활동 필터 (memo/weight/kcal/cardio/soreness/rpe/none)
   const [showSort,   setShowSort]   = useState(false);
   const [statusMenu, setStatusMenu] = useState(null); // 상태 메뉴 열린 회원 id
   const [showTestPanel, setShowTestPanel] = useState(false);
 
   // 상태 헬퍼 (status 없으면 active)
   function mStatus(m) { return m.status || "active"; }
+  // 실시간 활동 요약 — liveMembersById(onSnapshot)가 있으면 우선 사용, 없으면 기존 members 값으로 폴백. 한국시간 기준 오늘(today) 날짜와 대조.
+  function getTodayInputTypes(m) {
+    const live = liveMembersById[m.id];
+    const liveMember = live ? { ...m, ...live } : m;
+    return liveMember.todayInputTypes?.date === todayKST ? sortByActivityPriority(liveMember.todayInputTypes.types || []) : [];
+  }
+  function passActivityFilter(m) {
+    if (activityFilter === "all") return true;
+    const types = getTodayInputTypes(m);
+    if (activityFilter === "none") return types.length === 0;
+    return types.includes(activityFilter);
+  }
   function getMemberMeta(m) {
     const ss = (sessionsMap[m.id] || []);
     const sorted = [...ss].sort((a,b) => (b.date||"").localeCompare(a.date||""));
@@ -4022,15 +4048,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     });
   }
 
-  // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용
+  // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용 — 오늘 활동 필터는 검색 여부와 무관하게 항상 적용
   const filtered = sortMembers(
     members.filter(m => {
       if (isOwner(m)) return false; // 대표님은 일반 목록 제외
-      return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m));
+      return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m)) && passActivityFilter(m);
     })
   ).filter(m => {
-    if (search.trim()) return matchSearch(m.name, search) && !isOwner(m);
-    return passFilter(m);
+    if (search.trim()) return matchSearch(m.name, search) && !isOwner(m) && passActivityFilter(m);
+    return passFilter(m) && passActivityFilter(m);
   });
 
   const ownerMember = members.find(m => isOwner(m));
@@ -4145,6 +4171,24 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         </div>
       </div>
 
+      {/* 오늘 활동 필터 — 대표가 "오늘 누가 뭘 입력했는지" 바로 찾기 위한 필터 (회원 상태 필터와 별개 축) */}
+      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",paddingBottom:2}}>
+        {ACTIVITY_FILTERS.map(f => {
+          const active = activityFilter === f.key;
+          const icon = f.key === "all" ? "🗂" : f.key === "none" ? "⚪" : ACTIVITY_ICON[f.key];
+          return (
+            <button key={f.key} onClick={()=>setActivityFilter(f.key)}
+              style={{flexShrink:0,padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
+                whiteSpace:"nowrap",
+                borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
+                background:active?"rgba(94,234,212,.14)":"transparent",
+                color:active?"#5EEAD4":"#94a3b8"}}>
+              {icon} {f.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* 오늘 생일인 회원 요약 */}
       {(() => {
         const bdays = filtered.filter(m => isTodayBirthday(m));
@@ -4206,8 +4250,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
             const live = liveMembersById[m.id];
             const liveMember = live ? { ...m, ...live } : m;
             const isNewInput = hasNewMemberInput(liveMember);
-            const todayInputTypes = liveMember.todayInputTypes?.date === today ? sortByActivityPriority(liveMember.todayInputTypes.types || []) : [];
-            const recentActivity = (liveMember.recentActivityLog || []).slice(0, 4);
+            const todayInputTypes = getTodayInputTypes(m);
+            const recentActivity = (liveMember.recentActivityLog || []).slice(0, 3);
 
             const status    = mStatus(m);
             const isEnded   = status === "ended";

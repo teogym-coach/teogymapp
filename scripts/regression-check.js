@@ -430,6 +430,25 @@ const checks = [
     db.includes('export async function touchMemberActivities(memberId, activities = [])') &&
     (db.match(/await touchMemberActivities\(/g) || []).length >= 3
   ],
+  ['최근 활동: dateKey 미전달 시 한국시간 기준으로 폴백 (UTC 기준이면 KST 00~09시에 하루 밀림)',
+    db.includes('function koreaDateKey(date = new Date())') &&
+    db.includes("const todayKey = activities[0].dateKey || koreaDateKey();")
+  ],
+  // ── 회원 목록 "오늘 활동" 필터 ──
+  ['오늘 활동 필터: 전체/메모/체중/칼로리/유산소/근육통/RPE/입력없음 8종 정의',
+    ["all","memo","weight","kcal","cardio","soreness","rpe","none"].every(k => app.includes(`key: "${k}"`))
+  ],
+  ['오늘 활동 필터: 한국시간(getKoreaDateString) 기준으로 오늘 판정',
+    app.includes('const todayKST = getKoreaDateString();') &&
+    app.includes('liveMember.todayInputTypes?.date === todayKST')
+  ],
+  ['오늘 활동 필터: passActivityFilter가 filtered 목록 계산에 반영됨',
+    app.includes('function passActivityFilter(m)') &&
+    (app.match(/&& passActivityFilter\(m\)/g) || []).length >= 2
+  ],
+  ['오늘 활동 필터: "오늘 입력 없음"은 오늘 입력 타입이 하나도 없는 회원만 표시',
+    app.includes('if (activityFilter === "none") return types.length === 0;')
+  ],
   ['NEW 배지: hasNewMemberInput + ADMIN_INPUT_READ_KEY',
     app.includes('ADMIN_INPUT_READ_KEY') &&
     app.includes('function hasNewMemberInput(m)') &&

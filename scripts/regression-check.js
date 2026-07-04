@@ -707,6 +707,26 @@ const checks = [
     app.includes('if(savingSection)return;') &&
     app.includes('disabled={!!savingSection}')
   ],
+  ['수업일지 카드 순서: 운동종목(SessionMini)이 근육통/RPE/메모(MemberFeedbackForm)보다 먼저 표시',
+    (() => {
+      const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/>');
+      return i !== -1;
+    })()
+  ],
+  ['수업 후 상태: 근육통/RPE는 가로 2분할 소형 카드로 축소(요약 행 높이 절감), 메모는 기존 크기 유지',
+    app.includes('className="member-feedback-form compact-feedback feedback-duo"') &&
+    app.includes('className="feedback-duo-row"') &&
+    app.includes('.feedback-duo-row{display:flex;align-items:stretch;gap:8px}') &&
+    app.includes('.feedback-duo-btn{width:auto!important;min-width:0!important;height:30px!important;')
+  ],
+  ['수업 후 상태: 근육통/RPE 소형 카드에서도 편집 영역(feedback-edit)은 전체 너비로 그대로 유지(부위 선택·VAS 버튼 공간 확보)',
+    (() => {
+      const i = app.indexOf('className="feedback-duo-row"');
+      const block = app.slice(i, i + 2000);
+      return block.includes('openSection==="soreness"&&<div className="feedback-edit">') &&
+        block.includes('openSection==="rpe"&&<div className="feedback-edit">');
+    })()
+  ],
   ['Firestore 저장: saveSessionMemberFeedback이 건드린 필드만 setDoc(merge:true)로 반영, 나머지는 기존값 유지',
     db.includes('if (feedback.sorenessLevel !== undefined || feedback.sorenessBodyParts !== undefined || feedback.sorenessBodyPart !== undefined) {') &&
     db.includes('if (feedback.rpe !== undefined) payload.rpe = Number(feedback.rpe);') &&

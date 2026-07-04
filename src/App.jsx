@@ -2227,7 +2227,8 @@ const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];
 
 // 최근 세션의 대표 부위만 최신순으로 추출 — 연속 중복 제거, 코어/교정은 "하루 전체 분할"이 아니므로 제외.
 // windowDays: 분할 패턴 분석은 최근 2~4주 실제 수업일지를 우선한다(스펙 6번) — 그 이전 기록은 현재 스타일과 다를 수 있어 배제.
-function getRecentPartSequence(sessions=[], n=10, windowDays=28){
+// n=14: 최대 5분할이 2회 반복되려면 10개가 필요 — 약간의 여유를 둬 하루 이틀 빠진 경우도 패턴을 잡을 수 있게 함.
+function getRecentPartSequence(sessions=[], n=14, windowDays=28){
   const cutoff=new Date(Date.now()-windowDays*86400000).toISOString().slice(0,10);
   const sorted=[...sessions].filter(s=>String(s.date||"")>=cutoff).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
   const seq=[];
@@ -2240,14 +2241,27 @@ function getRecentPartSequence(sessions=[], n=10, windowDays=28){
   return seq;
 }
 
-// 1순위: 최근 2~4주 수업일지에서 반복되는 분할 패턴 추정 — 최근 6개 안의 고유 부위를 등장 순서대로, 2~5개(2분할도 인정)면 사이클로 채택.
+// 시간순(오래된→최신) 시퀀스가 주기 L로 일관되게 반복되는지 확인 — i번째와 (i-L)번째가 전부 같아야 함.
+// (마지막 사이클이 완전히 끝나지 않은 "진행 중" 반복도 인정하기 위해, 두 구간을 통째로 자르지 않고 전체를 겹쳐서 비교한다)
+function isPeriodic(chrono,L){
+  for(let i=L;i<chrono.length;i++){ if(chrono[i]!==chrono[i-L])return false; }
+  return true;
+}
+// 시간순(오래된→최신) 시퀀스에서 "실제로 2회 이상 반복된" 가장 최근 사이클을 찾는다(길이 1~5, 짧은 길이부터 검증).
+// 단순히 최근 고유 부위를 나열하는 것과 달리, 최소 한 사이클 + 다음 사이클 일부(2개 이상)가 그대로 이어져야 패턴으로 인정한다.
+function detectRepeatingCycle(chrono=[]){
+  const n=chrono.length;
+  for(let L=1;L<=5;L++){
+    if(n<L+2)continue;
+    if(isPeriodic(chrono,L))return chrono.slice(-L);
+  }
+  return null;
+}
+// 1순위: 최근 2~4주 수업일지에서 반복되는 분할 패턴 추정. 신뢰도 기준(스펙 3번): 같은 흐름이 2회 이상 반복 + 최근 4주 기록 4회 이상.
 // 기본 5분할/3분할은 이 패턴을 못 찾은(=데이터가 부족한 신규 회원) 경우에만 폴백으로 쓰인다.
 function inferActualSplit(sequence=[]){
   if(sequence.length<4)return null;
-  const chrono=[...sequence].reverse().slice(-6);
-  const order=[];
-  chrono.forEach(p=>{if(!order.includes(p))order.push(p);});
-  return (order.length>=2&&order.length<=5)?order:null;
+  return detectRepeatingCycle([...sequence].reverse());
 }
 
 function getRecommendedPart(profile,sessions=[],onboarding={}){
@@ -2262,31 +2276,42 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
   // 콤보 항목("가슴 · 어깨")도 하위 부위로 조회/회피 판정할 수 있도록
   const findCycleIndex=p=>cycle.findIndex(c=>c===p||c.split(" · ").includes(p));
   const overlapsAvoid=(p,avoid)=>p.split(" · ").some(x=>avoid.has(x));
+  const cycleLabel=cycle.length===1?cycle[0]:`${cycle.length}분할`;
+  const lastPart=sequence[0];
 
   let part=null, reason="";
 
   // 2·3순위: 다음 수업 날짜 역산 — 사이클을 하루 1스텝으로 채우는 계산이므로, 실제 주당 빈도가 사이클 길이에 못 미치는
-  // 회원(예: 주 2회인데 5분할)에게는 적용하지 않고 4순위(최근 부위·회복)로 넘긴다 — "주 2회 회원에게 주 5회처럼 추천 금지".
+  // 회원(예: 주 2회인데 5분할)에게는 적용하지 않고 아래(패턴 이어가기/회복 회피)로 넘긴다 — "주 2회 회원에게 주 5회처럼 추천 금지".
   if(info.daysUntil!=null && info.daysUntil>=1 && info.daysUntil<=cycle.length && freq>=cycle.length-1){
     const idxNext=findCycleIndex(info.part);
     if(idxNext!==-1){
       const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;
       part=cycle[idxToday];
-      reason=inferred?"최근 수업 흐름을 기준으로":"다음 수업까지 남은 일정을 고려해";
+      reason=inferred?`최근 수업 흐름을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:"다음 수업까지 남은 일정을 고려해";
     }
   }
 
-  // 4순위: 최근 부위·회복 간격 — 위에서 정한 부위가 최근에 했거나 상극 부위면 회피
-  const lastPart=sequence[0];
-  const avoid=new Set();
-  if(lastPart){avoid.add(lastPart); const c=CONFLICT[lastPart]; if(c)avoid.add(c);}
-  if(!part||overlapsAvoid(part,avoid)){
+  // 패턴이 실제로 확인됐다면(inferred) — 마지막 수업 다음 순서로 이어간다. 이 경우 아래 회복 회피 규칙보다 우선한다
+  // (예: 가슴→어깨가 원래 상극 조합이라도, 회원이 실제로 그렇게 반복해왔다면 그 흐름을 따른다).
+  if(!part && inferred && lastPart){
+    const idxLast=findCycleIndex(lastPart);
+    if(idxLast!==-1){
+      part=cycle[(idxLast+1)%cycle.length];
+      reason=`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에`;
+    }
+  }
+
+  // 최종 폴백: 패턴도 다음 수업 정보도 못 정했을 때만 — 최근 부위·회복 간격 회피
+  if(!part){
+    const avoid=new Set();
+    if(lastPart){avoid.add(lastPart); const c=CONFLICT[lastPart]; if(c)avoid.add(c);}
     const counts=getRecentPartCounts(sessions);
     const candidates=cycle.filter(p=>!overlapsAvoid(p,avoid));
     part=candidates.sort((a,b)=>(counts[a]||0)-(counts[b]||0))[0]||cycle.find(p=>!overlapsAvoid(p,avoid))||cycle[0];
     reason="최근 운동 부위와 회복을 고려해";
   }
-  if(!reason)reason=inferred?"최근 수업 흐름을 기준으로":"기본 분할 기준으로";
+  if(!reason)reason=inferred?`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:"기본 분할 기준으로";
 
   return {part, reason, cycle, info};
 }

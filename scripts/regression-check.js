@@ -966,10 +966,15 @@ const checks = [
     app.includes('const MALE_SPLIT = ["하체","등","가슴","어깨","팔"];') &&
     app.includes('const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];')
   ],
-  ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위)이 최근 2~4주(windowDays) 안에서, 2~5분할(2분할 포함)까지 인식',
-    app.includes('function getRecentPartSequence(sessions=[], n=10, windowDays=28)') &&
-    app.includes('function inferActualSplit(sequence=[])') &&
-    app.includes('return (order.length>=2&&order.length<=5)?order:null;')
+  ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위)이 최근 2~4주(windowDays) 안에서, 실제 "반복" 여부를 검증(단순 나열 아님)',
+    app.includes('function getRecentPartSequence(sessions=[], n=14, windowDays=28)') &&
+    app.includes('function isPeriodic(chrono,L){') &&
+    app.includes('function detectRepeatingCycle(chrono=[])') &&
+    app.includes('if(sequence.length<4)return null;') &&
+    app.includes('return detectRepeatingCycle([...sequence].reverse());')
+  ],
+  ['오늘의 운동 가이드: 패턴이 확인되면 마지막 수업 다음 순서로 이어가기(회복 회피 규칙보다 우선 — 가슴→어깨처럼 실제 반복된 흐름은 그대로 따름)',
+    app.includes('part=cycle[(idxLast+1)%cycle.length];')
   ],
   ['오늘의 운동 가이드: 다음 수업 날짜 역산 공식이 사이클 길이 이내 + 주당 빈도가 사이클 길이에 못 미치지 않을 때만 적용(3순위 게이트로 "주 2회에게 5회처럼" 추천 방지)',
     app.includes('const freq=getWorkoutFrequencyNumber(profile);') &&

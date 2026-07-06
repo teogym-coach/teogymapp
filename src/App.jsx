@@ -19,7 +19,7 @@ import {
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
-  getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
+  getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, recordGoalChange, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead,
   checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
   getPairSessions, savePairSession, deletePairSession, splitPairSession, updatePairSessionStatus,
   saveFcmToken,
@@ -1247,7 +1247,31 @@ function MemberApp({ onLogout }) {
     try{ assertOwnMember(); await saveMemberOnboarding(profile.id,{restingHeartRate:n}); setOnboarding(prev=>({...(prev||{}),restingHeartRate:n})); }
     catch(e){ console.error("[MemberApp] resting heart rate save failed",e); alert(e?.message||"안정시 심박수 저장에 실패했습니다."); }
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,cardioSaving,correctionSummaries};
+  // 목표 관리 — 온보딩 전체를 다시 진행하지 않고 주요 목표 항목만 부분 수정.
+  // members/memberOnboarding에 실제 값을 반영하는 건 기존 saveProfileInfo(saveMemberProfileFields)/saveMemberOnboarding을 그대로 재사용하고,
+  // recordGoalChange만 새로 호출해 변경 이력(goalHistory) 저장 + 관리자 "오늘 회원 입력" 피드 알림(goal_update)을 남긴다.
+  // changes: [{ field, fieldLabel, value, oldDisplay, newDisplay, extra }]
+  const saveGoalUpdate=async(changes)=>{
+    if(!changes||!changes.length) return;
+    assertOwnMember();
+    const profileFields={}; const onboardingOnlyFields={};
+    changes.forEach(c=>{
+      if(c.field==="weeklyWorkoutCount"){ profileFields.workoutFrequency=c.value; }
+      else if(c.field==="targetPeriod"){
+        profileFields.targetPeriod=c.value; profileFields.goalPeriod=c.value; profileFields.goalPeriodType=c.value;
+        const custom=c.extra?.targetPeriodCustom||""; profileFields.targetPeriodCustom=custom;
+        const deadline=goalDeadlineFromPeriod(c.value,custom);
+        if(deadline){ profileFields.goalDeadline=deadline; profileFields.targetDate=deadline; }
+      }
+      else if(c.field==="focusAreas"||c.field==="averageWorkoutTime"){ onboardingOnlyFields[c.field]=c.value; }
+      else { profileFields[c.field]=c.value; } // goal, targetWeightKg
+    });
+    if(Object.keys(profileFields).length) await saveProfileInfo(profileFields);
+    if(Object.keys(onboardingOnlyFields).length) await saveMemberOnboarding(profile.id,onboardingOnlyFields);
+    await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
+    await load();
+  };
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home","⌂","홈"],["workout","＋","수업"],["health","♥","건강"],["analysis","▥","분석"],["profile","●","프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-block"}}>{i}{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -2678,10 +2702,107 @@ function PartVolumeCard({sessions=[]}){
     </section>
   );
 }
-function MemberProfile(p){const links=[{title:"교정/운동 영상 보기",label:"인스타그램",url:"https://www.instagram.com/teogym_pt",color:"#E1306C",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" strokeWidth="2.5"/></svg>},{title:"운동 루틴 영상 보기",label:"유튜브",url:"https://youtube.com/@gymteo",color:"#FF0000",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96A29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58A2.78 2.78 0 0 0 3.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.95A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="currentColor" stroke="none"/></svg>},{title:"운동 정보/칼럼 보기",label:"블로그",url:"https://m.blog.naver.com/teogym",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>},{title:"센터 새소식 보기",label:"네이버 플레이스",url:"https://naver.me/5ZJFzvnv",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>}]; const loginEmail=(auth.currentUser?.email||p.profile.memberAppAccountEmail||p.profile.email||"-").trim(); const base={birthYear:p.profile.birthYear||p.onboarding.birthYear||"",birthMonth:p.profile.birthMonth||p.onboarding.birthMonth||"",birthYearMonth:p.profile.birthYearMonth||p.onboarding.birthYearMonth||"",birthDay:p.profile.birthDay||p.onboarding.birthDay||"",workoutFrequency:p.profile.workoutFrequency||p.onboarding.weeklyWorkoutCount||"",height:p.profile.height||p.onboarding.heightCm||"",startWeight:p.profile.startWeight||p.startW||"",currentWeight:p.profile.currentWeight||p.curW||"",targetWeightKg:p.onboarding.targetWeightKg||p.onboarding.targetWeight||p.onboarding.goalWeight||p.profile.targetWeightKg||p.profile.targetWeight||p.profile.goalWeight||"",targetPeriod:p.onboarding.targetPeriod||p.onboarding.goalPeriod||p.profile.targetPeriod||"",targetPeriodCustom:p.onboarding.targetPeriodCustom||p.onboarding.goalDeadline||p.onboarding.targetDate||"",goal:p.onboarding.goal||p.profile.goal||""}; const [editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[msg,setMsg]=useState(""); const [d,setD]=useState(base); useEffect(()=>{if(!editing)setD(base);},[editing,base.workoutFrequency,base.height,base.startWeight,base.currentWeight,base.targetWeightKg,base.birthYear,base.birthMonth,base.birthDay,base.birthYearMonth,base.targetPeriod,base.targetPeriodCustom,base.goal]); const same=(a,b)=>String(a??"").trim()===String(b??"").trim(); const edit=patch=>setD(prev=>({...prev,...patch})); const cancel=()=>{setD(base);setEditing(false);p.resetMemberScroll?.();}; const save=async()=>{if(saving)return; setSaving(true);setMsg("");try{const profilePatch={}; ["birthYear","birthMonth","birthDay","workoutFrequency","height","startWeight","currentWeight","targetWeightKg","goal"].forEach(k=>{if(!same(d[k],base[k]))profilePatch[k]=d[k];}); const deadline=goalDeadlineFromPeriod(d.targetPeriod,d.targetPeriodCustom); if((!same(d.birthYear,base.birthYear)||!same(d.birthMonth,base.birthMonth))&&d.birthYear&&d.birthMonth)profilePatch.birthYearMonth=`${d.birthYear}-${String(d.birthMonth).padStart(2,"0")}`; if(!same(d.targetPeriod,base.targetPeriod)){profilePatch.targetPeriod=d.targetPeriod; profilePatch.goalPeriod=d.targetPeriod; profilePatch.goalPeriodType=d.targetPeriod;} if(!same(d.targetPeriodCustom,base.targetPeriodCustom)){profilePatch.targetPeriodCustom=d.targetPeriodCustom; profilePatch.customGoalDate=d.targetPeriodCustom;} if(deadline&&(!same(d.targetPeriod,base.targetPeriod)||!same(d.targetPeriodCustom,base.targetPeriodCustom))){profilePatch.goalDeadline=deadline; profilePatch.targetDate=deadline;} if(Object.keys(profilePatch).length){console.log("[MemberProfile] saveProfileInfo payload",{path:`members/${p.profile.id}`,fields:Object.keys(profilePatch),payload:profilePatch}); const result=await p.saveProfileInfo(profilePatch); setEditing(false);setMsg((result?.messages||["프로필 저장 성공"]).join("\n"));}else{setEditing(false);setMsg("변경된 정보가 없습니다.");}}catch(e){const paths=[`members/${p.profile.id}`,`members/${p.profile.id}/memberOnboarding/main`,`members/${p.profile.id}/bodyCheck/main`]; console.error("[MemberProfile] profile save failed",{paths,code:e?.code,message:e?.message,results:e?.profileSaveResults,failures:e?.profileSaveFailures}); const failedFields=e?.profileSaveFailures?.join("\n")||e?.message||"권한 규칙에서 허용하지 않는 필드가 포함됐을 수 있습니다."; setMsg(`저장 실패
+function MemberProfile(p){const links=[{title:"교정/운동 영상 보기",label:"인스타그램",url:"https://www.instagram.com/teogym_pt",color:"#E1306C",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" strokeWidth="2.5"/></svg>},{title:"운동 루틴 영상 보기",label:"유튜브",url:"https://youtube.com/@gymteo",color:"#FF0000",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96A29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58A2.78 2.78 0 0 0 3.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.95A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="currentColor" stroke="none"/></svg>},{title:"운동 정보/칼럼 보기",label:"블로그",url:"https://m.blog.naver.com/teogym",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>},{title:"센터 새소식 보기",label:"네이버 플레이스",url:"https://naver.me/5ZJFzvnv",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>}]; const loginEmail=(auth.currentUser?.email||p.profile.memberAppAccountEmail||p.profile.email||"-").trim(); const base={birthYear:p.profile.birthYear||p.onboarding.birthYear||"",birthMonth:p.profile.birthMonth||p.onboarding.birthMonth||"",birthYearMonth:p.profile.birthYearMonth||p.onboarding.birthYearMonth||"",birthDay:p.profile.birthDay||p.onboarding.birthDay||"",workoutFrequency:p.profile.workoutFrequency||p.onboarding.weeklyWorkoutCount||"",height:p.profile.height||p.onboarding.heightCm||"",startWeight:p.profile.startWeight||p.startW||"",currentWeight:p.profile.currentWeight||p.curW||"",targetWeightKg:p.onboarding.targetWeightKg||p.onboarding.targetWeight||p.onboarding.goalWeight||p.profile.targetWeightKg||p.profile.targetWeight||p.profile.goalWeight||"",targetPeriod:p.onboarding.targetPeriod||p.onboarding.goalPeriod||p.profile.targetPeriod||"",targetPeriodCustom:p.onboarding.targetPeriodCustom||p.onboarding.goalDeadline||p.onboarding.targetDate||"",goal:p.onboarding.goal||p.profile.goal||""}; const [editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[msg,setMsg]=useState(""); const [showGoalManage,setShowGoalManage]=useState(false); const [d,setD]=useState(base); useEffect(()=>{if(!editing)setD(base);},[editing,base.workoutFrequency,base.height,base.startWeight,base.currentWeight,base.targetWeightKg,base.birthYear,base.birthMonth,base.birthDay,base.birthYearMonth,base.targetPeriod,base.targetPeriodCustom,base.goal]); const same=(a,b)=>String(a??"").trim()===String(b??"").trim(); const edit=patch=>setD(prev=>({...prev,...patch})); const cancel=()=>{setD(base);setEditing(false);p.resetMemberScroll?.();}; const save=async()=>{if(saving)return; setSaving(true);setMsg("");try{const profilePatch={}; ["birthYear","birthMonth","birthDay","workoutFrequency","height","startWeight","currentWeight","targetWeightKg","goal"].forEach(k=>{if(!same(d[k],base[k]))profilePatch[k]=d[k];}); const deadline=goalDeadlineFromPeriod(d.targetPeriod,d.targetPeriodCustom); if((!same(d.birthYear,base.birthYear)||!same(d.birthMonth,base.birthMonth))&&d.birthYear&&d.birthMonth)profilePatch.birthYearMonth=`${d.birthYear}-${String(d.birthMonth).padStart(2,"0")}`; if(!same(d.targetPeriod,base.targetPeriod)){profilePatch.targetPeriod=d.targetPeriod; profilePatch.goalPeriod=d.targetPeriod; profilePatch.goalPeriodType=d.targetPeriod;} if(!same(d.targetPeriodCustom,base.targetPeriodCustom)){profilePatch.targetPeriodCustom=d.targetPeriodCustom; profilePatch.customGoalDate=d.targetPeriodCustom;} if(deadline&&(!same(d.targetPeriod,base.targetPeriod)||!same(d.targetPeriodCustom,base.targetPeriodCustom))){profilePatch.goalDeadline=deadline; profilePatch.targetDate=deadline;} if(Object.keys(profilePatch).length){console.log("[MemberProfile] saveProfileInfo payload",{path:`members/${p.profile.id}`,fields:Object.keys(profilePatch),payload:profilePatch}); const result=await p.saveProfileInfo(profilePatch); setEditing(false);setMsg((result?.messages||["프로필 저장 성공"]).join("\n"));}else{setEditing(false);setMsg("변경된 정보가 없습니다.");}}catch(e){const paths=[`members/${p.profile.id}`,`members/${p.profile.id}/memberOnboarding/main`,`members/${p.profile.id}/bodyCheck/main`]; console.error("[MemberProfile] profile save failed",{paths,code:e?.code,message:e?.message,results:e?.profileSaveResults,failures:e?.profileSaveFailures}); const failedFields=e?.profileSaveFailures?.join("\n")||e?.message||"권한 규칙에서 허용하지 않는 필드가 포함됐을 수 있습니다."; setMsg(`저장 실패
 확인 경로: ${paths.join(" · ")}
 확인 필드: targetWeightKg / weeklyWorkoutCount / goal / currentWeight
-${failedFields}`);}finally{setSaving(false);}}; return <><h1>프로필</h1><div className="profile-head"><div className="avatar">{p.profile.name?.[0]||'T'}</div><div><h2>{p.profile.name}</h2><p>{base.goal}</p></div></div><MCard title="회원 정보"><Info l="로그인 이메일" v={loginEmail}/><EditableInfo editing={editing} l="운동 빈도"><SelectLine label="운동 빈도" value={d.workoutFrequency} opts={[1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} onChange={v=>edit({workoutFrequency:v})}/></EditableInfo>{!editing&&<Info l="운동 빈도" v={base.workoutFrequency||"-"}/>}<EditableInfo editing={editing} l="생년월일"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}><InputLine label="출생연도" type="number" value={d.birthYear} onChange={v=>edit({birthYear:v})}/><SelectLine label="출생월" value={d.birthMonth} opts={["",...Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthMonth:v})}/><SelectLine label="출생일" value={d.birthDay} opts={["",...Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthDay:v})}/></div></EditableInfo>{!editing&&<Info l="생년월일" v={formatBirthYearMonth(base)+(base.birthDay?"-"+String(base.birthDay).padStart(2,"0"):"")}/>} {!editing&&<Info l="나이" v={formatInternationalAgeFromBirth(base)}/>}<EditableInfo editing={editing} l="키"><InputLine label="키(cm)" type="number" value={d.height} onChange={v=>edit({height:v})}/></EditableInfo>{!editing&&<Info l="키" v={base.height?`${base.height}cm`:"-"}/>}<EditableInfo editing={editing} l="시작 체중"><InputLine label="시작 체중(kg)" type="number" value={d.startWeight} onChange={v=>edit({startWeight:v})}/></EditableInfo>{!editing&&<Info l="시작 체중" v={formatWeightValue(base.startWeight)}/>}<EditableInfo editing={editing} l="현재 체중"><InputLine label="현재 체중(kg)" type="number" value={d.currentWeight} onChange={v=>edit({currentWeight:v})}/></EditableInfo>{!editing&&<Info l="현재 체중" v={formatWeightValue(base.currentWeight)}/>}<EditableInfo editing={editing} l="목표 체중"><InputLine label="목표 체중(kg)" type="number" value={d.targetWeightKg} onChange={v=>edit({targetWeightKg:v})}/></EditableInfo>{!editing&&<Info l="목표 체중" v={formatWeightValue(base.targetWeightKg)}/>}<EditableInfo editing={editing} l="목표 기간"><SelectLine label="목표 기간" value={d.targetPeriod} opts={TARGET_PERIOD_OPTIONS} onChange={v=>edit({targetPeriod:v})}/></EditableInfo>{editing&&d.targetPeriod==="직접 입력"&&<EditableInfo editing={editing} l="직접 입력"><InputLine label="목표 기간 직접 입력" type="date" value={d.targetPeriodCustom} onChange={v=>edit({targetPeriodCustom:v})}/></EditableInfo>}{!editing&&<GoalPeriodInfo currentWeight={base.currentWeight} targetWeight={base.targetWeightKg} period={base.targetPeriod} customDate={base.targetPeriodCustom}/>}<EditableInfo editing={editing} l="운동 목표"><SelectLine label="운동 목표" value={d.goal} opts={AI_GOAL_OPTIONS} onChange={v=>edit({goal:v})}/></EditableInfo>{!editing&&<Info l="운동 목표" v={base.goal||"-"}/>}<div className="profile-actions">{editing?<><button className="primary compact" onClick={save} disabled={saving}>{saving?"저장 중...":"저장"}</button><button className="ghost compact" onClick={cancel} disabled={saving}>취소</button></>:<button className="primary compact" onClick={()=>{setD(base);setEditing(true);p.resetMemberScroll?.();}}>정보 수정</button>}</div>{msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}</MCard><MemberNoticeList notices={p.notices} onOpen={p.openNotice}/><MemberNotificationCard memberId={p.profile.id}/><MCard title="바로가기"><div className="link-brand-grid">{links.map(x=><a className="link-brand-card" key={x.url} href={x.url} target="_blank" rel="noreferrer"><div className="link-brand-icon" style={{background:x.color+"18",color:x.color}}>{x.icon}</div><div className="link-brand-info"><b>{x.label}</b><span>{x.title}</span></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0C8D3" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>)}</div></MCard><button className="ghost" onClick={p.onLogout}>로그아웃</button></>}
+${failedFields}`);}finally{setSaving(false);}}; if(showGoalManage) return <MemberGoalManageScreen onboarding={p.onboarding} profile={p.profile} onSave={p.saveGoalUpdate} onBack={()=>{setShowGoalManage(false);p.resetMemberScroll?.();}}/>; return <><h1>프로필</h1><div className="profile-head"><div className="avatar">{p.profile.name?.[0]||'T'}</div><div><h2>{p.profile.name}</h2><p>{base.goal}</p></div></div><MCard title="회원 정보"><Info l="로그인 이메일" v={loginEmail}/><EditableInfo editing={editing} l="운동 빈도"><SelectLine label="운동 빈도" value={d.workoutFrequency} opts={[1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} onChange={v=>edit({workoutFrequency:v})}/></EditableInfo>{!editing&&<Info l="운동 빈도" v={base.workoutFrequency||"-"}/>}<EditableInfo editing={editing} l="생년월일"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}><InputLine label="출생연도" type="number" value={d.birthYear} onChange={v=>edit({birthYear:v})}/><SelectLine label="출생월" value={d.birthMonth} opts={["",...Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthMonth:v})}/><SelectLine label="출생일" value={d.birthDay} opts={["",...Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthDay:v})}/></div></EditableInfo>{!editing&&<Info l="생년월일" v={formatBirthYearMonth(base)+(base.birthDay?"-"+String(base.birthDay).padStart(2,"0"):"")}/>} {!editing&&<Info l="나이" v={formatInternationalAgeFromBirth(base)}/>}<EditableInfo editing={editing} l="키"><InputLine label="키(cm)" type="number" value={d.height} onChange={v=>edit({height:v})}/></EditableInfo>{!editing&&<Info l="키" v={base.height?`${base.height}cm`:"-"}/>}<EditableInfo editing={editing} l="시작 체중"><InputLine label="시작 체중(kg)" type="number" value={d.startWeight} onChange={v=>edit({startWeight:v})}/></EditableInfo>{!editing&&<Info l="시작 체중" v={formatWeightValue(base.startWeight)}/>}<EditableInfo editing={editing} l="현재 체중"><InputLine label="현재 체중(kg)" type="number" value={d.currentWeight} onChange={v=>edit({currentWeight:v})}/></EditableInfo>{!editing&&<Info l="현재 체중" v={formatWeightValue(base.currentWeight)}/>}<EditableInfo editing={editing} l="목표 체중"><InputLine label="목표 체중(kg)" type="number" value={d.targetWeightKg} onChange={v=>edit({targetWeightKg:v})}/></EditableInfo>{!editing&&<Info l="목표 체중" v={formatWeightValue(base.targetWeightKg)}/>}<EditableInfo editing={editing} l="목표 기간"><SelectLine label="목표 기간" value={d.targetPeriod} opts={TARGET_PERIOD_OPTIONS} onChange={v=>edit({targetPeriod:v})}/></EditableInfo>{editing&&d.targetPeriod==="직접 입력"&&<EditableInfo editing={editing} l="직접 입력"><InputLine label="목표 기간 직접 입력" type="date" value={d.targetPeriodCustom} onChange={v=>edit({targetPeriodCustom:v})}/></EditableInfo>}{!editing&&<GoalPeriodInfo currentWeight={base.currentWeight} targetWeight={base.targetWeightKg} period={base.targetPeriod} customDate={base.targetPeriodCustom}/>}<EditableInfo editing={editing} l="운동 목표"><SelectLine label="운동 목표" value={d.goal} opts={AI_GOAL_OPTIONS} onChange={v=>edit({goal:v})}/></EditableInfo>{!editing&&<Info l="운동 목표" v={base.goal||"-"}/>}<div className="profile-actions">{editing?<><button className="primary compact" onClick={save} disabled={saving}>{saving?"저장 중...":"저장"}</button><button className="ghost compact" onClick={cancel} disabled={saving}>취소</button></>:<button className="primary compact" onClick={()=>{setD(base);setEditing(true);p.resetMemberScroll?.();}}>정보 수정</button>}</div>{msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}</MCard><MCard title="목표 관리"><p className="notice soft">운동 목적·집중관리 부위·운동 빈도 등 온보딩 때 설정한 목표를 다시 확인하고 수정할 수 있어요.</p><button className="primary compact" onClick={()=>setShowGoalManage(true)}>목표 관리 열기</button></MCard><MemberNoticeList notices={p.notices} onOpen={p.openNotice}/><MemberNotificationCard memberId={p.profile.id}/><MCard title="바로가기"><div className="link-brand-grid">{links.map(x=><a className="link-brand-card" key={x.url} href={x.url} target="_blank" rel="noreferrer"><div className="link-brand-icon" style={{background:x.color+"18",color:x.color}}>{x.icon}</div><div className="link-brand-info"><b>{x.label}</b><span>{x.title}</span></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0C8D3" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>)}</div></MCard><button className="ghost" onClick={p.onLogout}>로그아웃</button></>}
+
+// 목표 관리 — 온보딩을 전체 재진행하지 않고 주요 목표 항목만 "현재 값 표시 → 수정" 방식으로 부분 수정.
+// 실제 저장은 MemberApp.saveGoalUpdate(onSave)로 위임 — 여기서는 화면/입력값 처리만 담당한다.
+function MemberGoalManageScreen({onboarding,profile,onSave,onBack}){
+  const ob=onboarding||{}; const pr=profile||{};
+  const cur={
+    goal: ob.goal||pr.goal||"",
+    focusAreas: Array.isArray(ob.focusAreas)?ob.focusAreas:[],
+    weeklyWorkoutCount: pr.workoutFrequency||ob.weeklyWorkoutCount||"",
+    averageWorkoutTime: ob.averageWorkoutTime||"",
+    targetWeightKg: ob.targetWeightKg||ob.targetWeight||pr.targetWeightKg||pr.targetWeight||"",
+    targetPeriod: ob.targetPeriod||ob.goalPeriod||pr.targetPeriod||"",
+    targetPeriodCustom: ob.targetPeriodCustom||ob.goalDeadline||ob.targetDate||"",
+  };
+  const displayOf=(key,val,custom)=>{
+    if(key==="focusAreas") return (val&&val.length)?val.join(", "):"-";
+    if(key==="targetWeightKg") return val?`${val}kg`:"-";
+    if(key==="targetPeriod") return val==="직접 입력"?(custom||"-"):(val||"-");
+    return val||"-";
+  };
+  const FIELDS=[
+    {key:"goal",label:"운동 목적",type:"choice",options:AI_GOAL_OPTIONS},
+    {key:"focusAreas",label:"집중관리 부위",type:"multi",options:ONBOARDING_FOCUS},
+    {key:"weeklyWorkoutCount",label:"운동 빈도",type:"choice",options:[0,1,2,3,4,5,6,7].map(n=>`주 ${n}회`)},
+    {key:"averageWorkoutTime",label:"운동 가능 시간",type:"choice",options:WORKOUT_TIME_OPTIONS},
+    {key:"targetWeightKg",label:"목표 체중",type:"number"},
+    {key:"targetPeriod",label:"목표 기간",type:"period"},
+  ];
+  const [editingKey,setEditingKey]=useState(null);
+  const [draft,setDraft]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [msg,setMsg]=useState("");
+
+  const startEdit=(f)=>{ setMsg(""); setEditingKey(f.key); setDraft({ value: f.key==="focusAreas"?[...cur.focusAreas]:cur[f.key], custom: cur.targetPeriodCustom }); };
+  const cancelEdit=()=>{ setEditingKey(null); setDraft(null); };
+
+  const submit=async(f)=>{
+    if(saving||!draft) return;
+    const oldValue=cur[f.key]; const newValue=draft.value;
+    const changed = f.key==="focusAreas"
+      ? JSON.stringify([...(oldValue||[])].sort())!==JSON.stringify([...(newValue||[])].sort())
+      : (String(oldValue??"")!==String(newValue??"")) || (f.key==="targetPeriod"&&newValue==="직접 입력"&&String(cur.targetPeriodCustom||"")!==String(draft.custom||""));
+    if(!changed){ cancelEdit(); return; }
+    setSaving(true); setMsg("");
+    try{
+      const oldDisplay=displayOf(f.key,oldValue,cur.targetPeriodCustom);
+      const newDisplay=displayOf(f.key,newValue,draft.custom);
+      await onSave([{ field:f.key, fieldLabel:f.label, value:newValue, oldDisplay, newDisplay,
+        extra: f.key==="targetPeriod" ? { targetPeriodCustom: newValue==="직접 입력"?(draft.custom||""):"" } : undefined }]);
+      cancelEdit();
+      setMsg("저장했어요.");
+    }catch(e){ setMsg(e?.message||"저장에 실패했습니다."); }
+    finally{ setSaving(false); }
+  };
+
+  const history=Array.isArray(ob.goalHistory)?ob.goalHistory:[];
+
+  return <><h1>목표 관리</h1>
+    <MCard title="주요 목표">
+      {FIELDS.map(f=>(
+        <div key={f.key} style={{padding:"12px 0",borderBottom:"1px solid #E8ECF1"}}>
+          <div style={{fontSize:12,color:"#8B949E",fontWeight:700,marginBottom:4}}>현재 {f.label}</div>
+          {editingKey===f.key ? (
+            <>
+              {f.type==="choice" && <Choices vals={f.options} cur={draft.value} onPick={v=>setDraft(d=>({...d,value:v}))}/>}
+              {f.type==="multi" && <Choices vals={f.options} cur={draft.value} multi onPick={v=>setDraft(d=>({...d,value:d.value.includes(v)?d.value.filter(x=>x!==v):[...d.value,v]}))}/>}
+              {f.type==="number" && <div className="numunit"><input className="bignum" type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={draft.value} onChange={e=>setDraft(d=>({...d,value:sanitizeDecimalInput(e.target.value)}))} placeholder="0"/><span className="numunit-suffix">kg</span></div>}
+              {f.type==="period" && <>
+                <Choices vals={TARGET_PERIOD_OPTIONS} cur={draft.value} onPick={v=>setDraft(d=>({...d,value:v}))}/>
+                {draft.value==="직접 입력" && <input className="bignum" style={{marginTop:10}} type="date" value={draft.custom||""} onChange={e=>setDraft(d=>({...d,custom:e.target.value}))}/>}
+              </>}
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <button className="primary compact" onClick={()=>submit(f)} disabled={saving}>{saving?"저장 중...":"저장"}</button>
+                <button className="ghost compact" onClick={cancelEdit} disabled={saving}>취소</button>
+              </div>
+            </>
+          ) : (
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+              <div style={{fontSize:15,fontWeight:700,color:"#20242A",flex:1,minWidth:0,overflowWrap:"break-word"}}>{displayOf(f.key,cur[f.key],cur.targetPeriodCustom)}</div>
+              <button className="ghost compact" style={{width:"auto",flexShrink:0}} onClick={()=>startEdit(f)}>수정하기</button>
+            </div>
+          )}
+        </div>
+      ))}
+      {msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}
+    </MCard>
+    <MCard title="최근 변경 이력">
+      {history.length===0 ? <p className="notice soft">아직 변경 이력이 없습니다.</p> : history.slice(0,20).map((h,i)=>(
+        <div key={i} style={{padding:"9px 0",borderBottom:"1px solid #E8ECF1"}}>
+          <div style={{fontSize:11,color:"#8B949E"}}>{formatCompactDate(new Date(h.at))} · {h.fieldLabel}</div>
+          <div style={{fontSize:13,color:"#20242A",fontWeight:600,marginTop:2}}>{h.oldValue} → {h.newValue}</div>
+        </div>
+      ))}
+    </MCard>
+    <button className="ghost" onClick={onBack}>← 프로필로 돌아가기</button>
+  </>;
+}
 
 function MemberNoticeList({notices=[],onOpen}){return <MCard title="공지사항">{notices.length?notices.map(n=><button key={n.id} className={`member-notice-row ${n.isRead?"read":"unread"}`} onClick={()=>onOpen?.(n)}><span>{n.isImportant?"📌 중요":"공지"}</span><b>{n.title}</b><em>{formatCompactDate(n.createdAt)}</em><i>{n.isRead?"읽음":"새 공지"}</i></button>):<p className="notice soft">현재 등록된 공지사항이 없습니다.</p>}</MCard>}
 function getNextPtPart(profile){return profile?.nextWorkoutPart&&profile.nextWorkoutPart!=="미정"?normalizeWorkoutPart(profile.nextWorkoutPart):profile?.nextPtPart&&profile.nextPtPart!=="미정"?normalizeWorkoutPart(profile.nextPtPart):"하체";}
@@ -4480,9 +4601,9 @@ const TEST_MEMBER_PRESETS = [
 ];
 
 // 회원 카드 "오늘 입력" 배지/최근 활동 표시 우선순위 (스펙: 메모>근육통>RPE>체중>유산소>칼로리>걸음수)
-const ACTIVITY_PRIORITY = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps"];
-const ACTIVITY_ICON = { memo:"📝", pain:"📍", soreness:"💪", rpe:"😊", condition:"🙂", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟" };
-const ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통", rpe:"RPE", condition:"컨디션", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수" };
+const ACTIVITY_PRIORITY = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps","goal_update"];
+const ACTIVITY_ICON = { memo:"📝", pain:"📍", soreness:"💪", rpe:"😊", condition:"🙂", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟", goal_update:"🎯" };
+const ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통", rpe:"RPE", condition:"컨디션", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수", goal_update:"목표 변경" };
 function sortByActivityPriority(types) {
   return [...types].sort((a,b) => ACTIVITY_PRIORITY.indexOf(a) - ACTIVITY_PRIORITY.indexOf(b));
 }
@@ -4493,18 +4614,29 @@ function formatActivityTime(at) {
 }
 
 // 오늘 회원 입력 피드에 포함할 활동 타입 — 걸음수는 기존 "오늘 활동" 필터와 동일하게 스펙에 없어 제외
-const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal"];
-const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를" };
+const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","goal_update"];
+const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를", goal_update:"을" };
+// goal_update는 회원이 "운동 목적"/"집중관리 부위" 등 서로 다른 항목을 바꿀 수 있어 타입 하나로는 문장에 항목명을 못 담는다 —
+// 이 타입만 ACTIVITY_LABEL 대신 이벤트별 item.label(예: "운동 목적")을 그대로 문장에 사용하고, 조사(을/를)도 그 라벨 기준으로 계산한다.
+const DYNAMIC_LABEL_TYPES = new Set(["goal_update"]);
+const ACTIVITY_VERB = { goal_update: "변경했습니다" };
+function koreanParticleEulReul(word) {
+  const ch = String(word || "").trim().slice(-1);
+  const code = ch.charCodeAt(0);
+  if (!ch || code < 0xAC00 || code > 0xD7A3) return "를"; // 한글 완성형 범위 밖이면 기본값
+  return (code - 0xAC00) % 28 !== 0 ? "을" : "를"; // 종성(받침) 유무로 을/를 판정
+}
 // 오늘 입력 피드 클릭 시 이동할 화면 — 세부 입력 영역까지 스크롤 앵커가 없는 화면 구조라 관련 상위 탭까지만 이동
 const FEED_TARGET_BY_TYPE = {
-  weight:    { targetScreen: "healthhub", healthHubTab: "대시보드" },
-  pain:      { targetScreen: "healthhub", healthHubTab: "대시보드" },
-  condition: { targetScreen: "healthhub", healthHubTab: "대시보드" },
-  kcal:      { targetScreen: "healthhub", healthHubTab: "음식" },
-  cardio:    { targetScreen: "healthhub", healthHubTab: "유산소" },
-  soreness:  { targetScreen: "soreness" },
-  rpe:       { targetScreen: "soreness" },
-  memo:      { targetScreen: "soreness" },
+  weight:      { targetScreen: "healthhub", healthHubTab: "대시보드" },
+  pain:        { targetScreen: "healthhub", healthHubTab: "대시보드" },
+  condition:   { targetScreen: "healthhub", healthHubTab: "대시보드" },
+  kcal:        { targetScreen: "healthhub", healthHubTab: "음식" },
+  cardio:      { targetScreen: "healthhub", healthHubTab: "유산소" },
+  soreness:    { targetScreen: "soreness" },
+  rpe:         { targetScreen: "soreness" },
+  memo:        { targetScreen: "soreness" },
+  goal_update: { targetScreen: "hub" }, // 온보딩/목표 관리 전용 관리자 화면이 따로 없어 회원 상세(허브)로 이동
 };
 function feedItemTarget(type) {
   return FEED_TARGET_BY_TYPE[type] || {};
@@ -4829,7 +4961,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                 <span style={{fontSize:15,flexShrink:0}}>{ACTIVITY_ICON[item.type] || "📌"}</span>
                 <div style={{minWidth:0,flex:1}}>
                   <div style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>
-                    <span style={{color:"#5EEAD4"}}>{item.memberName}</span> 회원이 {ACTIVITY_LABEL[item.type]||item.type}{ACTIVITY_PARTICLE[item.type]||"를"} 입력했습니다
+                    <span style={{color:"#5EEAD4"}}>{item.memberName}</span> 회원이 {DYNAMIC_LABEL_TYPES.has(item.type) ? item.label : (ACTIVITY_LABEL[item.type]||item.type)}
+                    {DYNAMIC_LABEL_TYPES.has(item.type) ? koreanParticleEulReul(item.label) : (ACTIVITY_PARTICLE[item.type]||"를")} {ACTIVITY_VERB[item.type]||"입력했습니다"}
                   </div>
                   <div style={{fontSize:11,color:"#94a3b8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.value}</div>
                 </div>

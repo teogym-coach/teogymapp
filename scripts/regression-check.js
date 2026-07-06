@@ -1301,6 +1301,44 @@ const checks = [
     app.includes('최근 ${biggestGainPeriod.name} 운동 볼륨이 꾸준히 늘면서 중량도 함께 올라가는 좋은 흐름입니다.') &&
     app.includes('최근 교정 운동을 꾸준히 이어온 것이 움직임 개선으로 이어지고 있는 것으로 보입니다.')
   ],
+  // ── 회원앱 "목표 관리" (온보딩 부분 수정 + 변경 이력 + 관리자 피드 연동) ──
+  ['목표 관리: 프로필 화면에 "목표 관리" 메뉴 추가',
+    app.includes('목표 관리 열기') &&
+    app.includes('setShowGoalManage(true)')
+  ],
+  ['목표 관리: MemberGoalManageScreen이 운동목적/집중관리부위/운동빈도/운동가능시간/목표체중/목표기간 6개 항목을 다룸',
+    app.includes('function MemberGoalManageScreen({onboarding,profile,onSave,onBack})') &&
+    ["goal","focusAreas","weeklyWorkoutCount","averageWorkoutTime","targetWeightKg","targetPeriod"].every(k => app.includes(`key:"${k}"`))
+  ],
+  ['목표 관리: 저장은 기존 saveProfileInfo/saveMemberOnboarding을 재사용(중복 저장 로직 없음)',
+    app.includes('const saveGoalUpdate=async(changes)=>{') &&
+    app.includes('if(Object.keys(profileFields).length) await saveProfileInfo(profileFields);') &&
+    app.includes('if(Object.keys(onboardingOnlyFields).length) await saveMemberOnboarding(profile.id,onboardingOnlyFields);')
+  ],
+  ['목표 관리: 변경 이력은 recordGoalChange가 memberOnboarding/main.goalHistory(최근 30건)에 저장',
+    db.includes('export async function recordGoalChange(memberId, changes = [])') &&
+    db.includes('.slice(0, 30)') &&
+    db.includes("source: \"member_goal_update\"")
+  ],
+  ['목표 관리: goalHistory가 Firestore Rules 화이트리스트(memberOnboardingProfileKeysAllowed)에 포함됨',
+    firestoreRules.includes('"restingHeartRate", "goalHistory"')
+  ],
+  ['목표 관리: recordGoalChange가 touchMemberActivities로 goal_update 알림을 오늘 회원 입력 피드에 연동',
+    db.includes('type: "goal_update", label: c.fieldLabel, value: `${c.oldDisplay} → ${c.newDisplay}`') &&
+    app.includes('"goal_update"') && app.includes('TODAY_FEED_TYPES')
+  ],
+  ['목표 관리: 같은 배치에서 같은 type의 활동이 겹쳐도 feedEventId가 충돌하지 않도록 at을 1ms씩 offset',
+    db.includes('const newEntries = activities.map((a, i) => ({') &&
+    db.includes('dateKey: a.dateKey || todayKey, at: now + i,')
+  ],
+  ['목표 관리 피드: goal_update는 항목별 문장(예: "운동 목적을 변경했습니다")을 위해 item.label/조사를 동적으로 계산',
+    app.includes('const DYNAMIC_LABEL_TYPES = new Set(["goal_update"]);') &&
+    app.includes('function koreanParticleEulReul(word)') &&
+    app.includes('ACTIVITY_VERB[item.type]||"입력했습니다"')
+  ],
+  ['목표 관리 피드 이동: goal_update 클릭 시 회원 상세(hub)로 이동 — 전용 관리자 화면이 없어 최소 기준(상세 이동) 충족',
+    app.includes('goal_update: { targetScreen: "hub" }')
+  ],
 ];
 
 let failed = 0;

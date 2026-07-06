@@ -807,6 +807,25 @@ describe("TEO GYM Firestore Rules v8", function () {
       await seedSubcollection("member_paused", "memberOnboarding", "main", { completed: true });
       await assertFails(db.collection("members").doc("member_paused").collection("memberOnboarding").doc("main").get());
     });
+
+    it("[진행중 회원] 목표 관리 — goalHistory 필드 update 허용 (완료 상태는 그대로 유지)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("memberOnboarding").doc("main").update({
+          goalHistory: [{ at: 1, field: "goal", fieldLabel: "운동 목적", oldValue: "다이어트", newValue: "벌크업", source: "member_goal_update", changedBy: MEMBER_A_UID }],
+          updatedAt: new Date(),
+        })
+      );
+    });
+
+    it("[진행중 회원] 화이트리스트에 없는 필드 update 차단 (예: memberUid 위조 시도)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("memberOnboarding").doc("main").update({
+          memberUid: "hacked_uid",
+        })
+      );
+    });
   });
 
   // ════════════════════════════════════════════════════

@@ -1103,9 +1103,11 @@ export async function touchMemberActivities(memberId, activities = []) {
     const types = [...new Set([...prevTypes, ...activities.map(a => a.type)])];
     const prevLog = Array.isArray(data.recentActivityLog) ? data.recentActivityLog : [];
     const now = Date.now();
-    const newEntries = activities.map(a => ({
+    // 같은 배치에서 같은 type의 활동이 여러 건 저장될 수 있어(예: 목표 관리에서 여러 항목 동시 수정)
+    // at을 1ms씩 밀어 feedEventId(memberId, at, type)가 서로 충돌하지 않게 한다.
+    const newEntries = activities.map((a, i) => ({
       type: a.type, label: a.label, value: a.value,
-      dateKey: a.dateKey || todayKey, at: now,
+      dateKey: a.dateKey || todayKey, at: now + i,
     }));
     const recentActivityLog = [...newEntries, ...prevLog].slice(0, 15);
     await updateDoc(ref, {
@@ -1622,7 +1624,7 @@ const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
   "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight",
   "targetWeight", "targetWeightKg", "targetPeriod", "targetPeriodCustom",
   "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
-  "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate",
+  "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory",
 ]);
 
 function sanitizeMemberOnboardingPayload(data = {}) {
@@ -1644,6 +1646,40 @@ export async function saveMemberOnboarding(memberId, data) {
   const payload = sanitizeMemberOnboardingPayload(data);
   await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
   return { id: "main", ...payload };
+}
+
+// ════════════════════════════════════════════════════
+// 회원앱 "목표 관리" — 온보딩 완료 후 주요 목표 항목을 부분 수정할 때의 변경 이력 + 관리자 알림
+// 실제 값 저장은 saveMemberProfileFields/saveMemberOnboarding을 그대로 재사용하고(이 함수는 손대지 않음),
+// 이 함수는 memberOnboarding/main.goalHistory(최근 30건)에 이력만 추가하고
+// touchMemberActivities로 "오늘 회원 입력 피드"에 goal_update 알림을 올린다.
+// ════════════════════════════════════════════════════
+export async function recordGoalChange(memberId, changes = []) {
+  // changes: [{ field, fieldLabel, oldDisplay, newDisplay }]
+  if (!memberId || !changes.length) return;
+  requireUid();
+  try {
+    const ref = doc(db, "members", memberId, "memberOnboarding", "main");
+    const snap = await getDoc(ref);
+    const existing = snap.exists() ? snap.data() : {};
+    const now = Date.now();
+    const changedBy = auth.currentUser?.uid || "";
+    const newEntries = changes.map((c, i) => ({
+      at: now + i, field: c.field, fieldLabel: c.fieldLabel,
+      oldValue: c.oldDisplay, newValue: c.newDisplay,
+      source: "member_goal_update", changedBy,
+    }));
+    const prevHistory = Array.isArray(existing.goalHistory) ? existing.goalHistory : [];
+    const goalHistory = [...newEntries.slice().reverse(), ...prevHistory].slice(0, 30);
+    await setDoc(ref, { goalHistory, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (e) {
+    console.warn("[DB:recordGoalChange] history write failed", e?.code || e?.message || e);
+  }
+  const activities = changes.map(c => ({
+    type: "goal_update", label: c.fieldLabel, value: `${c.oldDisplay} → ${c.newDisplay}`,
+    dateKey: koreaDateKey(),
+  }));
+  await touchMemberActivities(memberId, activities);
 }
 
 // 온보딩 재진행 시 회원앱이 다시 채워 넣는 "온보딩 답변 미러" 필드만 초기화한다.

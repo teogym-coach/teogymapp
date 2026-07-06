@@ -154,7 +154,7 @@ service cloud.firestore {
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
         "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
-        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"
+        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory"
       ]);
     }
 
@@ -166,7 +166,7 @@ service cloud.firestore {
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
         "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
-        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"
+        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory"
       ]);
     }
 

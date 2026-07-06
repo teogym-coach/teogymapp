@@ -443,33 +443,50 @@ const checks = [
     app.includes('const todayKST = getKoreaDateString();') &&
     app.includes('liveMember.todayInputTypes?.date === todayKST')
   ],
+  ['오늘 회원 입력 피드: 트레이너별 읽음 상태(trainerNotificationReads)를 Firestore에서 실시간 구독',
+    app.includes('subscribeToTrainerNotificationReads(user.uid, setNotificationReads)') &&
+    db.includes('export function subscribeToTrainerNotificationReads(trainerUid, onChange)')
+  ],
+  ['오늘 회원 입력 피드: 이벤트 id(feedEventId)로 이미 읽은 알림을 걸러내 "읽지 않은 알림"만 표시',
+    db.includes('export function feedEventId(memberId, at, type)') &&
+    app.includes('const id = feedEventId(m.id, a.at, a.type);') &&
+    app.includes('if (readEventIds.has(id)) return;')
+  ],
   ['오늘 회원 입력 피드: getTodayFeedItems가 전체 회원 recentActivityLog를 병합해 최신 입력순 정렬',
     app.includes('function getTodayFeedItems()') &&
     app.includes('if (a.dateKey !== todayKST || !TODAY_FEED_TYPES.includes(a.type)) return;') &&
     app.includes('items.sort((a,b) => (b.at||0) - (a.at||0))')
   ],
-  ['오늘 회원 입력 피드: 요약 카드(총 N건 · 입력 회원 N명) + 피드 보기 토글',
-    app.includes('입력 회원 ${todayFeedMemberCount}명') &&
-    app.includes('오늘 입력 피드 보기')
+  ['오늘 회원 입력 피드: 요약 카드가 "읽지 않은 알림 N건" 표시, 모두 확인하면 안내 문구로 전환',
+    app.includes('읽지 않은 알림 ${todayFeedItems.length}건') &&
+    app.includes('오늘 새로운 회원 입력이 없습니다.')
   ],
-  ['오늘 회원 입력 피드: 피드 항목 클릭 시 해당 회원 읽음 처리 후 상세 이동',
-    app.includes('if (target) { markAdminInputRead(target.id); onSelect(target); }')
+  ['오늘 회원 입력 피드: 알림 클릭 시 해당 알림 1건만 읽음 처리 + type별 목적 화면(healthhub/soreness)으로 이동',
+    app.includes('onMarkEventsRead?.([item.id]);') &&
+    app.includes('onSelect(target, feedItemTarget(item.type));') &&
+    app.includes('const FEED_TARGET_BY_TYPE = {')
   ],
-  ['NEW 배지: hasNewMemberInput + ADMIN_INPUT_READ_KEY',
-    app.includes('ADMIN_INPUT_READ_KEY') &&
-    app.includes('function hasNewMemberInput(m)') &&
-    app.includes('markAdminInputRead')
+  ['오늘 회원 입력 피드: 읽음 상태는 Firestore(trainerNotificationReads)에 영구 저장되어 새로고침/재로그인에도 유지, 회원 원본 데이터는 변경하지 않음',
+    db.includes('export async function markNotificationEventsRead(trainerUid, todayKey, eventIds = [])') &&
+    firestoreRules.includes('match /trainerNotificationReads/{uid}')
   ],
-  ['NEW 배지: 회원 카드에 🔴 NEW 입력 배지 표시',
-    app.includes('isNewInput = hasNewMemberInput(liveMember)') &&
-    app.includes('🔴 NEW 입력')
+  ['오늘 회원 입력 피드 이동: goHub가 targetScreen/healthHubTab 옵션을 받아 healthhub/soreness로 직접 이동',
+    app.includes('function goHub(m, opts={})') &&
+    app.includes('setScreen(opts.targetScreen || "hub")') &&
+    app.includes('setHealthHubInitialTab(opts.healthHubTab || "대시보드")')
   ],
-  ['NEW 배지: 카드 클릭 시 읽음 처리',
-    app.includes('markAdminInputRead(m.id);onSelect(m)')
+  ['오늘 회원 입력 피드 이동: HealthHubScreen이 initialTab prop으로 시작 탭을 받음',
+    app.includes('function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveBodyData, onSaveNutrition, showToast, onBack, targetCal, initialTab })') &&
+    app.includes('useState(initialTab || "대시보드")')
   ],
-  ['NEW 배지(아이콘 영역): 오늘 입력 피드에 표시되는 회원이면 왼쪽 아이콘에 큰 NEW 표시',
+  ['NEW 표시 통일: 회원 카드 왼쪽 아이콘의 큰 NEW 배지 하나만 사용 (이름 옆 작은 "NEW 입력" 배지는 폐지)',
     app.includes('function hasTodayFeedInput(m)') &&
-    app.includes('hasTodayFeedInput(m) && (')
+    app.includes('hasTodayFeedInput(m) && (') &&
+    !app.includes('🔴 NEW 입력')
+  ],
+  ['NEW 표시: 회원 카드 클릭 시 그 회원의 오늘 미확인 알림을 모두 읽음 처리',
+    app.includes('function markMemberFeedRead(m)') &&
+    app.includes('markMemberFeedRead(m);onSelect(m);')
   ],
   // ── 출석 기능 ──
   ['출석 기능: saveAttendance 함수 존재 (db.js)',

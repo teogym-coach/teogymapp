@@ -351,6 +351,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // trainerNotificationReads: "오늘 회원 입력 피드" 읽음 상태 — 문서 id == 본인 uid일 때만 본인이 읽기/쓰기.
+    // 회원 원본 데이터가 아니라 트레이너 개인의 알림 확인 여부만 담으므로 다른 규칙과 무관하게 독립적으로 존재.
+    match /trainerNotificationReads/{uid} {
+      allow read, write: if isSignedIn() && uid() == uid;
+    }
+
     match /dailyConditioning/{conditioningId} {
       allow read: if isSignedIn() && isPublishedData(resource.data);
       allow create, update: if isSignedIn() && request.resource.data.trainerUid == uid();

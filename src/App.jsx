@@ -27,6 +27,7 @@ import {
   saveAttendance, getAttendanceRecent,
   getCardioLogs, saveCardioLog, deleteCardioLog,
   subscribeToMembers,
+  subscribeToTrainerNotificationReads, markNotificationEventsRead, feedEventId,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -534,28 +535,6 @@ const FUNC_BODY_KEYWORD_MAP = [
   { keys:["목","경추","cervical"], body:"목·경추" },
   { keys:["족저근막","plantar"], body:"족저근막" },
 ];
-
-// 관리자앱 NEW 배지 읽음 상태 (localStorage)
-const ADMIN_INPUT_READ_KEY = "tg_admin_input_read_v1";
-function loadAdminInputRead() {
-  try { return JSON.parse(localStorage.getItem(ADMIN_INPUT_READ_KEY)||"{}"); } catch { return {}; }
-}
-function saveAdminInputRead(data) {
-  try { localStorage.setItem(ADMIN_INPUT_READ_KEY, JSON.stringify(data)); } catch {}
-}
-function markAdminInputRead(memberId) {
-  const data = loadAdminInputRead();
-  data[memberId] = new Date().toISOString();
-  saveAdminInputRead(data);
-}
-function hasNewMemberInput(m) {
-  if (!m?.memberLastInputAt) return false;
-  const readAt = loadAdminInputRead()[m.id];
-  const lastMs = m.memberLastInputAt?.toMillis?.() || (m.memberLastInputAt?.seconds ? m.memberLastInputAt.seconds * 1000 : 0);
-  if (!lastMs) return false;
-  if (!readAt) return true;
-  return lastMs > new Date(readAt).getTime();
-}
 
 // 학습 데이터 (localStorage)
 const FUNC_LEARN_KEY = "tg_func_ex_learn_v1";
@@ -3053,6 +3032,8 @@ export default function App() {
   const [nutritionData, setNutritionData] = useState(null);
   const [cardioLogs, setCardioLogs] = useState([]);
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
+  const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
+  const [healthHubInitialTab, setHealthHubInitialTab] = useState("대시보드"); // 오늘 입력 피드에서 특정 항목을 눌러 건강관리 허브로 이동할 때 시작 탭
   const [loading,  setLoading]  = useState(false);
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
@@ -3086,6 +3067,19 @@ export default function App() {
     });
     return unsub;
   }, [user, memberMode]);
+
+  // 오늘 회원 입력 피드 — 트레이너 본인의 읽음 상태 실시간 구독 (기기/재로그인 상관없이 Firestore 기준으로 유지)
+  useEffect(() => {
+    if (!user || memberMode) return;
+    const unsub = subscribeToTrainerNotificationReads(user.uid, setNotificationReads);
+    return unsub;
+  }, [user, memberMode]);
+
+  // 오늘 회원 입력 피드 항목 읽음 처리 — 이벤트 id만 저장, 회원 원본 데이터는 건드리지 않음
+  async function markFeedEventsRead(eventIds) {
+    if (!user?.uid || !eventIds || !eventIds.length) return;
+    await markNotificationEventsRead(user.uid, getKoreaDateString(), eventIds);
+  }
 
   // 관리자가 현재 열어둔 회원의 새 입력이 실시간으로 감지되면 새로고침 없이 hub/히스토리 화면을 갱신
   const lastSyncedInputAtRef = useRef(null);
@@ -3200,8 +3194,10 @@ export default function App() {
     }
   }
 
-  function goHub(m) {
-    console.log("[TEO GYM] goHub — 회원 전환:", m?.name, m?.id);
+  // opts.targetScreen — 오늘 입력 피드에서 항목별로 다른 화면(healthhub/soreness)으로 바로 이동할 때 사용, 기본은 회원 상세(hub)
+  // opts.healthHubTab — targetScreen이 healthhub일 때 시작 탭
+  function goHub(m, opts={}) {
+    console.log("[TEO GYM] goHub — 회원 전환:", m?.name, m?.id, opts);
     // 이전 회원 데이터 즉시 초기화 (다른 회원 데이터 노출 방지)
     setMember(m);
     setSessions([]);
@@ -3209,7 +3205,8 @@ export default function App() {
     setNutritionData(null);
     setMemberPrivateData(null);
     setCardioLogs([]);
-    setScreen("hub");
+    setHealthHubInitialTab(opts.healthHubTab || "대시보드");
+    setScreen(opts.targetScreen || "hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
   }
@@ -3794,7 +3791,7 @@ export default function App() {
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} />}
-        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
@@ -3819,7 +3816,7 @@ export default function App() {
         {screen==="daily_conditioning" && member && <DailyConditioningAdminScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
-        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} />}
+        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} initialTab={healthHubInitialTab} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -4498,8 +4495,22 @@ function formatActivityTime(at) {
 // 오늘 회원 입력 피드에 포함할 활동 타입 — 걸음수는 기존 "오늘 활동" 필터와 동일하게 스펙에 없어 제외
 const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal"];
 const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를" };
+// 오늘 입력 피드 클릭 시 이동할 화면 — 세부 입력 영역까지 스크롤 앵커가 없는 화면 구조라 관련 상위 탭까지만 이동
+const FEED_TARGET_BY_TYPE = {
+  weight:    { targetScreen: "healthhub", healthHubTab: "대시보드" },
+  pain:      { targetScreen: "healthhub", healthHubTab: "대시보드" },
+  condition: { targetScreen: "healthhub", healthHubTab: "대시보드" },
+  kcal:      { targetScreen: "healthhub", healthHubTab: "음식" },
+  cardio:    { targetScreen: "healthhub", healthHubTab: "유산소" },
+  soreness:  { targetScreen: "soreness" },
+  rpe:       { targetScreen: "soreness" },
+  memo:      { targetScreen: "soreness" },
+};
+function feedItemTarget(type) {
+  return FEED_TARGET_BY_TYPE[type] || {};
+}
 
-function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {
+function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead }) {
   const today = new Date().toISOString().split("T")[0];
   const todayKST = getKoreaDateString(); // 오늘 입력 피드/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
   const [search,     setSearch]     = useState("");
@@ -4518,11 +4529,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     const liveMember = live ? { ...m, ...live } : m;
     return liveMember.todayInputTypes?.date === todayKST ? sortByActivityPriority(liveMember.todayInputTypes.types || []) : [];
   }
-  // 왼쪽 아이콘 영역 NEW 표시 조건 — 오늘 입력 피드에 1건 이상 표시되는 회원(걸음수 제외)
-  function hasTodayFeedInput(m) {
-    return getTodayInputTypes(m).some(t => t !== "steps");
-  }
-  // 오늘 회원 입력 피드 — 전체 회원의 오늘(KST) 활동 로그를 입력 시각순으로 병합
+  // 트레이너 본인이 오늘 읽음 처리한 이벤트 id 집합 — 날짜가 바뀌면(자정 경과) 자동으로 빈 집합 취급
+  const readEventIds = notificationReads?.date === todayKST ? new Set(notificationReads.readEventIds || []) : new Set();
+  // 오늘 회원 입력 피드 — 전체 회원의 오늘(KST) 활동 로그 중 "아직 읽지 않은" 이벤트만 입력 시각순으로 병합
   function getTodayFeedItems() {
     const items = [];
     members.forEach(m => {
@@ -4532,13 +4541,23 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
       const log = Array.isArray(liveMember.recentActivityLog) ? liveMember.recentActivityLog : [];
       log.forEach(a => {
         if (a.dateKey !== todayKST || !TODAY_FEED_TYPES.includes(a.type)) return;
-        items.push({ ...a, memberId: m.id, memberName: m.name });
+        const id = feedEventId(m.id, a.at, a.type);
+        if (readEventIds.has(id)) return; // 이미 확인한 알림은 피드에서 제외
+        items.push({ ...a, id, memberId: m.id, memberName: m.name });
       });
     });
     return items.sort((a,b) => (b.at||0) - (a.at||0));
   }
-  const todayFeedItems = getTodayFeedItems();
-  const todayFeedMemberCount = new Set(todayFeedItems.map(i=>i.memberId)).size;
+  const todayFeedItems = getTodayFeedItems(); // = 읽지 않은 알림 목록
+  // 왼쪽 아이콘 영역 큰 NEW 표시 조건 — 오늘 입력 피드(읽지 않은 알림)에 1건이라도 남아있는 회원만. 작은 NEW 배지는 폐지하고 이 하나로 통일한다.
+  function hasTodayFeedInput(m) {
+    return todayFeedItems.some(i => i.memberId === m.id);
+  }
+  // 회원 카드 클릭 시 그 회원의 오늘 미확인 알림을 전부 읽음 처리
+  function markMemberFeedRead(m) {
+    const ids = todayFeedItems.filter(i => i.memberId === m.id).map(i => i.id);
+    if (ids.length) onMarkEventsRead?.(ids);
+  }
   function getMemberMeta(m) {
     const ss = (sessionsMap[m.id] || []);
     const sorted = [...ss].sort((a,b) => (b.date||"").localeCompare(a.date||""));
@@ -4785,7 +4804,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#5EEAD4"}}>📋 오늘 회원 입력</div>
             <Mo c="#94a3b8" s={11}>
-              {todayFeedItems.length===0 ? "아직 입력이 없습니다" : `총 ${todayFeedItems.length}건 · 입력 회원 ${todayFeedMemberCount}명`}
+              {todayFeedItems.length===0 ? "오늘 새로운 회원 입력이 없습니다." : `읽지 않은 알림 ${todayFeedItems.length}건`}
             </Mo>
           </div>
           <Btn ghost sm onClick={()=>setShowTodayFeed(v=>!v)} style={{color:"#5EEAD4",borderColor:"rgba(94,234,212,.35)"}}>
@@ -4795,12 +4814,14 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         {showTodayFeed && (
           <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto"}}>
             {todayFeedItems.length===0 ? (
-              <Mo c="#475569" s={11}>오늘 회원이 입력한 기록이 아직 없습니다.</Mo>
+              <Mo c="#475569" s={11}>오늘 새로운 회원 입력이 없습니다.</Mo>
             ) : todayFeedItems.map((item,i) => (
-              <div key={`${item.memberId}-${item.at}-${i}`}
+              <div key={item.id||`${item.memberId}-${item.at}-${i}`}
                 onClick={()=>{
                   const target = members.find(x=>x.id===item.memberId);
-                  if (target) { markAdminInputRead(target.id); onSelect(target); }
+                  if (!target) return;
+                  onMarkEventsRead?.([item.id]);
+                  onSelect(target, feedItemTarget(item.type));
                 }}
                 style={{padding:"8px 10px",borderRadius:8,background:"#111827",
                   border:"1px solid rgba(255,255,255,0.06)",cursor:"pointer",
@@ -4879,7 +4900,6 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
             // 실시간 활동 요약 — liveMembersById(onSnapshot)가 있으면 우선 사용, 없으면 기존 members 값으로 폴백
             const live = liveMembersById[m.id];
             const liveMember = live ? { ...m, ...live } : m;
-            const isNewInput = hasNewMemberInput(liveMember);
             const todayInputTypes = getTodayInputTypes(m);
             const recentActivity = (liveMember.recentActivityLog || []).slice(0, 3);
 
@@ -4903,7 +4923,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                   padding:"11px 13px", display:"flex", alignItems:"center", justifyContent:"space-between",
                   opacity: isEnded ? 0.65 : 1, transition:"opacity .15s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",flex:1,minWidth:0}}
-                  onClick={()=>{markAdminInputRead(m.id);onSelect(m);}}>
+                  onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 아이콘 — 오늘 입력 피드에 표시되는 회원이면 우측 상단에 큰 NEW 표시 */}
                   <div style={{width:38,height:38,borderRadius:10,flexShrink:0,position:"relative",
                     background: isEnded ? "rgba(255,255,255,0.05)"
@@ -4965,10 +4985,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,182,193,.2)",color:"#f472b6",fontWeight:700}}>🎂 생일</span>
                       )}
-                      {isNewInput && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(239,68,68,.2)",color:"#EF4444",fontWeight:700}}>🔴 NEW 입력</span>
-                      )}
+                      {/* NEW 표시는 왼쪽 아이콘 영역의 큰 배지 하나로 통일 — 여기(이름 옆)에는 더 이상 표시하지 않는다 */}
                       {/* 오늘 입력 배지 — 다른 상태 배지와 함께 너무 복잡해지지 않도록 우선순위 상위 3개만, 나머지는 +N으로 요약 (상세는 우측 최근활동 참고) */}
                       {!isEnded && todayInputTypes.slice(0,3).map(t => (
                         <span key={t} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
@@ -11911,11 +11928,12 @@ function ReferralStatsScreen({ members=[], onBack }) {
 // ════════════════════════════════════════════
 // 건강관리 허브 — 바디체크 + 영양관리 통합
 // ════════════════════════════════════════════
-function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveBodyData, onSaveNutrition, showToast, onBack, targetCal }) {
+function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveBodyData, onSaveNutrition, showToast, onBack, targetCal, initialTab }) {
   const [memberCheckins,setMemberCheckins]=useState([]);
   useEffect(()=>{let alive=true; if(member?.id)getMemberCheckins(member.id,30).then(v=>alive&&setMemberCheckins(v||[])).catch(()=>{}); return()=>{alive=false};},[member?.id]);
   // ── 단일 탭 state — 항상 정확히 하나만 활성 ──────────────────────────
-  const [tab, setTab] = useState("대시보드");
+  // initialTab: 오늘 입력 피드에서 특정 항목(체중/칼로리/유산소 등)을 눌러 바로 해당 탭으로 진입할 때 사용
+  const [tab, setTab] = useState(initialTab || "대시보드");
 
   const TABS = [
     {key:"대시보드", role:"body",   bodyTab:"대시보드", icon:"📊"},

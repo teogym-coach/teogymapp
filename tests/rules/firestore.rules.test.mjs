@@ -1078,6 +1078,53 @@ describe("TEO GYM Firestore Rules v8", function () {
   });
 
   // ════════════════════════════════════════════════════
+  // 14-1. trainerNotificationReads — "오늘 회원 입력 피드" 읽음 상태 (트레이너 본인 전용)
+  // ════════════════════════════════════════════════════
+  describe("14-1. trainerNotificationReads", () => {
+    it("[본인] 자기 uid 문서 read 허용", async () => {
+      await seedGlobal("trainerNotificationReads", TRAINER_UID, { date: "2026-07-06", readEventIds: ["a__1__weight"] });
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("trainerNotificationReads").doc(TRAINER_UID).get());
+    });
+
+    it("[본인] 자기 uid 문서 write(set) 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(
+        db.collection("trainerNotificationReads").doc(TRAINER_UID)
+          .set({ date: "2026-07-06", readEventIds: ["a__1__weight"] })
+      );
+    });
+
+    it("[다른 트레이너] 남의 uid 문서 read 차단", async () => {
+      await seedGlobal("trainerNotificationReads", TRAINER_UID, { date: "2026-07-06", readEventIds: [] });
+      const db = asUser(testEnv, STRANGER_UID);
+      await assertFails(db.collection("trainerNotificationReads").doc(TRAINER_UID).get());
+    });
+
+    it("[다른 트레이너] 남의 uid 문서 write 차단", async () => {
+      const db = asUser(testEnv, STRANGER_UID);
+      await assertFails(
+        db.collection("trainerNotificationReads").doc(TRAINER_UID)
+          .set({ date: "2026-07-06", readEventIds: ["hacked"] })
+      );
+    });
+
+    it("[회원] 트레이너의 읽음 상태 문서 read/write 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("trainerNotificationReads").doc(TRAINER_UID).get());
+      await assertFails(
+        db.collection("trainerNotificationReads").doc(TRAINER_UID)
+          .set({ date: "2026-07-06", readEventIds: [] })
+      );
+    });
+
+    it("[비로그인] read/write 차단", async () => {
+      const db = asAnon(testEnv);
+      await assertFails(db.collection("trainerNotificationReads").doc(TRAINER_UID).get());
+    });
+  });
+
+  // ════════════════════════════════════════════════════
   // 15. 회원 간 데이터 꼬임 방지 — 교차 접근 차단
   // ════════════════════════════════════════════════════
   describe("15. 회원 간 데이터 꼬임 방지", () => {

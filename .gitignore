@@ -8,3 +8,4 @@ build/
 !.env.example
 backups/
 scripts/serviceAccount.json
+firestore-debug.log

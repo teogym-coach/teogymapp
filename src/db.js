@@ -7,6 +7,7 @@
 //    /members/{id}/bodyCheck/main         ← 바디체크
 //    /members/{id}/nutrition/meta         ← 영양 메타 (목표, 즐겨찾기)
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
+//    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
 //
 //  보안:
 //    - 모든 읽기/쓰기는 auth.currentUser.uid 검증
@@ -1114,6 +1115,36 @@ export async function touchMemberActivities(memberId, activities = []) {
     });
   } catch (e) {
     console.warn("[DB:touchMemberActivities]", e?.code || e?.message || e);
+  }
+}
+
+// ════════════════════════════════════════════════════
+// 관리자(트레이너)의 "오늘 회원 입력 피드" 읽음 상태
+// — 회원 원본 데이터는 건드리지 않고, members/{id}.recentActivityLog의 각 이벤트를
+//   `${memberId}__${at}__${type}` id로 취급해 "읽은 id 목록"만 트레이너별로 저장한다.
+// trainerNotificationReads/{trainerUid}: { date, readEventIds: string[] }
+// ════════════════════════════════════════════════════
+export function feedEventId(memberId, at, type) {
+  return `${memberId}__${at}__${type}`;
+}
+
+export function subscribeToTrainerNotificationReads(trainerUid, onChange) {
+  if (!trainerUid) return () => {};
+  const ref = doc(db, "trainerNotificationReads", trainerUid);
+  return onSnapshot(ref, snap => onChange(snap.exists() ? snap.data() : null));
+}
+
+export async function markNotificationEventsRead(trainerUid, todayKey, eventIds = []) {
+  if (!trainerUid || !eventIds.length) return;
+  try {
+    const ref = doc(db, "trainerNotificationReads", trainerUid);
+    const snap = await getDoc(ref);
+    const data = snap.exists() ? snap.data() : {};
+    const prevIds = data.date === todayKey ? (data.readEventIds || []) : [];
+    const readEventIds = [...new Set([...prevIds, ...eventIds])];
+    await setDoc(ref, { date: todayKey, readEventIds, updatedAt: serverTimestamp() });
+  } catch (e) {
+    console.warn("[DB:markNotificationEventsRead]", e?.code || e?.message || e);
   }
 }
 

@@ -8,7 +8,7 @@
 //    /members/{id}/nutrition/meta         ← 영양 메타 (목표, 즐겨찾기)
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
 //    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
-//    /exerciseClassifications/{trainerUid} ← 운동 종목 자동 분류 전체 회원 공통 학습 데이터
+//    /exerciseClassifications/{trainerUid} ← 센터 공통 운동 라이브러리(운동명→기구/부위/세부부위 마스터 데이터)
 //
 //  보안:
 //    - 모든 읽기/쓰기는 auth.currentUser.uid 검증
@@ -1684,11 +1684,21 @@ export async function recordGoalChange(memberId, changes = []) {
 }
 
 // ════════════════════════════════════════════════════
-// 운동 종목 자동 분류 — 트레이너 "전체 회원 공통" 학습 데이터
+// 운동 종목 자동 분류 — 센터 "공통 운동 라이브러리" (트레이너별 마스터 데이터, 특정 회원에 속하지 않음)
 // exerciseClassifications/{trainerUid}: { items: { [정규화된운동명]: {equipment, muscleTop, muscleSub, displayName, updatedAt} } }
-// 특정 회원에 속하지 않는 트레이너 전역 데이터 — 한 회원 수업일지에서 기구/부위/세부부위를 직접 수정하면
-// 이 문서에 반영되고, 실시간 구독으로 다른 모든 회원 수업일지에도 즉시 같은 분류가 적용된다.
-// (exerciseKey는 호출부(App.jsx)에서 normalizeExName으로 정규화해 전달한다 — 정규화 로직 중복 방지)
+//
+// 한 회원 수업일지에서 트레이너가 기구/부위/세부부위를 직접 수정하면 이 문서에 반영되고,
+// 실시간 구독으로 다른 모든 회원 수업일지에도 즉시 같은 분류가 적용된다(회원별이 아니라 센터 전체 기준).
+// 같은 운동명을 다시 저장해도 새 항목이 생기지 않고 기존 items[key]가 merge되어
+// equipment/muscleTop/muscleSub/displayName/updatedAt만 갱신된다(Firestore setDoc merge:true의 중첩 맵 병합).
+//
+// exerciseKey는 호출부(App.jsx의 canonicalExerciseKey)에서 정규화 + 별칭 통일까지 마친 뒤 전달한다
+// (정규화 로직 중복 방지 — db.js는 순수 Firestore I/O만 담당).
+//
+// 확장 지점: 이 문서가 "기구/부위/세부부위"뿐 아니라 향후 운동 라이브러리 화면(이름/기구/부위/세부부위 수정,
+// 이미지·영상·설명·주의사항·대체 운동 등)의 마스터 데이터로 확장될 때도, 그 화면은 이 두 함수
+// (subscribeToExerciseClassifications로 읽고, saveExerciseClassification(trainerUid, key, patch, displayName)으로
+// 저장)를 그대로 재사용하면 된다 — items[key]는 임의의 추가 필드를 patch에 담아도 기존 필드를 지우지 않고 병합된다.
 // ════════════════════════════════════════════════════
 export function subscribeToExerciseClassifications(trainerUid, onChange) {
   if (!trainerUid) return () => {};

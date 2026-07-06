@@ -3205,10 +3205,11 @@ export default function App() {
     return unsub;
   }, [user, memberMode]);
 
-  // 수업일지에서 트레이너가 기구/부위/세부부위를 직접 수정/저장하면 전체 회원 공통 학습 데이터에 반영
+  // 수업일지에서 트레이너가 기구/부위/세부부위를 직접 수정/저장하면 센터 공통 운동 라이브러리(exerciseClassifications)에 반영.
+  // canonicalExerciseKey를 써서 "벤치프레스"로 저장된 항목을 나중에 "Bench Press"로 입력해도 같은 키로 병합되게 한다.
   function recordExerciseClassification(name, patch) {
     if (!user?.uid || !name) return;
-    const key = normalizeExName(name);
+    const key = canonicalExerciseKey(name);
     if (!key || key.length < 2) return;
     saveExerciseClassification(user.uid, key, patch, name).catch(() => {});
   }
@@ -7141,11 +7142,12 @@ const EX_MUSCLE_SUGGEST = [
 
 // 트레이너가 확인/요청한 종목의 정확한 기구/부위/세부부위 — 공백·대소문자·흔한 표기 차이는
 // normalizeExName으로 정규화한 뒤 "정확히 일치"하는 것만 매칭한다(키워드 부분매칭이 아니라서 다른 종목과 충돌하지 않음).
-// EX_MUSCLE_SUGGEST의 키워드 추론보다 우선 적용되지만, 트레이너의 Firestore 학습 데이터보다는 후순위다.
+// EX_MUSCLE_SUGGEST의 키워드 추론보다 우선 적용되지만, 트레이너의 Firestore 공통 운동 라이브러리(exerciseClassifications)보다는 후순위다.
+// 이 배열은 코드에 내장된 "기본값"이고, exerciseClassifications가 실제 운영 중 쌓이는 "센터 공통 마스터 데이터"다.
 const EXERCISE_LIBRARY = [
   { names:["스모데드리프트","스모데드"],                         equipment:"바벨",  muscleTop:"하체",     muscleSub:"전체" },
   { names:["푸쉬업","푸시업","pushup"],                           equipment:"맨몸",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
-  { names:["벤치프레스"],                                        equipment:"바벨",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
+  { names:["벤치프레스","benchpress","bench press"],              equipment:"바벨",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
   { names:["덤벨플라이"],                                        equipment:"덤벨",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
   { names:["케이블프레스다운로프","프레스다운로프"],              equipment:"케이블", muscleTop:"팔-삼두근", muscleSub:"외측두" },
   { names:["케이블플라이"],                                      equipment:"케이블", muscleTop:"가슴",     muscleSub:"가운데가슴" },
@@ -7153,10 +7155,19 @@ const EXERCISE_LIBRARY = [
   { names:["케이블프레스다운","프레스다운"],                      equipment:"케이블", muscleTop:"팔-삼두근", muscleSub:"전체" },
 ];
 const EXERCISE_LIBRARY_BY_NAME = new Map();
-EXERCISE_LIBRARY.forEach(entry => entry.names.forEach(n => EXERCISE_LIBRARY_BY_NAME.set(n, entry)));
+EXERCISE_LIBRARY.forEach(entry => entry.names.forEach(n => EXERCISE_LIBRARY_BY_NAME.set(normalizeExName(n), entry)));
 function getLibraryClassification(name) {
   const key = normalizeExName(name);
   return key ? (EXERCISE_LIBRARY_BY_NAME.get(key) || null) : null;
+}
+// 정규화 키만으로는 언어가 다른 표기(예: "벤치프레스" vs "bench press")를 하나로 묶을 수 없으므로,
+// EXERCISE_LIBRARY에 별칭이 등록된 운동은 그 항목의 대표 이름으로 저장/조회 키를 통일한다.
+// (별칭이 없는 임의의 새 운동명은 그대로 normalizeExName 결과를 키로 사용 — 추측 번역은 하지 않는다)
+function canonicalExerciseKey(name) {
+  const key = normalizeExName(name);
+  if (!key) return key;
+  const lib = EXERCISE_LIBRARY_BY_NAME.get(key);
+  return lib ? normalizeExName(lib.names[0]) : key;
 }
 
 // 운동명 기반 부위/세부부위 추천 (키워드 포함 여부로 매칭)
@@ -7164,10 +7175,10 @@ function getLibraryClassification(name) {
 // 운동명 → 기구 자동 추천 + 학습 시스템
 // ════════════════════════════════════════════
 
-// 운동명 정규화 (비교 정확도 향상)
+// 운동명 정규화 — 공백/하이픈/괄호/구두점뿐 아니라 한글·영문·숫자가 아닌 모든 문자(불필요한 특수문자)를 제거하고 소문자화한다.
+// "벤치프레스" / "벤치 프레스" / "Bench-Press!" 모두 같은 키로 정규화된다.
 function normalizeExName(name) {
-  return (name||"").toLowerCase()
-    .replace(/[\s\-_()（）]/g,"").replace(/[.,!?]/g,"");
+  return (name||"").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 // 키워드 기반 기구 자동 추천 — 입력값/키워드 모두 normalizeExName으로 정규화한 뒤 비교해
@@ -7193,17 +7204,18 @@ function getAutoEquipmentByName(name) {
   return null;
 }
 
-// 운동 종목 자동 분류 통합 추천 — 우선순위: 1) 트레이너 전체 공통 학습(Firestore, classifications)
-// 2) EXERCISE_LIBRARY(정확 매칭) 3) 기존 키워드 추론(EX_MUSCLE_SUGGEST/getAutoEquipmentByName)
+// 운동 종목 자동 분류 통합 추천 — 우선순위: 1) 센터 공통 운동 라이브러리(Firestore exerciseClassifications, classifications)
+// 2) 기본 운동 라이브러리(EXERCISE_LIBRARY, 정확 매칭) 3) 기존 키워드 추론(EX_MUSCLE_SUGGEST/getAutoEquipmentByName)
 // classifications는 App 최상위에서 exerciseClassifications/{trainerUid}를 실시간 구독한 { [정규화된운동명]: {equipment,muscleTop,muscleSub} } 맵이다.
+// canonicalExerciseKey를 써서 "벤치프레스"/"Bench Press"처럼 별칭이 등록된 표기는 같은 항목을 조회한다.
 function suggestEquipment(name, classifications) {
-  const key = normalizeExName(name);
+  const key = canonicalExerciseKey(name);
   const learned = key ? classifications?.[key]?.equipment : null;
   return learned || getLibraryClassification(name)?.equipment || getAutoEquipmentByName(name);
 }
 
 function suggestMuscle(name, classifications) {
-  const key = normalizeExName(name);
+  const key = canonicalExerciseKey(name);
   const learned = key ? classifications?.[key] : null;
   if (learned?.muscleTop) return { top: learned.muscleTop, sub: learned.muscleSub || mSubs(learned.muscleTop)[0] || "" };
   const lib = getLibraryClassification(name);

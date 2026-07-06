@@ -416,6 +416,19 @@ const checks = [
     app.includes('function suggestMuscle(name, classifications)') &&
     app.includes('return learned || getLibraryClassification(name)?.equipment || getAutoEquipmentByName(name);')
   ],
+  ['운동명 정규화: 한글/영문/숫자가 아닌 모든 문자를 제거(유니코드 인식)해 공백·대소문자·특수문자 표기 차이를 통일',
+    app.includes('function normalizeExName(name) {') &&
+    app.includes('replace(/[^\\p{L}\\p{N}]/gu, "")')
+  ],
+  ['운동명 정규화: canonicalExerciseKey가 EXERCISE_LIBRARY 별칭(예: 벤치프레스/Bench Press)을 대표 이름 하나로 통일해 저장/조회 키가 갈리지 않게 함',
+    app.includes('function canonicalExerciseKey(name)') &&
+    app.includes('"벤치프레스","benchpress","bench press"') &&
+    app.includes('const key = canonicalExerciseKey(name);')
+  ],
+  ['운동 종목 전체 회원 공통 학습: 같은 운동명 재저장 시 새 항목 대신 items[key]가 merge되어 equipment/muscleTop/muscleSub/displayName/updatedAt만 갱신(Firestore setDoc merge:true)',
+    db.includes('items: { [exerciseKey]: { ...clean(patch), displayName, updatedAt: serverTimestamp() } },') &&
+    db.includes('}, { merge: true });')
+  ],
   ['생일 배지: isTodayBirthday 함수 존재',
     app.includes('function isTodayBirthday(m)') &&
     app.includes('now.getMonth() + 1 === bm && now.getDate() === bd')

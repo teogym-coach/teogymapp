@@ -383,8 +383,8 @@ const checks = [
     app.includes('teo 대표님 owner') &&
     app.includes('ownerAlias')
   ],
-  ['운동 자동 분류: 덤벨 벤치프레스 → 가슴/가운데 가슴',
-    app.includes('"덤벨 벤치프레스"') && app.includes('sub:"가운데 가슴"')
+  ['운동 자동 분류: 덤벨 벤치프레스 → 가슴/가운데가슴 (공백 있는 "가운데 가슴" 값은 MUSCLE_MAP 옵션과 안 맞아 제거)',
+    app.includes('"덤벨 벤치프레스"') && app.includes('sub:"가운데가슴"') && !app.includes('sub:"가운데 가슴"')
   ],
   ['운동 자동 분류: 업라이트 로우 → 어깨/전면·측면',
     app.includes('"업라이트 로우"') && (app.includes('sub:"전면·측면"') || app.includes("sub:'전면·측면'"))
@@ -392,15 +392,29 @@ const checks = [
   ['운동 자동 분류: 사이드 래터럴 레이즈 추가',
     app.includes('"사이드 래터럴 레이즈"')
   ],
-  ['근육 부위 자동 학습: MUSCLE_LEARN_KEY + threshold 3',
-    app.includes('MUSCLE_LEARN_KEY') &&
-    app.includes('recordMuscleLearn') &&
-    app.includes('getLearnedMuscle') &&
-    app.includes('c >= 3')
+  ['운동 자동 분류: 요청 종목(스모 데드리프트/푸쉬업/벤치프레스/덤벨 플라이/케이블 프레스다운(로프)/케이블 플라이/라잉 트라이셉스 익스텐션) 정확 매칭 라이브러리 등록',
+    app.includes('const EXERCISE_LIBRARY = [') &&
+    ["스모데드리프트","푸쉬업","벤치프레스","덤벨플라이","케이블프레스다운로프","케이블플라이","라잉트라이셉스익스텐션","케이블프레스다운"].every(k => app.includes(`"${k}"`))
   ],
-  ['근육 부위 자동 학습: suggestMuscle이 학습값 우선 사용',
-    app.includes('const learned = getLearnedMuscle(name)') &&
-    app.includes('if (learned) return learned;')
+  ['운동 자동 분류: EXERCISE_LIBRARY는 normalizeExName으로 정규화된 이름을 정확 일치(Map)로 조회 — 키워드 부분매칭과 충돌하지 않음',
+    app.includes('const EXERCISE_LIBRARY_BY_NAME = new Map();') &&
+    app.includes('function getLibraryClassification(name)')
+  ],
+  ['운동 자동 분류: 킥백의 muscleTop 오타("삼두") 수정 — MUSCLE_MAP에 없는 값이라 드롭다운이 깨지는 문제 방지',
+    app.includes('top:"팔-삼두근", sub:"외측두"') && !app.includes('top:"삼두"')
+  ],
+  ['운동 종목 전체 회원 공통 학습: exerciseClassifications/{trainerUid}를 실시간 구독해 회원과 무관하게 전체 적용',
+    app.includes('subscribeToExerciseClassifications(user.uid, setExerciseClassifications)') &&
+    db.includes('export function subscribeToExerciseClassifications(trainerUid, onChange)')
+  ],
+  ['운동 종목 전체 회원 공통 학습: 트레이너가 직접 수정하면 saveExerciseClassification으로 즉시 저장(localStorage 아님)',
+    app.includes('function recordExerciseClassification(name, patch)') &&
+    db.includes('export async function saveExerciseClassification(trainerUid, exerciseKey, patch, displayName)')
+  ],
+  ['운동 종목 자동 분류 우선순위: 1) Firestore 학습 데이터 2) EXERCISE_LIBRARY 정확 매칭 3) 기존 키워드 추론(EX_MUSCLE_SUGGEST/getAutoEquipmentByName)',
+    app.includes('function suggestEquipment(name, classifications)') &&
+    app.includes('function suggestMuscle(name, classifications)') &&
+    app.includes('return learned || getLibraryClassification(name)?.equipment || getAutoEquipmentByName(name);')
   ],
   ['생일 배지: isTodayBirthday 함수 존재',
     app.includes('function isTodayBirthday(m)') &&
@@ -666,20 +680,22 @@ const checks = [
     app.includes('if(sets.length<=1){showToast("최소 1세트 유지");return e;}') &&
     app.includes('const key = who==="A"?"setsA":"setsB";')
   ],
-  ['2:1 운동 종목 자동 매칭: 1:1과 동일한 매핑 함수(suggestMuscle/suggestEquipment)를 공용 스코프로 재사용',
-    app.includes('function suggestMuscle(name) {') &&
-    app.includes('function suggestEquipment(name) {') &&
-    (app.match(/function suggestMuscle\(name\) \{/g) || []).length === 1 &&
-    (app.match(/function suggestEquipment\(name\) \{/g) || []).length === 1
+  ['2:1 운동 종목 자동 매칭: 1:1과 동일한 매핑 함수(suggestMuscle/suggestEquipment, classifications 포함)를 공용 스코프로 재사용',
+    app.includes('function suggestMuscle(name, classifications) {') &&
+    app.includes('function suggestEquipment(name, classifications) {') &&
+    (app.match(/function suggestMuscle\(name, classifications\) \{/g) || []).length === 1 &&
+    (app.match(/function suggestEquipment\(name, classifications\) \{/g) || []).length === 1
   ],
-  ['2:1 자동 매칭: 이름 입력 시 부위/기구 자동 채움 + 수동 수정값은 이후 덮어쓰지 않음(_muscleManual/_equipManual)',
+  ['2:1 자동 매칭: 이름 입력 시 부위/기구 자동 채움(muscleSub 포함) + 수동 수정값은 이후 덮어쓰지 않음(_muscleManual/_equipManual) + 수정 시 전체 공통 학습 데이터에 기록',
     app.includes('if (!e._muscleManual) {') &&
-    app.includes('const sug = suggestMuscle(val);') &&
-    app.includes('if (sug?.top) u.muscleTop = sug.top;') &&
+    app.includes('const sug = suggestMuscle(val, classifications);') &&
+    app.includes('if (sug?.top) { u.muscleTop = sug.top; u.muscleSub =') &&
     app.includes('if (!e._equipManual) {') &&
-    app.includes('const sugEq = suggestEquipment(val);') &&
+    app.includes('const sugEq = suggestEquipment(val, classifications);') &&
     app.includes('} else if (field==="muscleTop") {') &&
-    app.includes('} else if (field==="equipment") {')
+    app.includes('} else if (field==="equipment") {') &&
+    app.includes('onLearnExercise?.(e.name, { muscleTop: val, muscleSub: mSubs(val)[0] || "" });') &&
+    app.includes('onLearnExercise?.(e.name, { equipment: val });')
   ],
   ['2:1 하단 버튼: 목록으로 가기 + 저장 + 나눠서 기록(나눠서 기록이 가장 넓은 영역)',
     app.includes('목록으로 가기') &&

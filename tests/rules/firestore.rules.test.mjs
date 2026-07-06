@@ -1144,6 +1144,45 @@ describe("TEO GYM Firestore Rules v8", function () {
   });
 
   // ════════════════════════════════════════════════════
+  // 14-2. exerciseClassifications — 운동 종목 자동 분류 "전체 회원 공통" 학습 데이터 (트레이너 본인 전용)
+  // ════════════════════════════════════════════════════
+  describe("14-2. exerciseClassifications", () => {
+    it("[본인] 자기 uid 문서 read 허용", async () => {
+      await seedGlobal("exerciseClassifications", TRAINER_UID, { items: { "스모데드리프트": { equipment: "바벨", muscleTop: "하체", muscleSub: "전체" } } });
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("exerciseClassifications").doc(TRAINER_UID).get());
+    });
+
+    it("[본인] 자기 uid 문서에 항목 merge write 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(
+        db.collection("exerciseClassifications").doc(TRAINER_UID)
+          .set({ items: { "벤치프레스": { equipment: "바벨", muscleTop: "가슴", muscleSub: "가운데가슴" } } }, { merge: true })
+      );
+    });
+
+    it("[다른 트레이너] 남의 uid 문서 read/write 차단", async () => {
+      await seedGlobal("exerciseClassifications", TRAINER_UID, { items: {} });
+      const db = asUser(testEnv, STRANGER_UID);
+      await assertFails(db.collection("exerciseClassifications").doc(TRAINER_UID).get());
+      await assertFails(
+        db.collection("exerciseClassifications").doc(TRAINER_UID)
+          .set({ items: { "해킹": { equipment: "바벨" } } }, { merge: true })
+      );
+    });
+
+    it("[회원] exerciseClassifications read/write 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("exerciseClassifications").doc(TRAINER_UID).get());
+    });
+
+    it("[비로그인] read/write 차단", async () => {
+      const db = asAnon(testEnv);
+      await assertFails(db.collection("exerciseClassifications").doc(TRAINER_UID).get());
+    });
+  });
+
+  // ════════════════════════════════════════════════════
   // 15. 회원 간 데이터 꼬임 방지 — 교차 접근 차단
   // ════════════════════════════════════════════════════
   describe("15. 회원 간 데이터 꼬임 방지", () => {

@@ -8,6 +8,7 @@
 //    /members/{id}/nutrition/meta         ← 영양 메타 (목표, 즐겨찾기)
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
 //    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
+//    /exerciseClassifications/{trainerUid} ← 운동 종목 자동 분류 전체 회원 공통 학습 데이터
 //
 //  보안:
 //    - 모든 읽기/쓰기는 auth.currentUser.uid 검증
@@ -1680,6 +1681,31 @@ export async function recordGoalChange(memberId, changes = []) {
     dateKey: koreaDateKey(),
   }));
   await touchMemberActivities(memberId, activities);
+}
+
+// ════════════════════════════════════════════════════
+// 운동 종목 자동 분류 — 트레이너 "전체 회원 공통" 학습 데이터
+// exerciseClassifications/{trainerUid}: { items: { [정규화된운동명]: {equipment, muscleTop, muscleSub, displayName, updatedAt} } }
+// 특정 회원에 속하지 않는 트레이너 전역 데이터 — 한 회원 수업일지에서 기구/부위/세부부위를 직접 수정하면
+// 이 문서에 반영되고, 실시간 구독으로 다른 모든 회원 수업일지에도 즉시 같은 분류가 적용된다.
+// (exerciseKey는 호출부(App.jsx)에서 normalizeExName으로 정규화해 전달한다 — 정규화 로직 중복 방지)
+// ════════════════════════════════════════════════════
+export function subscribeToExerciseClassifications(trainerUid, onChange) {
+  if (!trainerUid) return () => {};
+  const ref = doc(db, "exerciseClassifications", trainerUid);
+  return onSnapshot(ref, snap => onChange(snap.exists() ? (snap.data().items || {}) : {}));
+}
+
+export async function saveExerciseClassification(trainerUid, exerciseKey, patch, displayName) {
+  if (!trainerUid || !exerciseKey || !patch) return;
+  try {
+    const ref = doc(db, "exerciseClassifications", trainerUid);
+    await setDoc(ref, {
+      items: { [exerciseKey]: { ...clean(patch), displayName, updatedAt: serverTimestamp() } },
+    }, { merge: true });
+  } catch (e) {
+    console.warn("[DB:saveExerciseClassification]", e?.code || e?.message || e);
+  }
 }
 
 // 온보딩 재진행 시 회원앱이 다시 채워 넣는 "온보딩 답변 미러" 필드만 초기화한다.

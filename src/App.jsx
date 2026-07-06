@@ -28,6 +28,7 @@ import {
   getCardioLogs, saveCardioLog, deleteCardioLog,
   subscribeToMembers,
   subscribeToTrainerNotificationReads, markNotificationEventsRead, feedEventId,
+  subscribeToExerciseClassifications, saveExerciseClassification,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -3154,6 +3155,7 @@ export default function App() {
   const [cardioLogs, setCardioLogs] = useState([]);
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
+  const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
   const [healthHubInitialTab, setHealthHubInitialTab] = useState("대시보드"); // 오늘 입력 피드에서 특정 항목을 눌러 건강관리 허브로 이동할 때 시작 탭
   const [loading,  setLoading]  = useState(false);
   const [toast,    setToast]    = useState(null);
@@ -3195,6 +3197,21 @@ export default function App() {
     const unsub = subscribeToTrainerNotificationReads(user.uid, setNotificationReads);
     return unsub;
   }, [user, memberMode]);
+
+  // 운동 종목 자동 분류 — 트레이너 전체 공통 학습 데이터 실시간 구독 (특정 회원이 아니라 트레이너 전체에 공통 적용)
+  useEffect(() => {
+    if (!user || memberMode) return;
+    const unsub = subscribeToExerciseClassifications(user.uid, setExerciseClassifications);
+    return unsub;
+  }, [user, memberMode]);
+
+  // 수업일지에서 트레이너가 기구/부위/세부부위를 직접 수정/저장하면 전체 회원 공통 학습 데이터에 반영
+  function recordExerciseClassification(name, patch) {
+    if (!user?.uid || !name) return;
+    const key = normalizeExName(name);
+    if (!key || key.length < 2) return;
+    saveExerciseClassification(user.uid, key, patch, name).catch(() => {});
+  }
 
   // 오늘 회원 입력 피드 항목 읽음 처리 — 이벤트 id만 저장, 회원 원본 데이터는 건드리지 않음
   async function markFeedEventsRead(eventIds) {
@@ -3916,10 +3933,10 @@ export default function App() {
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
-        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} />}
+        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
-        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} />}
+        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
@@ -7059,19 +7076,19 @@ function removeDraft(key) {
 // ════════════════════════════════════════════
 const EX_MUSCLE_SUGGEST = [
   // ── 사용자 지정 우선순위 ────────────────────
-  { keys:["덤벨 벤치프레스","db 벤치프레스"],                                           top:"가슴", sub:"가운데 가슴" },
-  { keys:["덤벨 플라이","db 플라이"],                                                    top:"가슴", sub:"가운데 가슴" },
+  { keys:["덤벨 벤치프레스","db 벤치프레스"],                                           top:"가슴", sub:"가운데가슴" },
+  { keys:["덤벨 플라이","db 플라이"],                                                    top:"가슴", sub:"가운데가슴" },
   { keys:["케이블 프론트 프레스"],                                                       top:"어깨", sub:"전면"       },
   { keys:["리어델트 머신","rear delt machine"],                                           top:"어깨", sub:"후면"       },
   { keys:["업라이트 로우","upright row"],                                                 top:"어깨", sub:"전면·측면"  },
   { keys:["사이드 래터럴 레이즈","side lateral raise","래터럴 레이즈"],                   top:"어깨", sub:"측면"       },
   // ── 가슴 ──────────────────────────────────
-  { keys:["벤치프레스","bench press","바벨 벤치"],      top:"가슴", sub:"대흉근 전체" },
+  { keys:["벤치프레스","bench press","바벨 벤치"],      top:"가슴", sub:"가운데가슴" },
   { keys:["인클라인 벤치","incline bench","윗가슴"],    top:"가슴", sub:"윗가슴"     },
   { keys:["디클라인 벤치","decline bench","아랫가슴"],  top:"가슴", sub:"아랫가슴"   },
-  { keys:["덤벨 플라이","dumbbell fly","케이블 플라이","플라이"],top:"가슴", sub:"대흉근 전체"},
+  { keys:["덤벨 플라이","dumbbell fly","케이블 플라이","플라이"],top:"가슴", sub:"가운데가슴"},
   { keys:["딥스","dips"],                               top:"가슴", sub:"아랫가슴"   },
-  { keys:["덤벨 벤치","db 벤치","db벤치"],              top:"가슴", sub:"대흉근 전체"},
+  { keys:["덤벨 벤치","db 벤치","db벤치"],              top:"가슴", sub:"가운데가슴"},
   // ── 등 ────────────────────────────────────
   { keys:["랫풀다운","lat pulldown","풀다운"],           top:"등",   sub:"광배근"     },
   { keys:["시티드 로우","seated row","케이블 로우","로우"],top:"등",  sub:"광배근"    },
@@ -7080,20 +7097,19 @@ const EX_MUSCLE_SUGGEST = [
   { keys:["풀업","pull up","친업","chin up","턱걸이"],   top:"등",   sub:"광배근"     },
   { keys:["루마니안 데드","rdl","루마니안"],             top:"등",   sub:"광배근"     },
   { keys:["데드리프트","deadlift"],                      top:"등",   sub:"광배근"     },
-  { keys:["페이스 풀","face pull"],                      top:"등",   sub:"후면삼각근" },
   // ── 어깨 ──────────────────────────────────
-  { keys:["업라이트 로우","upright row"],                 top:"어깨",sub:"측면삼각근" }, // 로우보다 우선
-  { keys:["페이스풀","페이스 풀","face pull"],            top:"어깨",sub:"후면삼각근" }, // 케이블 페이스풀
-  { keys:["리어델트","리어 델트","rear delt","리어레이즈"],top:"어깨",sub:"후면삼각근" },
-  { keys:["사이드 레터럴","사이드 레이즈","lateral raise"],top:"어깨",sub:"측면삼각근" },
-  { keys:["숄더프레스","shoulder press","오버헤드 프레스","ohp","밀리터리"],top:"어깨",sub:"전면삼각근"},
-  { keys:["프론트 레이즈","front raise"],                 top:"어깨",sub:"전면삼각근" },
+  { keys:["업라이트 로우","upright row"],                 top:"어깨",sub:"측면" }, // 로우보다 우선
+  { keys:["페이스풀","페이스 풀","face pull"],            top:"어깨",sub:"후면" }, // 케이블 페이스풀
+  { keys:["리어델트","리어 델트","rear delt","리어레이즈"],top:"어깨",sub:"후면" },
+  { keys:["사이드 레터럴","사이드 레이즈","lateral raise"],top:"어깨",sub:"측면" },
+  { keys:["숄더프레스","shoulder press","오버헤드 프레스","ohp","밀리터리"],top:"어깨",sub:"전면"},
+  { keys:["프론트 레이즈","front raise"],                 top:"어깨",sub:"전면" },
   // ── 하체 ──────────────────────────────────
   { keys:["스쿼트","squat"],                             top:"하체", sub:"전체"      },
-  { keys:["레그프레스","leg press"],                     top:"하체", sub:"대퇴사두근" },
-  { keys:["레그 익스텐션","leg extension"],              top:"하체", sub:"대퇴사두근" },
+  { keys:["레그프레스","leg press"],                     top:"하체", sub:"대퇴사두" },
+  { keys:["레그 익스텐션","leg extension"],              top:"하체", sub:"대퇴사두" },
   { keys:["레그컬","leg curl","누운 레그컬","앉아서 레그컬"],top:"하체",sub:"햄스트링"},
-  { keys:["런지","lunge","불가리안 스플릿","스플릿 스쿼트"],top:"하체",sub:"대퇴사두근"},
+  { keys:["런지","lunge","불가리안 스플릿","스플릿 스쿼트"],top:"하체",sub:"대퇴사두"},
   { keys:["힙쓰러스트","hip thrust","힙 브릿지"],         top:"하체", sub:"둔근"      },
   { keys:["카프레이즈","calf raise","종아리"],            top:"하체", sub:"종아리"    },
   { keys:["스모 데드","sumo dead"],                      top:"하체", sub:"내전근"     },
@@ -7112,7 +7128,7 @@ const EX_MUSCLE_SUGGEST = [
   { keys:["오버헤드 익스텐션","overhead extension"],       top:"팔-삼두근", sub:"장두"             },
   { keys:["스컬 크러셔","skull crusher","라잉 익스텐션"],  top:"팔-삼두근", sub:"전체"             },
   { keys:["클로즈 그립","narrow grip","좁은 그립"],        top:"팔-삼두근", sub:"전체"             },
-  { keys:["킥백","kickback"],                            top:"삼두", sub:"외측두"    },
+  { keys:["킥백","kickback"],                            top:"팔-삼두근", sub:"외측두"    },
   // ── 코어/기능 ─────────────────────────────
   { keys:["플랭크","plank"],                             top:"코어", sub:"코어"      },
   { keys:["크런치","crunch"],                            top:"코어", sub:"복직근"    },
@@ -7122,6 +7138,26 @@ const EX_MUSCLE_SUGGEST = [
   { keys:["케이블 크런치","cable crunch"],               top:"코어", sub:"복직근"    },
   { keys:["복부","ab ","ab_","core"],                    top:"코어", sub:"복직근"    },
 ];
+
+// 트레이너가 확인/요청한 종목의 정확한 기구/부위/세부부위 — 공백·대소문자·흔한 표기 차이는
+// normalizeExName으로 정규화한 뒤 "정확히 일치"하는 것만 매칭한다(키워드 부분매칭이 아니라서 다른 종목과 충돌하지 않음).
+// EX_MUSCLE_SUGGEST의 키워드 추론보다 우선 적용되지만, 트레이너의 Firestore 학습 데이터보다는 후순위다.
+const EXERCISE_LIBRARY = [
+  { names:["스모데드리프트","스모데드"],                         equipment:"바벨",  muscleTop:"하체",     muscleSub:"전체" },
+  { names:["푸쉬업","푸시업","pushup"],                           equipment:"맨몸",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
+  { names:["벤치프레스"],                                        equipment:"바벨",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
+  { names:["덤벨플라이"],                                        equipment:"덤벨",  muscleTop:"가슴",     muscleSub:"가운데가슴" },
+  { names:["케이블프레스다운로프","프레스다운로프"],              equipment:"케이블", muscleTop:"팔-삼두근", muscleSub:"외측두" },
+  { names:["케이블플라이"],                                      equipment:"케이블", muscleTop:"가슴",     muscleSub:"가운데가슴" },
+  { names:["라잉트라이셉스익스텐션"],                             equipment:"바벨",  muscleTop:"팔-삼두근", muscleSub:"전체" },
+  { names:["케이블프레스다운","프레스다운"],                      equipment:"케이블", muscleTop:"팔-삼두근", muscleSub:"전체" },
+];
+const EXERCISE_LIBRARY_BY_NAME = new Map();
+EXERCISE_LIBRARY.forEach(entry => entry.names.forEach(n => EXERCISE_LIBRARY_BY_NAME.set(n, entry)));
+function getLibraryClassification(name) {
+  const key = normalizeExName(name);
+  return key ? (EXERCISE_LIBRARY_BY_NAME.get(key) || null) : null;
+}
 
 // 운동명 기반 부위/세부부위 추천 (키워드 포함 여부로 매칭)
 // ════════════════════════════════════════════
@@ -7134,107 +7170,48 @@ function normalizeExName(name) {
     .replace(/[\s\-_()（）]/g,"").replace(/[.,!?]/g,"");
 }
 
-// 키워드 기반 기구 자동 추천
+// 키워드 기반 기구 자동 추천 — 입력값/키워드 모두 normalizeExName으로 정규화한 뒤 비교해
+// "벤치 프레스"처럼 공백이 섞인 입력도 "벤치프레스" 키워드와 매칭되게 한다.
 function getAutoEquipmentByName(name) {
   if (!name || name.trim().length < 2) return null;
-  const n = name.toLowerCase();
+  const n = normalizeExName(name);
+  const has = (...keys) => keys.some(k => n.includes(normalizeExName(k)));
   // 세부 종목 우선 (일반 키워드보다 먼저)
-  if (n.includes("페이스풀") || n.includes("페이스 풀") || n.includes("face pull")) return "케이블";
-  if (n.includes("21s컬") || n.includes("21s 컬") || n.includes("21s")) return "케이블";
-  if (n.includes("케이블"))         return "케이블";
-  if (n.includes("바벨"))           return "바벨";
-  if (n.includes("덤벨") || n.includes("db ") || n.startsWith("db") && n.length < 20) return "덤벨";
-  if (n.includes("스미스"))         return "머신";
-  if (n.includes("머신"))           return "머신";
-  if (n.includes("밴드"))           return "밴드";
-  if (n.includes("맨몸") || n.includes("푸쉬업") || n.includes("푸시업")) return "맨몸";
-  if (n.includes("플랭크") || n.includes("크런치") || n.includes("버드독") || n.includes("데드버그") || n.includes("레그레이즈")) return "맨몸";
+  if (has("페이스풀","페이스 풀","face pull")) return "케이블";
+  if (has("21s컬","21s 컬","21s")) return "케이블";
+  if (has("케이블"))  return "케이블";
+  if (has("바벨"))    return "바벨";
+  if (has("덤벨","db")) return "덤벨";
+  if (has("스미스"))  return "머신";
+  if (has("머신"))    return "머신";
+  if (has("밴드"))    return "밴드";
+  if (has("맨몸","푸쉬업","푸시업","push up","pushup")) return "맨몸";
+  if (has("플랭크","크런치","버드독","데드버그","레그레이즈")) return "맨몸";
   // 예외 규칙 (키워드 없을 때)
-  if (n.includes("랫풀다운") || n.includes("레그프레스") || n.includes("레그컬") || n.includes("레그익스텐션") || n.includes("체스트프레스") || n.includes("숄더프레스머신")) return "머신";
-  if (n.includes("벤치프레스") && !n.includes("덤벨") && !n.includes("스미스")) return "바벨";
+  if (has("랫풀다운","레그프레스","레그컬","레그익스텐션","체스트프레스","숄더프레스머신")) return "머신";
+  if (has("벤치프레스") && !has("덤벨") && !has("스미스")) return "바벨";
   return null;
 }
 
-// 기구 학습 데이터 — localStorage 기반 (Firestore 비용 없음)
-const EQUIP_LEARN_KEY = "tg_equip_learn_v1";
-function loadEquipLearn() {
-  try { return JSON.parse(localStorage.getItem(EQUIP_LEARN_KEY) || "{}"); } catch { return {}; }
-}
-function saveEquipLearn(data) {
-  try { localStorage.setItem(EQUIP_LEARN_KEY, JSON.stringify(data)); } catch {}
-}
-// 학습값 조회: 운동명 정규화 후 가장 많이 선택된 기구 반환
-function getLearnedEquipment(name) {
+// 운동 종목 자동 분류 통합 추천 — 우선순위: 1) 트레이너 전체 공통 학습(Firestore, classifications)
+// 2) EXERCISE_LIBRARY(정확 매칭) 3) 기존 키워드 추론(EX_MUSCLE_SUGGEST/getAutoEquipmentByName)
+// classifications는 App 최상위에서 exerciseClassifications/{trainerUid}를 실시간 구독한 { [정규화된운동명]: {equipment,muscleTop,muscleSub} } 맵이다.
+function suggestEquipment(name, classifications) {
   const key = normalizeExName(name);
-  if (!key || key.length < 2) return null;
-  const data = loadEquipLearn();
-  const rec  = data[key];
-  if (!rec || !rec.counts) return null;
-  const sorted = Object.entries(rec.counts).sort((a,b)=>b[1]-a[1]);
-  return sorted.length ? sorted[0][0] : null;
-}
-// 학습값 기록: 사용자가 직접 기구를 선택했을 때 호출
-function recordEquipLearn(name, equipment) {
-  if (!name || !equipment) return;
-  const key  = normalizeExName(name);
-  if (!key || key.length < 2) return;
-  const data = loadEquipLearn();
-  if (!data[key]) data[key] = { counts: {} };
-  data[key].counts[equipment] = (data[key].counts[equipment] || 0) + 1;
-  data[key].updatedAt = new Date().toISOString();
-  saveEquipLearn(data);
-}
-// 학습 데이터 초기화
-function clearEquipLearn(name) {
-  const data = loadEquipLearn();
-  if (name) { delete data[normalizeExName(name)]; }
-  else { Object.keys(data).forEach(k => delete data[k]); }
-  saveEquipLearn(data);
+  const learned = key ? classifications?.[key]?.equipment : null;
+  return learned || getLibraryClassification(name)?.equipment || getAutoEquipmentByName(name);
 }
 
-// 근육 부위 학습 데이터 — localStorage 기반, 3회 이상 선택 시 자동 적용
-const MUSCLE_LEARN_KEY = "tg_muscle_learn_v1";
-function loadMuscleLearn() {
-  try { return JSON.parse(localStorage.getItem(MUSCLE_LEARN_KEY)||"{}"); } catch { return {}; }
-}
-function saveMuscleLearn(data) {
-  try { localStorage.setItem(MUSCLE_LEARN_KEY, JSON.stringify(data)); } catch {}
-}
-function recordMuscleLearn(name, top, sub) {
-  if (!name || !top || !sub) return;
+function suggestMuscle(name, classifications) {
   const key = normalizeExName(name);
-  if (!key || key.length < 2) return;
-  const data = loadMuscleLearn();
-  if (!data[key]) data[key] = { combos: {} };
-  const combo = `${top}||${sub}`;
-  data[key].combos[combo] = (data[key].combos[combo] || 0) + 1;
-  data[key].updatedAt = new Date().toISOString();
-  saveMuscleLearn(data);
-}
-function getLearnedMuscle(name) {
-  const key = normalizeExName(name);
-  if (!key || key.length < 2) return null;
-  const data = loadMuscleLearn();
-  const rec = data[key];
-  if (!rec?.combos) return null;
-  const best = Object.entries(rec.combos).filter(([,c]) => c >= 3).sort((a,b) => b[1]-a[1])[0];
-  if (!best) return null;
-  const [top, sub] = best[0].split("||");
-  return { top, sub };
-}
-
-// 통합 추천: 학습값 > 키워드 자동 매핑 순
-function suggestEquipment(name) {
-  return getLearnedEquipment(name) || getAutoEquipmentByName(name);
-}
-
-function suggestMuscle(name) {
-  const learned = getLearnedMuscle(name);
-  if (learned) return learned;
+  const learned = key ? classifications?.[key] : null;
+  if (learned?.muscleTop) return { top: learned.muscleTop, sub: learned.muscleSub || mSubs(learned.muscleTop)[0] || "" };
+  const lib = getLibraryClassification(name);
+  if (lib) return { top: lib.muscleTop, sub: lib.muscleSub };
   if (!name || name.trim().length < 2) return null;
-  const lower = name.toLowerCase().replace(/[_\-]/g, " ");
+  const n = normalizeExName(name);
   for (const rule of EX_MUSCLE_SUGGEST) {
-    if (rule.keys.some(k => lower.includes(k.toLowerCase()))) {
+    if (rule.keys.some(k => n.includes(normalizeExName(k)))) {
       return { top: rule.top, sub: rule.sub };
     }
   }
@@ -7242,7 +7219,7 @@ function suggestMuscle(name) {
 }
 
 function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
-  allMembers=[] }) {
+  allMembers=[], classifications={}, onLearnExercise }) {
   const isCorr = false;
   const isEdit = !!(editData?.id);
   const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
@@ -7461,7 +7438,7 @@ function updateEx(ei, key, val) {
         }
         // ── 기구 자동 추천 (기능 추천 없을 때만) ─────────────────────────
         if (!ex._equipManual && !(u.equipment === "기능")) {
-          const sugEq = suggestEquipment(val);
+          const sugEq = suggestEquipment(val, classifications);
           if (sugEq) {
             u.equipment    = sugEq;
             u._autoEquip   = true;
@@ -7473,7 +7450,7 @@ function updateEx(ei, key, val) {
         }
         // ── 부위 자동 추천 (웨이트 운동용) ───────────────────────────────
         if (!ex._muscleManual && u.equipment !== "기능" && ex.equipment !== "기능") {
-          const sug = suggestMuscle(val);
+          const sug = suggestMuscle(val, classifications);
           if (sug && mSubs(sug.top).length > 0) {
             u.muscleTop = sug.top;
             u.muscleSub = mSubs(sug.top).includes(sug.sub) ? sug.sub : (mSubs(sug.top)[0] || sug.sub);
@@ -7486,7 +7463,7 @@ function updateEx(ei, key, val) {
       if (key === "equipment") {
         u._equipManual = true;
         u._autoEquip   = false;
-        if (ex.name) recordEquipLearn(ex.name, val);
+        if (ex.name) onLearnExercise?.(ex.name, { equipment: val });
 
         // "기능" 선택 시 → 기능운동 세트 형식으로 전환, 부위 기능으로
         if (val === "기능") {
@@ -7563,7 +7540,7 @@ function updateEx(ei, key, val) {
         u.muscleSub = mSubs(val)[0] || "";
         u._muscleManual = true; // 수동 수정됨
         u._autoSuggest  = false;
-        if (ex.name) recordMuscleLearn(ex.name, val, mSubs(val)[0] || "");
+        if (ex.name) onLearnExercise?.(ex.name, { muscleTop: val, muscleSub: mSubs(val)[0] || "" });
         // 기능 ↔ 일반 전환 시 세트 형식 변환
         const wasFunc = ex.muscleTop === "기능" || (ex.equipment === "맨몸" && ex.muscleTop === "코어");
         const isFunc  = val === "기능" || (ex.equipment === "맨몸" && val === "코어");
@@ -7583,7 +7560,7 @@ function updateEx(ei, key, val) {
       // muscleSub 수동 변경 감지
       if (key === "muscleSub") {
         u._muscleManual = true; u._autoSuggest = false;
-        if (ex.name && ex.muscleTop) recordMuscleLearn(ex.name, ex.muscleTop, val);
+        if (ex.name && ex.muscleTop) onLearnExercise?.(ex.name, { muscleTop: ex.muscleTop, muscleSub: val });
       }
       // funcCategory / funcBodyPart / funcTool 수동 변경 → _funcManual 플래그
       if (key === "funcCategory" || key === "funcBodyPart" || key === "funcTool") {
@@ -9557,7 +9534,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   );
 }
 
-function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, showToast, loading }) {
+function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
   const isEdit = !!(editData?.id);
 
   // ID가 없으면 이름으로 자동 복원 (기존 데이터 memberAId 누락 대응)
@@ -9641,17 +9618,20 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
     const u = {...e, [field]:val};
     if (field==="name") {
       if (!e._muscleManual) {
-        const sug = suggestMuscle(val);
-        if (sug?.top) u.muscleTop = sug.top;
+        const sug = suggestMuscle(val, classifications);
+        if (sug?.top) { u.muscleTop = sug.top; u.muscleSub = mSubs(sug.top).includes(sug.sub) ? sug.sub : (mSubs(sug.top)[0] || sug.sub || ""); }
       }
       if (!e._equipManual) {
-        const sugEq = suggestEquipment(val);
+        const sugEq = suggestEquipment(val, classifications);
         if (sugEq) u.equipment = sugEq;
       }
     } else if (field==="muscleTop") {
+      u.muscleSub = mSubs(val)[0] || "";
       u._muscleManual = true;
+      if (e.name) onLearnExercise?.(e.name, { muscleTop: val, muscleSub: mSubs(val)[0] || "" });
     } else if (field==="equipment") {
       u._equipManual = true;
+      if (e.name) onLearnExercise?.(e.name, { equipment: val });
     }
     return u;
   }));

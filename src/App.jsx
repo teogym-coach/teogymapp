@@ -10048,6 +10048,13 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
   const [cardMode, setCardMode] = useState("simple");
   const [sortMode, setSortMode] = useState("no"); // 기본: 회차별 내림차순
   const [filterPart, setFilterPart] = useState(null);
+  // 히스토리 카드 모바일 레이아웃 — 오른쪽 요약 영역이 flexShrink:0로 폭을 고정 요구해 좁은 화면에서 왼쪽(날짜/부위명)이 0에 가깝게 눌려 한글이 음절 단위로 세로 줄바꿈되는 문제 방지
+  const [isMobile, setIsMobile] = useState(typeof window!=="undefined" ? window.innerWidth<=768 : false);
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth<=768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
 
   // 정렬/필터 — sessions 안전 처리
   const sortedSessions = (() => {
@@ -10198,14 +10205,14 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
               <div key={s.id||i}
                 onClick={() => setReportSession(s)}
                 style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,
-                  padding:"11px 13px",cursor:"pointer",transition:"border-color .15s"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <Mo c="#94a3b8" s={9} style={{marginBottom:2}}>{s.date} · {s.sessionNo}회차</Mo>
+                  padding:"11px 13px",cursor:"pointer",transition:"border-color .15s",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+                <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:isMobile?0:8}}>
+                  <div style={{flex:1,minWidth:0,width:isMobile?"100%":"auto"}}>
+                    <Mo c="#94a3b8" s={9} style={{marginBottom:2,display:"block",whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"break-word"}}>{s.date} · {s.sessionNo}회차</Mo>
                     <div style={{display:"inline-flex",marginBottom:4,padding:"2px 7px",borderRadius:999,fontSize:8,fontWeight:800,background:s.isPublished?"rgba(94,234,212,.12)":"rgba(255,209,102,.10)",color:s.isPublished?"#5EEAD4":"#ffd166",border:"1px solid "+(s.isPublished?"rgba(94,234,212,.24)":"rgba(255,209,102,.22)")}}>
                       {s.isPublished ? "회원 공개" : (s.status === "completed" ? "비공개·완료" : "비공개·초안")}
                     </div>
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#fff",marginBottom:4}}>
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#fff",marginBottom:4,whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"break-word"}}>
                       {typeLbl || "웨이트"}
                     </div>
                     {/* 대표님 운동 시간 표시 */}
@@ -10242,12 +10249,20 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       </div>
                     )}
                   </div>
-                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                  <div style={{
+                    textAlign: isMobile ? "left" : "right",
+                    flexShrink: 0,
+                    marginLeft: isMobile ? 0 : 8,
+                    marginTop: isMobile ? 8 : 0,
+                    paddingTop: isMobile ? 8 : 0,
+                    borderTop: isMobile ? "1px solid rgba(255,255,255,0.06)" : "none",
+                    width: isMobile ? "100%" : "auto",
+                  }}>
                     <Mo c="#5EEAD4" s={12} style={{fontWeight:700}}>{(s.totalVolume||0).toLocaleString()} kg</Mo>
-                    <PartVolBadges exercises={s.exercises} style={{marginTop:4,justifyContent:"flex-end"}} />
+                    <PartVolBadges exercises={s.exercises} style={{marginTop:4,justifyContent:isMobile?"flex-start":"flex-end"}} />
                     {/* 세트 수 — 트레이너 전용 */}
                     {calcTotalSets(s.exercises) > 0 && (
-                      <div style={{display:"flex",gap:3,marginTop:4,justifyContent:"flex-end",flexWrap:"wrap",alignItems:"center"}}>
+                      <div style={{display:"flex",gap:3,marginTop:4,justifyContent:isMobile?"flex-start":"flex-end",flexWrap:"wrap",alignItems:"center"}}>
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
                           background:"rgba(255,255,255,0.05)",color:"#94a3b8",fontWeight:600}}>
                           {calcTotalSets(s.exercises)}세트
@@ -10260,7 +10275,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                         ))}
                       </div>
                     )}
-                    <div style={{display:"flex",gap:3,marginTop:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                    <div style={{display:"flex",gap:3,marginTop:3,justifyContent:isMobile?"flex-start":"flex-end",flexWrap:"wrap"}}>
                       {s.intensity && <Bdg color={ic}>{s.intensity}</Bdg>}
                       {s.condition && <Bdg color={cc.color}>{cc.emoji} {s.condition}</Bdg>}
                     </div>
@@ -10274,7 +10289,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       const hasAny = (feedback?.sorenessLevel && feedback.sorenessLevel !== "없음") || feedback?.rpe != null || memoText || cardio || weight || kcal;
                       if (!hasAny) return null;
                       return (
-                        <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:"flex-end",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+                        <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:isMobile?"flex-start":"flex-end",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
                           {feedback?.sorenessLevel && feedback.sorenessLevel !== "없음" && (
                             <Mo c="#ff9f43" s={8}>💪 {formatSorenessBodyParts(feedback)} · {feedback.sorenessLevel}</Mo>
                           )}
@@ -10333,7 +10348,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                     </div>
                   );
                 })()}
-                <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end"}}
+                <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end",flexWrap:"wrap"}}
                   onClick={e => e.stopPropagation()}>
                   {s.sessionType === "2:1" && s.memberBId && !["recorded","sent"].includes(s.pairStatus) && !s.isPublished && (
                     <button onClick={() => setConfirmPair(s)}

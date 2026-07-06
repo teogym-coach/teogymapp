@@ -1040,7 +1040,7 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
 
 const MEMBER_COLORS = { background:"#FFFFFF", pageSoft:"#F6F7F9", card:"#FFFFFF", cardSoft:"#F1F3F6", textPrimary:"#20242A", textSecondary:"#8B949E", border:"#E8ECF1", accentBlue:"#2F73F6", accentPurple:"#8B5CF6", positiveGreen:"#16C784", danger:"#FF5A5F" };
 const ONBOARDING_GOALS=["운동 기초 다지기","다이어트 성공","근육 키우기","특정 부위 집중하기","건강한 습관 만들기"];
-const ONBOARDING_FOCUS=["벌크업","상체 프레임 넓히기","대표알 어깨 만들기","다이어트 초집중","선명한 복근","뱃살 옆구리살 빼기","탄탄한 가슴 근육","굵은 팔뚝 만들기","하체 강화"];
+const ONBOARDING_FOCUS=["벌크업","상체 프레임 넓히기","대포알 어깨 만들기","다이어트 초집중","선명한 복근","뱃살 옆구리살 빼기","탄탄한 가슴 근육","굵은 팔뚝 만들기","하체 강화","직각 어깨 만들기","V자 등 만들기","힙업 만들기"];
 const DEFAULT_ADMIN_EMAIL = "teogym12@gmail.com";
 const DEFAULT_MEMBER_TEST_EMAIL = "teogym12.member@gmail.com";
 const NEXT_PT_PART_OPTIONS = ["하체","등","가슴","어깨","팔","코어","전신","교정","유산소","미정"];

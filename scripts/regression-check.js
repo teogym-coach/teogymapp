@@ -434,20 +434,26 @@ const checks = [
     db.includes('function koreaDateKey(date = new Date())') &&
     db.includes("const todayKey = activities[0].dateKey || koreaDateKey();")
   ],
-  // ── 회원 목록 "오늘 활동" 필터 ──
-  ['오늘 활동 필터: 전체/메모/체중/칼로리/유산소/근육통/RPE/입력없음 8종 정의',
-    ["all","memo","weight","kcal","cardio","soreness","rpe","none"].every(k => app.includes(`key: "${k}"`))
+  // ── 회원 목록 "오늘 회원 입력 피드" (항목별 "오늘 활동" 필터를 대체) ──
+  ['오늘 회원 입력 피드: 메모/통증/근육통/RPE/컨디션/체중/유산소/칼로리 8종 타입 정의',
+    app.includes('const TODAY_FEED_TYPES = [') &&
+    ["memo","pain","soreness","rpe","condition","weight","cardio","kcal"].every(k => app.includes(`"${k}"`))
   ],
-  ['오늘 활동 필터: 한국시간(getKoreaDateString) 기준으로 오늘 판정',
+  ['오늘 회원 입력 피드: 한국시간(getKoreaDateString) 기준으로 오늘 판정',
     app.includes('const todayKST = getKoreaDateString();') &&
     app.includes('liveMember.todayInputTypes?.date === todayKST')
   ],
-  ['오늘 활동 필터: passActivityFilter가 filtered 목록 계산에 반영됨',
-    app.includes('function passActivityFilter(m)') &&
-    (app.match(/&& passActivityFilter\(m\)/g) || []).length >= 2
+  ['오늘 회원 입력 피드: getTodayFeedItems가 전체 회원 recentActivityLog를 병합해 최신 입력순 정렬',
+    app.includes('function getTodayFeedItems()') &&
+    app.includes('if (a.dateKey !== todayKST || !TODAY_FEED_TYPES.includes(a.type)) return;') &&
+    app.includes('items.sort((a,b) => (b.at||0) - (a.at||0))')
   ],
-  ['오늘 활동 필터: "오늘 입력 없음"은 오늘 입력 타입이 하나도 없는 회원만 표시',
-    app.includes('if (activityFilter === "none") return types.length === 0;')
+  ['오늘 회원 입력 피드: 요약 카드(총 N건 · 입력 회원 N명) + 피드 보기 토글',
+    app.includes('입력 회원 ${todayFeedMemberCount}명') &&
+    app.includes('오늘 입력 피드 보기')
+  ],
+  ['오늘 회원 입력 피드: 피드 항목 클릭 시 해당 회원 읽음 처리 후 상세 이동',
+    app.includes('if (target) { markAdminInputRead(target.id); onSelect(target); }')
   ],
   ['NEW 배지: hasNewMemberInput + ADMIN_INPUT_READ_KEY',
     app.includes('ADMIN_INPUT_READ_KEY') &&
@@ -460,6 +466,10 @@ const checks = [
   ],
   ['NEW 배지: 카드 클릭 시 읽음 처리',
     app.includes('markAdminInputRead(m.id);onSelect(m)')
+  ],
+  ['NEW 배지(아이콘 영역): 오늘 입력 피드에 표시되는 회원이면 왼쪽 아이콘에 큰 NEW 표시',
+    app.includes('function hasTodayFeedInput(m)') &&
+    app.includes('hasTodayFeedInput(m) && (')
   ],
   // ── 출석 기능 ──
   ['출석 기능: saveAttendance 함수 존재 (db.js)',

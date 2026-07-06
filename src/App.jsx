@@ -4495,25 +4495,17 @@ function formatActivityTime(at) {
   catch { return ""; }
 }
 
-// 회원 목록 상단 "오늘 활동" 필터 — 걸음수는 스펙에 없어 제외
-const ACTIVITY_FILTERS = [
-  { key: "all",      label: "전체" },
-  { key: "memo",     label: "오늘 메모" },
-  { key: "weight",   label: "오늘 체중" },
-  { key: "kcal",     label: "오늘 칼로리" },
-  { key: "cardio",   label: "오늘 유산소" },
-  { key: "soreness", label: "오늘 근육통" },
-  { key: "rpe",      label: "오늘 RPE" },
-  { key: "none",     label: "오늘 입력 없음" },
-];
+// 오늘 회원 입력 피드에 포함할 활동 타입 — 걸음수는 기존 "오늘 활동" 필터와 동일하게 스펙에 없어 제외
+const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal"];
+const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를" };
 
 function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[] }) {
   const today = new Date().toISOString().split("T")[0];
-  const todayKST = getKoreaDateString(); // 오늘 활동 필터/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
+  const todayKST = getKoreaDateString(); // 오늘 입력 피드/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
   const [filter,     setFilter]     = useState("active");
-  const [activityFilter, setActivityFilter] = useState("all"); // 오늘 활동 필터 (memo/weight/kcal/cardio/soreness/rpe/none)
+  const [showTodayFeed, setShowTodayFeed] = useState(false); // 오늘 회원 입력 피드 펼침 상태
   const [showSort,   setShowSort]   = useState(false);
   const [statusMenu, setStatusMenu] = useState(null); // 상태 메뉴 열린 회원 id
   const [showTestPanel, setShowTestPanel] = useState(false);
@@ -4526,12 +4518,27 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     const liveMember = live ? { ...m, ...live } : m;
     return liveMember.todayInputTypes?.date === todayKST ? sortByActivityPriority(liveMember.todayInputTypes.types || []) : [];
   }
-  function passActivityFilter(m) {
-    if (activityFilter === "all") return true;
-    const types = getTodayInputTypes(m);
-    if (activityFilter === "none") return types.length === 0;
-    return types.includes(activityFilter);
+  // 왼쪽 아이콘 영역 NEW 표시 조건 — 오늘 입력 피드에 1건 이상 표시되는 회원(걸음수 제외)
+  function hasTodayFeedInput(m) {
+    return getTodayInputTypes(m).some(t => t !== "steps");
   }
+  // 오늘 회원 입력 피드 — 전체 회원의 오늘(KST) 활동 로그를 입력 시각순으로 병합
+  function getTodayFeedItems() {
+    const items = [];
+    members.forEach(m => {
+      if (isOwner(m)) return;
+      const live = liveMembersById[m.id];
+      const liveMember = live ? { ...m, ...live } : m;
+      const log = Array.isArray(liveMember.recentActivityLog) ? liveMember.recentActivityLog : [];
+      log.forEach(a => {
+        if (a.dateKey !== todayKST || !TODAY_FEED_TYPES.includes(a.type)) return;
+        items.push({ ...a, memberId: m.id, memberName: m.name });
+      });
+    });
+    return items.sort((a,b) => (b.at||0) - (a.at||0));
+  }
+  const todayFeedItems = getTodayFeedItems();
+  const todayFeedMemberCount = new Set(todayFeedItems.map(i=>i.memberId)).size;
   function getMemberMeta(m) {
     const ss = (sessionsMap[m.id] || []);
     const sorted = [...ss].sort((a,b) => (b.date||"").localeCompare(a.date||""));
@@ -4648,15 +4655,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     });
   }
 
-  // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용 — 오늘 활동 필터는 검색 여부와 무관하게 항상 적용
+  // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용
   const filtered = sortMembers(
     members.filter(m => {
       if (isOwner(m)) return false; // 대표님은 일반 목록 제외
-      return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m)) && passActivityFilter(m);
+      return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m));
     })
   ).filter(m => {
-    if (search.trim()) return matchSearch(m.name, search) && !isOwner(m) && passActivityFilter(m);
-    return passFilter(m) && passActivityFilter(m);
+    if (search.trim()) return matchSearch(m.name, search) && !isOwner(m);
+    return passFilter(m);
   });
 
   const ownerMember = members.find(m => isOwner(m));
@@ -4771,22 +4778,45 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         </div>
       </div>
 
-      {/* 오늘 활동 필터 — 대표가 "오늘 누가 뭘 입력했는지" 바로 찾기 위한 필터 (회원 상태 필터와 별개 축) */}
-      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",paddingBottom:2}}>
-        {ACTIVITY_FILTERS.map(f => {
-          const active = activityFilter === f.key;
-          const icon = f.key === "all" ? "🗂" : f.key === "none" ? "⚪" : ACTIVITY_ICON[f.key];
-          return (
-            <button key={f.key} onClick={()=>setActivityFilter(f.key)}
-              style={{flexShrink:0,padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
-                whiteSpace:"nowrap",
-                borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
-                background:active?"rgba(94,234,212,.14)":"transparent",
-                color:active?"#5EEAD4":"#94a3b8"}}>
-              {icon} {f.label}
-            </button>
-          );
-        })}
+      {/* 오늘 회원 입력 피드 — 대표가 "오늘 누가 뭘 입력했는지" 시간순으로 바로 확인하는 영역 (기존 항목별 필터를 대체) */}
+      <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
+        background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.2)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#5EEAD4"}}>📋 오늘 회원 입력</div>
+            <Mo c="#94a3b8" s={11}>
+              {todayFeedItems.length===0 ? "아직 입력이 없습니다" : `총 ${todayFeedItems.length}건 · 입력 회원 ${todayFeedMemberCount}명`}
+            </Mo>
+          </div>
+          <Btn ghost sm onClick={()=>setShowTodayFeed(v=>!v)} style={{color:"#5EEAD4",borderColor:"rgba(94,234,212,.35)"}}>
+            {showTodayFeed ? "피드 접기 ▲" : "오늘 입력 피드 보기 ▼"}
+          </Btn>
+        </div>
+        {showTodayFeed && (
+          <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto"}}>
+            {todayFeedItems.length===0 ? (
+              <Mo c="#475569" s={11}>오늘 회원이 입력한 기록이 아직 없습니다.</Mo>
+            ) : todayFeedItems.map((item,i) => (
+              <div key={`${item.memberId}-${item.at}-${i}`}
+                onClick={()=>{
+                  const target = members.find(x=>x.id===item.memberId);
+                  if (target) { markAdminInputRead(target.id); onSelect(target); }
+                }}
+                style={{padding:"8px 10px",borderRadius:8,background:"#111827",
+                  border:"1px solid rgba(255,255,255,0.06)",cursor:"pointer",
+                  display:"flex",alignItems:"flex-start",gap:8}}>
+                <span style={{fontSize:15,flexShrink:0}}>{ACTIVITY_ICON[item.type] || "📌"}</span>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>
+                    <span style={{color:"#5EEAD4"}}>{item.memberName}</span> 회원이 {ACTIVITY_LABEL[item.type]||item.type}{ACTIVITY_PARTICLE[item.type]||"를"} 입력했습니다
+                  </div>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.value}</div>
+                </div>
+                <span style={{fontSize:9,color:"#475569",flexShrink:0,whiteSpace:"nowrap"}}>{formatActivityTime(item.at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 오늘 생일인 회원 요약 */}
@@ -4874,14 +4904,19 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                   opacity: isEnded ? 0.65 : 1, transition:"opacity .15s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",flex:1,minWidth:0}}
                   onClick={()=>{markAdminInputRead(m.id);onSelect(m);}}>
-                  {/* 아이콘 */}
-                  <div style={{width:38,height:38,borderRadius:10,flexShrink:0,
+                  {/* 아이콘 — 오늘 입력 피드에 표시되는 회원이면 우측 상단에 큰 NEW 표시 */}
+                  <div style={{width:38,height:38,borderRadius:10,flexShrink:0,position:"relative",
                     background: isEnded ? "rgba(255,255,255,0.05)"
                               : isToday ? "rgba(0,229,160,.18)"
                               : isWarning ? "rgba(255,107,107,.12)"
                               : "rgba(255,255,255,0.08)",
                     display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>
                     {isEnded ? "🔒" : isPaused ? "⏸️" : isToday ? "🟢" : isWarning ? "⚠️" : "💪"}
+                    {!isEnded && hasTodayFeedInput(m) && (
+                      <span style={{position:"absolute",top:-6,right:-7,background:"#ef4444",color:"#fff",
+                        fontSize:8,fontWeight:800,padding:"1px 5px",borderRadius:6,
+                        boxShadow:"0 0 0 2px #0d1117",letterSpacing:.3}}>NEW</span>
+                    )}
                   </div>
                   {/* 정보 */}
                   <div style={{minWidth:0,flex:1}}>

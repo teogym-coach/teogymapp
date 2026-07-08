@@ -1046,7 +1046,8 @@ const ONBOARDING_GOALS=["운동 기초 다지기","다이어트 성공","근육 
 const ONBOARDING_FOCUS=["벌크업","상체 프레임 넓히기","대포알 어깨 만들기","다이어트 초집중","선명한 복근","뱃살 옆구리살 빼기","탄탄한 가슴 근육","굵은 팔뚝 만들기","하체 강화","직각 어깨 만들기","V자 등 만들기","힙업 만들기"];
 const DEFAULT_ADMIN_EMAIL = "teogym12@gmail.com";
 const DEFAULT_MEMBER_TEST_EMAIL = "teogym12.member@gmail.com";
-const NEXT_PT_PART_OPTIONS = ["하체","등","가슴","어깨","팔","코어","전신","교정","유산소","미정"];
+const NEXT_PT_PART_OPTIONS = ["상체","하체","등","가슴","어깨","팔","코어","전신","교정","미정"];
+function parseNextParts(value){const v=String(value||"").trim(); if(!v||v==="미정")return []; return v.split(" · ").map(s=>s.trim()).filter(Boolean);}
 function normalizeEmail(value){ return (value || "").trim().toLowerCase(); }
 function MemberEmailAdminWarning({email}){
   const memberEmail = normalizeEmail(email);
@@ -6915,6 +6916,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [showMemo, setShowMemo] = useState(false);
   const [ptSaving, setPtSaving] = useState(false);
+  const [partMenuOpen, setPartMenuOpen] = useState(false);
   const [ob, setOb] = useState(null);
   const [hubAttendance, setHubAttendance] = useState([]);
   useEffect(() => {
@@ -6940,6 +6942,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
       await updateMember(member.id, patch);
       onMemberPatch(patch);
     } catch(e) { console.error(e); } finally { setPtSaving(false); }
+  };
+  const currentNextParts = parseNextParts(member.nextWorkoutPart || member.nextPtPart);
+  const toggleNextPart = (x) => {
+    if (ptSaving) return;
+    const next = x === "미정" ? [] : (currentNextParts.includes(x) ? currentNextParts.filter(p=>p!==x) : [...currentNextParts, x]);
+    handleSaveNextPart(next.length ? next.join(" · ") : "미정");
   };
   const handleOpenLastSession = () => {
     if (!sessions.length) { alert("수정할 수업일지가 없습니다."); return; }
@@ -7068,7 +7076,11 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
         .hub-qbtn{transition:all .15s ease;}.hub-qbtn:hover{filter:brightness(1.12);}
         .hub-sbadge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;font-family:'DM Mono',monospace;font-size:9px;font-weight:800;margin-right:6px;}
         .hub-ptgrid{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;}
-        @media(max-width:540px){.hub-2col{grid-template-columns:1fr 1fr!important;}.hub-3col{grid-template-columns:1fr 1fr!important;}.hub-ptgrid{grid-template-columns:1fr 1fr!important;}.hub-ptgrid>*:last-child{grid-column:span 2;}}
+        .hub-ptgrid>div{min-width:0;}
+        .hub-next-date-value,.hub-next-part-value{font-size:16px;line-height:1.2;overflow-wrap:anywhere;word-break:break-word;}
+        @media(max-width:540px){.hub-2col{grid-template-columns:1fr 1fr!important;}.hub-3col{grid-template-columns:1fr 1fr!important;}}
+        @media(max-width:900px){.hub-ptgrid{grid-template-columns:1fr 1fr!important;}.hub-ptgrid>*:last-child{grid-column:span 2;}.hub-next-date-value,.hub-next-part-value{font-size:15px;}}
+        @media(max-width:480px){.hub-next-date-value,.hub-next-part-value{font-size:13px;}}
         .hub-header-row1{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;}
         .hub-header-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;}
         .hub-header-actions{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
@@ -7226,7 +7238,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
           <label style={{display:"block",cursor:ptSaving?"default":"pointer",position:"relative"}}>
             <input type="date" value={member.nextWorkoutDate||""} onChange={e=>handleSaveNextDate(e.target.value)} disabled={ptSaving}
               style={{position:"absolute",inset:0,opacity:0,cursor:ptSaving?"default":"pointer",width:"100%",height:"100%"}}/>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"#fff",lineHeight:1.2}}>
+            <div className="hub-next-date-value" style={{fontFamily:"'Syne',sans-serif",fontWeight:900,color:"#fff"}}>
               {member.nextWorkoutDate ? formatCompactDate(member.nextWorkoutDate) : "날짜 미정"}
             </div>
             {nextPtInfo.dDay!=="D-?"&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",marginTop:2,fontWeight:700}}>{nextPtInfo.dDay}</div>}
@@ -7235,14 +7247,31 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, load
           {ptSaving&&<div style={{position:"absolute",top:8,right:8,width:6,height:6,borderRadius:"50%",background:"#5EEAD4"}}/>}
         </div>
 
-        {/* 💪 다음 운동 부위 */}
+        {/* 💪 다음 운동 부위 (여러 개 선택 가능) */}
         <div style={{background:"#0f1626",border:"1px solid rgba(94,234,212,.25)",borderRadius:12,padding:"11px 12px"}}>
           <Mo c="#5EEAD4" s={8} style={{marginBottom:5,display:"block"}}>💪 다음 운동</Mo>
-          <select value={member.nextWorkoutPart||member.nextPtPart||"미정"} onChange={e=>handleSaveNextPart(e.target.value)} disabled={ptSaving}
-            style={{width:"100%",background:"transparent",border:"none",color:"#fff",fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,cursor:"pointer",appearance:"none",WebkitAppearance:"none",padding:0,outline:"none"}}>
-            {NEXT_PT_PART_OPTIONS.map(x=><option key={x} style={{background:"#111827",color:"#e5e7eb"}}>{x}</option>)}
-          </select>
-          <Mo c="#3a4a5a" s={8} style={{marginTop:5,display:"block"}}>탭하여 변경 ▼</Mo>
+          <button type="button" onClick={()=>setPartMenuOpen(v=>!v)} disabled={ptSaving}
+            style={{display:"block",width:"100%",background:"transparent",border:"none",padding:0,margin:0,textAlign:"left",cursor:ptSaving?"default":"pointer"}}>
+            <div className="hub-next-part-value" style={{fontFamily:"'Syne',sans-serif",fontWeight:900,color:"#fff"}}>
+              {currentNextParts.length ? currentNextParts.join(" · ") : "미정"}
+            </div>
+          </button>
+          <Mo c="#3a4a5a" s={8} style={{marginTop:5,display:"block"}}>{partMenuOpen?"탭하여 접기 ▲":"탭하여 변경(복수 선택) ▼"}</Mo>
+          {partMenuOpen&&(
+            <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
+              {NEXT_PT_PART_OPTIONS.map(x=>{
+                const active = x==="미정" ? currentNextParts.length===0 : currentNextParts.includes(x);
+                return (
+                  <button key={x} type="button" disabled={ptSaving} onClick={()=>toggleNextPart(x)}
+                    style={{padding:"5px 10px",borderRadius:999,border:`1px solid ${active?"#5EEAD4":"rgba(255,255,255,.14)"}`,
+                      background:active?"rgba(94,234,212,.18)":"transparent",color:active?"#5EEAD4":"#94a3b8",
+                      fontSize:11,fontWeight:700,cursor:ptSaving?"default":"pointer"}}>
+                    {x}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* 📋 회원 온보딩 */}

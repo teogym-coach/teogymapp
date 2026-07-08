@@ -4660,6 +4660,68 @@ function feedItemTarget(type) {
   return FEED_TARGET_BY_TYPE[type] || {};
 }
 
+// 오늘 회원 입력 피드 카드 — 모바일은 좌로 스와이프, PC는 우측 작은 ✕ 버튼으로 개별 삭제(=해당 알림만 읽음 처리해 피드에서 제거).
+// recentActivityLog(회원 카드 "최근 활동" 미리보기와 공유되는 원본 로그)는 건드리지 않고, 피드 표시 여부만 trainerNotificationReads로 제어한다.
+function TodayFeedItemCard({ item, deleting, onOpen, onDelete }) {
+  const [translateX, setTranslateX] = useState(0);
+  const dragState = useRef({ startX: 0, startTranslate: 0, dragging: false, moved: false });
+
+  function handleTouchStart(e) {
+    dragState.current = { startX: e.touches[0].clientX, startTranslate: translateX, dragging: true, moved: false };
+  }
+  function handleTouchMove(e) {
+    if (!dragState.current.dragging) return;
+    const delta = e.touches[0].clientX - dragState.current.startX;
+    if (Math.abs(delta) > 4) dragState.current.moved = true;
+    setTranslateX(Math.min(0, Math.max(-72, dragState.current.startTranslate + delta)));
+  }
+  function handleTouchEnd() {
+    dragState.current.dragging = false;
+    setTranslateX(prev => (prev < -36 ? -72 : 0));
+  }
+  function handleCardClick() {
+    if (dragState.current.moved) { dragState.current.moved = false; return; }
+    if (translateX !== 0) { setTranslateX(0); return; }
+    onOpen();
+  }
+
+  return (
+    <div style={{position:"relative",borderRadius:8,overflow:"hidden"}}>
+      <div style={{position:"absolute",inset:0,display:"flex",justifyContent:"flex-end"}}>
+        <button onClick={e=>{e.stopPropagation();onDelete();}} disabled={deleting}
+          style={{width:72,border:"none",background:"#ef4444",color:"#fff",fontSize:11,fontWeight:700,
+            cursor:deleting?"default":"pointer",opacity:deleting?.6:1}}>
+          {deleting ? "삭제 중" : "삭제"}
+        </button>
+      </div>
+      <div
+        onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
+        onClick={handleCardClick}
+        style={{position:"relative",transform:`translateX(${translateX}px)`,
+          transition: dragState.current.dragging ? "none" : "transform .18s ease",
+          padding:"8px 30px 8px 10px",borderRadius:8,background:"#111827",
+          border:"1px solid rgba(255,255,255,0.06)",cursor:"pointer",
+          display:"flex",alignItems:"flex-start",gap:8}}>
+        <span style={{fontSize:15,flexShrink:0}}>{ACTIVITY_ICON[item.type] || "📌"}</span>
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>
+            <span style={{color:"#5EEAD4"}}>{item.memberName}</span> 회원이 {DYNAMIC_LABEL_TYPES.has(item.type) ? item.label : (ACTIVITY_LABEL[item.type]||item.type)}
+            {DYNAMIC_LABEL_TYPES.has(item.type) ? koreanParticleEulReul(item.label) : (ACTIVITY_PARTICLE[item.type]||"를")} {ACTIVITY_VERB[item.type]||"입력했습니다"}
+          </div>
+          <div style={{fontSize:11,color:"#94a3b8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.value}</div>
+        </div>
+        <span style={{fontSize:9,color:"#475569",flexShrink:0,whiteSpace:"nowrap",marginRight:4}}>{formatActivityTime(item.at)}</span>
+        <button onClick={e=>{e.stopPropagation();onDelete();}} disabled={deleting} title="삭제"
+          style={{position:"absolute",right:4,top:4,width:18,height:18,borderRadius:"50%",
+            border:"none",background:"rgba(255,255,255,0.06)",color:"#ff6b6b",fontSize:10,lineHeight:"18px",
+            padding:0,cursor:deleting?"default":"pointer",opacity:deleting?.5:1}}>
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead }) {
   const today = new Date().toISOString().split("T")[0];
   const todayKST = getKoreaDateString(); // 오늘 입력 피드/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
@@ -4667,6 +4729,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
   const [sortBy,     setSortBy]     = useState("recent");
   const [filter,     setFilter]     = useState("active");
   const [showTodayFeed, setShowTodayFeed] = useState(false); // 오늘 회원 입력 피드 펼침 상태
+  const [deletingFeedIds, setDeletingFeedIds] = useState(() => new Set()); // 개별 삭제 진행 중인 피드 항목 id
+  const [deletingAllFeed, setDeletingAllFeed] = useState(false); // 전체삭제 진행 중 여부
   const [showSort,   setShowSort]   = useState(false);
   const [statusMenu, setStatusMenu] = useState(null); // 상태 메뉴 열린 회원 id
   const [showTestPanel, setShowTestPanel] = useState(false);
@@ -4707,6 +4771,28 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
   function markMemberFeedRead(m) {
     const ids = todayFeedItems.filter(i => i.memberId === m.id).map(i => i.id);
     if (ids.length) onMarkEventsRead?.(ids);
+  }
+  // 피드 항목 개별 삭제 — 회원 원본 로그(recentActivityLog)는 그대로 두고, 이 알림만 트레이너 읽음 처리로 화면에서 제거
+  async function handleDeleteFeedItem(item) {
+    if (deletingFeedIds.has(item.id) || deletingAllFeed) return;
+    if (!window.confirm("이 회원 입력 기록을 삭제할까요?")) return;
+    setDeletingFeedIds(prev => new Set(prev).add(item.id));
+    try {
+      await onMarkEventsRead?.([item.id]);
+    } finally {
+      setDeletingFeedIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
+    }
+  }
+  // 전체삭제 — 현재 표시 중인(읽지 않은) 피드 항목을 한 번에 읽음 처리
+  async function handleDeleteAllFeed() {
+    if (deletingAllFeed || !todayFeedItems.length) return;
+    if (!window.confirm("오늘 회원 입력 알림을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.")) return;
+    setDeletingAllFeed(true);
+    try {
+      await onMarkEventsRead?.(todayFeedItems.map(i => i.id));
+    } finally {
+      setDeletingAllFeed(false);
+    }
   }
   function getMemberMeta(m) {
     const ss = (sessionsMap[m.id] || []);
@@ -4957,35 +5043,35 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
               {todayFeedItems.length===0 ? "오늘 새로운 회원 입력이 없습니다." : `읽지 않은 알림 ${todayFeedItems.length}건`}
             </Mo>
           </div>
-          <Btn ghost sm onClick={()=>setShowTodayFeed(v=>!v)} style={{color:"#5EEAD4",borderColor:"rgba(94,234,212,.35)"}}>
-            {showTodayFeed ? "피드 접기 ▲" : "오늘 입력 피드 보기 ▼"}
-          </Btn>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+            {todayFeedItems.length > 0 && (
+              <Btn ghost sm disabled={deletingAllFeed} onClick={handleDeleteAllFeed}
+                style={{color:"#ff6b6b",borderColor:"rgba(255,107,107,.35)"}}>
+                {deletingAllFeed ? "삭제 중…" : "전체삭제"}
+              </Btn>
+            )}
+            <Btn ghost sm onClick={()=>setShowTodayFeed(v=>!v)} style={{color:"#5EEAD4",borderColor:"rgba(94,234,212,.35)"}}>
+              {showTodayFeed ? "피드 접기 ▲" : "오늘 입력 피드 보기 ▼"}
+            </Btn>
+          </div>
         </div>
         {showTodayFeed && (
           <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto"}}>
             {todayFeedItems.length===0 ? (
               <Mo c="#475569" s={11}>오늘 새로운 회원 입력이 없습니다.</Mo>
             ) : todayFeedItems.map((item,i) => (
-              <div key={item.id||`${item.memberId}-${item.at}-${i}`}
-                onClick={()=>{
+              <TodayFeedItemCard
+                key={item.id||`${item.memberId}-${item.at}-${i}`}
+                item={item}
+                deleting={deletingFeedIds.has(item.id)}
+                onOpen={()=>{
                   const target = members.find(x=>x.id===item.memberId);
                   if (!target) return;
                   onMarkEventsRead?.([item.id]);
                   onSelect(target, feedItemTarget(item.type));
                 }}
-                style={{padding:"8px 10px",borderRadius:8,background:"#111827",
-                  border:"1px solid rgba(255,255,255,0.06)",cursor:"pointer",
-                  display:"flex",alignItems:"flex-start",gap:8}}>
-                <span style={{fontSize:15,flexShrink:0}}>{ACTIVITY_ICON[item.type] || "📌"}</span>
-                <div style={{minWidth:0,flex:1}}>
-                  <div style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>
-                    <span style={{color:"#5EEAD4"}}>{item.memberName}</span> 회원이 {DYNAMIC_LABEL_TYPES.has(item.type) ? item.label : (ACTIVITY_LABEL[item.type]||item.type)}
-                    {DYNAMIC_LABEL_TYPES.has(item.type) ? koreanParticleEulReul(item.label) : (ACTIVITY_PARTICLE[item.type]||"를")} {ACTIVITY_VERB[item.type]||"입력했습니다"}
-                  </div>
-                  <div style={{fontSize:11,color:"#94a3b8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.value}</div>
-                </div>
-                <span style={{fontSize:9,color:"#475569",flexShrink:0,whiteSpace:"nowrap"}}>{formatActivityTime(item.at)}</span>
-              </div>
+                onDelete={()=>handleDeleteFeedItem(item)}
+              />
             ))}
           </div>
         )}

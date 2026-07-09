@@ -21,6 +21,7 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { db, auth } from "./firebase-config";
+import { isMemberMode } from "./app-mode";
 
 // ── 현재 트레이너 uid (없으면 throw) ─────────────────
 function requireUid() {
@@ -547,16 +548,26 @@ function publicSession(data = {}) {
 
 async function attachSessionMemberFeedback(memberId, sessions = []) {
   const uid = auth.currentUser?.uid || null;
+  const memberModeApp = isMemberMode();
   return Promise.all((sessions || []).map(async session => {
     if (!uid) return session;
     const path = `members/${memberId}/sessions/${session.id}/memberFeedback/${uid}`;
     try {
-      // 회원앱 Rules는 본인 feedback 문서만 읽을 수 있으므로 컬렉션 list 대신
-      // 저장 경로와 동일한 문서 경로를 직접 읽습니다.
-      const feedbackRef = doc(db, "members", memberId, "sessions", session.id, "memberFeedback", uid);
-      const feedbackSnap = await getDoc(feedbackRef);
-      const memberFeedback = feedbackSnap.exists() ? { id: feedbackSnap.id, ...feedbackSnap.data() } : null;
-      return { ...session, memberFeedback, memberFeedbackList: memberFeedback ? [memberFeedback] : [] };
+      if (memberModeApp) {
+        // 회원앱 Rules는 본인 feedback 문서만 읽을 수 있으므로 컬렉션 list 대신
+        // 저장 경로와 동일한 문서 경로를 직접 읽습니다.
+        const feedbackRef = doc(db, "members", memberId, "sessions", session.id, "memberFeedback", uid);
+        const feedbackSnap = await getDoc(feedbackRef);
+        const memberFeedback = feedbackSnap.exists() ? { id: feedbackSnap.id, ...feedbackSnap.data() } : null;
+        return { ...session, memberFeedback, memberFeedbackList: memberFeedback ? [memberFeedback] : [] };
+      }
+      // 관리자앱: 회원이 본인 auth.uid 문서(memberFeedback/{회원uid})로 저장하므로
+      // 관리자 uid 문서를 읽으면 항상 비어 있다. 트레이너는 Rules상 컬렉션 읽기(list)가
+      // 허용되므로 목록으로 조회해 회원앱(source==="memberApp") 문서를 우선 사용한다.
+      const listSnap = await getDocs(collection(db, "members", memberId, "sessions", session.id, "memberFeedback"));
+      const list = listSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const memberFeedback = list.find(f => f.source === "memberApp") || list[0] || null;
+      return { ...session, memberFeedback, memberFeedbackList: list };
     } catch (e) {
       console.warn("[DB:attachSessionMemberFeedback] read failed", { path, memberId, sessionId: session.id, code: e?.code, message: e?.message });
       return session;

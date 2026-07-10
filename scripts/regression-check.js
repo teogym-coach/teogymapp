@@ -23,9 +23,14 @@ const membersBlockFlat = membersBlock.replace(/\s+/g, ' ');
 // 원본 소스에서 그대로 슬라이스해 new Function으로 실행한다 — 로직을 다시 옮겨 적지 않고 원본 코드 자체를 검증한다.
 let workoutGuideLib = null;
 try {
+  const sliceNum = app.slice(app.indexOf('function toPositiveNumber'), app.indexOf('function getBodyWeightRecords'));
+  const sliceFunc = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceA = app.slice(app.indexOf('function getNextPtPart'), app.indexOf('function formatWeightValue'));
   const sliceB = app.slice(app.indexOf('function normalizeWorkoutPart'), app.indexOf('function formatRoutineSet'));
-  const factory = new Function(`${sliceA}\n${sliceB}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT };`);
+  const sliceC = app.slice(app.indexOf('function hasRoutineCautionText'), app.indexOf('function ReviewRoutine'));
+  const sliceEquip = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const EQUIP_COLOR'));
+  const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function suggestMuscle'));
+  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement };`);
   workoutGuideLib = factory();
 } catch (e) {
   console.error('[regression] 오늘의 운동 가이드 로직 추출 실패:', e.message);
@@ -1317,6 +1322,182 @@ const checks = [
       return r.isPaired === true && arrEq(r.cycle, lib.PAIR_SPLIT_DEFAULT) && r.part === '가슴 · 어깨 · 삼두';
     }
   ),
+
+  // ── 운동명 정규화 + 세트·중량·볼륨·RPE 추천 — 실제 buildReviewRoutine/recommendExerciseDose 실행 검증 ──
+  wgScenario('운동명 정규화 시나리오1: "시티드 케이블로우"와 "시티드 케이블 로우"가 동일 운동으로 집계됨', lib => {
+    const mkSet = (w, r) => ({ weight: w, reps: r, volume: w * r });
+    const sessions = [
+      { date: daysAgoStr(10), isPublished: true, exercises: [{ name: '시티드 케이블로우', muscleTop: '등', sets: [mkSet(40, 12), mkSet(40, 12), mkSet(40, 12)] }] },
+      { date: daysAgoStr(5), isPublished: true, exercises: [{ name: '시티드 케이블 로우', muscleTop: '등', sets: [mkSet(42.5, 12), mkSet(42.5, 12), mkSet(42.5, 12)] }] },
+    ];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '등');
+    const matched = rec.routine.filter(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('시티드 케이블로우'));
+    return matched.length === 1 && matched[0].analyzedCount === 2;
+  }),
+  wgScenario('운동명 정규화 시나리오2: "랫풀다운"과 "랫 풀 다운"의 최근 기록이 하나로 합쳐짐', lib => {
+    const mkSet = (w, r) => ({ weight: w, reps: r, volume: w * r });
+    const sessions = [
+      { date: daysAgoStr(9), isPublished: true, exercises: [{ name: '랫풀다운', muscleTop: '등', sets: [mkSet(35, 12), mkSet(35, 12), mkSet(35, 12)] }] },
+      { date: daysAgoStr(4), isPublished: true, exercises: [{ name: '랫 풀 다운', muscleTop: '등', sets: [mkSet(37.5, 12), mkSet(37.5, 12), mkSet(37.5, 12)] }] },
+    ];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '등');
+    const matched = rec.routine.filter(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('랫풀다운'));
+    return matched.length === 1 && matched[0].analyzedCount === 2;
+  }),
+  wgScenario('운동명 정규화 시나리오3: 기록이 없는 운동은 기본 4세트와 20·15·12·10회가 추천됨', lib => {
+    const r = lib.recommendExerciseDose([], {});
+    const reps = r.sets.map(s => Number(String(s.reps).replace('회', '')));
+    return r.sets.length === 4 && JSON.stringify(reps) === JSON.stringify(lib.DOSE_REP_SCHEME);
+  }),
+  wgScenario('운동명 정규화 시나리오4: 최근 RPE 6이고 모든 세트를 완료한 운동은 볼륨이 소폭 증가함', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 20, reps: 12, volume: 240 }, { weight: 20, reps: 12, volume: 240 }, { weight: 20, reps: 12, volume: 240 }], rpe: 6, isNegative: false, isFunc: false }];
+    const r = lib.recommendExerciseDose(history, {});
+    const lastVol = 3 * 240;
+    const newVol = r.sets.reduce((s, x) => s + (Number(String(x.weight).replace('kg', '')) || 0) * (Number(String(x.reps).replace('회', '')) || 0), 0);
+    return newVol > lastVol;
+  }),
+  wgScenario('운동명 정규화 시나리오5: 최근 RPE 9~10인 운동은 무조건 중량을 올리지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 20, reps: 12, volume: 240 }, { weight: 20, reps: 12, volume: 240 }, { weight: 20, reps: 12, volume: 240 }], rpe: 9, isNegative: false, isFunc: false }];
+    const r = lib.recommendExerciseDose(history, {});
+    return r.sets.every(s => { const w = Number(String(s.weight).replace('kg', '')); return !Number.isFinite(w) || w <= 20; });
+  }),
+  wgScenario('운동명 정규화 시나리오6: 최근 실패(불편감) 기록이 있으면 중량 또는 반복수가 보수적으로 조정됨', lib => {
+    const history = [{ date: daysAgoStr(2), sets: [{ weight: 20, reps: 12, volume: 240 }], rpe: 8, isPainRisk: true, isFunc: false }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w <= 20 && reps < 12;
+  }),
+  wgScenario('운동명 정규화 시나리오7: 동일 운동 최근 최대 8회만 사용하되 최신 기록에 더 높은 가중치를 줌', lib => {
+    const mkSet = w => ({ weight: w, reps: 10, volume: w * 10 });
+    const sessions = [];
+    for (let i = 0; i < 10; i++) {
+      sessions.push({ date: daysAgoStr(20 - i), isPublished: true, exercises: [{ name: '벤치프레스', muscleTop: '가슴', sets: [mkSet(20 + i), mkSet(20 + i), mkSet(20 + i)], rpe: 6 }] });
+    }
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '가슴');
+    const matched = rec.routine.find(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('벤치프레스'));
+    return !!matched && matched.analyzedCount === 8;
+  }),
+  wgScenario('운동명 정규화 시나리오8: 권장 총볼륨 증가가 일반적으로 최근 기록 대비 3~8% 범위에 들어감', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 20, reps: 12, volume: 240 }, { weight: 20, reps: 12, volume: 240 }, { weight: 20, reps: 12, volume: 240 }], rpe: 6, isNegative: false, isFunc: false }];
+    const r = lib.recommendExerciseDose(history, {});
+    const lastVol = 3 * 240;
+    const newVol = r.sets.reduce((s, x) => s + (Number(String(x.weight).replace('kg', '')) || 0) * (Number(String(x.reps).replace('회', '')) || 0), 0);
+    const pct = ((newVol - lastVol) / lastVol) * 100;
+    return pct >= 0 && pct <= 8.5;
+  }),
+  wgScenario('운동명 정규화 시나리오9: 맨몸·시간 기반 운동에 중량 볼륨 공식을 잘못 적용하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ reps: 15, durationSec: 30 }], rpe: 6, isNegative: false, isFunc: true }];
+    const r = lib.recommendExerciseDose(history, {});
+    return r.sets.every(s => !/kg/.test(String(s.weight)));
+  }),
+
+  // ── 테오짐 실제 장비 중량(바벨 5kg 그리드/덤벨 구비 목록/머신·케이블 실측 간격) 반영 — 실제 실행 검증 ──
+  wgScenario('바벨 시나리오1: 20kg 바벨 운동 다음 추천으로 22.5kg을 생성하지 않음', lib => {
+    const mk = () => ({ weight: 20, reps: 12, volume: 240 });
+    const history = [{ date: daysAgoStr(3), sets: [mk(), mk(), mk()], rpe: 6, isFunc: false, equipment: '바벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    return r.sets.every(s => { const w = Number(String(s.weight).replace('kg', '')); return !Number.isFinite(w) || w !== 22.5; });
+  }),
+  wgScenario('바벨 시나리오2: 기본 바벨 20kg과 2.5kg 원판을 사용하면 다음 구성 가능한 총중량을 25kg으로 판단', lib => {
+    return lib.nextWorkingWeight(20, '바벨', []).weight === 25;
+  }),
+  wgScenario('바벨 시나리오3: 바벨 운동에서 총중량이 일반적으로 5kg 단위로 증가함', lib => {
+    const { weight } = lib.nextWorkingWeight(30, '바벨', []);
+    return weight - 30 === 5;
+  }),
+  wgScenario('바벨 시나리오4: 30kg 다음 추천으로 32.5kg을 생성하지 않고 35kg 또는 반복수 증가를 선택', lib => {
+    const mk = () => ({ weight: 30, reps: 12, volume: 360 });
+    const history = [{ date: daysAgoStr(3), sets: [mk(), mk(), mk()], rpe: 6, isFunc: false, equipment: '바벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w !== 32.5 && (w === 35 || (w === 30 && reps > 12));
+  }),
+  wgScenario('바벨 시나리오5: 목표 반복수를 아직 못 채운 세트는 큰 중량 점프 대신 현재 중량에서 반복수 증가를 우선', lib => {
+    const history = [
+      { date: daysAgoStr(2), sets: [{ weight: 20, reps: 10, volume: 200 }], rpe: 7, isFunc: false, equipment: '바벨' },
+      { date: daysAgoStr(5), sets: [{ weight: 20, reps: 12, volume: 240 }], rpe: 7, isFunc: false, equipment: '바벨' },
+      { date: daysAgoStr(9), sets: [{ weight: 20, reps: 12, volume: 240 }], rpe: 7, isFunc: false, equipment: '바벨' },
+    ];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w === 20 && reps > 10;
+  }),
+  wgScenario('덤벨 시나리오6: 덤벨 추천값이 반드시 구비 목록 중 하나임', lib => {
+    return [1, 3, 5, 7, 8, 10, 12, 14, 20, 24, 30, 34].every(cw => {
+      const history = [{ date: daysAgoStr(3), sets: [{ weight: cw, reps: 12, volume: cw * 12 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+      const r = lib.recommendExerciseDose(history, {});
+      const w = Number(String(r.sets[0].weight).replace('kg', ''));
+      return !Number.isFinite(w) || lib.DUMBBELL_WEIGHTS.includes(w);
+    });
+  }),
+  wgScenario('덤벨 시나리오7: 5kg 다음에 존재하지 않는 6kg을 추천하지 않고 7kg 또는 5kg 반복수 증가를 선택', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 5, reps: 12, volume: 60 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w !== 6 && (w === 7 || (w === 5 && reps > 12));
+  }),
+  wgScenario('덤벨 시나리오8: 14kg에서 20kg으로 바로 증가하지 않고 14kg에서 반복수 증가를 우선', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 14, reps: 12, volume: 168 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w === 14 && reps > 12;
+  }),
+  wgScenario('덤벨 시나리오9: 24kg 다음에 존재하지 않는 26·28kg을 생성하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 24, reps: 12, volume: 288 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w !== 26 && w !== 28 && (!Number.isFinite(w) || lib.DUMBBELL_WEIGHTS.includes(w));
+  }),
+  wgScenario('덤벨 시나리오10: 한 손 기준 덤벨 기록을 양손 합산 중량으로 잘못 추천하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 14, reps: 12, volume: 168 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    return r.sets.every(s => { const w = Number(String(s.weight).replace('kg', '')); return !Number.isFinite(w) || w < 28; });
+  }),
+  wgScenario('머신·케이블 시나리오11: 실제 기록이 20·25kg이면 증량 간격을 5kg으로 판단', lib => {
+    const history = [
+      { date: daysAgoStr(10), sets: [{ weight: 20, reps: 12, volume: 240 }], rpe: 6, isFunc: false, equipment: '머신' },
+      { date: daysAgoStr(3), sets: [{ weight: 25, reps: 12, volume: 300 }], rpe: 6, isFunc: false, equipment: '머신' },
+    ];
+    return lib.estimateWeightIncrement(history) === 5;
+  }),
+  wgScenario('머신·케이블 시나리오12: 동일 운동에서 한 가지 중량만 존재하면 임의 증량 단위를 생성하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 20, reps: 12, volume: 240 }], rpe: 6, isFunc: false, equipment: '머신' }];
+    if (lib.estimateWeightIncrement(history) !== null) return false;
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w === 20 && reps > 12;
+  }),
+  wgScenario('RPE·통증 시나리오13: 최근 RPE 9이지만 통증이 없으면 후보에서 사라지지 않고 중량 유지/반복 감소', lib => {
+    const sessions = [{ date: daysAgoStr(3), isPublished: true, exercises: [{ name: '레그프레스', muscleTop: '하체', equipment: '머신', rpe: 9, feedback: '힘들었지만 잘 마쳤어요', sets: [{ weight: 100, reps: 10, volume: 1000 }, { weight: 100, reps: 10, volume: 1000 }, { weight: 100, reps: 10, volume: 1000 }] }] }];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '하체');
+    const matched = rec.routine.find(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('레그프레스'));
+    if (!matched) return false;
+    const w = Number(String(matched.sets[0].weight).replace('kg', ''));
+    return w <= 100;
+  }),
+  wgScenario('RPE·통증 시나리오14: 최근 RPE 10이지만 명확한 통증이 없으면 무조건 운동을 제외하지 않음', lib => {
+    const sessions = [{ date: daysAgoStr(3), isPublished: true, exercises: [{ name: '스쿼트', muscleTop: '하체', equipment: '바벨', rpe: 10, feedback: '많이 힘들었어요', sets: [{ weight: 60, reps: 8, volume: 480 }, { weight: 60, reps: 8, volume: 480 }, { weight: 60, reps: 8, volume: 480 }] }] }];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '하체');
+    return !!rec.routine.find(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('스쿼트'));
+  }),
+  wgScenario('RPE·통증 시나리오15: "무릎 통증"처럼 명확한 통증 기록이 있으면 해당 운동을 후보에서 제외함', lib => {
+    const sessions = [{ date: daysAgoStr(3), isPublished: true, exercises: [{ name: '레그익스텐션', muscleTop: '하체', equipment: '머신', feedback: '무릎 통증이 있었어요', sets: [{ weight: 40, reps: 10, volume: 400 }, { weight: 40, reps: 10, volume: 400 }, { weight: 40, reps: 10, volume: 400 }] }] }];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '하체');
+    return !rec.routine.find(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('레그익스텐션'));
+  }),
+  wgScenario('공통 시나리오16: 기록이 있어도 장비 종류를 알 수 없으면 구체적 중량을 임의 생성하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 33, reps: 12, volume: 396 }], rpe: 6, isFunc: false, equipment: null }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 33;
+  }),
+
   ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',
     app.includes('const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어");') &&
     app.includes('🧩 보조 운동')

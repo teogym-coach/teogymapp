@@ -30,7 +30,7 @@ try {
   const sliceC = app.slice(app.indexOf('function hasRoutineCautionText'), app.indexOf('function ReviewRoutine'));
   const sliceEquip = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const EQUIP_COLOR'));
   const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function suggestMuscle'));
-  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement };`);
+  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance };`);
   workoutGuideLib = factory();
 } catch (e) {
   console.error('[regression] 오늘의 운동 가이드 로직 추출 실패:', e.message);
@@ -1496,6 +1496,75 @@ const checks = [
     const r = lib.recommendExerciseDose(history, {});
     const w = Number(String(r.sets[0].weight).replace('kg', ''));
     return w === 33;
+  }),
+
+  // ── 안전 보완: 기록 없는 바벨 20kg 자동추천 제거 + 그리드 검증 + 덤벨 증가율 기반 판단 — 실제 실행 검증 ──
+  wgScenario('바벨 안전1: 바벨 운동 기록이 전혀 없을 때 20kg을 자동 추천하지 않음', lib => {
+    const r = lib.recommendExerciseDose([], {});
+    return r.sets.every(s => !/kg/.test(String(s.weight)));
+  }),
+  wgScenario('바벨 안전2: 기록 없는 바벨 운동에 "가벼운 중량부터 시작 후 RPE에 맞춰 조정" 안내가 표시됨', lib => {
+    const r = lib.recommendExerciseDose([], {});
+    return /가벼운/.test(r.reason) && /RPE/.test(r.reason);
+  }),
+  wgScenario('바벨 안전3: 과거 바벨 기록이 22.5kg일 때 무조건 27.5kg을 생성하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 22.5, reps: 12, volume: 270 }], rpe: 6, isFunc: false, equipment: '바벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w !== 27.5;
+  }),
+  wgScenario('바벨 안전4: 바벨 종류와 기본 바 무게를 알 수 없으면 새로운 총중량을 임의 생성하지 않음', lib => {
+    const mk = () => ({ weight: 33, reps: 10, volume: 330 });
+    const sessions = [{ date: daysAgoStr(3), isPublished: true, exercises: [{ name: '이상한운동123', muscleTop: '가슴', sets: [mk(), mk(), mk()], rpe: 6 }] }];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '가슴');
+    const matched = rec.routine.find(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('이상한운동123'));
+    if (!matched) return false;
+    const w = Number(String(matched.sets[0].weight).replace('kg', ''));
+    return w === 33;
+  }),
+  wgScenario('덤벨 안전5: 3kg에서 4kg으로 상승률이 높으면 반복수 증가를 우선', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 3, reps: 12, volume: 36 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    const reps = Number(String(r.sets[0].reps).replace('회', ''));
+    return w === 3 && reps > 12;
+  }),
+  wgScenario('덤벨 안전6: 5kg에서 7kg으로 바로 증량하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 5, reps: 12, volume: 60 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 5;
+  }),
+  wgScenario('덤벨 안전7: 8kg에서 10kg으로 바로 증량하지 않음', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 8, reps: 12, volume: 96 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 8;
+  }),
+  wgScenario('덤벨 안전8: 20kg에서 24kg 증량은 최근 수행과 RPE가 충분히 안정적인 경우에만 허용', lib => {
+    const mk = () => ({ weight: 20, reps: 12, volume: 240 });
+    const history = [
+      { date: daysAgoStr(2), sets: [mk(), mk(), mk()], rpe: 6, isFunc: false, equipment: '덤벨' },
+      { date: daysAgoStr(5), sets: [mk(), mk(), mk()], rpe: 6, isFunc: false, equipment: '덤벨' },
+      { date: daysAgoStr(9), sets: [mk(), mk(), mk()], rpe: 6, isFunc: false, equipment: '덤벨' },
+    ];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 24;
+  }),
+  wgScenario('덤벨 안전9: 30kg에서 34kg 증량은 최근 RPE가 높으면 허용하지 않음', lib => {
+    const history = [{ date: daysAgoStr(2), sets: [{ weight: 30, reps: 10, volume: 300 }], rpe: 9, isFunc: false, equipment: '덤벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w <= 30;
+  }),
+  wgScenario('덤벨 안전10: 덤벨 추천값은 여전히 테오짐 구비 목록 외의 값을 생성하지 않음', lib => {
+    return [1, 2, 3, 4, 5, 7, 8, 10, 12, 14, 20, 24, 30, 34].every(cw => {
+      const history = [{ date: daysAgoStr(3), sets: [{ weight: cw, reps: 12, volume: cw * 12 }], rpe: 6, isFunc: false, equipment: '덤벨' }];
+      const r = lib.recommendExerciseDose(history, {});
+      const w = Number(String(r.sets[0].weight).replace('kg', ''));
+      return !Number.isFinite(w) || lib.DUMBBELL_WEIGHTS.includes(w);
+    });
   }),
 
   ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',

@@ -2849,7 +2849,27 @@ const BARBELL_WEIGHT_STEP=5;
 // 실제 기록이 있으면 그 기록 자체가 이미 유효한 5kg 그리드 위의 값이므로 이 상수에 의존하지 않고 "기록값 + 5kg"으로만 계산한다.
 const DEFAULT_BARBELL_BASE_WEIGHT=20;
 const DUMBBELL_WEIGHTS=[1,2,3,4,5,7,8,10,12,14,20,24,30,34,40]; // 편측(한 손) 기준 구비 중량
-const DUMBBELL_BIG_JUMP_KG=5; // 이 이상 벌어지는 구간(14→20, 24→30, 34→40 등)은 중량 점프 대신 반복수 증가를 우선
+const DUMBBELL_JUMP_PCT_THRESHOLD=15; // 다음 구비 덤벨까지 증가율(%)이 이보다 크면 안정적 수행이 확인될 때만 점프를 허용
+
+// 바벨 총중량이 표준 그리드(DEFAULT_BARBELL_BASE_WEIGHT 기준 5kg 간격)로 실제 구성 가능한 값인지 검증.
+// DEFAULT_BARBELL_BASE_WEIGHT는 여기(검증 기준)에서만 쓰이고, 추천 중량으로 자동 채워 넣는 데는 쓰지 않는다.
+// 22.5kg처럼 이 그리드를 벗어난 기록은 "확인 불가"로 보고 새 총중량을 만들지 않는다(과거 기록 자체는 수정하지 않음).
+function isBarbellWeightPlausible(w){
+  if(!Number.isFinite(w)||w<DEFAULT_BARBELL_BASE_WEIGHT)return false;
+  const diff=Math.round((w-DEFAULT_BARBELL_BASE_WEIGHT)*10);
+  return diff%Math.round(BARBELL_WEIGHT_STEP*10)===0;
+}
+// 최근 기록이 "충분히 안정적"인지 — 중량 상승 폭이 큰 구간(예: 덤벨 14→20)에서만 이 확인을 거친다.
+// 교차 확인할 기록 자체가 모자라면(count 미만) 안정적이라고 단정하지 않는다.
+function hasStableRecentPerformance(history, count=2){
+  const recent=(history||[]).slice(0,count);
+  if(recent.length<count)return false;
+  return recent.every(h=>{
+    const allDone=h.sets.length>0&&h.sets.every(s=>toPositiveNumber(s.weight)&&toPositiveNumber(s.reps));
+    const rpeOk=!Number.isFinite(h.rpe)||h.rpe<=7;
+    return allDone&&rpeOk&&!h.isPainRisk&&!h.isHighEffort;
+  });
+}
 
 function distinctPositiveWeights(history){
   return [...new Set(history.flatMap(h=>h.sets.map(s=>Number(s.weight)).filter(n=>Number.isFinite(n)&&n>0)))].sort((a,b)=>a-b);
@@ -2883,13 +2903,18 @@ function snapDownToValidWeight(w, equipment){
 // 이 경우 중량은 그대로 두고 반복수 증가로 점진적 과부하를 대신한다(중량 상승만이 유일한 과부하 방법이 아니다).
 function nextWorkingWeight(current, equipment, history){
   if(equipment==="바벨"){
-    const base=Number.isFinite(current)?current:DEFAULT_BARBELL_BASE_WEIGHT;
-    return {weight:Math.round((base+BARBELL_WEIGHT_STEP)*100)/100, capped:false};
+    // 근거(표준 그리드 일치) 없이는 새 총중량을 만들지 않는다 — 기록이 없거나(!current) 그리드를 벗어난 값(예: 22.5kg)이면
+    // 원판 조합을 다시 계산하지 않고 현재 기록을 유지한 채 반복수 증가로 대신한다.
+    if(!Number.isFinite(current)||!isBarbellWeightPlausible(current))return {weight:current??null, capped:true};
+    return {weight:Math.round((current+BARBELL_WEIGHT_STEP)*100)/100, capped:false};
   }
   if(equipment==="덤벨"){
     if(!Number.isFinite(current))return {weight:DUMBBELL_WEIGHTS[0], capped:false};
     const next=nextDumbbellWeight(current);
-    if(next-current>=DUMBBELL_BIG_JUMP_KG)return {weight:current, capped:true};
+    if(next<=current)return {weight:current, capped:true}; // 이미 최고 구비 중량
+    const jumpPct=((next-current)/current)*100;
+    // 증가율이 10~15%를 넘으면 최근 기록이 충분히 안정적일 때만 다음 구비 중량을 검토(그 외엔 반복수 증가 우선)
+    if(jumpPct>DUMBBELL_JUMP_PCT_THRESHOLD&&!hasStableRecentPerformance(history))return {weight:current, capped:true};
     return {weight:next, capped:false};
   }
   const inc=estimateWeightIncrement(history);
@@ -2912,10 +2937,10 @@ function recommendExerciseDose(history=[], opts={}){
   const {lower=false}=opts;
   const analyzedCount=history.length;
 
-  // 기록 없음 — 근거 없는 중량을 만들지 않고 안전한 시작 안내만 제공
+  // 기록 없음 — 회원 경험·부상 이력 등 아무 근거가 없으므로 특정 중량(빈 바 무게 포함)을 자동 생성하지 않는다.
   if(!analyzedCount){
-    const sets=DOSE_REP_SCHEME.map((reps,i)=>({label:`${i+1}세트`,weight:i===0?"이전 기록 없음 · 가볍게 시작":"1세트 수행 후 조정",reps:`${reps}회`}));
-    return {sets,reason:"이전 기록이 없어 가벼운 중량부터 시작하도록 안내했습니다. 첫 세트를 수행한 뒤 다음 세트 중량을 조정해보세요(목표 RPE 7~8)."};
+    const sets=DOSE_REP_SCHEME.map((reps,i)=>({label:`${i+1}세트`,weight:i===0?"빈 바 또는 가벼운 중량부터 시작":"1세트 수행 후 조정",reps:`${reps}회`}));
+    return {sets,reason:"이전 기록이 없어 빈 바 또는 수행 가능한 가벼운 중량부터 시작하도록 안내했습니다. 첫 세트를 수행한 뒤 목표 RPE 7~8에 맞춰 다음 세트 중량을 조정해보세요."};
   }
 
   const last=history[0];

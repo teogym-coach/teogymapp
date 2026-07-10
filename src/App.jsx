@@ -2819,18 +2819,40 @@ function GoalMetric({goal}){return <div className="metric goal-metric"><span>현
 function CurrentWeightMetric({curW}){return <div className="metric"><span>현재 체중</span><b>{formatWeightValue(curW)}</b></div>}
 function NextWorkoutMetric({profile}){const info=getNextWorkoutInfo(profile); return <div className="metric next-workout-metric"><span>다음 수업 운동</span><b>{info.part||"미정"}</b><small>{info.dateText}</small><em>{info.dDay}</em></div>}
 function normalizeWorkoutPart(part){if(["팔-이두근","팔-삼두근","이두","삼두"].includes(part))return "팔"; if(part==="복근")return "코어"; if(["기능","스트레칭/이동성"].includes(part))return "교정"; return part||"";}
-function exerciseMatchesPart(e,part){const vals=[e.muscleTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));}
+// exerciseMatchesPart: 정규화된 값(팔=이두+삼두 통합) 비교에 더해, 원본 값(이두/삼두처럼 normalizeWorkoutPart가 뭉개는 하위 구분)도 함께 비교한다.
+// 미는/당기는 콤보 분할("가슴 · 어깨 · 삼두"/"등 · 이두")에서 이두·삼두를 구분해 추천할 수 있도록 추가된 것으로, 기존 매칭 결과는 그대로 유지하고 새 매칭만 더한다.
+function exerciseMatchesPart(e,part){const vals=[e.muscleTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); const rawVals=[e.muscleTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));}
 function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume));}
 function formatExerciseDose(e,lower){const src=getFilledSets(e); const source=src.length?src:[]; const count=Math.max(3,Math.min(4,(source.length||3)-(lower?1:0))); const sets=Array.from({length:count},(_,i)=>{const st=source[i]||source[source.length-1]||{}; const w=st.weight?`${st.weight}kg`:(source.length?"가능한 중량":(i===0?"가볍게 시작":"가능한 중량")); const reps=st.reps||([20,15,12,10][i]||10); return {label:`${i+1}세트`,weight:w,reps:`${reps}회`};}); return {sets};}
 function isTrainerMarkedExercise(e){return !!(e.isFavorite||e.favorite||e.isRecommended||e.recommended||e.memberAppRecommended);}
 function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; sessions.filter(s=>String(s.date||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(e.muscleTop||e.type); if(part)counts[part]=(counts[part]||0)+1;})); return counts;}
 function getWorkoutFrequencyNumber(profile={}){const raw=String(profile.workoutFrequency||profile.weeklyWorkoutCount||""); const n=Number(raw.match(/\d+/)?.[0]); return Number.isFinite(n)&&n>0?n:3;}
+// 회원의 가장 최근 실제 수업이 2:1이었는지 — 과거 이력이 아니라 "현재 진행 중인 수업 형태"를 판별하는 유일한 기준.
+// 2:1 관리 화면에서 나눠서 기록되거나 수업일지에서 수동으로 2:1 표시된 세션 모두 sessionType:"2:1"로 저장되므로, 별도 조회 없이 회원 본인 sessions만으로 판별할 수 있다.
+// 최근 수업이 다시 1:1로 바뀌면 이 값도 자동으로 "1:1"로 돌아오므로 2:1 종료 후 일반 추천 로직 복귀도 별도 상태 없이 처리된다.
+function getLatestSessionType(sessions=[]){
+  const sorted=[...sessions].filter(s=>s?.date).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+  return sorted[0]?.sessionType==="2:1" ? "2:1" : "1:1";
+}
 function getPreSessionWarmup(part){const map={"하체":["발바닥/종아리 근막이완","고관절 가동성","둔근 활성화","발목 가동성"],"가슴":["흉추 회전","소흉근/대흉근 이완","견갑 안정화","전거근 활성화"],"등":["광배/대원근 이완","흉추 신전","견갑 하강/후인 연습","호흡 패턴 정리"],"어깨":["흉추 회전","상부승모 과긴장 완화","전거근 활성화","회전근개 준비운동"],"팔":["상완 근막이완","전완 스트레칭","손목 가동성","팔꿈치 준비운동"],"코어":["횡격막 호흡","골반 중립 찾기","Dead Bug 준비","플랭크 활성화"]}; return map[part]||["전신 가동성 운동","호흡 준비","근막이완","동적 스트레칭"];}
-// 성별 기본 분할 — 회원 실제 기록이 부족할 때의 기준선(5순위). "가슴 · 어깨"는 formatTypes와 동일한 구분자 관례.
-const MALE_SPLIT = ["하체","등","가슴","어깨","팔"];
-const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];
+// 성별/2:1 여부에 따른 기본 분할 — 회원 실제 기록으로 패턴을 못 잡았을 때만 쓰는 최종 폴백(6순위).
+// " · "로 이어진 항목은 하루에 함께 진행하는 콤보 부위(formatTypes와 동일한 구분자 관례).
+const MALE_SPLIT        = ["하체","등","가슴","어깨","팔"];                 // 남성(개인/남남 2:1) 기본 — 5분할 우선
+const FEMALE_SPLIT_2WAY = ["하체","가슴 · 등 · 어깨 · 팔"];                 // 여성 방식 A — 상체/하체 2분할(경험·빈도 낮을 때)
+const FEMALE_SPLIT_3WAY = ["하체","가슴 · 어깨 · 삼두","등 · 이두"];        // 여성/혼성 2:1 기본 — 미는/당기는 3분할(빈도 있을 때)
+const PAIR_SPLIT_DEFAULT = FEMALE_SPLIT_3WAY; // 2:1 수업 기록이 아직 부족할 때의 공통 기본값(파트너 성별 데이터가 없어 혼성 3분할을 기준으로 사용)
 
-// 최근 세션의 대표 부위만 최신순으로 추출 — 연속 중복 제거, 코어/교정은 "하루 전체 분할"이 아니므로 제외.
+// 실제 수업일지의 원본 selectedTypes로 그날의 "콤보 라벨"을 만든다 — normalizeWorkoutPart와 달리 이두/삼두를 "팔"로 뭉개지 않아
+// "가슴 · 어깨 · 삼두"/"등 · 이두" 같은 미는/당기는 조합을 실제 기록에서 그대로 인식할 수 있다.
+const PART_COMBO_ORDER = ["하체","가슴","등","어깨","이두","삼두","팔"];
+function partComboLabel(rawTypes){
+  const arr=Array.isArray(rawTypes)?rawTypes:[rawTypes];
+  const set=new Set(arr.filter(t=>PART_COMBO_ORDER.includes(t)));
+  if(!set.size)return "";
+  return PART_COMBO_ORDER.filter(p=>set.has(p)).join(" · ");
+}
+
+// 최근 세션의 콤보 라벨만 최신순으로 추출 — 연속 중복 제거, 코어/교정 등은 "하루 전체 분할"이 아니므로 제외(partComboLabel이 자동 배제).
 // windowDays: 분할 패턴 분석은 최근 2~4주 실제 수업일지를 우선한다(스펙 6번) — 그 이전 기록은 현재 스타일과 다를 수 있어 배제.
 // n=14: 최대 5분할이 2회 반복되려면 10개가 필요 — 약간의 여유를 둬 하루 이틀 빠진 경우도 패턴을 잡을 수 있게 함.
 function getRecentPartSequence(sessions=[], n=14, windowDays=28){
@@ -2838,8 +2860,8 @@ function getRecentPartSequence(sessions=[], n=14, windowDays=28){
   const sorted=[...sessions].filter(s=>String(s.date||"")>=cutoff).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
   const seq=[];
   for(const s of sorted){
-    const part=normalizeWorkoutPart((s.selectedTypes||[s.type])[0]||"");
-    if(!part||part==="코어"||part==="교정")continue;
+    const part=partComboLabel(s.selectedTypes||[s.type]);
+    if(!part)continue;
     if(seq[seq.length-1]!==part)seq.push(part);
     if(seq.length>=n)break;
   }
@@ -2871,18 +2893,23 @@ function inferActualSplit(sequence=[]){
 
 function getRecommendedPart(profile,sessions=[],onboarding={}){
   const gender=onboarding?.gender||profile?.gender||"남성";
-  const baseCycle=gender==="여성"?FEMALE_SPLIT:MALE_SPLIT;
+  const freq=getWorkoutFrequencyNumber(profile);
+  // 1순위: 현재 진행 중인 수업 형태(1:1/2:1) — 성별보다 우선. 2:1 진행 중이면 실제 2:1 수업일지 패턴을 최우선으로 따르고,
+  // 아직 패턴이 부족할 때만 파트너 성별 조합을 모르는 상태에서도 적용 가능한 공통 기본값(혼성 3분할)을 쓴다.
+  const isPaired=getLatestSessionType(sessions)==="2:1";
+  const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:gender==="여성"?(freq>=3?FEMALE_SPLIT_3WAY:FEMALE_SPLIT_2WAY):MALE_SPLIT;
   const sequence=getRecentPartSequence(sessions);
   const inferred=inferActualSplit(sequence);
   const cycle=inferred||baseCycle;
   const info=getNextWorkoutInfo(profile);
-  const freq=getWorkoutFrequencyNumber(profile);
   const CONFLICT={"하체":"등","등":"하체","가슴":"어깨","어깨":"가슴"};
-  // 콤보 항목("가슴 · 어깨")도 하위 부위로 조회/회피 판정할 수 있도록
+  // 콤보 항목("가슴 · 어깨 · 삼두")도 하위 부위로 조회/회피 판정할 수 있도록
   const findCycleIndex=p=>cycle.findIndex(c=>c===p||c.split(" · ").includes(p));
   const overlapsAvoid=(p,avoid)=>p.split(" · ").some(x=>avoid.has(x));
   const cycleLabel=cycle.length===1?cycle[0]:`${cycle.length}분할`;
   const lastPart=sequence[0];
+  const lastAtoms=lastPart?lastPart.split(" · "):[];
+  const pairNote=isPaired?"2:1 수업 ":"";
 
   let part=null, reason="";
 
@@ -2893,7 +2920,7 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
     if(idxNext!==-1){
       const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;
       part=cycle[idxToday];
-      reason=inferred?`최근 수업 흐름을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:"다음 수업까지 남은 일정을 고려한 추천입니다.";
+      reason=inferred?`최근 ${pairNote}기록을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:`다음 수업이 ${info.part} 운동으로 예정되어 있어, 그 전까지 일정을 고려한 추천입니다.`;
     }
   }
 
@@ -2903,22 +2930,26 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
     const idxLast=findCycleIndex(lastPart);
     if(idxLast!==-1){
       part=cycle[(idxLast+1)%cycle.length];
-      reason=`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;
+      reason=`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;
     }
   }
 
   // 최종 폴백: 패턴도 다음 수업 정보도 못 정했을 때만 — 최근 부위·회복 간격 회피
   if(!part){
     const avoid=new Set();
-    if(lastPart){avoid.add(lastPart); const c=CONFLICT[lastPart]; if(c)avoid.add(c);}
+    lastAtoms.forEach(a=>{avoid.add(a); const c=CONFLICT[a]; if(c)avoid.add(c);});
     const counts=getRecentPartCounts(sessions);
+    const comboCount=label=>label.split(" · ").reduce((sum,atom)=>sum+(counts[normalizeWorkoutPart(atom)]||0),0);
     const candidates=cycle.filter(p=>!overlapsAvoid(p,avoid));
-    part=candidates.sort((a,b)=>(counts[a]||0)-(counts[b]||0))[0]||cycle.find(p=>!overlapsAvoid(p,avoid))||cycle[0];
-    reason="최근 운동 부위와 회복 간격을 고려한 추천입니다.";
+    part=candidates.sort((a,b)=>comboCount(a)-comboCount(b))[0]||cycle.find(p=>!overlapsAvoid(p,avoid))||cycle[0];
+    const avoidedConflict=lastAtoms.map(a=>CONFLICT[a]).find(Boolean);
+    reason=(avoidedConflict && candidates.length<cycle.length)
+      ?`${lastAtoms[0]} 운동 다음 날 ${avoidedConflict} 운동은 피로가 겹칠 수 있어, ${part} 운동을 먼저 배치했습니다.`
+      :"최근 운동 부위와 회복 간격을 고려한 추천입니다.";
   }
-  if(!reason)reason=inferred?`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:"기본 분할 기준을 따른 추천입니다.";
+  if(!reason)reason=inferred?`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:isPaired?"2:1 수업 기록이 아직 충분하지 않아 기본 3분할을 적용했습니다.":"기본 분할 기준을 따른 추천입니다.";
 
-  return {part, reason, cycle, info};
+  return {part, reason, cycle, info, isPaired};
 }
 
 function formatRoutineSet(st,j){const w=st.weight?`${st.weight}kg`:"중량 자유"; const r=st.reps?`${st.reps}회`:(st.durationSec?`${st.durationSec}초`:"횟수 자유"); return `${j+1}세트 ${w} × ${r}`;}

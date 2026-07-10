@@ -1192,9 +1192,23 @@ const checks = [
     app.includes('["가슴","등","하체","어깨","팔"].map(x=>') &&
     !/const parts=\["가슴","등","하체","어깨","코어"\]/.test(app)
   ],
-  ['오늘의 운동 가이드: 성별 기본 분할 상수(남자 5분할/여자 3분할) 정의',
-    app.includes('const MALE_SPLIT = ["하체","등","가슴","어깨","팔"];') &&
-    app.includes('const FEMALE_SPLIT = ["하체","등","가슴 · 어깨"];')
+  ['오늘의 운동 가이드: 성별 기본 분할 상수(남자 5분할/여자 2~3분할) + 2:1 공통 기본값 정의',
+    app.includes('const MALE_SPLIT        = ["하체","등","가슴","어깨","팔"];') &&
+    app.includes('const FEMALE_SPLIT_2WAY = ["하체","가슴 · 등 · 어깨 · 팔"];') &&
+    app.includes('const FEMALE_SPLIT_3WAY = ["하체","가슴 · 어깨 · 삼두","등 · 이두"];') &&
+    app.includes('const PAIR_SPLIT_DEFAULT = FEMALE_SPLIT_3WAY;')
+  ],
+  ['오늘의 운동 가이드: 원본 selectedTypes 기반 콤보 라벨(partComboLabel)로 이두/삼두를 뭉개지 않고 미는/당기는 조합을 그대로 인식',
+    app.includes('const PART_COMBO_ORDER = ["하체","가슴","등","어깨","이두","삼두","팔"];') &&
+    app.includes('function partComboLabel(rawTypes){')
+  ],
+  ['오늘의 운동 가이드: 2:1 여부 판별(getLatestSessionType)이 회원 본인 sessions의 최근 sessionType만으로 이뤄짐(별도 조회 없음) — 최근 수업이 1:1로 바뀌면 자동 복귀',
+    app.includes('function getLatestSessionType(sessions=[]){') &&
+    app.includes('return sorted[0]?.sessionType==="2:1" ? "2:1" : "1:1";')
+  ],
+  ['오늘의 운동 가이드: getRecommendedPart 1순위가 성별보다 2:1 여부(isPaired)를 먼저 반영해 기본 사이클을 선택',
+    app.includes('const isPaired=getLatestSessionType(sessions)==="2:1";') &&
+    app.includes('const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:gender==="여성"?(freq>=3?FEMALE_SPLIT_3WAY:FEMALE_SPLIT_2WAY):MALE_SPLIT;')
   ],
   ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위)이 최근 2~4주(windowDays) 안에서, 실제 "반복" 여부를 검증(단순 나열 아님)',
     app.includes('function getRecentPartSequence(sessions=[], n=14, windowDays=28)') &&
@@ -1215,8 +1229,8 @@ const checks = [
     app.includes('function getNextWorkoutInfo(profile){const part=getNextPtPart(profile);') &&
     app.includes('function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10);')
   ],
-  ['오늘의 운동 가이드: exerciseMatchesPart가 배열(콤보 부위)도 하위호환으로 지원',
-    app.includes('const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
+  ['오늘의 운동 가이드: exerciseMatchesPart가 배열(콤보 부위)도 하위호환으로 지원 + 원본 값(이두/삼두)도 함께 비교',
+    app.includes('const rawVals=[e.muscleTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
   ],
   ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',
     app.includes('const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어");') &&
@@ -1311,11 +1325,11 @@ const checks = [
   ],
 
   // ── 원인과 추천 이유까지 설명하는 PT 코치형(비교 → 변화 이유 → 잘하는 점 → 다음 행동 → 추천 이유) ──
-  ['원인설명형: 홈 탭 "오늘의 운동 가이드" 추천 이유(getRecommendedPart)가 모두 완결된 문장으로 "왜 이 부위/순서를 추천하는지"를 설명(문장이 <br/>에서 끊기지 않음)',
-    app.includes('"다음 수업까지 남은 일정을 고려한 추천입니다."') &&
-    app.includes('reason=`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;') &&
-    app.includes('reason="최근 운동 부위와 회복 간격을 고려한 추천입니다.";') &&
-    app.includes('reason=inferred?`최근 4주 기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:"기본 분할 기준을 따른 추천입니다.";')
+  ['원인설명형: 홈 탭 "오늘의 운동 가이드" 추천 이유(getRecommendedPart)가 모두 완결된 문장으로 "왜 이 부위/순서를 추천하는지"를 설명(문장이 <br/>에서 끊기지 않음), 2:1 진행 중이면 그 사실도 문장에 반영',
+    app.includes(':`다음 수업이 ${info.part} 운동으로 예정되어 있어, 그 전까지 일정을 고려한 추천입니다.`;') &&
+    app.includes('reason=`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;') &&
+    app.includes('reason=(avoidedConflict && candidates.length<cycle.length)') &&
+    app.includes('if(!reason)reason=inferred?`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:isPaired?"2:1 수업 기록이 아직 충분하지 않아 기본 3분할을 적용했습니다.":"기본 분할 기준을 따른 추천입니다.";')
   ],
   ['원인설명형: 건강 요약 배너가 체중 변화 이유(식단·유산소 신호를 교차 참조)와, 유산소 부족 시 "체중 변화는 좋지만 유산소가 줄어서" 같은 교차 원인 기반 추천 이유를 포함',
     app.includes('const reason=recentKcalCount>=5&&zoneWeek.inZone>0?"최근 식단과 유산소 기록이 함께 이어진 것이 이런 변화로 연결되고 있어요.":') &&

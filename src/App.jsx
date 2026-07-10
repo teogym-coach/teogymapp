@@ -2837,10 +2837,18 @@ function getLatestSessionType(sessions=[]){
 function getPreSessionWarmup(part){const map={"하체":["발바닥/종아리 근막이완","고관절 가동성","둔근 활성화","발목 가동성"],"가슴":["흉추 회전","소흉근/대흉근 이완","견갑 안정화","전거근 활성화"],"등":["광배/대원근 이완","흉추 신전","견갑 하강/후인 연습","호흡 패턴 정리"],"어깨":["흉추 회전","상부승모 과긴장 완화","전거근 활성화","회전근개 준비운동"],"팔":["상완 근막이완","전완 스트레칭","손목 가동성","팔꿈치 준비운동"],"코어":["횡격막 호흡","골반 중립 찾기","Dead Bug 준비","플랭크 활성화"]}; return map[part]||["전신 가동성 운동","호흡 준비","근막이완","동적 스트레칭"];}
 // 성별/2:1 여부에 따른 기본 분할 — 회원 실제 기록으로 패턴을 못 잡았을 때만 쓰는 최종 폴백(6순위).
 // " · "로 이어진 항목은 하루에 함께 진행하는 콤보 부위(formatTypes와 동일한 구분자 관례).
-const MALE_SPLIT        = ["하체","등","가슴","어깨","팔"];                 // 남성(개인/남남 2:1) 기본 — 5분할 우선
-const FEMALE_SPLIT_2WAY = ["하체","가슴 · 등 · 어깨 · 팔"];                 // 여성 방식 A — 상체/하체 2분할(경험·빈도 낮을 때)
-const FEMALE_SPLIT_3WAY = ["하체","가슴 · 어깨 · 삼두","등 · 이두"];        // 여성/혼성 2:1 기본 — 미는/당기는 3분할(빈도 있을 때)
+// 순환 순서 자체를 상극 조합이 인접하지 않도록 구성(하체↔등, 가슴↔어깨) — 다음 수업 날짜 역산(2·3순위)이
+// 사이클 인덱스를 그대로 걸어가더라도 배열 순서 자체에서부터 연속 배치를 만들지 않는다.
+const MALE_SPLIT         = ["하체","어깨","등","가슴","팔"];                // 남성(개인/남남 2:1) 기본 — 5분할 우선
+const FEMALE_SPLIT_2WAY  = ["하체","가슴 · 등 · 어깨 · 팔"];                // 여성 방식 A — 상체/하체 2분할(경험·빈도 낮을 때)
+const FEMALE_SPLIT_3WAY  = ["하체","가슴 · 어깨 · 삼두","등 · 이두"];       // 여성/혼성 2:1 기본 — 미는/당기는 3분할(빈도 있을 때)
+const FEMALE_SPLIT_COMBO_2WAY = ["하체 · 가슴 · 삼두","등 · 어깨 · 이두"];  // 여성 방식 B — 부위 조합형 2분할(그 조합이 실제 기록에서 확인될 때)
 const PAIR_SPLIT_DEFAULT = FEMALE_SPLIT_3WAY; // 2:1 수업 기록이 아직 부족할 때의 공통 기본값(파트너 성별 데이터가 없어 혼성 3분할을 기준으로 사용)
+// 여성 기본 분할 선택 — 방식 B(조합형) 사용 흔적이 실제 기록에 있으면 그 조합을 유지, 없으면 빈도로 방식 A/3분할을 가른다.
+function pickFemaleBaseCycle(sequence,freq){
+  if(sequence.some(s=>FEMALE_SPLIT_COMBO_2WAY.includes(s)))return FEMALE_SPLIT_COMBO_2WAY;
+  return freq>=3?FEMALE_SPLIT_3WAY:FEMALE_SPLIT_2WAY;
+}
 
 // 실제 수업일지의 원본 selectedTypes로 그날의 "콤보 라벨"을 만든다 — normalizeWorkoutPart와 달리 이두/삼두를 "팔"로 뭉개지 않아
 // "가슴 · 어깨 · 삼두"/"등 · 이두" 같은 미는/당기는 조합을 실제 기록에서 그대로 인식할 수 있다.
@@ -2897,8 +2905,8 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
   // 1순위: 현재 진행 중인 수업 형태(1:1/2:1) — 성별보다 우선. 2:1 진행 중이면 실제 2:1 수업일지 패턴을 최우선으로 따르고,
   // 아직 패턴이 부족할 때만 파트너 성별 조합을 모르는 상태에서도 적용 가능한 공통 기본값(혼성 3분할)을 쓴다.
   const isPaired=getLatestSessionType(sessions)==="2:1";
-  const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:gender==="여성"?(freq>=3?FEMALE_SPLIT_3WAY:FEMALE_SPLIT_2WAY):MALE_SPLIT;
   const sequence=getRecentPartSequence(sessions);
+  const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:gender==="여성"?pickFemaleBaseCycle(sequence,freq):MALE_SPLIT;
   const inferred=inferActualSplit(sequence);
   const cycle=inferred||baseCycle;
   const info=getNextWorkoutInfo(profile);
@@ -2919,8 +2927,13 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
     const idxNext=findCycleIndex(info.part);
     if(idxNext!==-1){
       const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;
-      part=cycle[idxToday];
-      reason=inferred?`최근 ${pairNote}기록을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:`다음 수업이 ${info.part} 운동으로 예정되어 있어, 그 전까지 일정을 고려한 추천입니다.`;
+      const candidate=cycle[idxToday];
+      // 날짜 역산 결과가 실제 최근 수업과 상극 조합이면(예: 어제 하체인데 오늘 등이 계산됨) 채택하지 않고 아래 단계로 넘긴다.
+      const conflictsWithLast=lastAtoms.some(a=>candidate.split(" · ").includes(a)||candidate.split(" · ").includes(CONFLICT[a]));
+      if(!conflictsWithLast){
+        part=candidate;
+        reason=inferred?`최근 ${pairNote}기록을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:`다음 수업이 ${info.part} 운동으로 예정되어 있어, 그 전까지 일정을 고려한 추천입니다.`;
+      }
     }
   }
 
@@ -2938,6 +2951,10 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
   if(!part){
     const avoid=new Set();
     lastAtoms.forEach(a=>{avoid.add(a); const c=CONFLICT[a]; if(c)avoid.add(c);});
+    // 다음 수업이 오늘·내일처럼 임박했다면, 그 예정 부위와 상극인 조합은 오늘 추천에서도 피해 PT 수행에 지장이 없게 한다.
+    if(info.daysUntil!=null && info.daysUntil>=0 && info.daysUntil<=1 && info.part){
+      info.part.split(" · ").forEach(a=>{avoid.add(a); const c=CONFLICT[a]; if(c)avoid.add(c);});
+    }
     const counts=getRecentPartCounts(sessions);
     const comboCount=label=>label.split(" · ").reduce((sum,atom)=>sum+(counts[normalizeWorkoutPart(atom)]||0),0);
     const candidates=cycle.filter(p=>!overlapsAvoid(p,avoid));

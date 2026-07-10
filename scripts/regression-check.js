@@ -30,7 +30,7 @@ try {
   const sliceC = app.slice(app.indexOf('function hasRoutineCautionText'), app.indexOf('function ReviewRoutine'));
   const sliceEquip = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const EQUIP_COLOR'));
   const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function suggestMuscle'));
-  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance };`);
+  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance, resolveBarbellKind, detectBarbellKindFromText, BARBELL_BASE_WEIGHT_BY_KIND };`);
   workoutGuideLib = factory();
 } catch (e) {
   console.error('[regression] 오늘의 운동 가이드 로직 추출 실패:', e.message);
@@ -1565,6 +1565,40 @@ const checks = [
       const w = Number(String(r.sets[0].weight).replace('kg', ''));
       return !Number.isFinite(w) || lib.DUMBBELL_WEIGHTS.includes(w);
     });
+  }),
+
+  // ── 바벨 세부 종류(일반 20kg / 라이트 10kg / EZ Bar 10kg) — 실제 실행 검증 ──
+  wgScenario('바 종류1: 20kg 일반 바벨 운동은 20kg 기준(일반 올림픽 바)으로 계산', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 20, reps: 12, volume: 240 }], rpe: 6, isFunc: false, equipment: '바벨', barbellKind: '일반바벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 25;
+  }),
+  wgScenario('바 종류2: 10kg 일반 바벨(라이트 바벨) 운동은 10kg 기준으로 계산', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 15, reps: 12, volume: 180 }], rpe: 6, isFunc: false, equipment: '바벨', barbellKind: '라이트바벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 20;
+  }),
+  wgScenario('바 종류3: EZ Bar 운동(운동명 키워드로 판별)은 10kg 기준으로 계산', lib => {
+    const mk = w => ({ weight: w, reps: 10, volume: w * 10 });
+    const sessions = [{ date: daysAgoStr(3), isPublished: true, exercises: [{ name: '이지바 컬', muscleTop: '팔-이두근', sets: [mk(15), mk(15), mk(15)], rpe: 6 }] }];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '팔');
+    const matched = rec.routine.find(x => lib.normalizeExerciseName(x.name) === lib.normalizeExerciseName('이지바 컬'));
+    if (!matched) return false;
+    const w = Number(String(matched.sets[0].weight).replace('kg', ''));
+    return w === 20;
+  }),
+  wgScenario('바 종류4: 바 종류를 잘못 인식하지 않음(덤벨을 바벨로, 일반 바벨을 EZ Bar로 오인하지 않음)', lib => {
+    const dumbbellKind = lib.resolveBarbellKind({ name: '덤벨컬', equipment: '덤벨' });
+    const plainBarbellKind = lib.resolveBarbellKind({ name: '바벨 스쿼트', equipment: '바벨' });
+    return dumbbellKind === null && plainBarbellKind === '일반바벨';
+  }),
+  wgScenario('바 종류5: 실제 기록이 있으면 기본 바 무게보다 기록값을 우선 사용', lib => {
+    const history = [{ date: daysAgoStr(3), sets: [{ weight: 40, reps: 10, volume: 400 }], rpe: 6, isFunc: false, equipment: '바벨', barbellKind: '일반바벨' }];
+    const r = lib.recommendExerciseDose(history, {});
+    const w = Number(String(r.sets[0].weight).replace('kg', ''));
+    return w === 45; // 기본값(20)+5가 아니라 실제 기록 40kg+5
   }),
 
   ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',

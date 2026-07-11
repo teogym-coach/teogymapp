@@ -1630,8 +1630,9 @@ function MemberCalendar(p){
           const events=getCalDayEvents(v);
           const shown=events.slice(0,3), more=events.length-shown.length;
           const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
+          const worked=!!v&&(v.pt.length>0||v.attended||v.cardio.length>0);
           return <button key={key} type="button"
-            className={`mv2-calx-cell${key===todayKey?" today":""}${key===selected?" sel":""}${key>todayKey?" future":""}`}
+            className={`mv2-calx-cell${key===todayKey?" today":""}${key===selected?" sel":""}${key>todayKey?" future":""}${worked?" worked":""}`}
             aria-label={`${mm}월 ${c.d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}${v?.weight!=null?" 체중 기록":""}${v?.kcal!=null?" 칼로리 기록":""}${v?.steps?" 걸음 수 기록":""}`}
             aria-pressed={key===selected}
             onClick={()=>setSelected(key)}>
@@ -4156,7 +4157,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-calx-nav button{width:38px;height:38px;border:0;border-radius:12px;background:transparent;color:#3B82F6;font-size:22px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease}
 .mv2-calx-nav button:active{background:#EEF3FB}
 .mv2-calx-nav button:disabled{opacity:.25;cursor:default}
-.mv2-calx-today{border:1px solid #E5E9EF;background:#fff;color:#3B82F6;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:mv2FadeIn .18s ease}
+.mv2-calx-today{border:1px solid #E5E9EF;background:#fff;color:#3B82F6;border-radius:999px;padding:8px 16px;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:mv2FadeIn .18s ease}
 /* 캘린더 그리드 — 헤어라인 + 글자 뒤 파스텔 하이라이트 바(테두리·그림자 없음) */
 .mv2-calx-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:12px 8px 10px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .mv2-calx-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:2px}
@@ -4165,15 +4166,16 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-calx-grid{display:grid;grid-template-columns:repeat(7,1fr)}
 .mv2-calx-cell{position:relative;min-height:86px;border:0;border-top:1px solid #F3F5F8;background:transparent;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:6px 2px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .mv2-calx-cell.out{cursor:default}
-.mv2-calx-num{align-self:center;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:14.5px;font-weight:800;color:#3A4353;border-radius:999px;font-variant-numeric:tabular-nums;position:relative;z-index:1;transition:background-color .18s ease,color .18s ease}
+.mv2-calx-num{align-self:center;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",'Noto Sans KR',sans-serif;font-size:13.5px;font-weight:500;letter-spacing:-.2px;color:#3A4353;border-radius:999px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;position:relative;z-index:1;transition:background-color .18s ease,color .18s ease}
 .mv2-calx-cell:nth-child(7n) .mv2-calx-num{color:#F26D6D}
 .mv2-calx-cell.future .mv2-calx-num{color:#A8B0BA}
 .mv2-calx-cell.out .mv2-calx-num{color:#CBD2DA}
-.mv2-calx-cell.today:not(.sel) .mv2-calx-num{color:#3B82F6;font-weight:900}
+.mv2-calx-cell.worked .mv2-calx-num{color:#3B82F6}
+.mv2-calx-cell.today:not(.sel) .mv2-calx-num{background:#3B82F6;color:#fff;font-weight:700}
 .mv2-calx-cell.sel .mv2-calx-num{background:#3B82F6;color:#fff!important}
 .mv2-calx-cell.sel::after{content:"";position:absolute;inset:2px 1px;border:1.5px solid rgba(59,130,246,.5);border-radius:12px;background:rgba(59,130,246,.05);pointer-events:none;animation:mv2FadeIn .15s ease}
 .mv2-calx-evts{display:flex;flex-direction:column;gap:2.5px;width:100%;position:relative;z-index:1;padding:0 2px}
-.mv2-evt{display:block;font-style:normal;font-size:9px;font-weight:800;line-height:1;padding:3.5px 4px;border-radius:4px;text-align:left;white-space:nowrap;overflow:hidden;letter-spacing:-.2px}
+.mv2-evt{display:block;font-style:normal;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;font-size:8.5px;font-weight:700;line-height:1.15;padding:3.5px 4px;border-radius:4px;text-align:left;white-space:nowrap;overflow:hidden;letter-spacing:-.1px;-webkit-font-smoothing:antialiased}
 .evt-pt{background:rgba(96,165,250,.22);color:#2C5282}
 .evt-solo{background:rgba(52,199,123,.17);color:#25684A}
 .evt-cardio{background:rgba(251,146,60,.17);color:#8F5322}
@@ -4259,8 +4261,8 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   /* 캘린더 — 시안(태블릿)처럼 요약 카드는 좌우 배치, 셀은 더 크게 */
   .mv2-calx-summary{grid-template-columns:auto 1fr;align-items:center;gap:28px;padding:22px 24px}
   .mv2-calx-cell{min-height:106px;padding:8px 4px}
-  .mv2-calx-num{width:30px;height:30px;font-size:16px}
-  .mv2-evt{font-size:10.5px;padding:4.5px 6px;border-radius:5px}
+  .mv2-calx-num{width:30px;height:30px;font-size:14.5px}
+  .mv2-evt{font-size:9.5px;padding:4.5px 6px;border-radius:5px}
   .mv2-calx-fab{right:max(16px,calc(50vw - 362px))}
 }
 `;

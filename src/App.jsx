@@ -8,6 +8,7 @@ import {
 import { auth, firebaseConfig, app as firebaseApp } from "./firebase-config";
 import { FCM_VAPID_KEY, getNotificationPermission, requestNotificationPermission, getFcmToken } from "./fcm";
 import { isMemberMode } from "./app-mode";
+import { isHoliday as isKrHoliday } from "holiday-kr";
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
@@ -1458,6 +1459,10 @@ function getCalDayEvents(v){
   if(v.steps) ev.push("steps");
   return ev;
 }
+// 날짜 숫자 빨간색 판정 — 일요일 또는 대한민국 공휴일(음력 포함, holiday-kr로 연도별 자동 계산). 운동한 날(파란색)이 우선이므로 이 값은 worked보다 낮은 우선순위로만 쓰인다.
+function isCalRedDay(year,month,day){
+  try{ return !!isKrHoliday(year,month,day); }catch{ return false; }
+}
 function MemberCalendar(p){
   const todayKey=getKoreaDateString();
   const [ym,setYm]=useState(todayKey.slice(0,7));
@@ -1631,8 +1636,9 @@ function MemberCalendar(p){
           const shown=events.slice(0,3), more=events.length-shown.length;
           const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
           const worked=!!v&&(v.pt.length>0||v.attended||v.cardio.length>0);
+          const holidayRed=isCalRedDay(yy,mm,c.d);
           return <button key={key} type="button"
-            className={`mv2-calx-cell${key===todayKey?" today":""}${key===selected?" sel":""}${key>todayKey?" future":""}${worked?" worked":""}`}
+            className={`mv2-calx-cell${key===todayKey?" today":""}${key===selected?" sel":""}${worked?" worked":""}${holidayRed?" holiday":""}`}
             aria-label={`${mm}월 ${c.d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}${v?.weight!=null?" 체중 기록":""}${v?.kcal!=null?" 칼로리 기록":""}${v?.steps?" 걸음 수 기록":""}`}
             aria-pressed={key===selected}
             onClick={()=>setSelected(key)}>
@@ -4166,10 +4172,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-calx-grid{display:grid;grid-template-columns:repeat(7,1fr)}
 .mv2-calx-cell{position:relative;min-height:86px;border:0;border-top:1px solid #F3F5F8;background:transparent;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:6px 2px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .mv2-calx-cell.out{cursor:default}
-.mv2-calx-num{align-self:center;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",'Noto Sans KR',sans-serif;font-size:13.5px;font-weight:500;letter-spacing:-.2px;color:#3A4353;border-radius:999px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;position:relative;z-index:1;transition:background-color .18s ease,color .18s ease}
-.mv2-calx-cell:nth-child(7n) .mv2-calx-num{color:#F26D6D}
-.mv2-calx-cell.future .mv2-calx-num{color:#A8B0BA}
+.mv2-calx-num{align-self:center;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",'Noto Sans KR',sans-serif;font-size:13.5px;font-weight:500;letter-spacing:-.2px;color:#A8B0BA;border-radius:999px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;position:relative;z-index:1;transition:background-color .18s ease,color .18s ease}
 .mv2-calx-cell.out .mv2-calx-num{color:#CBD2DA}
+.mv2-calx-cell.holiday .mv2-calx-num{color:#F26D6D}
 .mv2-calx-cell.worked .mv2-calx-num{color:#3B82F6}
 .mv2-calx-cell.today:not(.sel) .mv2-calx-num{background:#3B82F6;color:#fff;font-weight:700}
 .mv2-calx-cell.sel .mv2-calx-num{background:#3B82F6;color:#fff!important}

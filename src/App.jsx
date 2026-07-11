@@ -1168,7 +1168,7 @@ function MemberApp({ onLogout }) {
   // ── V2 네비게이션 상태 ──
   const [workoutView,setWorkoutView]=useState("journal");      // 수업 탭 세그먼트: journal(수업일지) | calendar(운동 캘린더)
   const [journalFocusId,setJournalFocusId]=useState(null);     // 캘린더 날짜 상세 → 해당 수업일지 바로 열기
-  const [healthIntent,setHealthIntent]=useState(null);         // 홈/캘린더 → 건강 탭 진입 시 자동으로 열 입력 시트 {type:"weight"|"kcal"|"steps"|"condition"|"cardio", date}
+  const [healthIntent,setHealthIntent]=useState(null);         // 홈 → 건강 탭 진입 시 자동으로 열 카드 시트 {type:"weight"|"kcal"|"steps"|"condition"|"pain"|"cardio", date}
   // 키보드/한글 입력 후보창이 하단 탭바를 가리지 않도록, 텍스트 입력 포커스 중엔 탭바를 잠시 숨긴다
   const [navHidden,setNavHidden]=useState(false);
   useEffect(()=>{
@@ -1245,9 +1245,9 @@ function MemberApp({ onLogout }) {
         zone2Min:zone2.min, zone2Max:zone2.max, zoneStatus,
         memo:String(entry.memo||"").trim()||null,
       };
-      await saveCardioLog(profile.id,payload);
+      await saveCardioLog(profile.id,payload,entry.id||null);
       await load();
-      alert("유산소 기록이 저장됐어요.");
+      alert(entry.id?"유산소 기록이 수정됐어요.":"유산소 기록이 저장됐어요.");
     }catch(e){ console.error("[MemberApp] cardio save failed",e); alert(e?.message||"유산소 기록 저장에 실패했습니다."); }
     finally{ setCardioSaving(false); }
   };
@@ -2045,38 +2045,45 @@ function buildHealthMotivation(p){
   return msgs.slice(0,4);
 }
 
-// 오늘 상태 타일 계산 — Apple Health식 "요약 먼저, 입력은 Bottom Sheet" (읽기 전용 계산 헬퍼)
+const CONDITION_EMOJI={"좋음":"😊","보통":"😐","피곤":"😔","매우 피곤":"😩"};
+// 오늘 건강 카드 6종 계산 — "카드 하나 = 입력 항목 하나". 각 카드는 오늘 입력값을 요약해서 보여주고, 다시 누르면 그 항목만 수정 시트가 열린다.
 function buildTodayHealthTiles(p,today,open){
   const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
   const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
   const todayKcal=getKcalLogs(p.nutrition).find(r=>r.date===today)?.kcal;
-  const todayCardioMin=(p.cardioLogs||[]).filter(l=>l.date===today).reduce((s,l)=>s+(Number(l.durationMinutes)||0),0);
-  const hasTodayPain=!!(todayCheck.painPart&&todayCheck.painPart!=="없음");
-  const lastRecord=buildRecentHealthRecords({checkins:p.checkins,body:p.body,nutrition:p.nutrition})[0];
+  const todayCardio=(p.cardioLogs||[]).find(l=>l.date===today)||null;
+  const hasPainRecord=todayCheck.painPart!==undefined&&todayCheck.painPart!==null&&todayCheck.painPart!=="";
+  const hasActualPain=hasPainRecord&&todayCheck.painPart!=="없음";
   return [
-    {key:"weight",label:"오늘 체중",value:todayWeight!=null?`${todayWeight}kg`:"—",hint:todayWeight!=null?"기록 완료":"탭해서 입력",done:todayWeight!=null,onClick:open.measure},
-    {key:"kcal",label:"오늘 칼로리",value:todayKcal!=null?Number(todayKcal).toLocaleString():"—",hint:todayKcal!=null?"kcal · 기록 완료":"탭해서 입력",done:todayKcal!=null,onClick:open.measure},
-    {key:"steps",label:"오늘 걸음수",value:todayCheck.steps?Number(todayCheck.steps).toLocaleString():"—",hint:todayCheck.steps?"보 · 기록 완료":"탭해서 입력",done:!!todayCheck.steps,onClick:open.measure},
-    {key:"condition",label:"오늘 컨디션",value:todayCheck.condition||"—",hint:hasTodayPain?`통증 ${todayCheck.painPart}`:(todayCheck.condition?"기록 완료":"탭해서 입력"),done:!!todayCheck.condition,warn:hasTodayPain,onClick:open.condition},
-    {key:"cardio",label:"오늘 유산소",value:todayCardioMin>0?`${todayCardioMin}분`:"—",hint:todayCardioMin>0?"기록 완료":"탭해서 입력",done:todayCardioMin>0,onClick:open.cardio},
-    {key:"recent",label:"최근 기록",value:lastRecord?String(lastRecord.date).slice(5).replace("-","."):"없음",hint:lastRecord?"마지막 기록일":"오늘 시작해보세요",done:!!lastRecord,onClick:open.measure},
+    {key:"weight",label:"체중",value:todayWeight!=null?`${todayWeight}kg`:"—",hint:todayWeight!=null?"기록 완료":"탭해서 입력",done:todayWeight!=null,onClick:open.weight},
+    {key:"kcal",label:"칼로리",value:todayKcal!=null?`${Number(todayKcal).toLocaleString()}kcal`:"—",hint:todayKcal!=null?"기록 완료":"탭해서 입력",done:todayKcal!=null,onClick:open.kcal},
+    {key:"steps",label:"걸음수",value:todayCheck.steps?`${Number(todayCheck.steps).toLocaleString()}보`:"—",hint:todayCheck.steps?"기록 완료":"탭해서 입력",done:!!todayCheck.steps,onClick:open.steps},
+    {key:"condition",label:"컨디션",value:todayCheck.condition?`${CONDITION_EMOJI[todayCheck.condition]||""} ${todayCheck.condition}`:"—",hint:todayCheck.condition?"기록 완료":"탭해서 입력",done:!!todayCheck.condition,onClick:open.condition},
+    {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
+    {key:"cardio",label:"유산소",value:todayCardio?`${todayCardio.activityType} · ${todayCardio.durationMinutes}분`:"—",hint:todayCardio?"기록 완료":"탭해서 입력",done:!!todayCardio,onClick:open.cardio},
   ];
 }
 function MemberHealth(p){
   const today=getKoreaDateString();
-  const [sheet,setSheet]=useState(null); // "measure" | "condition" | "cardio"
-  const [cardioDate,setCardioDate]=useState(null);
-  const [justSaved,setJustSaved]=useState(false);
-  const [justSavedCondition,setJustSavedCondition]=useState(false);
-  const [justSavedPain,setJustSavedPain]=useState(false);
-  // 홈/캘린더에서 넘어온 입력 의도(healthIntent) → 해당 시트 자동 열기 + 날짜 프리셋. 저장 로직은 기존 그대로.
+  const [sheet,setSheet]=useState(null); // "weight" | "kcal" | "steps" | "condition" | "pain" | "cardio"
+  const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
+  const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
+  const todayKcal=getKcalLogs(p.nutrition).find(r=>r.date===today)?.kcal;
+  const todayCardio=(p.cardioLogs||[]).find(l=>l.date===today)||null;
+  // 카드별 열기 — 오늘 이미 입력한 값이 있으면 불러와 채워서 수정(overwrite)할 수 있게 한다. 다른 카드의 입력값이 섞이지 않도록 나머지 필드는 비운다.
+  const open={
+    weight:()=>{ p.setForm(f=>({...f,date:today,weight:todayWeight!=null?String(todayWeight):"",kcal:"",steps:""})); setSheet("weight"); },
+    kcal:()=>{ p.setForm(f=>({...f,date:today,kcal:todayKcal!=null?String(todayKcal):"",weight:"",steps:""})); setSheet("kcal"); },
+    steps:()=>{ p.setForm(f=>({...f,date:today,steps:todayCheck.steps?String(todayCheck.steps):"",weight:"",kcal:""})); setSheet("steps"); },
+    condition:()=>{ p.setForm(f=>({...f,date:today,condition:todayCheck.condition||""})); setSheet("condition"); },
+    pain:()=>{ p.setForm(f=>({...f,date:today,painPart:todayCheck.painPart||"없음",painSide:todayCheck.painSide||"해당 없음",painVas:todayCheck.painVas??0,painMemo:todayCheck.painMemo||""})); setSheet("pain"); },
+    cardio:()=>setSheet("cardio"),
+  };
+  // 홈에서 넘어온 입력 의도(healthIntent) → 해당 카드의 시트를 오늘 값으로 자동 열기. 저장 로직은 기존 그대로.
   useEffect(()=>{
     const it=p.healthIntent; if(!it) return;
     p.setHealthIntent?.(null);
-    if(it.date) p.setForm(f=>({...f,date:it.date}));
-    if(it.type==="cardio"){ setCardioDate(it.date||today); setSheet("cardio"); }
-    else if(it.type==="condition"||it.type==="pain") setSheet("condition");
-    else setSheet("measure");
+    (open[it.type]||open.weight)();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[p.healthIntent]);
   const weightCard=computeWeightCard(p.body);
@@ -2084,23 +2091,29 @@ function MemberHealth(p){
   const weekCardio=summarizeCardioWeek(p.cardioLogs||[]);
   const highlight=pickHighlightStat(p);
   const motivation=buildHealthMotivation(p);
-  const open={
-    measure:()=>{ p.setForm(f=>({...f,date:f.date||today})); setSheet("measure"); },
-    condition:()=>{ p.setForm(f=>({...f,date:f.date||today})); setSheet("condition"); },
-    cardio:()=>{ setCardioDate(today); setSheet("cardio"); },
-  };
   const tiles=buildTodayHealthTiles(p,today,open);
-  const submitMeasure=async()=>{
-    const w=String(p.form.weight??"").trim(), k=String(p.form.kcal??"").trim(), s=String(p.form.steps??"").trim();
-    if(!w&&!k&&!s){ alert("저장할 건강 기록을 입력해주세요."); return; }
-    if(w&&(!Number.isFinite(Number(w))||Number(w)<=0)){ alert("체중은 0보다 큰 숫자로 입력해주세요."); return; }
+  const [justSaved,setJustSaved]=useState(false);
+  const [justSavedCondition,setJustSavedCondition]=useState(false);
+  const [justSavedPain,setJustSavedPain]=useState(false);
+  const submitWeight=async()=>{
+    const w=String(p.form.weight??"").trim();
+    if(!w){ alert("체중을 입력해주세요."); return; }
+    if(!Number.isFinite(Number(w))||Number(w)<=0){ alert("체중은 0보다 큰 숫자로 입력해주세요."); return; }
     await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); setSheet(null);
   };
-  const handleSaveCondition=async()=>{ if(!p.form.condition){alert("컨디션을 선택해주세요.");return;} await p.saveCondition(); setJustSavedCondition(true); setTimeout(()=>setJustSavedCondition(false),700); };
-  const handleSavePain=async()=>{ const noPain=p.form.painPart==="없음"; if(noPain&&String(p.form.painMemo||"").trim()===""){alert("통증 부위나 메모를 입력해주세요.");return;} await p.savePain(); setJustSavedPain(true); setTimeout(()=>setJustSavedPain(false),700); };
+  const submitKcal=async()=>{
+    if(!String(p.form.kcal??"").trim()){ alert("섭취 칼로리를 입력해주세요."); return; }
+    await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); setSheet(null);
+  };
+  const submitSteps=async()=>{
+    if(!String(p.form.steps??"").trim()){ alert("걸음수를 입력해주세요."); return; }
+    await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); setSheet(null);
+  };
+  const submitCondition=async()=>{ if(!p.form.condition){alert("컨디션을 선택해주세요.");return;} await p.saveCondition(); setJustSavedCondition(true); setTimeout(()=>setJustSavedCondition(false),700); setSheet(null); };
+  const submitPain=async()=>{ const noPain=p.form.painPart==="없음"; if(noPain&&String(p.form.painMemo||"").trim()===""){alert("통증 부위나 메모를 입력해주세요.");return;} await p.savePain(); setJustSavedPain(true); setTimeout(()=>setJustSavedPain(false),700); setSheet(null); };
   return <>
     <h1>건강관리</h1>
-    <p className="sub">오늘의 상태를 먼저 확인하고, 항목을 눌러 바로 기록하세요</p>
+    <p className="sub">오늘의 상태를 먼저 확인하고, 카드를 눌러 항목별로 바로 기록하세요</p>
 
     <div className="health-summary-grid">
       <div className="health-summary-tile" key={`w-${weightCard.value}`}>
@@ -2124,7 +2137,7 @@ function MemberHealth(p){
 
     <div className="health-hub">
       <div className="health-block">
-        <div className="health-block-head"><span className="health-block-icon">📋</span><div><b>오늘 건강 기록</b><span>항목을 누르면 입력 시트가 바로 열려요</span></div></div>
+        <div className="health-block-head"><span className="health-block-icon">📋</span><div><b>오늘 건강 기록</b><span>카드를 누르면 그 항목만 입력·수정할 수 있어요</span></div></div>
         <div className="mv2-today-grid">
           {tiles.map(t=>(
             <button key={t.key} type="button" className={`mv2-today-tile${t.done?" done":""}${t.warn?" warn":""}`} onClick={t.onClick} aria-label={`${t.label} ${t.value===`—`?"미입력":t.value}`}>
@@ -2133,69 +2146,56 @@ function MemberHealth(p){
           ))}
         </div>
       </div>
-      <div className="health-hub-divider"/>
-      <CardioSection {...p}/>
     </div>
 
-    <RecentHealthRecords checkins={p.checkins} body={p.body} nutrition={p.nutrition} onDelete={p.deleteHealthRecord}/>
-
-    {/* 입력 Bottom Sheet — 저장은 전부 기존 saveCheck / saveCondition / savePain / saveCardioEntry 재사용 (신규 저장 로직 없음) */}
-    <MemberBottomSheet open={sheet==="measure"} onClose={()=>setSheet(null)} title="건강 기록 입력">
+    {/* 입력 Bottom Sheet — 카드 하나 = 입력 하나. 저장은 전부 기존 saveCheck / saveCondition / savePain / saveCardioEntry 재사용(신규 저장 로직 없음), 같은 날짜 문서를 덮어써 수정된다. */}
+    <MemberBottomSheet open={sheet==="weight"} onClose={()=>setSheet(null)} title="체중 입력">
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
       <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
-      <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
-      <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
-      <button className={`primary${justSaved?" save-success":""}`} onClick={submitMeasure} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
+      <button className={`primary${justSaved?" save-success":""}`} onClick={submitWeight} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="condition"} onClose={()=>setSheet(null)} title="컨디션 · 통증 입력">
+    <MemberBottomSheet open={sheet==="kcal"} onClose={()=>setSheet(null)} title="칼로리 입력">
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
-      <div className="health-optional-section" style={{borderTop:"none",marginTop:0,paddingTop:0}}>
-        <SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} placeholder="선택 안 함" onChange={v=>p.setForm({...p.form,condition:v})}/>
-        <button type="button" className={`primary compact${justSavedCondition?" save-success":""}`} onClick={handleSaveCondition} disabled={p.conditionSaving}>{p.conditionSaving?"저장 중...":justSavedCondition?"컨디션 저장 완료 ✓":"컨디션 저장"}</button>
-      </div>
-      <div className="health-optional-section">
-        <PainInput form={p.form} setForm={p.setForm}/>
-        <button type="button" className={`primary compact${justSavedPain?" save-success":""}`} onClick={handleSavePain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"통증 저장"}</button>
-      </div>
+      <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
+      <button className={`primary${justSaved?" save-success":""}`} onClick={submitKcal} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title="유산소 기록">
-      <CardioEntryForm p={p} initialDate={cardioDate||today} onSaved={()=>setSheet(null)}/>
+    <MemberBottomSheet open={sheet==="steps"} onClose={()=>setSheet(null)} title="걸음수 입력">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
+      <button className={`primary${justSaved?" save-success":""}`} onClick={submitSteps} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="condition"} onClose={()=>setSheet(null)} title="컨디션 입력">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} placeholder="선택 안 함" onChange={v=>p.setForm({...p.form,condition:v})}/>
+      <button className={`primary${justSavedCondition?" save-success":""}`} onClick={submitCondition} disabled={p.conditionSaving}>{p.conditionSaving?"저장 중...":justSavedCondition?"컨디션 저장 완료 ✓":"저장"}</button>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="pain"} onClose={()=>setSheet(null)} title="통증 입력">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <PainInput form={p.form} setForm={p.setForm}/>
+      <button className={`primary${justSavedPain?" save-success":""}`} onClick={submitPain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"저장"}</button>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title={todayCardio?"유산소 기록 수정":"유산소 기록"}>
+      <CardioEntryForm key={todayCardio?.id||"new"} p={p} initialDate={today} initialLog={todayCardio} onSaved={()=>setSheet(null)}/>
     </MemberBottomSheet>
   </>;
 }
 
-// ════════════════════════════════════════════════════
-// 유산소 기록 / Zone2 심박수 / 유산소 분석 — 건강 탭 하위 메뉴
-// ════════════════════════════════════════════════════
-function CardioSection(p){
-  const [cardioTab,setCardioTab]=useState("record");
-  // Zone2 심박수는 별도 탭이 아니라 "유산소 분석" 안의 보조 지표로 통합 — 버튼 2개만 남겨 줄바꿈 없이 항상 1줄로 표시
-  const TABS=[["record","유산소 기록"],["analysis","유산소 분석"]];
-  return <div className="health-block">
-    <div className="health-block-head"><span className="health-block-icon">❤️</span><div><b>유산소 운동</b><span>기록하고 Zone2와 변화를 확인해보세요</span></div></div>
-    <div className="cardio-tab-bar">
-      {TABS.map(([k,l])=><button key={k} type="button" className={cardioTab===k?"active":""} onClick={()=>setCardioTab(k)}>{l}</button>)}
-    </div>
-    <div className="cardio-tab-fade" key={cardioTab}>
-      {cardioTab==="record"  && <CardioRecordTab {...p}/>}
-      {cardioTab==="analysis"&& <CardioAnalysisTab {...p}/>}
-    </div>
-  </div>;
-}
-
-// 유산소 입력 폼 — 건강 탭 기록 영역과 Bottom Sheet(오늘 상태 타일/캘린더 진입)에서 공유. 저장은 기존 saveCardioEntry 그대로.
-function CardioEntryForm({p,initialDate,onSaved,onCancel}){
+// 유산소 입력 폼 — 건강 탭 카드(오늘 유산소) / 캘린더 Bottom Sheet에서 공유. 저장은 기존 saveCardioEntry 그대로.
+// initialLog가 있으면 그 기록을 불러와 수정(같은 문서 덮어쓰기)하고, 없으면 새 기록을 만든다.
+function CardioEntryForm({p,initialDate,initialLog,onSaved,onCancel}){
   const today=getKoreaDateString();
   const [justSaved,setJustSaved]=useState(false);
-  const [d,setD]=useState({date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
+  const [d,setD]=useState(()=>initialLog
+    ?{date:initialLog.date||initialDate||today,activityType:initialLog.activityType||"",durationMinutes:initialLog.durationMinutes?String(initialLog.durationMinutes):"",averageHeartRate:initialLog.averageHeartRate?String(initialLog.averageHeartRate):"",intensity:initialLog.intensity||"약간 힘듦",memo:initialLog.memo||""}
+    :{date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
   const weightUsed=toPositiveNumber(getLatestBodyWeight(p.body)?.weight)||toPositiveNumber(p.profile.currentWeight);
   const met=d.activityType?getCardioMet(d.activityType,d.intensity):null;
   const estCalories=met&&weightUsed&&d.durationMinutes?calcCardioCalories(met,weightUsed,d.durationMinutes):null;
   const submit=async()=>{
     if(!d.activityType){ alert("유산소 종목을 선택해주세요."); return; }
     if(!d.durationMinutes||Number(d.durationMinutes)<=0){ alert("운동 시간을 입력해주세요."); return; }
-    await p.saveCardioEntry(d);
-    setD({date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
+    await p.saveCardioEntry({...d,id:initialLog?.id});
+    if(!initialLog) setD({date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
     setJustSaved(true); setTimeout(()=>setJustSaved(false),700);
     onSaved?.();
   };
@@ -2209,77 +2209,10 @@ function CardioEntryForm({p,initialDate,onSaved,onCancel}){
     <InputLine label="메모" value={d.memo} onChange={v=>setD({...d,memo:v})}/>
     {estCalories!=null && <div className="cardio-estimate"><b>{d.activityType} {d.durationMinutes}분</b><span>예상 소모 칼로리 {estCalories}kcal</span></div>}
     <p className="notice soft" style={{marginTop:10}}>칼로리는 체중, 속도, 심박수, 기구 설정에 따라 달라질 수 있는 예상값입니다.</p>
-    <button className={`primary${justSaved?" save-success":""}`} onClick={submit} disabled={p.cardioSaving||!weightUsed}>{p.cardioSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
+    <button className={`primary${justSaved?" save-success":""}`} onClick={submit} disabled={p.cardioSaving||!weightUsed}>{p.cardioSaving?"저장 중...":justSaved?"저장 완료 ✓":initialLog?"수정 저장":"저장"}</button>
     {onCancel&&<button className="ghost" onClick={onCancel}>취소</button>}
   </div>;
 }
-function CardioRecordTab(p){
-  const [open,setOpen]=useState(false);
-  const logs=p.cardioLogs||[];
-  return <>
-    {!open
-      ? <button type="button" className="primary" onClick={()=>setOpen(true)}>오늘 유산소 기록하기</button>
-      : <CardioEntryForm p={p} onSaved={()=>setOpen(false)} onCancel={()=>setOpen(false)}/>}
-    <CardioWeeklySummaryCard logs={logs}/>
-    <CardioRecentList logs={logs} onDelete={p.deleteCardioEntry}/>
-  </>;
-}
-
-function CardioWeeklySummaryCard({logs=[]}){
-  const week=summarizeCardioWeek(logs);
-  return <div className="health-subcard" key={`cw-${week.totalMinutes}`}><b className="health-subcard-title">이번 주 유산소 요약</b><div className="grid2"><Metric t="총 시간" v={`${week.totalMinutes}분`}/><Metric t="총 소모 칼로리" v={`${week.totalCalories}kcal`}/><Metric t="운동 횟수" v={`${week.count}회`}/></div></div>;
-}
-
-function CardioRecentList({logs=[],onDelete}){
-  return <div className="health-subcard"><b className="health-subcard-title">최근 유산소 기록</b>{logs.length?logs.slice(0,10).map(l=><div className="health-record-row" key={l.id}><div><b>{l.date} · {l.activityType}</b><span>{l.durationMinutes}분</span>{l.caloriesBurned&&<span>{l.caloriesBurned}kcal</span>}{l.averageHeartRate&&<span>심박 {l.averageHeartRate}bpm</span>}{l.zoneStatus&&<span style={{color:ZONE_STATUS_COLOR[l.zoneStatus]}}>{ZONE_STATUS_LABEL[l.zoneStatus]}</span>}{l.memo&&<span>메모: {l.memo}</span>}</div><button type="button" onClick={()=>onDelete?.(l.id)}>삭제</button></div>):<p className="notice soft">아직 저장된 유산소 기록이 없습니다.</p>}</div>;
-}
-
-function CardioZone2Tab(p){
-  const [rhrInput,setRhrInput]=useState("");
-  const hasAge=hasKnownAge(p.profile,p.onboarding);
-  if(!hasAge) return <div className="health-subcard"><b className="health-subcard-title">내 Zone2 심박수</b><p className="notice soft">생년월일 또는 나이를 먼저 입력해주세요. 프로필에서 입력할 수 있어요.</p></div>;
-  const age=getProfileAge(p.profile,p.onboarding);
-  const zone2=getZone2Range(age,p.onboarding.restingHeartRate);
-  return <>
-    <div className="health-subcard">
-      <b className="health-subcard-title">내 Zone2 심박수</b>
-      <div className="zone2-range"><b>{zone2.min}~{zone2.max}bpm</b><span>{zone2.method==="personalized"?"안정시 심박수를 반영한 개인화 구간":"기본 계산 방식(연령 기준)"}</span></div>
-      <p className="notice soft" style={{marginTop:10}}>대화를 짧게 할 수 있고, 숨은 차지만 오래 유지할 수 있는 강도예요.</p>
-      {zone2.method!=="personalized" && <div style={{marginTop:12}}>
-        <InputLine label="안정시 심박수(선택, bpm)" value={rhrInput} type="number" onChange={setRhrInput}/>
-        <button type="button" className="ghost compact" onClick={()=>p.saveRestingHeartRate(rhrInput)}>입력하고 더 정확하게 계산하기</button>
-      </div>}
-      <p className="notice soft" style={{marginTop:10}}>심장질환, 고혈압, 약물 복용, 어지러움·흉통 이력이 있다면 운동 전 의학적 확인이 필요합니다.</p>
-    </div>
-    <div className="health-subcard"><b className="health-subcard-title">목적별 가이드</b>{CARDIO_GOAL_GUIDES.map(g=><div className="cardio-guide-row" key={g.title}><b>{g.title}</b><span>{g.desc}</span></div>)}</div>
-  </>;
-}
-
-function CardioAnalysisTab(p){
-  const logs=p.cardioLogs||[];
-  const totalMinutesAllTime=logs.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0);
-  const totalCaloriesAllTime=logs.reduce((s,l)=>s+(Number(l.caloriesBurned)||0),0);
-  // Zone2 심박수는 더 이상 별도 탭이 아니라 분석 탭의 보조 지표 — 기록 유무와 무관하게(나이/온보딩만 있으면) 항상 표시
-  const zone2Section=<CardioZone2Tab {...p}/>;
-  if(!logs.length) return <>{zone2Section}<div className="health-subcard"><b className="health-subcard-title">유산소 분석</b><p className="notice soft">유산소 기록이 쌓이면 분석 결과를 보여드려요.</p></div></>;
-  const week=summarizeCardioWeek(logs);
-  const zoneStat=getZone2Achievement(logs);
-  const weightInsight=getCardioWeightInsight(logs,p.body);
-  const improvement=detectCardioFitnessImprovement(logs);
-  const feedback=buildCardioFeedback({logs,body:p.body});
-  return <>
-    <div className="health-subcard highlight"><b className="health-subcard-title">최근 90일 누적 기록</b><div className="grid2"><Metric t="누적 유산소 시간" v={`${totalMinutesAllTime}분`}/><Metric t="누적 소모 칼로리" v={`${Math.round(totalCaloriesAllTime).toLocaleString()}kcal`}/></div></div>
-    <div className="health-subcard"><b className="health-subcard-title">이번 주 유산소 총량</b><div className="grid2"><Metric t="총 시간" v={`${week.totalMinutes}분`}/><Metric t="총 소모 칼로리" v={`${week.totalCalories}kcal`}/><Metric t="운동 횟수" v={`${week.count}회`}/></div></div>
-    {weightInsight && <div className="health-subcard"><b className="health-subcard-title">체중 변화 비교</b><p className="notice soft">최근 유산소로 약 {weightInsight.weeklyCalories}kcal를 소모했어요.</p><p className="notice soft" style={{marginTop:8}}>{weightInsight.losing?`체중이 ${Math.abs(weightInsight.change)}kg 줄었어요.`:"유산소 소모량보다 섭취량, 수면, 근력운동 총량도 함께 확인이 필요합니다."}</p></div>}
-    {zoneStat.total>0 && <div className="health-subcard"><b className="health-subcard-title">Zone2 달성률</b><div className="grid2"><Metric t="Zone2 구간" v={`${zoneStat.inZone}회`}/><Metric t="Zone2 이하" v={`${zoneStat.below}회`}/><Metric t="Zone2 초과" v={`${zoneStat.above}회`}/></div></div>}
-    {improvement && <div className="health-subcard"><b className="health-subcard-title">심폐지구력 변화</b><p className="notice soft">같은 강도에서 심박 부담이 줄어 심폐지구력이 개선되고 있을 가능성이 있습니다.</p></div>}
-    {zone2Section}
-    <div className="health-subcard"><b className="health-subcard-title">대표 피드백</b>{feedback.length?feedback.map((m,i)=><p className="notice soft" key={i} style={{marginTop:i?8:0}}>{m}</p>):<p className="notice soft">꾸준히 기록해주시면 더 자세한 분석을 보여드릴게요.</p>}</div>
-  </>;
-}
-
-function buildRecentHealthRecords({checkins=[],body,nutrition}){const map=new Map(); const touch=(date,patch)=>{if(!date)return; map.set(date,{date,...(map.get(date)||{}),...patch});}; getBodyWeightRecords(body).forEach(r=>touch(r.date,{weight:r.weight})); getKcalLogs(nutrition).forEach(r=>touch(r.date,{kcal:r.kcal})); (checkins||[]).forEach(c=>{const date=c.date||c.id; touch(date,{steps:c.steps,condition:c.condition,painPart:c.painPart||c.painRecord?.part,painSide:c.painSide||c.painRecord?.side,painVas:c.painVas??c.painRecord?.vas,painMemo:c.painMemo||c.painRecord?.memo});}); return [...map.values()].filter(r=>r.weight||r.kcal||r.steps||r.condition||r.painPart||r.painMemo).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,5);}
-function RecentHealthRecords({checkins,body,nutrition,onDelete}){const rows=buildRecentHealthRecords({checkins,body,nutrition}); return <CollapsibleSection label="최근 건강 기록" defaultOpen={false}><section className="mcard">{rows.length?rows.map(r=><div className="health-record-row" key={r.date}><div><b>{r.date}</b>{r.weight&&<span>체중 {r.weight}kg</span>}{r.kcal&&<span>칼로리 {Number(r.kcal).toLocaleString()}kcal</span>}{r.steps&&<span>걸음수 {Number(r.steps).toLocaleString()}보</span>}{r.condition&&<span>컨디션 {r.condition}</span>}{r.painPart&&r.painPart!=="없음"&&<span>통증: {r.painPart} · {r.painSide||"-"} · VAS {r.painVas??0}</span>}{r.painMemo&&<span>메모: {r.painMemo}</span>}</div><button type="button" onClick={()=>onDelete?.(r.date)}>삭제</button></div>):<p className="notice soft">아직 저장된 건강 기록이 없습니다.</p>}</section></CollapsibleSection>}
 
 const PAIN_PARTS=["없음","목","어깨","팔꿈치","손목","허리","고관절","무릎","발목","기타"];
 const PAIN_SIDES=["해당 없음","왼쪽","오른쪽","양쪽","중앙"];

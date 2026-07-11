@@ -677,14 +677,13 @@ const checks = [
     firestoreRules.includes('"agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"') &&
     db.includes('"agreedTermsAt", "agreedPrivacyAt", "restingHeartRate"')
   ],
-  ['회원앱 건강 탭: 유산소 기록/유산소 분석 메뉴(Zone2는 별도 탭 대신 분석 안 보조 지표로 통합, 줄바꿈 방지)',
-    app.includes('function CardioSection(p)') &&
-    app.includes('["record","유산소 기록"]') &&
-    app.includes('["analysis","유산소 분석"]') &&
-    !app.includes('["zone2","Zone2 심박수"]') &&
+  ['회원앱 건강 탭: 하단 유산소 섹션(유산소 기록/유산소 분석 탭) 제거 — 상단 "오늘 유산소" 카드 하나가 입력/수정을 전담(기존 기록을 불러와 덮어씀)',
+    !app.includes('function CardioSection(') &&
+    !app.includes('["record","유산소 기록"]') &&
+    !app.includes('["analysis","유산소 분석"]') &&
     app.includes('function MemberHealth(p)') &&
-    app.includes('<CardioSection {...p}/>') &&
-    app.includes('const zone2Section=<CardioZone2Tab {...p}/>;')
+    app.includes('{key:"cardio",label:"유산소"') &&
+    app.includes('<CardioEntryForm key={todayCardio?.id||"new"} p={p} initialDate={today} initialLog={todayCardio} onSaved={()=>setSheet(null)}/>')
   ],
   ['관리자앱 건강관리 허브: 유산소 탭 연동(최근 기록/주간 요약/Zone2/체중 비교)',
     app.includes('function AdminCardioSection(') &&
@@ -832,31 +831,28 @@ const checks = [
     app.includes('.login-form input:not([type="checkbox"]){width:100%;background:#fff;color:#20242A;')
   ],
 
-  // ── 회원앱 건강 탭: 최근 건강 기록 하단 이동 + 기본 닫힘 ──
-  ['건강 탭 순서: 유산소 섹션(CardioSection)이 최근 건강 기록보다 먼저 렌더링됨',
+  // ── 회원앱 건강 탭: 카드 하나 = 입력 항목 하나 재설계 ──
+  ['건강 탭 카드 순서: 체중·칼로리·걸음수·컨디션·통증·유산소 6개 카드가 이 순서로 배치(카드 하나 = 입력 항목 하나)',
     (() => {
-      const memberHealthFn = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function MemberHealth(p){') + 6000);
-      const iCardio = memberHealthFn.indexOf('<CardioSection {...p}/>');
-      const iRecent = memberHealthFn.indexOf('<RecentHealthRecords');
-      return iCardio !== -1 && iRecent !== -1 && iCardio < iRecent;
+      const i = app.indexOf('function buildTodayHealthTiles(p,today,open){');
+      const block = app.slice(i, i + 2200);
+      const order = ['key:"weight"', 'key:"kcal"', 'key:"steps"', 'key:"condition"', 'key:"pain"', 'key:"cardio"'];
+      let pos = -1;
+      return order.every(tok => { const idx = block.indexOf(tok); if (idx === -1 || idx <= pos) return false; pos = idx; return true; });
     })()
   ],
-  ['최근 건강 기록: CollapsibleSection으로 감싸 기본 닫힘(defaultOpen 미지정 시 false) + 펼치기 토글 재사용',
-    app.includes('function RecentHealthRecords({checkins,body,nutrition,onDelete}){const rows=buildRecentHealthRecords({checkins,body,nutrition}); return <CollapsibleSection label="최근 건강 기록" defaultOpen={false}><section className="mcard">') &&
-    app.includes('function CollapsibleSection({ label, defaultOpen = false, children })')
-  ],
-  ['최근 건강 기록: 삭제 기능(onDelete)과 데이터 조회(buildRecentHealthRecords)는 그대로 유지',
-    app.includes('onClick={()=>onDelete?.(r.date)}') &&
-    app.includes('function buildRecentHealthRecords({checkins=[],body,nutrition})')
+  ['최근 건강 기록 카드 제거: 건강 탭 입력 카드 영역에는 조회 전용 최근 기록 카드가 없음(RecentHealthRecords/buildRecentHealthRecords 삭제)',
+    !app.includes('function RecentHealthRecords(') &&
+    !app.includes('<RecentHealthRecords') &&
+    !app.includes('function buildRecentHealthRecords(')
   ],
 
   // ── 건강 탭 프리미엄 리디자인(동기부여 대시보드) ──
-  ['건강 탭: 오늘 건강 기록 + 유산소 운동이 하나의 health-hub 카드로 통합됨',
+  ['건강 탭: 오늘 건강 기록 카드 6종이 하나의 health-hub 카드로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
     (() => {
       const iHub = app.indexOf('<div className="health-hub">');
-      const iDivider = app.indexOf('<div className="health-hub-divider"/>');
-      const iCardio = app.indexOf('<CardioSection {...p}/>');
-      return iHub !== -1 && iDivider !== -1 && iCardio !== -1 && iHub < iDivider && iDivider < iCardio;
+      const iGrid = app.indexOf('className="mv2-today-grid"');
+      return iHub !== -1 && iGrid !== -1 && iHub < iGrid && !app.includes('<div className="health-hub-divider"/>');
     })()
   ],
   ['건강 탭: 상단 요약이 체중/이번주 운동/유산소/동적 하이라이트 4종으로 개편, 목표 카드 제거',
@@ -883,7 +879,7 @@ const checks = [
   ['건강 탭: 저장 완료 시 성공 플래시 애니메이션(.save-success), 기존 저장 함수(saveCheck/saveCardioEntry) 로직은 변경 없음',
     app.includes('.primary.save-success,.ghost.save-success{background:#16C784') &&
     app.includes('await p.saveCheck(); setJustSaved(true);') &&
-    app.includes('await p.saveCardioEntry(d);')
+    app.includes('await p.saveCardioEntry({...d,id:initialLog?.id});')
   ],
 
   // ── 변화분석 탭: 회원 목표(다이어트/벌크업/체형교정)에 따른 자동 재구성 ──
@@ -970,7 +966,7 @@ const checks = [
   ['성장 리포트: 화면 어디에도 "AI" 문자열이 없음(변화요약/BEST/성장리포트/미래예측 영역)',
     (() => {
       const start = app.indexOf('function computeGrowthReport');
-      const end = app.indexOf('function CardioSection');
+      const end = app.indexOf('function buildNextClassChecklist');
       return start !== -1 && end !== -1 && !app.slice(start, end).includes('AI');
     })()
   ],

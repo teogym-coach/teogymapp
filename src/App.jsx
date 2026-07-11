@@ -1393,9 +1393,9 @@ function buildSessionReportStats(s={}){
     soreness:fb.sorenessLevel&&fb.sorenessLevel!=="없음"?`${formatSorenessBodyParts(fb)} ${fb.sorenessLevel}`:null,
   };
 }
-// 운동일 = PT 수업 또는 개인운동 완료가 있는 날 (유산소만 있는 날은 활동으로는 보여주되 운동일에는 포함하지 않음 — 기존 주간 운동 카운트 기준과 동일)
+// 운동일 = PT 수업 또는 개인운동 완료 또는 유산소 기록이 있는 날 (hasWorkoutDay = hasPT || hasPersonalWorkout || hasCardio) — 같은 날 여러 종류가 겹쳐도 운동일은 1일만 증가
 function getWorkoutDaySet(dayMap){
-  return new Set([...dayMap.entries()].filter(([,v])=>v.pt.length>0||v.attended).map(([k])=>k));
+  return new Set([...dayMap.entries()].filter(([,v])=>v.pt.length>0||v.attended||v.cardio.length>0).map(([k])=>k));
 }
 function computeStreakStats(workoutDays,todayKey){
   const dayBefore=(key,n)=>getKoreaDateString(new Date(new Date(`${key}T12:00:00`).getTime()-n*86400000));
@@ -1417,7 +1417,7 @@ function computeCalendarMonthSummary(dayMap,ym,onboarding,todayKey){
   const entries=[...dayMap.entries()].filter(([k])=>k.startsWith(ym));
   const ptCount=entries.reduce((n,[,v])=>n+v.pt.length,0);
   const soloCount=entries.filter(([,v])=>v.attended).length;
-  const workoutDayCount=entries.filter(([,v])=>v.pt.length>0||v.attended).length;
+  const workoutDayCount=entries.filter(([,v])=>v.pt.length>0||v.attended||v.cardio.length>0).length;
   const cardioDays=entries.filter(([,v])=>v.cardio.length>0);
   const cardioTotal=entries.reduce((n,[,v])=>n+v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0),0);
   const cardioCount=entries.reduce((n,[,v])=>n+v.cardio.length,0);
@@ -1802,7 +1802,7 @@ function pickHomeMainAction(p,todayKey){
   const unread=p.sessions.filter(s=>s.isPublished&&!p.readSessionIds?.has(s.id)&&getSessionPublishDate(s)>=SESSION_UNREAD_CUTOFF).length;
   if(unread>0) return {key:"feedback",icon:"📋",title:"대표 피드백 확인하기",desc:`새로 도착한 수업일지 ${unread}건이 있어요`,cta:"수업일지 열기",onClick:()=>p.setTab("workout")};
   const attended=(p.attendance||[]).some(a=>a.date===todayKey);
-  if(!attended) return {key:"workout",icon:"💪",title:"오늘 운동 완료 체크",desc:"PT나 개인운동을 마쳤다면 오늘을 기록해보세요",cta:"운동 완료 체크",onClick:p.saveAttendanceToday,busy:p.attendanceSaving};
+  if(!attended) return {key:"workout",icon:"💪",title:"오늘 운동 완료 체크",desc:"오늘 개인 운동을 했다면 완료로 기록해보세요",cta:"개인 운동 완료",onClick:p.saveAttendanceToday,busy:p.attendanceSaving};
   const hasWeight=getBodyWeightRecords(p.body).some(r=>r.date===todayKey);
   if(!hasWeight) return {key:"weight",icon:"⚖️",title:"오늘 체중 기록하기",desc:"기록이 쌓일수록 변화가 정확해져요",cta:"체중 입력",onClick:()=>{p.setHealthIntent?.({type:"weight",date:todayKey}); p.setTab("health");}};
   const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===todayKey)||{};

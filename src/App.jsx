@@ -5120,8 +5120,8 @@ export default function App() {
         </div>
       )}
 
-      {/* NAV — 홈 화면(사이드바)에서는 숨김 */}
-      {screen !== "home" && (
+      {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)에서는 숨김 */}
+      {screen !== "home" && screen !== "members" && (
       <nav className="noprint" style={{
         borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"0 clamp(10px,3vw,16px)",
         paddingTop:"env(safe-area-inset-top, 0px)",
@@ -5161,13 +5161,13 @@ export default function App() {
       )}
 
       {/* SCREENS */}
-      <div className="noprint" style={screen==="home" ? {width:"100%"} : {
+      <div className="noprint" style={(screen==="home"||screen==="members") ? {width:"100%"} : {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
-        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} />}
@@ -6613,20 +6613,20 @@ function TodayFeedItemCard({ item, deleting, onOpen, onDelete }) {
         onClick={handleCardClick}
         style={{position:"relative",transform:`translateX(${translateX}px)`,
           transition: dragState.current.dragging ? "none" : "transform .18s ease",
-          padding:"8px 30px 8px 10px",borderRadius:8,background:"#111827",
-          border:"1px solid rgba(255,255,255,0.06)",cursor:"pointer",
+          padding:"9px 30px 9px 11px",borderRadius:12,background:"#F8FAFC",
+          border:"1px solid #EDEFF2",cursor:"pointer",
           display:"flex",alignItems:"flex-start",gap:8}}>
         <span style={{fontSize:15,flexShrink:0}}>{ACTIVITY_ICON[item.type] || "📌"}</span>
         <div style={{minWidth:0,flex:1}}>
-          <div style={{fontSize:12,color:"#ddddf0",fontWeight:600}}>
-            <span style={{color:"#5EEAD4"}}>{item.memberName}</span> 회원이 {feedSentence(item)}
+          <div style={{fontSize:12,color:"#0F172A",fontWeight:600}}>
+            <span style={{color:"#0F9488",fontWeight:800}}>{item.memberName}</span> 회원이 {feedSentence(item)}
           </div>
-          <div style={{fontSize:11,color:"#94a3b8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.value}</div>
+          <div style={{fontSize:11,color:"#64748B",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.value}</div>
         </div>
-        <span style={{fontSize:9,color:"#475569",flexShrink:0,whiteSpace:"nowrap",marginRight:4}}>{formatActivityTime(item.at)}</span>
+        <span style={{fontSize:9,color:"#94A3B8",flexShrink:0,whiteSpace:"nowrap",marginRight:4}}>{formatActivityTime(item.at)}</span>
         <button onClick={e=>{e.stopPropagation();onDelete();}} disabled={deleting} title="삭제"
           style={{position:"absolute",right:4,top:4,width:18,height:18,borderRadius:"50%",
-            border:"none",background:"rgba(255,255,255,0.06)",color:"#ff6b6b",fontSize:10,lineHeight:"18px",
+            border:"none",background:"rgba(15,23,42,.05)",color:"#EF4444",fontSize:10,lineHeight:"18px",
             padding:0,cursor:deleting?"default":"pointer",opacity:deleting?.5:1}}>
           ✕
         </button>
@@ -6635,7 +6635,97 @@ function TodayFeedItemCard({ item, deleting, onOpen, onDelete }) {
   );
 }
 
-function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead }) {
+// ════════════════════════════════════════════
+// 회원 목록 V2 — 홈 대시보드 디자인 시스템(DB 토큰)을 그대로 잇는 라이트 UI.
+// 데이터·필터·읽음 처리 로직은 기존 그대로, 표현 계층만 재설계.
+// ════════════════════════════════════════════
+function relativeTimeLabel(at){
+  if(!at) return "";
+  const t=Number(at); if(!Number.isFinite(t)) return "";
+  const diff=Date.now()-t;
+  if(diff<60000) return "방금 전";
+  if(diff<3600000) return `${Math.floor(diff/60000)}분 전`;
+  const dayKey=getKoreaDateString(new Date(t));
+  const todayKey=getKoreaDateString();
+  if(dayKey===todayKey){
+    if(diff<43200000&&new Date(t).getHours()<12&&new Date().getHours()>=12) return "오늘 오전";
+    return `${Math.floor(diff/3600000)}시간 전`;
+  }
+  if(dayKey===dateStrDaysAgo(1)) return "어제";
+  const days=Math.max(2,Math.floor(diff/86400000));
+  return `${days}일 전`;
+}
+// 최근 방문 흐름 컬러 — 아바타 도트로 표시 (오늘=민트, 3일 이내=그린, 7일=그레이, 14일=앰버, 그 이상=레드)
+function visitTone(daysSince,isToday){
+  if(isToday) return DB.mint;
+  if(daysSince==null) return "#CBD5E1";
+  if(daysSince<=3) return DB.success;
+  if(daysSince<=7) return "#A7B1BD";
+  if(daysSince<=14) return DB.warning;
+  return DB.danger;
+}
+// 다음 수업 라벨 — 예약된 다음 수업(nextWorkoutDate)이 있으면 그것을, 없으면 마지막 수업 기준
+function nextSessionInfoLabel(m,meta,today){
+  const info=getNextWorkoutInfo(m);
+  if(info.daysUntil!=null&&info.daysUntil>=0){
+    const when=info.daysUntil===0?"오늘 수업":info.daysUntil===1?"내일":`${info.daysUntil}일 후`;
+    return {text:`${when}${info.part&&info.part!=="미정"?` · ${info.part}`:""}`,hot:info.daysUntil===0};
+  }
+  if(meta.lastDate===today) return {text:"오늘 수업 완료",hot:true};
+  if(meta.daysSince!=null) return {text:`마지막 수업 ${meta.daysSince===0?"오늘":`${meta.daysSince}일 전`}`,hot:false};
+  return {text:"수업 기록 없음",hot:false};
+}
+// 우측 상태값 톤 — 통증=레드 · 근육통 강함/RPE 9+=앰버 · 일반 입력=민트
+function activityTone(a){
+  if(a.type==="pain") return DB.danger;
+  if(a.type==="soreness"&&/강함/.test(String(a.value||""))) return "#B45309";
+  if(a.type==="rpe"){ const n=Number(String(a.value||"").replace(/[^0-9.]/g,"")); if(n>=9) return "#B45309"; }
+  return DB.mintSoft;
+}
+// 카드 셸 — hover 리프트 + 클릭 시 민트 보더/살짝 확대 (220ms)
+function MemberCardShell({onClick,dim,children}){
+  const [hov,setHov]=useState(false);
+  const [press,setPress]=useState(false);
+  return <div onClick={onClick}
+    onMouseEnter={()=>setHov(true)} onMouseLeave={()=>{setHov(false);setPress(false);}}
+    onMouseDown={()=>setPress(true)} onMouseUp={()=>setPress(false)}
+    onTouchStart={()=>setPress(true)} onTouchEnd={()=>setPress(false)}
+    style={{
+      background:"#fff",borderRadius:18,cursor:"pointer",
+      border:`1.5px solid ${press?DB.mint:hov?"rgba(57,199,184,.35)":DB.border}`,
+      boxShadow:press?"0 4px 18px rgba(57,199,184,.16)":hov?DB.shadowLg:DB.shadow,
+      transform:press?"scale(1.008)":hov?"translateY(-2px)":"none",
+      transition:"transform .22s ease,box-shadow .22s ease,border-color .22s ease",
+      padding:"16px 16px 15px",display:"flex",alignItems:"flex-start",gap:13,
+      opacity:dim?.6:1,
+    }}>{children}</div>;
+}
+// 프로필 — 실제 사진이 있으면 표시, 없으면 이니셜. 최근 방문 도트 + 오늘 입력 NEW 배지.
+function MemberAvatar({name,photo,tone,showNew}){
+  const [imgOk,setImgOk]=useState(true);
+  return <div style={{position:"relative",flexShrink:0}}>
+    <div style={{width:48,height:48,borderRadius:"50%",overflow:"hidden",background:DB.mintTint,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      {photo&&imgOk
+        ? <img src={photo} alt="" onError={()=>setImgOk(false)} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+        : <span style={{fontFamily:DB.font,fontWeight:800,fontSize:17,color:DB.mintSoft}}>{(name||"?").slice(0,1)}</span>}
+    </div>
+    <span style={{position:"absolute",right:-1,bottom:1,width:11,height:11,borderRadius:"50%",background:tone,boxShadow:"0 0 0 2.5px #fff"}}/>
+    {showNew&&(
+      <span style={{position:"absolute",top:-5,right:-8,background:DB.danger,color:"#fff",fontSize:7.5,fontWeight:800,padding:"2px 5px",borderRadius:7,boxShadow:"0 0 0 2px #fff",letterSpacing:.3,fontFamily:DB.font}}>NEW</span>
+    )}
+  </div>;
+}
+// Apple Wallet 느낌의 라운드 칩
+function GoalChip({label,tint}){
+  const tones={
+    mint:{bg:DB.mintTint,fg:DB.mintSoft,bd:"rgba(57,199,184,.25)"},
+    slate:{bg:"rgba(100,116,139,.08)",fg:"#64748B",bd:"rgba(100,116,139,.18)"},
+  };
+  const t=tones[tint]||tones.mint;
+  return <span style={{display:"inline-flex",alignItems:"center",padding:"4px 11px",borderRadius:999,background:t.bg,color:t.fg,border:`1px solid ${t.bd}`,fontSize:11,fontWeight:700,fontFamily:DB.font,whiteSpace:"nowrap"}}>{label}</span>;
+}
+
+function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack }) {
   const today = new Date().toISOString().split("T")[0];
   const todayKST = getKoreaDateString(); // 오늘 입력 피드/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
   const [search,     setSearch]     = useState("");
@@ -6661,6 +6751,11 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     return buildTodayFeedItems(members, liveMembersById, notificationReads, todayKST);
   }
   const todayFeedItems = getTodayFeedItems(); // = 읽지 않은 알림 목록
+  // "체크 필요" 필터/AI 요약 — 홈 대시보드와 동일한 buildTodaySummary 재사용 (신규 계산 로직 없음)
+  const todayAttention = buildTodaySummary(members, liveMembersById, todayKST).attention;
+  const attentionById = new Map(todayAttention.map(x=>[x.member.id, x.reasons]));
+  // 오늘 입력 요약 — 항목별 입력 인원 수 (기존 todayInputTypes 재사용)
+  const todayInputCounts = (()=>{ const c={weight:0,condition:0,cardio:0,rpe:0}; members.forEach(m=>{ if(isOwner(m)) return; getTodayInputTypes(m).forEach(t=>{ if(c[t]!=null) c[t]++; }); }); return c; })();
   // 왼쪽 아이콘 영역 큰 NEW 표시 조건 — 오늘 입력 피드(읽지 않은 알림)에 1건이라도 남아있는 회원만. 작은 NEW 배지는 폐지하고 이 하나로 통일한다.
   function hasTodayFeedInput(m) {
     return todayFeedItems.some(i => i.memberId === m.id);
@@ -6736,18 +6831,23 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     return now.getMonth() + 1 === bm && now.getDate() === bd;
   }
 
-  // 필터
-  const FILTERS = [
-    {key:"active",  label:"진행중",   color:"#5EEAD4"},
-    {key:"paused",  label:"휴식중",   color:"#ffd166"},
-    {key:"ended",   label:"종료회원", color:"#94a3b8"},
-    {key:"consult", label:"상담",     color:"#a78bfa"},
-    {key:"all",     label:"전체",     color:"#94a3b8"},
-    {key:"today",   label:"오늘 수업",color:"#5EEAD4"},
-    {key:"7days",   label:"7일 미방문",color:"#ff9f43"},
-    {key:"14days",  label:"14일 미방문",color:"#ff6b6b"},
-    {key:"diet",    label:"다이어트", color:"#a29bfe"},
-    {key:"bulk",    label:"벌크업",   color:"#f97316"},
+  // 필터 — 자주 쓰는 5개는 세그먼트, 나머지(기존 필터 전부 유지)는 "필터" 팝오버로
+  const SEGMENT_FILTERS = [
+    {key:"active",     label:"전체"},
+    {key:"today",      label:"오늘 수업"},
+    {key:"unrecorded", label:"미기록"},
+    {key:"attention",  label:"체크 필요"},
+    {key:"new",        label:"최근 등록"},
+  ];
+  const MORE_FILTERS = [
+    {key:"paused",  label:"휴식중"},
+    {key:"ended",   label:"종료회원"},
+    {key:"consult", label:"상담"},
+    {key:"all",     label:"모든 상태"},
+    {key:"7days",   label:"7일 미방문"},
+    {key:"14days",  label:"14일 미방문"},
+    {key:"diet",    label:"다이어트"},
+    {key:"bulk",    label:"벌크업"},
   ];
   const SORTS = [
     {key:"recent",    label:"최근 기록순"},
@@ -6783,6 +6883,10 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     if (filter === "consult") return (m.status||"").includes("상담") || (m.programType||"").includes("상담");
     if (filter === "diet")    return (m.goal||"").includes("다이어트") || (m.goal||"").includes("감량");
     if (filter === "bulk")    return (m.goal||"").includes("벌크") || (m.goal||"").includes("증량") || (m.goal||"").includes("근육");
+    // V2 신규 필터 — 전부 기존 데이터 계산만 재사용
+    if (filter === "unrecorded") return (sessionsMap[m.id]||[]).some(s=>s.isPublished!==true);
+    if (filter === "attention")  return attentionById.has(m.id);
+    if (filter === "new")        return (m.startDate||"") >= dateStrDaysAgo(29);
     return true;
   }
 
@@ -6822,107 +6926,132 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
   const ownerMember = members.find(m => isOwner(m));
 
   return (
-    <div>
-      <SH title="👥 회원 목록"
-        sub={`${filtered.length}명`}
-        right={
-          <div style={{display:"flex",gap:6}}>
-            <Btn ghost sm onClick={onRefresh}>↻</Btn>
-            <Btn sm onClick={onAdd}>+ 추가</Btn>
+    <div style={{minHeight:"100dvh",background:DB.bg,fontFamily:DB.font}}>
+      {/* ═══ 헤더 — 홈 대시보드와 같은 라이트 스티키 헤더 ═══ */}
+      <div style={{position:"sticky",top:0,zIndex:60,background:"rgba(246,247,249,.88)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderBottom:DB.hairline}}>
+        <div style={{maxWidth:820,margin:"0 auto",display:"flex",alignItems:"center",gap:10,padding:"11px 16px",paddingTop:"calc(11px + env(safe-area-inset-top,0px))"}}>
+          <button onClick={onBack} aria-label="홈으로" style={{width:34,height:34,borderRadius:11,border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:DB.shadow,flexShrink:0}}>←</button>
+          <div style={{display:"flex",alignItems:"baseline",gap:8,minWidth:0}}>
+            <span style={{fontFamily:DB.font,fontWeight:800,fontSize:17,color:DB.text,letterSpacing:"-.4px",whiteSpace:"nowrap"}}>회원 목록</span>
+            <span style={{fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:DB.mintSoft,whiteSpace:"nowrap"}}>{filtered.length}명</span>
           </div>
-        }
-      />
+          <div style={{marginLeft:"auto",display:"flex",gap:7,flexShrink:0}}>
+            <button onClick={onRefresh} aria-label="새로고침" style={{width:34,height:34,borderRadius:11,border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,fontSize:14,cursor:"pointer",boxShadow:DB.shadow}}>↻</button>
+            <button onClick={onAdd} style={{height:34,padding:"0 14px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",fontFamily:DB.font,fontWeight:800,fontSize:12.5,cursor:"pointer",boxShadow:"0 4px 12px rgba(57,199,184,.3)",whiteSpace:"nowrap"}}>+ 회원 추가</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:820,margin:"0 auto",padding:"16px 16px calc(44px + env(safe-area-inset-bottom,0px))"}}>
 
       {/* 대표님 전용 운동 기록 버튼 */}
       {ownerMember && (
-        <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
-          background:"linear-gradient(135deg,rgba(94,234,212,.1),rgba(129,140,248,.08))",
-          border:"1px solid rgba(94,234,212,.25)",
+        <div style={{marginBottom:12,padding:"13px 16px",borderRadius:16,
+          background:"linear-gradient(135deg,rgba(57,199,184,.10),#FFFFFF)",
+          border:"1px solid rgba(57,199,184,.28)",boxShadow:DB.shadow,
           display:"flex",alignItems:"center",justifyContent:"space-between",
           cursor:"pointer"}}
           onClick={()=>onSelect(ownerMember)}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:36,height:36,borderRadius:9,background:"rgba(94,234,212,.2)",
+          <div style={{display:"flex",alignItems:"center",gap:11}}>
+            <div style={{width:38,height:38,borderRadius:12,background:DB.mintTint,
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏋️</div>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#5EEAD4"}}>대표님 운동 기록</div>
-              <Mo c="#94a3b8" s={10}>{ownerMember.name} · 개인 운동 전용</Mo>
+              <div style={{fontFamily:DB.font,fontWeight:800,fontSize:14,color:DB.mintSoft}}>대표님 운동 기록</div>
+              <div style={{fontFamily:DB.font,fontSize:11,color:DB.faint,fontWeight:600,marginTop:2}}>{ownerMember.name} · 개인 운동 전용</div>
             </div>
           </div>
-          <Mo c="#5EEAD4" s={13}>→</Mo>
+          <span style={{color:DB.mintSoft,fontSize:14,fontWeight:700}}>→</span>
         </div>
       )}
 
       {/* 테스트 회원 관리 (기본 접힘) — docs/member-app-test-accounts.md */}
-      <div style={{marginBottom:10}}>
-        <Btn ghost sm onClick={()=>setShowTestPanel(v=>!v)} style={{color:"#a78bfa",borderColor:"rgba(167,139,250,.3)"}}>
+      <div style={{marginBottom:12}}>
+        <button onClick={()=>setShowTestPanel(v=>!v)} style={{border:"1px solid rgba(139,92,246,.25)",background:"#fff",color:"#7C3AED",borderRadius:11,padding:"7px 12px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font,boxShadow:DB.shadow}}>
           🧪 테스트 회원 관리 {showTestPanel?"▲":"▼"}
-        </Btn>
+        </button>
         {showTestPanel && (
-          <div style={{marginTop:8,padding:10,borderRadius:8,background:"rgba(167,139,250,.06)",border:"1px solid rgba(167,139,250,.2)"}}>
-            <Mo c="#a78bfa" s={9}>회원앱 로그인/상태차단/공지/2:1 테스트 전용 — 실제 회원과 무관</Mo>
+          <div style={{marginTop:8,padding:"12px 14px",borderRadius:14,background:"#fff",border:"1px solid rgba(139,92,246,.2)",boxShadow:DB.shadow}}>
+            <div style={{fontSize:11,color:"#7C3AED",fontWeight:600,fontFamily:DB.font}}>회원앱 로그인/상태차단/공지/2:1 테스트 전용 — 실제 회원과 무관</div>
             <div style={{display:"grid",gap:6,marginTop:8}}>
               {TEST_MEMBER_PRESETS.map(preset=>{
                 const exists = members.some(m => (m.email||"").trim().toLowerCase() === preset.email);
                 return (
                   <div key={preset.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-                    <div style={{fontSize:11,color:"#cbd5e1"}}>{preset.name} <span style={{color:"#94a3b8"}}>({preset.email})</span></div>
-                    <Btn ghost sm disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{color:exists?"#475569":"#a78bfa",borderColor:exists?"#334155":"rgba(167,139,250,.4)"}}>
+                    <div style={{fontSize:11.5,color:DB.text,fontFamily:DB.font}}>{preset.name} <span style={{color:DB.faint}}>({preset.email})</span></div>
+                    <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font}}>
                       {exists?"생성됨":"생성"}
-                    </Btn>
+                    </button>
                   </div>
                 );
               })}
             </div>
-            <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:8}}>
+            <div style={{fontSize:10.5,color:DB.faint,marginTop:8,fontFamily:DB.font,lineHeight:1.6}}>
               생성 후 회원 상세 → 회원앱 관리 → 회원앱 초대 버튼으로 Firebase Auth 계정을 연결해야 로그인 테스트가 가능합니다.
-            </Mo>
+            </div>
           </div>
         )}
       </div>
 
       {/* 검색창 */}
-      <div style={{position:"relative",marginBottom:8}}>
+      <div style={{position:"relative",marginBottom:12}}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="2" strokeLinecap="round" style={{position:"absolute",left:15,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
         <input
           value={search} onChange={e=>setSearch(e.target.value)}
-          placeholder="이름 검색 (초성 가능: ㄱㅁㅅ)"
-          style={{width:"100%",padding:"9px 36px 9px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-            background:"#111827",color:"#ddddf0",fontSize:13,boxSizing:"border-box"}}
+          placeholder="이름 검색 (초성 가능)"
+          style={{width:"100%",height:46,padding:"0 38px 0 40px",borderRadius:14,border:`1px solid ${DB.border}`,
+            background:"#fff",color:DB.text,fontSize:14,fontWeight:600,fontFamily:DB.font,boxSizing:"border-box",
+            boxShadow:DB.shadow,outline:"none"}}
         />
         {search && (
           <button onClick={()=>setSearch("")}
-            style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
-              background:"none",border:"none",color:"#94a3b8",fontSize:14,cursor:"pointer",padding:0}}>✕</button>
+            style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:22,height:22,borderRadius:"50%",
+              background:DB.bg,border:"none",color:DB.sub,fontSize:11,cursor:"pointer",padding:0}}>✕</button>
         )}
       </div>
 
-      {/* 필터 + 정렬 */}
-      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"nowrap",overflowX:"auto",paddingBottom:2}}>
-        {FILTERS.map(f => (
-          <button key={f.key} onClick={()=>setFilter(f.key)}
-            style={{flexShrink:0,padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
-              borderColor:filter===f.key?(f.color||"#5EEAD4"):"rgba(255,255,255,0.08)",
-              background:filter===f.key?`${f.color||"#5EEAD4"}18`:"transparent",
-              color:filter===f.key?(f.color||"#5EEAD4"):"#94a3b8"}}>
-            {f.label}
-          </button>
-        ))}
-        <div style={{flexShrink:0,position:"relative",marginLeft:"auto"}}>
-          <button onClick={()=>setShowSort(v=>!v)}
-            style={{padding:"5px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
-              borderColor:sortBy==="recent"?"#5EEAD4":"rgba(255,255,255,0.08)",
-              background:showSort?"rgba(255,255,255,0.08)":"transparent",
-              color:sortBy==="recent"?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>
-            ⇅ {SORTS.find(s=>s.key===sortBy)?.label}
-          </button>
+      {/* 빠른 필터 — Apple Segmented Control + 나머지 조건·정렬은 "필터" 팝오버 */}
+      <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center"}}>
+        <div style={{flex:1,minWidth:0,display:"flex",gap:4,background:"#ECEFF3",borderRadius:14,padding:4,overflowX:"auto"}}>
+          {SEGMENT_FILTERS.map(f => (
+            <button key={f.key} onClick={()=>setFilter(f.key)}
+              style={{flex:"1 0 auto",minWidth:0,height:36,padding:"0 12px",borderRadius:11,border:"none",cursor:"pointer",
+                fontSize:12.5,fontWeight:filter===f.key?800:600,fontFamily:DB.font,whiteSpace:"nowrap",
+                background:filter===f.key?"#fff":"transparent",
+                color:filter===f.key?DB.text:DB.sub,
+                boxShadow:filter===f.key?"0 2px 8px rgba(15,23,42,.09)":"none",
+                transition:"background-color .2s ease,color .2s ease,box-shadow .2s ease"}}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div style={{flexShrink:0,position:"relative"}}>
+          {(()=>{ const moreActive=MORE_FILTERS.find(f=>f.key===filter); return (
+            <button onClick={()=>setShowSort(v=>!v)}
+              style={{height:44,padding:"0 13px",borderRadius:14,border:`1px solid ${moreActive?"rgba(57,199,184,.4)":DB.border}`,cursor:"pointer",
+                background:moreActive?DB.mintTint:"#fff",color:moreActive?DB.mintSoft:DB.sub,
+                fontSize:12.5,fontWeight:700,fontFamily:DB.font,boxShadow:DB.shadow,whiteSpace:"nowrap"}}>
+              {moreActive?moreActive.label:"필터"} ⚙
+            </button>
+          );})()}
           {showSort && (
-            <div style={{position:"absolute",right:0,top:34,background:"#111827",border:"1px solid rgba(255,255,255,0.08)",
-              borderRadius:8,zIndex:20,minWidth:140,boxShadow:"0 4px 16px rgba(0,0,0,.4)"}}>
+            <div style={{position:"absolute",right:0,top:50,background:"#fff",border:`1px solid ${DB.border}`,
+              borderRadius:16,zIndex:80,minWidth:180,boxShadow:DB.shadowLg,padding:6,overflow:"hidden"}}>
+              <div style={{fontSize:10.5,fontWeight:800,color:DB.faint,padding:"7px 12px 3px",letterSpacing:".6px"}}>조건</div>
+              {MORE_FILTERS.map(f=>(
+                <button key={f.key} onClick={()=>{setFilter(filter===f.key?"active":f.key);setShowSort(false);}}
+                  style={{display:"block",width:"100%",padding:"9px 12px",background:filter===f.key?DB.mintTint:"none",border:"none",borderRadius:10,
+                    color:filter===f.key?DB.mintSoft:DB.text,fontSize:12.5,fontWeight:filter===f.key?800:600,
+                    textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
+                  {filter===f.key?"✓ ":""}{f.label}
+                </button>
+              ))}
+              <div style={{height:1,background:DB.border,margin:"6px 4px"}}/>
+              <div style={{fontSize:10.5,fontWeight:800,color:DB.faint,padding:"5px 12px 3px",letterSpacing:".6px"}}>정렬</div>
               {SORTS.map(s=>(
                 <button key={s.key} onClick={()=>{setSortBy(s.key);setShowSort(false);}}
-                  style={{display:"block",width:"100%",padding:"9px 14px",background:"none",border:"none",
-                    color:sortBy===s.key?"#5EEAD4":"#ddddf0",fontSize:12,fontWeight:sortBy===s.key?700:400,
-                    textAlign:"left",cursor:"pointer"}}>
+                  style={{display:"block",width:"100%",padding:"9px 12px",background:"none",border:"none",borderRadius:10,
+                    color:sortBy===s.key?DB.mintSoft:DB.text,fontSize:12.5,fontWeight:sortBy===s.key?800:600,
+                    textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
                   {sortBy===s.key?"✓ ":""}{s.label}
                 </button>
               ))}
@@ -6931,46 +7060,50 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         </div>
       </div>
 
-      {/* 오늘 회원 입력 피드 — 대표가 "오늘 누가 뭘 입력했는지" 시간순으로 바로 확인하는 영역 (기존 항목별 필터를 대체) */}
-      <div style={{marginBottom:10,padding:"12px 14px",borderRadius:10,
-        background:"rgba(94,234,212,.06)",border:"1px solid rgba(94,234,212,.2)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"#5EEAD4"}}>📋 오늘 회원 입력</div>
-            <Mo c="#94a3b8" s={11}>
-              {todayFeedItems.length===0 ? "오늘 새로운 회원 입력이 없습니다." : `읽지 않은 알림 ${todayFeedItems.length}건`}
-            </Mo>
-          </div>
-          <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-            {todayFeedItems.length > 0 && (
-              <Btn ghost sm disabled={deletingAllFeed} onClick={handleDeleteAllFeed}
-                style={{color:"#ff6b6b",borderColor:"rgba(255,107,107,.35)"}}>
-                {deletingAllFeed ? "삭제 중…" : "전체삭제"}
-              </Btn>
-            )}
-            <Btn ghost sm onClick={()=>setShowTodayFeed(v=>!v)} style={{color:"#5EEAD4",borderColor:"rgba(94,234,212,.35)"}}>
-              {showTodayFeed ? "피드 접기 ▲" : "오늘 입력 피드 보기 ▼"}
-            </Btn>
-          </div>
+      {/* 오늘 입력 — 컴팩트 Summary Card. 항목별 인원 수 + 읽지 않은 알림 피드(펼침) */}
+      <div style={{marginBottom:14,padding:"12px 15px",borderRadius:16,background:"#fff",border:`1px solid ${DB.border}`,boxShadow:DB.shadow}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:DB.font,fontWeight:800,fontSize:12.5,color:DB.text,flexShrink:0}}>오늘 입력</span>
+          {[["weight","체중"],["condition","컨디션"],["cardio","유산소"],["rpe","RPE"]].map(([k,l])=>(
+            <span key={k} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11.5,fontWeight:600,color:todayInputCounts[k]>0?DB.sub:"#C3CBD6",fontFamily:DB.font}}>
+              {ACTIVITY_ICON[k]} {l} <b style={{color:todayInputCounts[k]>0?DB.mintSoft:"#C3CBD6",fontVariantNumeric:"tabular-nums"}}>{todayInputCounts[k]}</b>
+            </span>
+          ))}
+          <button onClick={()=>setShowTodayFeed(v=>!v)}
+            style={{marginLeft:"auto",flexShrink:0,border:"none",background:"none",cursor:"pointer",fontFamily:DB.font,
+              fontSize:11.5,fontWeight:700,color:todayFeedItems.length>0?DB.mintSoft:DB.faint,padding:"3px 0"}}>
+            {todayFeedItems.length===0 ? "오늘 새로운 회원 입력이 없습니다." : `읽지 않은 알림 ${todayFeedItems.length}건`} {showTodayFeed?"▲":"▼"}
+          </button>
         </div>
         {showTodayFeed && (
           <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto"}}>
             {todayFeedItems.length===0 ? (
-              <Mo c="#475569" s={11}>오늘 새로운 회원 입력이 없습니다.</Mo>
-            ) : todayFeedItems.map((item,i) => (
-              <TodayFeedItemCard
-                key={item.id||`${item.memberId}-${item.at}-${i}`}
-                item={item}
-                deleting={deletingFeedIds.has(item.id)}
-                onOpen={()=>{
-                  const target = members.find(x=>x.id===item.memberId);
-                  if (!target) return;
-                  onMarkEventsRead?.([item.id]);
-                  onSelect(target, feedItemTarget(item.type));
-                }}
-                onDelete={()=>handleDeleteFeedItem(item)}
-              />
-            ))}
+              <div style={{fontSize:11.5,color:DB.faint,fontFamily:DB.font,padding:"4px 0"}}>오늘 새로운 회원 입력이 없습니다.</div>
+            ) : (
+              <>
+                <div style={{display:"flex",justifyContent:"flex-end"}}>
+                  <button disabled={deletingAllFeed} onClick={handleDeleteAllFeed}
+                    style={{border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.05)",color:DB.danger,borderRadius:9,
+                      padding:"5px 11px",fontSize:11,fontWeight:700,cursor:deletingAllFeed?"default":"pointer",fontFamily:DB.font}}>
+                    {deletingAllFeed ? "삭제 중…" : "전체삭제"}
+                  </button>
+                </div>
+                {todayFeedItems.map((item,i) => (
+                  <TodayFeedItemCard
+                    key={item.id||`${item.memberId}-${item.at}-${i}`}
+                    item={item}
+                    deleting={deletingFeedIds.has(item.id)}
+                    onOpen={()=>{
+                      const target = members.find(x=>x.id===item.memberId);
+                      if (!target) return;
+                      onMarkEventsRead?.([item.id]);
+                      onSelect(target, feedItemTarget(item.type));
+                    }}
+                    onDelete={()=>handleDeleteFeedItem(item)}
+                  />
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -6980,11 +7113,11 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         const bdays = filtered.filter(m => isTodayBirthday(m));
         if (!bdays.length) return null;
         return (
-          <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
-            background:"rgba(244,114,182,.07)",border:"1px solid rgba(244,114,182,.22)"}}>
-            <div style={{fontWeight:800,fontSize:12,color:"#f472b6",marginBottom:4}}>🎂 오늘 생일</div>
+          <div style={{marginBottom:12,padding:"11px 15px",borderRadius:16,
+            background:"linear-gradient(135deg,#FFF5FA,#FFFFFF)",border:"1px solid rgba(244,114,182,.25)",boxShadow:DB.shadow}}>
+            <div style={{fontWeight:800,fontSize:12,color:"#DB2777",marginBottom:4,fontFamily:DB.font}}>🎂 오늘 생일</div>
             {bdays.map(m => (
-              <div key={m.id} style={{fontSize:11,color:"#ddddf0",cursor:"pointer",padding:"2px 0"}}
+              <div key={m.id} style={{fontSize:12.5,color:DB.text,cursor:"pointer",padding:"3px 0",fontWeight:700,fontFamily:DB.font}}
                 onClick={()=>onSelect(m)}>
                 {m.name}
               </div>
@@ -6995,244 +7128,165 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
 
       {/* 2:1 진입 카드 — 진행중 2:1이 1개 이상 있을 때, active/all 필터에서만 표시 */}
       {(filter==="active"||filter==="all") && pairSessions.some(ps=>!ps.teamStatus||ps.teamStatus==="active") && (
-        <div style={{marginBottom:10,padding:"10px 13px",borderRadius:10,
-          background:"linear-gradient(135deg,rgba(255,209,102,.1),rgba(255,107,107,.06))",
-          border:"1px solid rgba(255,209,102,.25)",
+        <div style={{marginBottom:12,padding:"12px 15px",borderRadius:16,
+          background:"linear-gradient(135deg,#FFFBF0,#FFFFFF)",
+          border:"1px solid rgba(245,158,11,.28)",boxShadow:DB.shadow,
           display:"flex",alignItems:"center",justifyContent:"space-between",
           cursor:"pointer"}}
           onClick={onPair21}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:36,height:36,borderRadius:9,background:"rgba(255,209,102,.2)",
+          <div style={{display:"flex",alignItems:"center",gap:11}}>
+            <div style={{width:38,height:38,borderRadius:12,background:"rgba(245,158,11,.12)",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#ffd166"}}>2:1 수업 진행중</div>
-              <Mo c="#94a3b8" s={10}>{pairSessions.filter(ps=>!ps.teamStatus||ps.teamStatus==="active").length}팀 운영중 · 탭하여 관리</Mo>
+              <div style={{fontFamily:DB.font,fontWeight:800,fontSize:14,color:"#B45309"}}>2:1 수업 진행중</div>
+              <div style={{fontFamily:DB.font,fontSize:11,color:DB.faint,fontWeight:600,marginTop:2}}>{pairSessions.filter(ps=>!ps.teamStatus||ps.teamStatus==="active").length}팀 운영중 · 탭하여 관리</div>
             </div>
           </div>
-          <Mo c="#ffd166" s={13}>→</Mo>
+          <span style={{color:"#B45309",fontSize:14,fontWeight:700}}>→</span>
         </div>
       )}
 
       {/* 회원 목록 */}
-      {loading ? <Skel n={4} /> : filtered.length === 0 ? (
-        <Emp msg={members.length===0 ? "등록된 회원이 없습니다. + 추가를 눌러 시작하세요!" : "검색 결과가 없습니다."} />
+      {loading ? (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {[0,1,2,3].map(i=><div key={i} style={{height:104,borderRadius:18,background:"#fff",border:`1px solid ${DB.border}`,opacity:.55}}/>)}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{padding:"52px 0",textAlign:"center"}}>
+          <div style={{width:52,height:52,borderRadius:"50%",background:DB.mintTint,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto",fontSize:22}}>👥</div>
+          <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,marginTop:14}}>{members.length===0 ? "등록된 회원이 없습니다" : "조건에 맞는 회원이 없습니다"}</div>
+          <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginTop:5}}>{members.length===0 ? "+ 회원 추가를 눌러 시작하세요" : "필터나 검색어를 바꿔보세요"}</div>
+        </div>
       ) : (
-        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {filtered.map(m => {
             const meta = getMemberMeta(m);
             const isToday   = meta.lastDate === today;
-            const isWarning = meta.daysSince !== null && meta.daysSince > 14;
-            const isAlert7  = !isToday && meta.daysSince !== null && meta.daysSince > 7;
-            // 실제 우선순위 목표 배지 (설문 데이터 기반)
-            const priorityGoalBadge = m.survey?.priorityGoal || "";
-            const recentSess3 = (sessionsMap[m.id] || [])
-              .sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,3);
-            // 통증관리: 실제 VAS 기록이 있을 때만 표시 (painArea 단독으로는 표시 안 함)
-            const isPainMgmt = recentSess3.some(s=>
-              (s.painRecord?.before?.vas >= 5) || (s.painRecord?.after?.vas >= 5)
-            );
-            const isBirthday = isTodayBirthday(m);
-            // 실시간 활동 요약 — liveMembersById(onSnapshot)가 있으면 우선 사용, 없으면 기존 members 값으로 폴백
-            const live = liveMembersById[m.id];
-            const liveMember = live ? { ...m, ...live } : m;
-            const todayInputTypes = getTodayInputTypes(m);
-            const recentActivity = (liveMember.recentActivityLog || []).slice(0, 3);
-
             const status    = mStatus(m);
             const isEnded   = status === "ended";
             const isPaused  = status === "paused";
-            const borderCol = isEnded ? "rgba(255,255,255,0.04)"
-                            : isToday ? "#5EEAD4"
-                            : isWarning ? "#ff6b6b44"
-                            : "rgba(255,255,255,0.08)";
-            const bgCol     = isEnded ? "#0d1117"
-                            : isToday ? "rgba(0,229,160,.06)"
-                            : isWarning ? "rgba(255,107,107,.04)"
-                            : "#111827";
+            // 실시간 활동 요약 — liveMembersById(onSnapshot)가 있으면 우선 사용, 없으면 기존 members 값으로 폴백
+            const live = liveMembersById[m.id];
+            const liveMember = live ? { ...m, ...live } : m;
+            const recentActivity = (liveMember.recentActivityLog || []).slice(0, 3);
+            const isBirthday = isTodayBirthday(m);
+            const next = nextSessionInfoLabel(m, meta, today);
+            const goalChips = [...new Set([m.goal, (m.survey?.priorityGoal||"").replace(" 우선","")].map(g=>String(g||"").trim()).filter(Boolean))].slice(0,2);
+            const reasons = attentionById.get(m.id);
+            const photo = m.photoURL || m.photoUrl || m.profileImage || m.profileImageUrl || "";
+            const draftSess = (sessionsMap[m.id] || []).find(s =>
+              s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId
+            );
 
             return (
               <div key={m.id} style={{position:"relative"}}
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
-              <div
-                style={{background:bgCol, border:"1px solid "+borderCol, borderRadius:10,
-                  padding:"11px 13px", display:"flex", alignItems:"center", justifyContent:"space-between",
-                  opacity: isEnded ? 0.65 : 1, transition:"opacity .15s"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",flex:1,minWidth:0}}
-                  onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
-                  {/* 아이콘 — 오늘 입력 피드에 표시되는 회원이면 우측 상단에 큰 NEW 표시 */}
-                  <div style={{width:38,height:38,borderRadius:10,flexShrink:0,position:"relative",
-                    background: isEnded ? "rgba(255,255,255,0.05)"
-                              : isToday ? "rgba(0,229,160,.18)"
-                              : isWarning ? "rgba(255,107,107,.12)"
-                              : "rgba(255,255,255,0.08)",
-                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>
-                    {isEnded ? "🔒" : isPaused ? "⏸️" : isToday ? "🟢" : isWarning ? "⚠️" : "💪"}
+              <MemberCardShell dim={isEnded} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
+                  {/* 좌 — 프로필 (사진/이니셜 + 최근 방문 도트 + 오늘 입력 NEW) */}
+                  <div style={{position:"relative",flexShrink:0}}>
+                    <MemberAvatar name={m.name} photo={photo} tone={visitTone(meta.daysSince,isToday)}/>
                     {!isEnded && hasTodayFeedInput(m) && (
-                      <span style={{position:"absolute",top:-6,right:-7,background:"#ef4444",color:"#fff",
-                        fontSize:8,fontWeight:800,padding:"1px 5px",borderRadius:6,
-                        boxShadow:"0 0 0 2px #0d1117",letterSpacing:.3}}>NEW</span>
+                      <span style={{position:"absolute",top:-5,right:-8,background:DB.danger,color:"#fff",
+                        fontSize:7.5,fontWeight:800,padding:"2px 5px",borderRadius:7,
+                        boxShadow:"0 0 0 2px #fff",letterSpacing:.3,fontFamily:DB.font}}>NEW</span>
                     )}
                   </div>
-                  {/* 정보 */}
+                  {/* 중앙 — 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
                   <div style={{minWidth:0,flex:1}}>
-                    {/* 이름 + 배지 */}
-                    <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
-                      <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,
-                        color:isEnded?"#475569":isToday?"#5EEAD4":isWarning?"#ff9f43":"#fff",
-                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span style={{fontFamily:DB.font,fontWeight:800,fontSize:17,letterSpacing:"-.3px",
+                        color:isEnded?DB.faint:DB.text,
+                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>
                         {m.name}
                       </span>
-                      {m.isTestMember && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(167,139,250,.2)",color:"#a78bfa",fontWeight:700}}>🧪 TEST</span>
+                      {m.isTestMember && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(139,92,246,.1)",color:"#7C3AED",fontWeight:800,fontFamily:DB.font}}>TEST</span>}
+                      {isPaused && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,fontFamily:DB.font}}>휴식중</span>}
+                      {isEnded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(100,116,139,.1)",color:DB.sub,fontWeight:800,fontFamily:DB.font}}>종료</span>}
+                      {isBirthday && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(244,114,182,.12)",color:"#DB2777",fontWeight:800,fontFamily:DB.font}}>🎂 생일</span>}
+                      {!isEnded && draftSess && (
+                        <button
+                          onClick={e => { e.stopPropagation(); onResumeDraft2_1?.(m.id, draftSess); }}
+                          style={{fontSize:9,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,
+                            border:"1px solid rgba(245,158,11,.3)",cursor:"pointer",fontFamily:DB.font}}>
+                          2:1 작성중{draftSess.memberBName ? ` · ${m.name}+${draftSess.memberBName}` : ""}
+                        </button>
                       )}
-                      {isEnded && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(100,116,139,.2)",color:"#94a3b8",fontWeight:700}}>종료</span>
-                      )}
-                      {isPaused && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,209,102,.2)",color:"#ffd166",fontWeight:700}}>휴식중</span>
-                      )}
-                      {!isEnded && !isPaused && isToday && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(0,229,160,.2)",color:"#5EEAD4",fontWeight:700}}>오늘 수업</span>
-                      )}
-                      {!isEnded && isWarning && !isToday && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>
-                          {meta.daysSince}일 미방문
-                        </span>
-                      )}
-                      {!isEnded && isAlert7 && !isWarning && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,209,102,.15)",color:"#ffd166",fontWeight:700}}>7일 미방문</span>
-                      )}
-                      {!isEnded && priorityGoalBadge && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontWeight:700}}>🎯 {priorityGoalBadge.replace(" 우선","")}</span>
-                      )}
-                      {!isEnded && isPainMgmt && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,107,107,.18)",color:"#ff9f43",fontWeight:700}}>💢 통증관리</span>
-                      )}
-                      {isBirthday && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,182,193,.2)",color:"#f472b6",fontWeight:700}}>🎂 생일</span>
-                      )}
-                      {/* NEW 표시는 왼쪽 아이콘 영역의 큰 배지 하나로 통일 — 여기(이름 옆)에는 더 이상 표시하지 않는다 */}
-                      {/* 오늘 입력 배지 — 다른 상태 배지와 함께 너무 복잡해지지 않도록 우선순위 상위 3개만, 나머지는 +N으로 요약 (상세는 우측 최근활동 참고) */}
-                      {!isEnded && todayInputTypes.slice(0,3).map(t => (
-                        <span key={t} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(94,234,212,.10)",color:"#5EEAD4",fontWeight:700}}>{ACTIVITY_ICON[t]} {ACTIVITY_LABEL[t]}</span>
-                      ))}
-                      {!isEnded && todayInputTypes.length > 3 && (
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(94,234,212,.06)",color:"#5EEAD4",fontWeight:700}}>+{todayInputTypes.length - 3}</span>
-                      )}
-                      {!isEnded && (() => {
-                        const draftSess = (sessionsMap[m.id] || []).find(s =>
-                          s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId
-                        );
-                        if (!draftSess) return null;
-                        return (
-                          <button
-                            onClick={e => { e.stopPropagation(); onResumeDraft2_1?.(m.id, draftSess); }}
-                            style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                              background:"rgba(255,209,102,.2)",color:"#ffd166",fontWeight:700,
-                              border:"1px solid rgba(255,209,102,.3)",cursor:"pointer"}}>
-                            🟠 2:1 작성중{draftSess.memberBName ? ` · ${m.name}+${draftSess.memberBName}` : ""}
-                          </button>
-                        );
-                      })()}
                     </div>
-                    {/* 서브 정보 */}
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                      {meta.lastDate ? (
-                        <Mo c={isToday?"#5EEAD4":"#94a3b8"} s={9}>
-                          {meta.lastDate} 수업
-                          {meta.lastMuscle ? <span style={{marginLeft:6,color:"#3a3a5a"}}>{"  "+meta.lastMuscle}</span> : ""}
-                        </Mo>
-                      ) : (
-                        <Mo c="#cbd5e1" s={9}>최근 수업 정보 없음</Mo>
-                      )}
+                    {/* 다음 수업 */}
+                    <div style={{display:"flex",alignItems:"center",gap:5,marginTop:5,minWidth:0}}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      <span style={{fontFamily:DB.font,fontSize:12.5,fontWeight:next.hot?800:600,color:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{next.text}</span>
                       {meta.remaining !== null && (
-                        <Mo c={meta.remaining<=3?"#ff9f43":"#94a3b8"} s={9}>
-                          잔여 {meta.remaining}회
-                        </Mo>
-                      )}
-                      {meta.lastMuscle && (
-                        <Mo c="#3a3a5a" s={9}>{meta.lastMuscle}</Mo>
+                        <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>
                       )}
                     </div>
-                    {/* 이메일 */}
-                    {m.email && (
-                      <Mo c="#3a3a5a" s={9} style={{display:"block",marginTop:1,
-                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                        ✉️ {m.email}
-                      </Mo>
+                    {/* 목표 칩 — Apple Wallet 느낌 라운드 칩 */}
+                    {!isEnded && goalChips.length>0 && (
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:7}}>
+                        {goalChips.map((g,i)=><GoalChip key={g} label={g} tint={i===0?"mint":"slate"}/>)}
+                      </div>
                     )}
-                    {/* 목표 */}
-                    {m.goal && (
-                      <Mo c="#2a2a42" s={9} style={{display:"block",marginTop:1,
-                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                        🎯 {m.goal}
-                      </Mo>
+                    {/* 최근 운동 부위 */}
+                    <div style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,fontWeight:600,marginTop:7,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      최근 운동{meta.lastMuscle ? `: ${meta.lastMuscle.split("·").join(" · ")}` : " 기록 없음"}
+                    </div>
+                  </div>
+                  {/* 우 — 오늘 상태 (없으면 회색, 통증 레드, 경고 앰버, 입력 민트) + AI 요약 + ⋯ 메뉴 */}
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:5,flexShrink:0,maxWidth:160}}>
+                    <button onClick={e=>{e.stopPropagation();setStatusMenu(statusMenu===m.id?null:m.id);}}
+                      aria-label="회원 관리 메뉴"
+                      style={{border:"none",background:"none",color:DB.faint,fontSize:16,padding:"0 2px 3px",cursor:"pointer",lineHeight:1,fontWeight:800}}>
+                      ⋯
+                    </button>
+                    {!isEnded && recentActivity.length > 0 ? recentActivity.map((a,i) => (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:5,maxWidth:160,minWidth:0}}>
+                        <span style={{fontSize:11,flexShrink:0}}>{ACTIVITY_ICON[a.type]}</span>
+                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:activityTone(a),overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{a.value}</span>
+                        <span style={{fontFamily:DB.font,fontSize:9.5,color:DB.faint,flexShrink:0}}>{relativeTimeLabel(a.at)}</span>
+                      </div>
+                    )) : !isEnded ? (
+                      <span style={{fontFamily:DB.font,fontSize:11,color:"#C3CBD6",fontWeight:600}}>오늘 입력 없음</span>
+                    ) : null}
+                    {!isEnded && reasons && (
+                      <div style={{marginTop:3,padding:"6px 9px",borderRadius:10,background:"rgba(245,158,11,.09)",border:"1px solid rgba(245,158,11,.22)",maxWidth:160}}>
+                        <div style={{fontFamily:DB.font,fontSize:9.5,fontWeight:800,color:"#B45309",letterSpacing:".3px"}}>오늘 체크 추천</div>
+                        <div style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:"#92400E",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{reasons.slice(0,2).join(" · ")}</div>
+                      </div>
                     )}
                   </div>
-                </div>
-                {/* 우측 버튼 영역 */}
-                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,marginLeft:8,alignItems:"flex-end",maxWidth:150}}>
-                  {/* 최근 활동 — 회원이 오늘 무엇을 입력했는지 5초 안에 파악하기 위한 영역 */}
-                  {!isEnded && recentActivity.length > 0 && (
-                    <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:"flex-end",marginBottom:2,maxWidth:150}}>
-                      {recentActivity.map((a,i) => (
-                        <div key={i} style={{display:"flex",alignItems:"center",gap:4,fontSize:9,maxWidth:150,minWidth:0}}>
-                          <span style={{color:"#cbd5e1",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:"0 1 auto"}}>{a.value}</span>
-                          <span style={{flexShrink:0}}>{ACTIVITY_ICON[a.type]}</span>
-                          <span style={{color:"#475569",fontSize:8,flexShrink:0}}>{formatActivityTime(a.at)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {/* 상태 변경 버튼 */}
-                  <button onClick={e=>{e.stopPropagation();setStatusMenu(statusMenu===m.id?null:m.id);}}
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
-                      color:"#94a3b8",fontSize:10,padding:"3px 8px",cursor:"pointer",fontWeight:700}}>
-                    ···
-                  </button>
-                  <button onClick={e=>{e.stopPropagation();onDelete(m.id);}}
-                    style={{background:"none",border:"none",color:"#cbd5e1",fontSize:14,padding:"2px 6px",cursor:"pointer"}}>
-                    🗑
-                  </button>
-                </div>
-              </div>
-              {/* 상태 변경 드롭다운 */}
+              </MemberCardShell>
+              {/* ⋯ 메뉴 — 상태 변경 + 삭제 (삭제는 카드 표면에서 제거하고 메뉴로 이동) */}
               {statusMenu === m.id && (
-                <div style={{position:"absolute",right:0,top:52,zIndex:100,
-                  background:"#1e293b",border:"1px solid rgba(255,255,255,0.12)",
-                  borderRadius:10,padding:"6px",minWidth:140,boxShadow:"0 8px 24px rgba(0,0,0,.5)"}}>
+                <div style={{position:"absolute",right:10,top:46,zIndex:100,
+                  background:"#fff",border:`1px solid ${DB.border}`,
+                  borderRadius:14,padding:6,minWidth:154,boxShadow:DB.shadowLg}}>
                   {status !== "active" && (
                     <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"active");}}
-                      style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",borderRadius:7,
-                        border:"none",background:"none",color:"#5EEAD4",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:9,
+                        border:"none",background:"none",color:DB.mintSoft,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>
                       ✅ 진행중으로 변경
                     </button>
                   )}
                   {status !== "paused" && (
                     <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"paused");}}
-                      style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",borderRadius:7,
-                        border:"none",background:"none",color:"#ffd166",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:9,
+                        border:"none",background:"none",color:"#B45309",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>
                       ⏸️ 휴식 처리
                     </button>
                   )}
                   {status !== "ended" && (
                     <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"ended");}}
-                      style={{display:"block",width:"100%",textAlign:"left",padding:"8px 12px",borderRadius:7,
-                        border:"none",background:"none",color:"#94a3b8",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:9,
+                        border:"none",background:"none",color:DB.sub,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>
                       🔒 종료 처리
                     </button>
                   )}
+                  <div style={{height:1,background:DB.border,margin:"4px 4px"}}/>
+                  <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onDelete(m.id);}}
+                    style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:9,
+                      border:"none",background:"none",color:DB.danger,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>
+                    🗑 회원 삭제
+                  </button>
                 </div>
               )}
             </div>
@@ -7240,6 +7294,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }

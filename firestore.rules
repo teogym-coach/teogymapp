@@ -256,7 +256,9 @@ service cloud.firestore {
                       && request.resource.data.keys().hasOnly(["date", "createdAt", "updatedAt", "source"])
                       && request.resource.data.date == dateId;
         allow update: if false;
-        allow delete: if isTrainerOfMember(memberId);
+        // 회원 본인(진행중)도 자기 운동 체크를 취소(삭제)할 수 있다 — attendance는 회원 셀프 체크 기록.
+        // update는 여전히 false라 내용 변조는 불가하고, 재생성 시에도 create 규칙(필드 4개 + date==docId)이 그대로 적용된다.
+        allow delete: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);
       }
 
       match /readSessions/{sessionId} {

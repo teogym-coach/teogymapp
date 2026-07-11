@@ -2132,6 +2132,12 @@ export async function saveAttendance(memberId, dateKey) {
   return { duplicate: false };
 }
 
+// 운동 완료 취소 — 회원 본인(진행중)만 자기 문서 삭제 가능 (Rules: attendance delete = trainer 또는 본인)
+export async function deleteAttendance(memberId, dateKey) {
+  requireUid();
+  await deleteDoc(doc(db, "members", memberId, "attendance", dateKey));
+}
+
 export async function getAttendanceMonth(memberId, year, month) {
   requireUid();
   const ym = `${year}-${String(month).padStart(2, "0")}`;

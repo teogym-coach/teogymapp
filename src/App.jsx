@@ -24,7 +24,7 @@ import {
   getPairSessions, savePairSession, deletePairSession, splitPairSession, updatePairSessionStatus,
   saveFcmToken,
   getReadSessionIds, markSessionsRead, SESSION_UNREAD_CUTOFF,
-  saveAttendance, getAttendanceRecent,
+  saveAttendance, getAttendanceRecent, deleteAttendance,
   getCardioLogs, saveCardioLog, deleteCardioLog,
   subscribeToMembers,
   subscribeToTrainerNotificationReads, markNotificationEventsRead, feedEventId,
@@ -1214,8 +1214,13 @@ function MemberApp({ onLogout }) {
   const saveProfileInfo=async(data)=>{assertOwnMember(); const result=await saveMemberProfileFields(profile.id,data); const nextData={...data}; setProfile(prev=>prev?{...prev,...nextData}:prev); setOnboarding(prev=>prev?{...prev,...nextData,targetWeightKg:nextData.targetWeightKg??prev.targetWeightKg,targetPeriod:nextData.targetPeriod??prev.targetPeriod,targetPeriodCustom:nextData.targetPeriodCustom??prev.targetPeriodCustom,goal:nextData.goal??prev.goal}:prev); const nextWeight=toPositiveNumber(nextData.currentWeight); if(nextWeight){const dateKey=today; setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`profile_${dateKey}`,date:dateKey,weight:nextWeight,note:"프로필 저장 반영"})}));} await load(); return result;};
   const markSessionsAsRead=async(ids)=>{if(!ids?.length||!profile?.id)return; try{assertOwnMember();}catch{return;} const newIds=ids.filter(id=>id&&!readSessionIds.has(id)); if(!newIds.length)return; setReadSessionIds(prev=>{const next=new Set(prev); newIds.forEach(id=>next.add(id)); return next;}); markSessionsRead(profile.id,newIds).catch(()=>{}); };
   const saveAttendanceToday=async()=>{if(attendanceSaving||!profile?.id)return; setAttendanceSaving(true); try{assertOwnMember(); const result=await saveAttendance(profile.id,today); if(result.duplicate){alert("오늘은 이미 운동 체크가 완료되었습니다.");}else{alert("오늘 운동이 기록되었습니다."); setAttendance(prev=>[...prev,{date:today,source:"memberApp"}]);}}catch(e){console.error("[출석]",e); alert("출석 기록에 실패했습니다.");}finally{setAttendanceSaving(false);};};
-  // 캘린더 날짜별 운동 완료 체크 — 기존 saveAttendance(문서 ID=날짜) 재사용, 중복은 duplicate로 안전 처리. 미래 날짜는 정책상 차단.
-  const saveAttendanceForDate=async(dateKey)=>{ if(!profile?.id||!dateKey) return {duplicate:false,blocked:true}; if(dateKey>today){ alert("미래 날짜에는 운동 완료 체크를 할 수 없어요."); return {duplicate:false,blocked:true}; } assertOwnMember(); const result=await saveAttendance(profile.id,dateKey); if(!result.duplicate) setAttendance(prev=>prev.some(a=>a.date===dateKey)?prev:[...prev,{date:dateKey,source:"memberApp"}]); return result; }; const openNotice=async(notice)=>{if(!notice?.id)return; assertOwnMember(); await markNoticeRead(profile.id,notice.id); alert(`${notice.isImportant?"📌 중요 공지\n":""}${notice.title}\n\n${notice.content}\n\n작성일 ${formatCompactDate(notice.createdAt)}`); await load();};
+  // 캘린더 날짜별 운동 완료 체크/취소 — 기존 saveAttendance/deleteAttendance 재사용(문서 ID=날짜, 중복은 duplicate로 안전 처리).
+  // 정책: 미래 날짜 차단 + 최근 30일(한국시간, 오늘 포함) 내에서만 체크·취소 가능 — 소급 기록 남발로 월간 통계·연속 기록 신뢰가 깨지는 것을 방지.
+  const ATTENDANCE_EDIT_DAYS=30;
+  const attendanceEditableFrom=getKoreaDateString(new Date(Date.now()-(ATTENDANCE_EDIT_DAYS-1)*86400000));
+  const canEditAttendanceDate=(dateKey)=>{ if(!dateKey) return {ok:false}; if(dateKey>today) return {ok:false,msg:"미래 날짜에는 운동 완료 체크를 할 수 없어요."}; if(dateKey<attendanceEditableFrom) return {ok:false,msg:`운동 체크는 최근 ${ATTENDANCE_EDIT_DAYS}일 안의 날짜만 기록·취소할 수 있어요.`}; return {ok:true}; };
+  const saveAttendanceForDate=async(dateKey)=>{ if(!profile?.id) return {duplicate:false,blocked:true}; const gate=canEditAttendanceDate(dateKey); if(!gate.ok){ if(gate.msg) alert(gate.msg); return {duplicate:false,blocked:true}; } assertOwnMember(); const result=await saveAttendance(profile.id,dateKey); if(!result.duplicate) setAttendance(prev=>prev.some(a=>a.date===dateKey)?prev:[...prev,{date:dateKey,source:"memberApp"}]); return result; };
+  const deleteAttendanceForDate=async(dateKey)=>{ if(!profile?.id) return {blocked:true}; const gate=canEditAttendanceDate(dateKey); if(!gate.ok){ if(gate.msg) alert(gate.msg); return {blocked:true}; } if(!window.confirm(`${dateKey} 운동 완료 기록을 취소할까요?`)) return {blocked:true}; assertOwnMember(); await deleteAttendance(profile.id,dateKey); setAttendance(prev=>prev.filter(a=>a.date!==dateKey)); return {blocked:false}; }; const openNotice=async(notice)=>{if(!notice?.id)return; assertOwnMember(); await markNoticeRead(profile.id,notice.id); alert(`${notice.isImportant?"📌 중요 공지\n":""}${notice.title}\n\n${notice.content}\n\n작성일 ${formatCompactDate(notice.createdAt)}`); await load();};
   // 유산소 기록 저장 — 체중은 최근 바디체크 기록을 자동으로 사용해 MET 기반 칼로리를 계산한다
   const saveCardioEntry=async(entry)=>{
     if(cardioSaving) return;
@@ -1281,7 +1286,7 @@ function MemberApp({ onLogout }) {
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load();
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,healthIntent,setHealthIntent,saveAttendanceForDate,cardioSaving,correctionSummaries};
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home","⌂","홈"],["workout","＋","수업"],["health","♥","건강"],["analysis","▥","분석"],["profile","●","프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-block"}}>{i}{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -1434,7 +1439,7 @@ function MemberCalendar(p){
   const todayKey=getKoreaDateString();
   const [ym,setYm]=useState(todayKey.slice(0,7));
   const [ext,setExt]=useState(()=>MEMBER_CAL_EXT_CACHE.get(p.profile.id)||null);
-  const [sheetDate,setSheetDate]=useState(null);
+  const [selected,setSelected]=useState(todayKey); // Apple Calendar식 — 날짜를 누르면 아래 상세 카드가 전환된다
   const [checking,setChecking]=useState(false);
   useEffect(()=>{
     if(MEMBER_CAL_EXT_CACHE.has(p.profile.id)) return;
@@ -1472,12 +1477,14 @@ function MemberCalendar(p){
   const firstDow=new Date(yy,mm-1,1).getDay();
   const daysInMonth=new Date(yy,mm,0).getDate();
   const cells=[...Array(firstDow).fill(null),...Array.from({length:daysInMonth},(_,i)=>i+1)];
-  const moveMonth=delta=>{
-    const d=new Date(yy,mm-1+delta,1);
-    setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
-  };
   const isThisMonth=ym===todayKey.slice(0,7);
   const monthLabel=`${yy}년 ${mm}월`;
+  const moveMonth=delta=>{
+    const d=new Date(yy,mm-1+delta,1);
+    const nextYm=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    setYm(nextYm);
+    setSelected(nextYm===todayKey.slice(0,7)?todayKey:`${nextYm}-01`);
+  };
 
   const checkDate=async(dateKey)=>{
     if(checking) return;
@@ -1496,50 +1503,89 @@ function MemberCalendar(p){
     }catch(e){ console.error("[캘린더 운동체크]",e); alert(e?.message||"운동 완료 체크에 실패했습니다."); }
     finally{ setChecking(false); }
   };
+  const uncheckDate=async(dateKey)=>{
+    if(checking) return;
+    setChecking(true);
+    try{
+      const result=await p.deleteAttendanceForDate(dateKey);
+      if(!result?.blocked){
+        const cached=MEMBER_CAL_EXT_CACHE.get(p.profile.id);
+        if(cached?.attendance){ cached.attendance=cached.attendance.filter(a=>a.date!==dateKey); setExt({...cached}); }
+      }
+    }catch(e){ console.error("[캘린더 운동체크 취소]",e); alert(e?.message||"운동 완료 취소에 실패했습니다."); }
+    finally{ setChecking(false); }
+  };
 
-  const sheetDay=sheetDate?dayMap.get(sheetDate)||{date:sheetDate,pt:[],cardio:[],attended:false}:null;
+  const selDay=dayMap.get(selected)||{date:selected,pt:[],cardio:[],attended:false};
+  const selGate=p.canEditAttendanceDate?p.canEditAttendanceDate(selected):{ok:selected<=todayKey};
+  const WEEKDAYS_FULL=["일요일","월요일","화요일","수요일","목요일","금요일","토요일"];
+  const selLabel=`${Number(selected.slice(5,7))}월 ${Number(selected.slice(8,10))}일 ${WEEKDAYS_FULL[new Date(`${selected}T12:00:00`).getDay()]}`;
+  const headline=summary.workoutDayCount>=12?`이번 달 ${summary.workoutDayCount}일 운동 — 최고의 흐름이에요 🔥`
+    :summary.workoutDayCount>=6?`이번 달 ${summary.workoutDayCount}일 운동했어요 💪`
+    :summary.workoutDayCount>0?`이번 달 ${summary.workoutDayCount}일 운동했어요`
+    :"이번 달 첫 운동을 기록해보세요";
 
   return <div className="mv2-cal-wrap">
-    <div className="mv2-cal-card">
-      <div className="mv2-cal-head">
-        <button type="button" aria-label="이전 달" onClick={()=>moveMonth(-1)}>‹</button>
-        <b>{monthLabel}</b>
-        <button type="button" aria-label="다음 달" onClick={()=>moveMonth(1)} disabled={isThisMonth}>›</button>
+    <div className="mv2-cal-main">
+      <div className="mv2-cal-card">
+        <div className="mv2-cal-head">
+          <button type="button" aria-label="이전 달" onClick={()=>moveMonth(-1)}>‹</button>
+          <b>{monthLabel}</b>
+          <button type="button" aria-label="다음 달" onClick={()=>moveMonth(1)} disabled={isThisMonth}>›</button>
+        </div>
+        <div className="mv2-cal-dow" aria-hidden="true">{["일","월","화","수","목","금","토"].map(d=><span key={d}>{d}</span>)}</div>
+        <div className="mv2-cal-grid">
+          {cells.map((d,i)=>{
+            if(d===null) return <span key={`e${i}`} className="mv2-cal-cell empty"/>;
+            const key=`${ym}-${String(d).padStart(2,"0")}`;
+            const v=dayMap.get(key);
+            const future=key>todayKey;
+            const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
+            return <button key={key} type="button"
+              className={`mv2-cal-cell${key===todayKey?" today":""}${key===selected?" sel":""}${future?" future":""}`}
+              aria-label={`${mm}월 ${d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}${v?.weight!=null?" 체중 기록":""}`}
+              aria-pressed={key===selected}
+              onClick={()=>setSelected(key)}>
+              <span className="mv2-cal-num">{d}</span>
+              <span className="mv2-cal-bars">
+                {v?.pt.length>0&&<i className="mv2-bar bar-pt">PT</i>}
+                {v?.attended&&<i className="mv2-bar bar-solo">운동</i>}
+                {cardioMin>0&&<i className="mv2-bar bar-cardio">{cardioMin}m</i>}
+              </span>
+              <span className="mv2-cal-under">
+                {v?.weight!=null&&<i className="mv2-dot-wt" title="체중 기록"/>}
+                {prInfo.prDates.has(key)&&<i className="mv2-dot-pr" title="PR">★</i>}
+              </span>
+            </button>;
+          })}
+        </div>
+        <div className="mv2-cal-legend" aria-hidden="true">
+          <span><i className="lg lg-pt"/>PT</span>
+          <span><i className="lg lg-solo"/>개인운동</span>
+          <span><i className="lg lg-cardio"/>유산소</span>
+          <span><i className="mv2-dot-wt"/>체중</span>
+        </div>
       </div>
-      <div className="mv2-cal-dow" aria-hidden="true">{["일","월","화","수","목","금","토"].map(d=><span key={d}>{d}</span>)}</div>
-      <div className="mv2-cal-grid">
-        {cells.map((d,i)=>{
-          if(d===null) return <span key={`e${i}`} className="mv2-cal-cell empty"/>;
-          const key=`${ym}-${String(d).padStart(2,"0")}`;
-          const v=dayMap.get(key);
-          const future=key>todayKey;
-          const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
-          const hasAny=!!(v&&(v.pt.length||v.attended||v.cardio.length||v.weight!=null||v.kcal!=null||v.steps||v.condition||v.pain));
-          return <button key={key} type="button"
-            className={`mv2-cal-cell${key===todayKey?" today":""}${future?" future":""}${v?.pt.length?" haspt":""}`}
-            aria-label={`${mm}월 ${d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}`}
-            onClick={()=>setSheetDate(key)}>
-            <span className="mv2-cal-num">{d}</span>
-            <span className="mv2-cal-marks">
-              {v?.pt.length>0&&<i className="mk-pt" title="PT 수업"/>}
-              {v?.attended&&<i className="mk-solo" title="개인운동 완료">✓</i>}
-              {prInfo.prDates.has(key)&&<i className="mk-pr" title="PR">★</i>}
-              {v?.weight!=null&&<i className="mk-wt" title="체중 기록"/>}
-            </span>
-            <span className="mv2-cal-cardio">{cardioMin>0?`${cardioMin}m`:hasAny?"":""}</span>
-          </button>;
-        })}
-      </div>
-      <div className="mv2-cal-legend" aria-hidden="true">
-        <span><i className="mk-pt"/>PT 수업</span>
-        <span><i className="mk-solo">✓</i>개인운동</span>
-        <span><i className="mk-cardio-demo">30m</i>유산소</span>
-        <span><i className="mk-wt"/>체중</span>
+
+      {/* 선택 날짜 상세 — 팝업 대신 캘린더 아래 카드가 자연스럽게 전환 (Apple Calendar 방식) */}
+      <div className="mv2-day-card" key={selected}>
+        <div className="mv2-day-card-head">
+          <b>{selLabel}</b>
+          {selected===todayKey&&<em>오늘</em>}
+        </div>
+        <MemberDayDetail day={selDay} todayKey={todayKey} prSessionIds={prInfo.prSessionIds}
+          checking={checking} editGate={selGate}
+          onCheck={()=>checkDate(selected)}
+          onUncheck={()=>uncheckDate(selected)}
+          onOpenSession={sid=>{ p.setJournalFocusId?.(sid); p.setWorkoutView?.("journal"); p.resetMemberScroll?.(); }}
+          onAddCardio={()=>{ p.setHealthIntent?.({type:"cardio",date:selected}); p.setTab?.("health"); }}
+          onEditHealth={()=>{ p.setHealthIntent?.({type:"weight",date:selected}); p.setTab?.("health"); }}
+        />
       </div>
     </div>
 
     <div className="mv2-cal-summary">
-      <MemberSectionHead title="이번 달 요약" caption={monthLabel}/>
+      <div className="mv2-sum-headline">{headline}</div>
       <div className="mv2-sum-grid">
         <div><span>PT 수업</span><b>{summary.ptCount}<em>회</em></b></div>
         <div><span>개인운동</span><b>{summary.soloCount}<em>회</em></b></div>
@@ -1552,21 +1598,11 @@ function MemberCalendar(p){
         {summary.goalRate!=null&&<div className="wide"><span>목표 운동일 달성률</span><b>{summary.goalRate}<em>%</em></b><i className="mv2-sum-bar"><small style={{width:`${summary.goalRate}%`}}/></i></div>}
       </div>
     </div>
-
-    <MemberBottomSheet open={!!sheetDate} onClose={()=>setSheetDate(null)} title={sheetDate?`${Number(sheetDate.slice(5,7))}월 ${Number(sheetDate.slice(8,10))}일`:""}>
-      {sheetDay&&<MemberDayDetail day={sheetDay} todayKey={todayKey} prSessionIds={prInfo.prSessionIds}
-        checking={checking}
-        onCheck={()=>checkDate(sheetDate)}
-        onOpenSession={sid=>{ setSheetDate(null); p.setJournalFocusId?.(sid); p.setWorkoutView?.("journal"); p.resetMemberScroll?.(); }}
-        onAddCardio={()=>{ setSheetDate(null); p.setHealthIntent?.({type:"cardio",date:sheetDate}); p.setTab?.("health"); }}
-        onEditHealth={()=>{ setSheetDate(null); p.setHealthIntent?.({type:"weight",date:sheetDate}); p.setTab?.("health"); }}
-      />}
-    </MemberBottomSheet>
   </div>;
 }
 
 // 날짜 상세 — 해당 날짜에 실제로 존재하는 기록만 섹션으로 표시(빈 항목은 숨김)
-function MemberDayDetail({day,todayKey,prSessionIds,checking,onCheck,onOpenSession,onAddCardio,onEditHealth}){
+function MemberDayDetail({day,todayKey,prSessionIds,checking,editGate,onCheck,onUncheck,onOpenSession,onAddCardio,onEditHealth}){
   const future=day.date>todayKey;
   const healthRows=[
     day.weight!=null&&["체중",`${day.weight}kg`],
@@ -1598,12 +1634,15 @@ function MemberDayDetail({day,todayKey,prSessionIds,checking,onCheck,onOpenSessi
     })}
 
     <div className="mv2-day-block">
-      <div className="mv2-day-block-head"><b><i className="mk-solo">✓</i>개인운동</b></div>
+      <div className="mv2-day-block-head"><b><i className="lg lg-solo" style={{width:14,height:14,borderRadius:5}}/>개인운동</b></div>
       {day.attended
-        ? <p className="mv2-day-sub done">이 날 운동 완료를 기록했어요 👏</p>
-        : future
-          ? <p className="mv2-day-sub">미래 날짜에는 완료 체크를 할 수 없어요.</p>
-          : <button type="button" className="primary compact" style={{marginTop:6}} disabled={checking} onClick={onCheck}>{checking?"기록 중...":"이 날 운동 완료 체크"}</button>}
+        ? <div className="mv2-day-done-row">
+            <p className="mv2-day-sub done">이 날 운동 완료를 기록했어요 👏</p>
+            {editGate?.ok&&<button type="button" className="mv2-day-cancel" disabled={checking} onClick={onUncheck}>{checking?"처리 중...":"완료 취소"}</button>}
+          </div>
+        : editGate?.ok
+          ? <button type="button" className="primary compact" style={{marginTop:6}} disabled={checking} onClick={onCheck}>{checking?"기록 중...":"이 날 운동 완료 체크"}</button>
+          : <p className="mv2-day-sub">{future?"미래 날짜에는 완료 체크를 할 수 없어요.":"최근 30일 안의 날짜만 기록·취소할 수 있어요."}</p>}
     </div>
 
     {day.cardio.length>0&&<div className="mv2-day-block">
@@ -4067,34 +4106,50 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-home-cal-stats{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
 .mv2-home-cal-stats span{background:#F6F7F9;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;color:#66717C}
 .mv2-home-cal-stats b{color:#20242A}
-/* ── 운동 캘린더 ── */
+/* ── 운동 캘린더 — Apple Calendar식: 큰 날짜·넓은 여백·컬러 바 이벤트·부드러운 민트 선택 ── */
 .mv2-cal-wrap{display:grid;gap:14px}
-.mv2-cal-card{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px 14px 14px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
-.mv2-cal-head{display:flex;align-items:center;justify-content:space-between;padding:0 6px;margin-bottom:12px}
-.mv2-cal-head b{font-size:17px;color:#20242A;letter-spacing:-.3px}
-.mv2-cal-head button{width:38px;height:38px;border:1px solid #EEF1F4;border-radius:12px;background:#F6F7F9;color:#66717C;font-size:18px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.mv2-cal-head button:disabled{opacity:.35;cursor:default}
-.mv2-cal-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px}
-.mv2-cal-dow span{text-align:center;font-size:11px;font-weight:800;color:#A8B0BA;padding:4px 0}
+.mv2-cal-main{display:grid;gap:14px;min-width:0}
+.mv2-cal-card{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px 12px 12px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-cal-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px;margin-bottom:14px}
+.mv2-cal-head b{font-size:19px;color:#20242A;letter-spacing:-.4px}
+.mv2-cal-head button{width:40px;height:40px;border:0;border-radius:13px;background:#F4F6F8;color:#66717C;font-size:19px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease}
+.mv2-cal-head button:active{background:#E8ECF1}
+.mv2-cal-head button:disabled{opacity:.3;cursor:default}
+.mv2-cal-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:6px}
+.mv2-cal-dow span{text-align:center;font-size:11.5px;font-weight:800;color:#A8B0BA;padding:4px 0}
 .mv2-cal-dow span:first-child{color:#F26D6D}
-.mv2-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
-.mv2-cal-cell{position:relative;min-height:52px;border:0;border-radius:12px;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:5px 0 3px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease}
-.mv2-cal-cell:active{background:#F1F3F6}
+.mv2-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.mv2-cal-cell{position:relative;min-height:72px;border:1.5px solid transparent;border-radius:14px;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:7px 2px 5px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .18s ease,box-shadow .18s ease,border-color .18s ease}
 .mv2-cal-cell.empty{cursor:default}
-.mv2-cal-cell.future{opacity:.38}
-.mv2-cal-num{font-size:13.5px;font-weight:800;color:#20242A;line-height:1;font-variant-numeric:tabular-nums}
-.mv2-cal-cell.today .mv2-cal-num{background:#2F73F6;color:#fff;width:24px;height:24px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin-top:-3px}
-.mv2-cal-cell.haspt .mv2-cal-num{color:#0F9488}
-.mv2-cal-marks{display:flex;align-items:center;gap:2px;min-height:10px;margin-top:3px}
-.mv2-cal-marks i,.mv2-cal-legend i{font-style:normal;display:inline-flex;align-items:center;justify-content:center}
-.mk-pt{width:7px;height:7px;border-radius:999px;background:#14B8A6}
-.mk-solo{color:#2F73F6;font-size:9px;font-weight:900;line-height:1}
-.mk-pr{color:#F59E0B;font-size:9px;line-height:1}
-.mk-wt{width:5px;height:5px;border-radius:999px;background:#C9D2DC}
-.mv2-cal-cardio{min-height:12px;font-size:9px;font-weight:800;color:#8B949E;line-height:1.2;margin-top:1px;font-variant-numeric:tabular-nums}
-.mv2-cal-legend{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;border-top:1px solid #F1F3F6;margin-top:10px;padding:10px 4px 0}
-.mv2-cal-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#8B949E}
-.mk-cardio-demo{font-size:9px;font-weight:800;color:#8B949E;background:#F1F3F6;border-radius:6px;padding:2px 4px}
+.mv2-cal-cell.future{opacity:.35}
+.mv2-cal-cell.sel{background:rgba(20,184,166,.09);border-color:rgba(20,184,166,.35);box-shadow:0 4px 14px rgba(20,184,166,.14)}
+.mv2-cal-num{font-size:16px;font-weight:800;color:#20242A;line-height:1;font-variant-numeric:tabular-nums;width:27px;height:27px;display:flex;align-items:center;justify-content:center;border-radius:999px}
+.mv2-cal-cell.today .mv2-cal-num{background:#0F9488;color:#fff}
+.mv2-cal-cell.sel:not(.today) .mv2-cal-num{color:#0F766E}
+.mv2-cal-bars{display:flex;flex-direction:column;gap:2px;width:100%;padding:0 3px;min-height:14px}
+.mv2-bar{display:block;font-style:normal;font-size:8.5px;font-weight:900;line-height:1;text-align:center;border-radius:5px;padding:2.5px 0;letter-spacing:.2px;overflow:hidden;white-space:nowrap}
+.bar-pt{background:rgba(20,184,166,.16);color:#0F766E}
+.bar-solo{background:rgba(47,115,246,.13);color:#2359C8}
+.bar-cardio{background:#F1F3F6;color:#66717C;font-variant-numeric:tabular-nums}
+.mv2-cal-under{display:flex;align-items:center;gap:3px;min-height:7px}
+.mv2-dot-wt{display:inline-block;width:4.5px;height:4.5px;border-radius:999px;background:#C4CDD8;font-style:normal}
+.mv2-dot-pr{font-style:normal;color:#F5A623;font-size:8px;line-height:1}
+.mv2-cal-legend{display:flex;gap:14px;justify-content:center;align-items:center;border-top:1px solid #F1F3F6;margin-top:10px;padding:11px 4px 4px}
+.mv2-cal-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#A8B0BA}
+.lg{display:inline-block;width:10px;height:10px;border-radius:4px;font-style:normal}
+.lg-pt{background:#14B8A6}
+.lg-solo{background:#2F73F6}
+.lg-cardio{background:#D6DCE3}
+.mk-pt{display:inline-block;width:8px;height:8px;border-radius:999px;background:#14B8A6;font-style:normal}
+/* 선택 날짜 상세 카드 — 팝업 대신 캘린더 아래에서 자연스럽게 전환 */
+.mv2-day-card{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px;box-shadow:0 2px 14px rgba(15,23,42,.05);animation:memberFadeIn .18s ease}
+.mv2-day-card-head{display:flex;align-items:center;gap:9px;margin-bottom:13px}
+.mv2-day-card-head b{font-size:17px;color:#20242A;letter-spacing:-.3px}
+.mv2-day-card-head em{font-style:normal;background:rgba(20,184,166,.12);color:#0F766E;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:900}
+.mv2-day-done-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mv2-day-cancel{flex-shrink:0;border:1px solid #FFDBDB;background:#FFF6F6;color:#E05252;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-day-cancel:disabled{opacity:.55;cursor:default}
+.mv2-sum-headline{font-size:16px;font-weight:900;color:#20242A;letter-spacing:-.3px;margin:2px 2px 13px}
 /* 월간 요약 */
 .mv2-cal-summary{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .mv2-sum-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
@@ -4171,7 +4226,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   .mv2-analysis-hero-grid{grid-template-columns:repeat(5,1fr)}
   .mv2-profile-stats{grid-template-columns:repeat(5,1fr)}
   .mv2-sheet{max-width:520px;border-radius:26px;bottom:auto;top:50%;transform:translate(-50%,-50%);animation:mv2FadeIn .2s ease}
-  .mv2-cal-cell{min-height:58px}
+  .mv2-cal-cell{min-height:82px}
+  .mv2-cal-num{font-size:17px}
+  .mv2-bar{font-size:9.5px;padding:3px 0}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

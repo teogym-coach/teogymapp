@@ -683,9 +683,18 @@ describe("TEO GYM Firestore Rules v8", function () {
   // ════════════════════════════════════════════════════
   describe("7. attendance", () => {
     beforeEach(async () => {
-      await seedMembers({ "member_a": memberActive, "member_paused": memberPaused });
+      await seedMembers({ "member_a": memberActive, "member_b": memberB, "member_paused": memberPaused });
       await seedSubcollection("member_a", "attendance", "2026-07-01", {
         date: "2026-07-01", source: "memberApp",
+      });
+      await seedSubcollection("member_b", "attendance", "2026-07-01", {
+        date: "2026-07-01", source: "memberApp",
+      });
+      await seedSubcollection("member_paused", "attendance", "2026-07-01", {
+        date: "2026-07-01", source: "memberApp",
+      });
+      await seedSubcollection("member_a", "sessions", "sess_pub_att", {
+        date: "2026-07-01", isPublished: true,
       });
     });
 
@@ -733,6 +742,55 @@ describe("TEO GYM Firestore Rules v8", function () {
           date: "2026-07-02", source: "memberApp", createdAt: new Date(), updatedAt: new Date(),
         })
       );
+    });
+
+    // ── 운동 완료 취소(회원 본인 delete 허용) — 2026-07-11 최소 변경 검증 ──
+    it("[진행중 회원] 본인 attendance delete 허용 (운동 완료 취소)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("attendance").doc("2026-07-01").delete());
+    });
+
+    it("[진행중 회원] 다른 회원 attendance create 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_b").collection("attendance").doc("2026-07-02").set({
+          date: "2026-07-02", source: "memberApp", createdAt: new Date(), updatedAt: new Date(),
+        })
+      );
+    });
+
+    it("[진행중 회원] 다른 회원 attendance delete 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("attendance").doc("2026-07-01").delete());
+    });
+
+    it("[비로그인] attendance create 차단", async () => {
+      const db = asAnon(testEnv);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("attendance").doc("2026-07-02").set({
+          date: "2026-07-02", source: "memberApp", createdAt: new Date(), updatedAt: new Date(),
+        })
+      );
+    });
+
+    it("[비로그인] attendance delete 차단", async () => {
+      const db = asAnon(testEnv);
+      await assertFails(db.collection("members").doc("member_a").collection("attendance").doc("2026-07-01").delete());
+    });
+
+    it("[진행중 회원] 본인 PT 수업일지(sessions) delete 차단 — 취소 허용이 다른 컬렉션으로 번지지 않음", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_a").collection("sessions").doc("sess_pub_att").delete());
+    });
+
+    it("[휴식중 회원] 본인 attendance delete 차단 (진행중 상태에서만 취소 가능)", async () => {
+      const db = asUser(testEnv, "paused_uid");
+      await assertFails(db.collection("members").doc("member_paused").collection("attendance").doc("2026-07-01").delete());
+    });
+
+    it("[관리자] attendance delete 유지 (trainer 권한 변화 없음)", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("attendance").doc("2026-07-01").delete());
     });
   });
 

@@ -185,6 +185,16 @@ function getCardioMet(activityType, intensity) {
   const table = CARDIO_MET_TABLE[activityType] || CARDIO_MET_TABLE["기타"];
   return table[intensity] ?? table.default;
 }
+// 복수 종목 선택 시 MET은 선택 종목들의 평균을 사용(종목별 시간 입력은 지원하지 않으므로)
+function getCardioMetMulti(activityTypes = [], intensity) {
+  const list = activityTypes.filter(Boolean);
+  if (!list.length) return null;
+  return list.reduce((s, t) => s + getCardioMet(t, intensity), 0) / list.length;
+}
+// 유산소 기록의 종목 목록을 가져온다 — 신규 activityTypes(배열) 우선, 없으면 activityType(구버전 단일 문자열)을 배열로 변환(normalizeTypes 재사용)
+function getCardioTypes(record) {
+  return normalizeTypes(record?.activityTypes?.length ? record.activityTypes : record?.activityType);
+}
 // 칼로리 = MET × 3.5 × 체중(kg) × 운동시간(분) / 200
 function calcCardioCalories(met, weightKg, minutes) {
   const w = toPositiveNumber(weightKg), m = toPositiveNumber(minutes);
@@ -1225,7 +1235,8 @@ function MemberApp({ onLogout }) {
   // 유산소 기록 저장 — 체중은 최근 바디체크 기록을 자동으로 사용해 MET 기반 칼로리를 계산한다
   const saveCardioEntry=async(entry)=>{
     if(cardioSaving) return;
-    if(!entry?.activityType) { alert("유산소 종목을 선택해주세요."); return; }
+    const activityTypes=(entry?.activityTypes||[]).filter(Boolean);
+    if(!activityTypes.length) { alert("유산소 종목을 선택해주세요."); return; }
     if(!entry?.durationMinutes || Number(entry.durationMinutes)<=0) { alert("운동 시간을 입력해주세요."); return; }
     const weightUsed=toPositiveNumber(getLatestBodyWeight(effectiveBody)?.weight)||toPositiveNumber(profile.currentWeight)||toPositiveNumber(effectiveOnboarding.currentWeightKg);
     if(!weightUsed){ alert("체중 정보가 없어 칼로리를 계산할 수 없어요. 건강관리에서 체중을 먼저 입력해주세요."); return; }
@@ -1234,11 +1245,12 @@ function MemberApp({ onLogout }) {
       assertOwnMember();
       const age=getProfileAge(profile,effectiveOnboarding);
       const zone2=getZone2Range(age,effectiveOnboarding.restingHeartRate);
-      const met=getCardioMet(entry.activityType,entry.intensity);
+      const met=getCardioMetMulti(activityTypes,entry.intensity);
       const caloriesBurned=calcCardioCalories(met,weightUsed,entry.durationMinutes);
       const zoneStatus=classifyZone2(entry.averageHeartRate,zone2);
       const payload={
-        date:entry.date||today, activityType:entry.activityType,
+        // activityTypes: 신규 복수 종목 배열(정식 필드) / activityType: 첫 종목을 그대로 유지해 구버전 화면(관리자앱 등)과 호환
+        date:entry.date||today, activityTypes, activityType:activityTypes[0],
         durationMinutes:Math.round(Number(entry.durationMinutes))||0,
         intensity:entry.intensity||null,
         averageHeartRate:toPositiveNumber(entry.averageHeartRate),
@@ -1736,7 +1748,7 @@ function MemberDayDetail({day,todayKey,prSessionIds,checking,editGate,onCheck,on
     rows.push(<div key={`cd-${l.id||i}`} className="mv2-calx-row static">
       <span className="mv2-calx-ico cardio" aria-hidden="true">🏃</span>
       <span className="mv2-calx-row-main"><b>유산소 <em className="mv2-calx-done">완료</em></b>{sub&&<small>{sub}</small>}</span>
-      <span className="mv2-calx-row-val">{l.durationMinutes}분 · {l.activityType}</span>
+      <span className="mv2-calx-row-val">{getCardioTypes(l).join(" · ")} · 총 {l.durationMinutes}분</span>
     </div>);
   });
   if(day.weight!=null) rows.push(<button key="wt" type="button" className="mv2-calx-row" onClick={onEditMeasure} aria-label="체중 기록 수정">
@@ -2062,7 +2074,7 @@ function buildTodayHealthTiles(p,today,open){
     {key:"steps",label:"걸음수",value:todayCheck.steps?`${Number(todayCheck.steps).toLocaleString()}보`:"—",hint:todayCheck.steps?"기록 완료":"탭해서 입력",done:!!todayCheck.steps,onClick:open.steps},
     {key:"condition",label:"컨디션",value:todayCheck.condition?`${CONDITION_EMOJI[todayCheck.condition]||""} ${todayCheck.condition}`:"—",hint:todayCheck.condition?"기록 완료":"탭해서 입력",done:!!todayCheck.condition,onClick:open.condition},
     {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
-    {key:"cardio",label:"유산소",value:todayCardio?`${todayCardio.activityType} · ${todayCardio.durationMinutes}분`:"—",hint:todayCardio?"기록 완료":"탭해서 입력",done:!!todayCardio,onClick:open.cardio},
+    {key:"cardio",label:"유산소",value:todayCardio?`${getCardioTypes(todayCardio).join(" · ")} · ${todayCardio.durationMinutes}분`:"—",hint:todayCardio?"기록 완료":"탭해서 입력",done:!!todayCardio,onClick:open.cardio},
   ];
 }
 function MemberHealth(p){
@@ -2188,28 +2200,29 @@ function CardioEntryForm({p,initialDate,initialLog,onSaved,onCancel}){
   const today=getKoreaDateString();
   const [justSaved,setJustSaved]=useState(false);
   const [d,setD]=useState(()=>initialLog
-    ?{date:initialLog.date||initialDate||today,activityType:initialLog.activityType||"",durationMinutes:initialLog.durationMinutes?String(initialLog.durationMinutes):"",averageHeartRate:initialLog.averageHeartRate?String(initialLog.averageHeartRate):"",intensity:initialLog.intensity||"약간 힘듦",memo:initialLog.memo||""}
-    :{date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
+    ?{date:initialLog.date||initialDate||today,activityTypes:getCardioTypes(initialLog),durationMinutes:initialLog.durationMinutes?String(initialLog.durationMinutes):"",averageHeartRate:initialLog.averageHeartRate?String(initialLog.averageHeartRate):"",intensity:initialLog.intensity||"약간 힘듦",memo:initialLog.memo||""}
+    :{date:initialDate||today,activityTypes:[],durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
   const weightUsed=toPositiveNumber(getLatestBodyWeight(p.body)?.weight)||toPositiveNumber(p.profile.currentWeight);
-  const met=d.activityType?getCardioMet(d.activityType,d.intensity):null;
+  const met=d.activityTypes.length?getCardioMetMulti(d.activityTypes,d.intensity):null;
   const estCalories=met&&weightUsed&&d.durationMinutes?calcCardioCalories(met,weightUsed,d.durationMinutes):null;
+  const toggleActivityType=x=>setD(prev=>({...prev,activityTypes:prev.activityTypes.includes(x)?prev.activityTypes.filter(t=>t!==x):[...prev.activityTypes,x]}));
   const submit=async()=>{
-    if(!d.activityType){ alert("유산소 종목을 선택해주세요."); return; }
+    if(!d.activityTypes.length){ alert("유산소 종목을 선택해주세요."); return; }
     if(!d.durationMinutes||Number(d.durationMinutes)<=0){ alert("운동 시간을 입력해주세요."); return; }
     await p.saveCardioEntry({...d,id:initialLog?.id});
-    if(!initialLog) setD({date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
+    if(!initialLog) setD({date:initialDate||today,activityTypes:[],durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
     setJustSaved(true); setTimeout(()=>setJustSaved(false),700);
     onSaved?.();
   };
   return <div className="health-subcard" style={{margin:0}}>
     {!weightUsed && <p className="notice soft" style={{marginBottom:10}}>체중 정보가 없어요. 건강관리에서 체중을 먼저 입력해주세요.</p>}
     <InputLine label="날짜" value={d.date} type="date" onChange={v=>setD({...d,date:v})}/>
-    <SelectLine label="유산소 종목" value={d.activityType} opts={CARDIO_ACTIVITIES} placeholder="선택해주세요" onChange={v=>setD({...d,activityType:v})}/>
+    <div className="form-line"><label>유산소 종목 <small>여러 종목 선택 가능</small></label><div className="choice-buttons">{CARDIO_ACTIVITIES.map(x=><button type="button" key={x} className={d.activityTypes.includes(x)?"active":""} onClick={()=>toggleActivityType(x)}>{x}</button>)}</div></div>
     <InputLine label="운동 시간(분)" value={d.durationMinutes} type="number" onChange={v=>setD({...d,durationMinutes:v})}/>
     <InputLine label="평균 심박수(선택)" value={d.averageHeartRate} type="number" onChange={v=>setD({...d,averageHeartRate:v})}/>
     <div className="form-line"><label>운동 강도</label><div className="choice-buttons">{CARDIO_INTENSITY_OPTIONS.map(x=><button type="button" key={x} className={d.intensity===x?"active":""} onClick={()=>setD({...d,intensity:x})}>{x}</button>)}</div></div>
     <InputLine label="메모" value={d.memo} onChange={v=>setD({...d,memo:v})}/>
-    {estCalories!=null && <div className="cardio-estimate"><b>{d.activityType} {d.durationMinutes}분</b><span>예상 소모 칼로리 {estCalories}kcal</span></div>}
+    {estCalories!=null && <div className="cardio-estimate"><b>{d.activityTypes.join(" · ")} {d.durationMinutes}분</b><span>예상 소모 칼로리 {estCalories}kcal</span></div>}
     <p className="notice soft" style={{marginTop:10}}>칼로리는 체중, 속도, 심박수, 기구 설정에 따라 달라질 수 있는 예상값입니다.</p>
     <button className={`primary${justSaved?" save-success":""}`} onClick={submit} disabled={p.cardioSaving||!weightUsed}>{p.cardioSaving?"저장 중...":justSaved?"저장 완료 ✓":initialLog?"수정 저장":"저장"}</button>
     {onCancel&&<button className="ghost" onClick={onCancel}>취소</button>}

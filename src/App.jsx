@@ -1420,7 +1420,10 @@ function computeCalendarMonthSummary(dayMap,ym,onboarding,todayKey){
   const workoutDayCount=entries.filter(([,v])=>v.pt.length>0||v.attended).length;
   const cardioDays=entries.filter(([,v])=>v.cardio.length>0);
   const cardioTotal=entries.reduce((n,[,v])=>n+v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0),0);
+  const cardioCount=entries.reduce((n,[,v])=>n+v.cardio.length,0);
   const weightDays=entries.filter(([,v])=>v.weight!=null).length;
+  const kcalDays=entries.filter(([,v])=>v.kcal!=null).length;
+  const stepsDays=entries.filter(([,v])=>v.steps).length;
   const streaks=computeStreakStats(getWorkoutDaySet(dayMap),todayKey);
   const weeklyTarget=parseWorkoutCount(onboarding?.weeklyWorkoutCount);
   // 목표 운동일: 주간 목표 횟수 × (이번 달 경과 주수) — 이번 달 오늘까지 기준으로 계산해 과대평가하지 않는다
@@ -1430,17 +1433,38 @@ function computeCalendarMonthSummary(dayMap,ym,onboarding,todayKey){
     const targetSoFar=Math.max(1,Math.round(weeklyTarget*(dayOfMonth/7)));
     goalRate=Math.min(100,Math.round(workoutDayCount/targetSoFar*100));
   }
-  return {ptCount,soloCount,workoutDayCount,cardioTotal,cardioAvg:cardioDays.length?Math.round(cardioTotal/cardioDays.length):0,cardioDayCount:cardioDays.length,weightDays,streaks,goalRate};
+  // 월간 목표(요약 카드 "목표 N일 중 X%") — 주간 목표 × 해당 월 주수 기준
+  let monthlyTarget=null, monthGoalRate=null;
+  if(weeklyTarget>0){
+    const dim=new Date(Number(ym.slice(0,4)),Number(ym.slice(5,7)),0).getDate();
+    monthlyTarget=Math.max(1,Math.round(weeklyTarget*dim/7));
+    monthGoalRate=Math.min(100,Math.round(workoutDayCount/monthlyTarget*100));
+  }
+  return {ptCount,soloCount,workoutDayCount,cardioTotal,cardioAvg:cardioDays.length?Math.round(cardioTotal/cardioDays.length):0,cardioDayCount:cardioDays.length,cardioCount,weightDays,kcalDays,stepsDays,streaks,goalRate,monthlyTarget,monthGoalRate};
 }
 
 // 과거 월 조회용 확장 데이터 캐시 — 탭을 오가도 다시 읽지 않도록 세션 동안 유지 (기존 read 함수 재사용, 새 쿼리/컬렉션 없음)
 const MEMBER_CAL_EXT_CACHE=new Map();
+// 캘린더 일정 라벨 — 항목별 고정 파스텔 색(색은 CSS .evt-* 참고). 운동 부위는 캘린더에 표시하지 않고 Detail Panel에서만 보여준다.
+const CAL_EVENT_LABEL={pt:"PT",solo:"개인운동",cardio:"유산소",weight:"체중",kcal:"칼로리",steps:"걸음수"};
+function getCalDayEvents(v){
+  if(!v) return [];
+  const ev=[];
+  if(v.pt.length) ev.push("pt");
+  if(v.attended) ev.push("solo");
+  if(v.cardio.length) ev.push("cardio");
+  if(v.weight!=null) ev.push("weight");
+  if(v.kcal!=null) ev.push("kcal");
+  if(v.steps) ev.push("steps");
+  return ev;
+}
 function MemberCalendar(p){
   const todayKey=getKoreaDateString();
   const [ym,setYm]=useState(todayKey.slice(0,7));
   const [ext,setExt]=useState(()=>MEMBER_CAL_EXT_CACHE.get(p.profile.id)||null);
-  const [selected,setSelected]=useState(todayKey); // Apple Calendar식 — 날짜를 누르면 아래 상세 카드가 전환된다
+  const [selected,setSelected]=useState(todayKey); // Apple Calendar식 — 날짜를 누르면 아래 Detail Panel이 전환된다
   const [checking,setChecking]=useState(false);
+  const [sheet,setSheet]=useState(null); // FAB Bottom Sheet: "menu" | "measure" | "cardio" | "condition"
   useEffect(()=>{
     if(MEMBER_CAL_EXT_CACHE.has(p.profile.id)) return;
     let alive=true;
@@ -1457,8 +1481,19 @@ function MemberCalendar(p){
     return ()=>{alive=false;};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[p.profile.id]);
-  const checkins=ext?.checkins||p.checkins;
-  const cardioLogs=ext?.cardioLogs||p.cardioLogs;
+  // 확장 로드본 + 최신 상태를 병합(같은 키는 최신 상태 우선) — 방금 저장한 기록도 캘린더에 즉시 반영
+  const checkins=useMemo(()=>{
+    const merged=new Map();
+    (ext?.checkins||[]).forEach(c=>{ const k=c.date||c.id; if(k) merged.set(k,c); });
+    (p.checkins||[]).forEach(c=>{ const k=c.date||c.id; if(k) merged.set(k,c); });
+    return [...merged.values()];
+  },[ext,p.checkins]);
+  const cardioLogs=useMemo(()=>{
+    const merged=new Map();
+    (ext?.cardioLogs||[]).forEach(l=>merged.set(l.id||`${l.date}_${l.activityType}`,l));
+    (p.cardioLogs||[]).forEach(l=>merged.set(l.id||`${l.date}_${l.activityType}`,l));
+    return [...merged.values()];
+  },[ext,p.cardioLogs]);
   const attendance=useMemo(()=>{
     // 확장 로드본과 현재 상태를 합쳐 방금 체크한 날짜도 즉시 반영
     const merged=new Map();
@@ -1474,9 +1509,14 @@ function MemberCalendar(p){
   const summary=useMemo(()=>computeCalendarMonthSummary(dayMap,ym,p.onboarding,todayKey),[dayMap,ym,p.onboarding,todayKey]);
 
   const [yy,mm]=ym.split("-").map(Number);
-  const firstDow=new Date(yy,mm-1,1).getDay();
+  // 월요일 시작(시안 기준) — 앞뒤는 인접 월 날짜(회색, 선택 불가)로 주 단위를 채운다
+  const firstDow=(new Date(yy,mm-1,1).getDay()+6)%7;
   const daysInMonth=new Date(yy,mm,0).getDate();
-  const cells=[...Array(firstDow).fill(null),...Array.from({length:daysInMonth},(_,i)=>i+1)];
+  const prevDim=new Date(yy,mm-1,0).getDate();
+  const cells=[];
+  for(let i=firstDow-1;i>=0;i--) cells.push({d:prevDim-i,out:true});
+  for(let d=1;d<=daysInMonth;d++) cells.push({d,out:false});
+  for(let t=1;cells.length%7!==0;t++) cells.push({d:t,out:true});
   const isThisMonth=ym===todayKey.slice(0,7);
   const monthLabel=`${yy}년 ${mm}월`;
   const moveMonth=delta=>{
@@ -1485,6 +1525,7 @@ function MemberCalendar(p){
     setYm(nextYm);
     setSelected(nextYm===todayKey.slice(0,7)?todayKey:`${nextYm}-01`);
   };
+  const goToday=()=>{ setYm(todayKey.slice(0,7)); setSelected(todayKey); };
 
   const checkDate=async(dateKey)=>{
     if(checking) return;
@@ -1518,155 +1559,212 @@ function MemberCalendar(p){
 
   const selDay=dayMap.get(selected)||{date:selected,pt:[],cardio:[],attended:false};
   const selGate=p.canEditAttendanceDate?p.canEditAttendanceDate(selected):{ok:selected<=todayKey};
-  const WEEKDAYS_FULL=["일요일","월요일","화요일","수요일","목요일","금요일","토요일"];
-  const selLabel=`${Number(selected.slice(5,7))}월 ${Number(selected.slice(8,10))}일 ${WEEKDAYS_FULL[new Date(`${selected}T12:00:00`).getDay()]}`;
-  const headline=summary.workoutDayCount>=12?`이번 달 ${summary.workoutDayCount}일 운동 — 최고의 흐름이에요 🔥`
-    :summary.workoutDayCount>=6?`이번 달 ${summary.workoutDayCount}일 운동했어요 💪`
-    :summary.workoutDayCount>0?`이번 달 ${summary.workoutDayCount}일 운동했어요`
-    :"이번 달 첫 운동을 기록해보세요";
+  const WEEKDAYS_SHORT=["일","월","화","수","목","금","토"];
+  const selLabel=`${Number(selected.slice(5,7))}월 ${Number(selected.slice(8,10))}일 (${WEEKDAYS_SHORT[new Date(`${selected}T12:00:00`).getDay()]})`;
+
+  // FAB Bottom Sheet — 날짜를 선택 날짜로 프리셋하고 기존 저장 로직(saveCheck/saveCondition/savePain/saveCardioEntry)을 그대로 사용
+  const openMeasure=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("measure"); };
+  const openCondition=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("condition"); };
+  const submitMeasure=async()=>{
+    const w=String(p.form.weight??"").trim(), k=String(p.form.kcal??"").trim(), s=String(p.form.steps??"").trim();
+    if(!w&&!k&&!s){ alert("저장할 건강 기록을 입력해주세요."); return; }
+    if(w&&(!Number.isFinite(Number(w))||Number(w)<=0)){ alert("체중은 0보다 큰 숫자로 입력해주세요."); return; }
+    await p.saveCheck(); setSheet(null);
+  };
+  const menuItems=[
+    {k:"solo",tint:"solo",icon:"🏋️",label:selDay.attended?"개인 운동 완료됨":"개인 운동 완료 체크",desc:selDay.attended?"이 날은 이미 완료로 기록되어 있어요":"이 날의 운동 완료를 기록해요",disabled:selDay.attended,run:()=>{ setSheet(null); checkDate(selected); }},
+    {k:"cardio",tint:"cardio",icon:"🏃",label:"유산소",desc:"러닝 · 자전거 · 등산 등 유산소 기록",run:()=>setSheet("cardio")},
+    {k:"weight",tint:"weight",icon:"⚖️",label:"체중",desc:"이 날의 체중을 기록해요",run:openMeasure},
+    {k:"kcal",tint:"kcal",icon:"🔥",label:"칼로리",desc:"총 섭취 칼로리를 기록해요",run:openMeasure},
+    {k:"steps",tint:"steps",icon:"👟",label:"걸음 수",desc:"하루 걸음 수를 기록해요",run:openMeasure},
+    {k:"memo",tint:"memo",icon:"💬",label:"컨디션 · 메모",desc:"컨디션과 통증 · 메모를 남겨요",run:openCondition},
+  ];
+  const sumItems=[
+    {tint:"pt",icon:"👤",label:"PT",value:summary.ptCount,unit:"회"},
+    {tint:"solo",icon:"🏋️",label:"개인 운동",value:summary.soloCount,unit:"회"},
+    {tint:"cardio",icon:"🏃",label:"유산소",value:summary.cardioCount,unit:"회"},
+    {tint:"weight",icon:"⚖️",label:"체중 기록",value:summary.weightDays,unit:"일"},
+    {tint:"kcal",icon:"🔥",label:"칼로리 기록",value:summary.kcalDays,unit:"일"},
+    {tint:"steps",icon:"👟",label:"걸음 수 기록",value:summary.stepsDays,unit:"일"},
+  ];
 
   return <div className="mv2-cal-wrap">
-    <div className="mv2-cal-main">
-      <div className="mv2-cal-card">
-        <div className="mv2-cal-head">
-          <button type="button" aria-label="이전 달" onClick={()=>moveMonth(-1)}>‹</button>
-          <b>{monthLabel}</b>
-          <button type="button" aria-label="다음 달" onClick={()=>moveMonth(1)} disabled={isThisMonth}>›</button>
-        </div>
-        <div className="mv2-cal-dow" aria-hidden="true">{["일","월","화","수","목","금","토"].map(d=><span key={d}>{d}</span>)}</div>
-        <div className="mv2-cal-grid">
-          {cells.map((d,i)=>{
-            if(d===null) return <span key={`e${i}`} className="mv2-cal-cell empty"/>;
-            const key=`${ym}-${String(d).padStart(2,"0")}`;
-            const v=dayMap.get(key);
-            const future=key>todayKey;
-            const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
-            return <button key={key} type="button"
-              className={`mv2-cal-cell${key===todayKey?" today":""}${key===selected?" sel":""}${future?" future":""}`}
-              aria-label={`${mm}월 ${d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}${v?.weight!=null?" 체중 기록":""}`}
-              aria-pressed={key===selected}
-              onClick={()=>setSelected(key)}>
-              <span className="mv2-cal-num">{d}</span>
-              <span className="mv2-cal-bars">
-                {v?.pt.length>0&&<i className="mv2-bar bar-pt">PT</i>}
-                {v?.attended&&<i className="mv2-bar bar-solo">운동</i>}
-                {cardioMin>0&&<i className="mv2-bar bar-cardio">{cardioMin}m</i>}
-              </span>
-              <span className="mv2-cal-under">
-                {v?.weight!=null&&<i className="mv2-dot-wt" title="체중 기록"/>}
-                {prInfo.prDates.has(key)&&<i className="mv2-dot-pr" title="PR">★</i>}
-              </span>
-            </button>;
-          })}
-        </div>
-        <div className="mv2-cal-legend" aria-hidden="true">
-          <span><i className="lg lg-pt"/>PT</span>
-          <span><i className="lg lg-solo"/>개인운동</span>
-          <span><i className="lg lg-cardio"/>유산소</span>
-          <span><i className="mv2-dot-wt"/>체중</span>
-        </div>
+    {/* 월간 요약 카드 — 이번 달 활동량이 가장 먼저 보이도록 */}
+    <div className="mv2-calx-summary">
+      <div className="mv2-calx-sum-main">
+        <span>{isThisMonth?"이번 달 운동한 날":`${mm}월 운동한 날`}</span>
+        <b>{summary.workoutDayCount}<em>일</em></b>
+        {summary.monthlyTarget!=null
+          ? <><small>목표 {summary.monthlyTarget}일 중 {summary.monthGoalRate}%</small>
+              <i className="mv2-calx-progress"><small style={{width:`${summary.monthGoalRate}%`}}/></i></>
+          : summary.streaks.current>0&&<small>🔥 연속 {summary.streaks.current}일째 운동 중</small>}
       </div>
-
-      {/* 선택 날짜 상세 — 팝업 대신 캘린더 아래 카드가 자연스럽게 전환 (Apple Calendar 방식) */}
-      <div className="mv2-day-card" key={selected}>
-        <div className="mv2-day-card-head">
-          <b>{selLabel}</b>
-          {selected===todayKey&&<em>오늘</em>}
-        </div>
-        <MemberDayDetail day={selDay} todayKey={todayKey} prSessionIds={prInfo.prSessionIds}
-          checking={checking} editGate={selGate}
-          onCheck={()=>checkDate(selected)}
-          onUncheck={()=>uncheckDate(selected)}
-          onOpenSession={sid=>{ p.setJournalFocusId?.(sid); p.setWorkoutView?.("journal"); p.resetMemberScroll?.(); }}
-          onAddCardio={()=>{ p.setHealthIntent?.({type:"cardio",date:selected}); p.setTab?.("health"); }}
-          onEditHealth={()=>{ p.setHealthIntent?.({type:"weight",date:selected}); p.setTab?.("health"); }}
-        />
+      <div className="mv2-calx-sum-grid">
+        {sumItems.map(it=>(
+          <div key={it.label}>
+            <span className={`mv2-calx-ico ${it.tint}`} aria-hidden="true">{it.icon}</span>
+            <div><small>{it.label}</small><b>{it.value}<em>{it.unit}</em></b></div>
+          </div>
+        ))}
       </div>
     </div>
 
-    <div className="mv2-cal-summary">
-      <div className="mv2-sum-headline">{headline}</div>
-      <div className="mv2-sum-grid">
-        <div><span>PT 수업</span><b>{summary.ptCount}<em>회</em></b></div>
-        <div><span>개인운동</span><b>{summary.soloCount}<em>회</em></b></div>
-        <div><span>총 운동일</span><b>{summary.workoutDayCount}<em>일</em></b></div>
-        <div><span>유산소</span><b>{summary.cardioTotal}<em>분</em></b></div>
-        {summary.cardioDayCount>0&&<div><span>평균 유산소</span><b>{summary.cardioAvg}<em>분</em></b></div>}
-        <div><span>체중 기록</span><b>{summary.weightDays}<em>일</em></b></div>
-        <div><span>연속 운동</span><b>{summary.streaks.current}<em>일</em></b></div>
-        {summary.streaks.monthLongest>0&&<div><span>이번 달 최장</span><b>{summary.streaks.monthLongest}<em>일</em></b></div>}
-        {summary.goalRate!=null&&<div className="wide"><span>목표 운동일 달성률</span><b>{summary.goalRate}<em>%</em></b><i className="mv2-sum-bar"><small style={{width:`${summary.goalRate}%`}}/></i></div>}
+    {/* 월 이동 + 오늘 */}
+    <div className="mv2-calx-head">
+      <div className="mv2-calx-nav">
+        <button type="button" aria-label="이전 달" onClick={()=>moveMonth(-1)}>‹</button>
+        <b>{monthLabel}</b>
+        <button type="button" aria-label="다음 달" onClick={()=>moveMonth(1)} disabled={isThisMonth}>›</button>
+      </div>
+      {!(isThisMonth&&selected===todayKey)&&<button type="button" className="mv2-calx-today" onClick={goToday}>오늘</button>}
+    </div>
+
+    {/* 캘린더 — 글자 뒤에 얇고 긴 파스텔 배경이 깔리는 Apple Calendar 일정 스타일 */}
+    <div className="mv2-calx-card">
+      <div className="mv2-calx-dow" aria-hidden="true">{["월","화","수","목","금","토","일"].map(d=><span key={d}>{d}</span>)}</div>
+      <div className="mv2-calx-grid">
+        {cells.map((c,i)=>{
+          if(c.out) return <span key={`o${i}`} className="mv2-calx-cell out" aria-hidden="true"><span className="mv2-calx-num">{c.d}</span></span>;
+          const key=`${ym}-${String(c.d).padStart(2,"0")}`;
+          const v=dayMap.get(key);
+          const events=getCalDayEvents(v);
+          const shown=events.slice(0,3), more=events.length-shown.length;
+          const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
+          return <button key={key} type="button"
+            className={`mv2-calx-cell${key===todayKey?" today":""}${key===selected?" sel":""}${key>todayKey?" future":""}`}
+            aria-label={`${mm}월 ${c.d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}${v?.weight!=null?" 체중 기록":""}${v?.kcal!=null?" 칼로리 기록":""}${v?.steps?" 걸음 수 기록":""}`}
+            aria-pressed={key===selected}
+            onClick={()=>setSelected(key)}>
+            <span className="mv2-calx-num">{c.d}</span>
+            <span className="mv2-calx-evts">
+              {shown.map(k=><i key={k} className={`mv2-evt evt-${k}`}>{CAL_EVENT_LABEL[k]}</i>)}
+              {more>0&&<i className="mv2-evt evt-more">+{more}</i>}
+            </span>
+          </button>;
+        })}
       </div>
     </div>
+
+    {/* Detail Panel — 팝업 대신 캘린더 아래에서 부드럽게 전환 (운동 부위는 여기에서만 표시) */}
+    <div className="mv2-calx-panel" key={selected}>
+      <i className="mv2-calx-handle" aria-hidden="true"/>
+      <div className="mv2-calx-panel-head">
+        <b>{selLabel}</b>
+        <span>{selected===todayKey?"오늘 기록":"기록"}</span>
+      </div>
+      <MemberDayDetail day={selDay} todayKey={todayKey} prSessionIds={prInfo.prSessionIds}
+        checking={checking} editGate={selGate}
+        onCheck={()=>checkDate(selected)}
+        onUncheck={()=>uncheckDate(selected)}
+        onOpenSession={sid=>{ p.setJournalFocusId?.(sid); p.setWorkoutView?.("journal"); p.resetMemberScroll?.(); }}
+        onEditMeasure={openMeasure}
+        onEditCondition={openCondition}
+      />
+    </div>
+
+    {/* Floating + — 시트에서 선택 날짜로 바로 기록 */}
+    <button type="button" className="mv2-calx-fab" aria-label={`${selLabel}에 기록 추가`} onClick={()=>setSheet("menu")}>＋</button>
+
+    {/* Bottom Sheet — 저장은 전부 기존 로직 재사용(신규 저장 경로 없음). PT는 관리자앱 수업 완료 시 자동 생성되므로 추가 항목에 없다. */}
+    <MemberBottomSheet open={sheet==="menu"} onClose={()=>setSheet(null)} title={`${selLabel} 기록 추가`}>
+      <div className="mv2-calx-menu">
+        {menuItems.map(it=>(
+          <button key={it.k} type="button" disabled={it.disabled} onClick={it.run}>
+            <span className={`mv2-calx-ico ${it.tint}`} aria-hidden="true">{it.icon}</span>
+            <span className="mv2-calx-menu-txt"><b>{it.label}</b><small>{it.desc}</small></span>
+            <span className="mv2-calx-chev" aria-hidden="true">›</span>
+          </button>
+        ))}
+      </div>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="measure"} onClose={()=>setSheet(null)} title="건강 기록 입력">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
+      <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
+      <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
+      <button className="primary" onClick={submitMeasure} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":"저장"}</button>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title="유산소 기록">
+      <CardioEntryForm key={selected} p={p} initialDate={selected} onSaved={()=>setSheet(null)}/>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="condition"} onClose={()=>setSheet(null)} title="컨디션 · 메모">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <div className="health-optional-section" style={{borderTop:"none",marginTop:0,paddingTop:0}}>
+        <SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} placeholder="선택 안 함" onChange={v=>p.setForm({...p.form,condition:v})}/>
+        <button type="button" className="primary compact" disabled={p.conditionSaving} onClick={async()=>{ if(!p.form.condition){alert("컨디션을 선택해주세요.");return;} await p.saveCondition(); }}>{p.conditionSaving?"저장 중...":"컨디션 저장"}</button>
+      </div>
+      <div className="health-optional-section">
+        <PainInput form={p.form} setForm={p.setForm}/>
+        <button type="button" className="primary compact" disabled={p.painSaving} onClick={async()=>{ const noPain=p.form.painPart==="없음"; if(noPain&&String(p.form.painMemo||"").trim()===""){alert("통증 부위나 메모를 입력해주세요.");return;} await p.savePain(); }}>{p.painSaving?"저장 중...":"통증 · 메모 저장"}</button>
+      </div>
+    </MemberBottomSheet>
   </div>;
 }
 
-// 날짜 상세 — 해당 날짜에 실제로 존재하는 기록만 섹션으로 표시(빈 항목은 숨김)
-function MemberDayDetail({day,todayKey,prSessionIds,checking,editGate,onCheck,onUncheck,onOpenSession,onAddCardio,onEditHealth}){
+// 날짜 상세(Detail Panel) — 시안의 행 리스트 스타일: 아이콘 + 항목 + 완료 배지 + 값 + ›. 실제 기록이 있는 항목만 표시.
+function MemberDayDetail({day,todayKey,prSessionIds,checking,editGate,onCheck,onUncheck,onOpenSession,onEditMeasure,onEditCondition}){
   const future=day.date>todayKey;
-  const healthRows=[
-    day.weight!=null&&["체중",`${day.weight}kg`],
-    day.kcal!=null&&["섭취 칼로리",`${Number(day.kcal).toLocaleString()}kcal`],
-    day.steps&&["걸음수",`${Number(day.steps).toLocaleString()}보`],
-    day.condition&&["컨디션",day.condition],
-    day.pain&&["통증",`${day.pain.part}${day.pain.side&&day.pain.side!=="해당 없음"?` · ${day.pain.side}`:""} · VAS ${day.pain.vas??0}`],
-  ].filter(Boolean);
-  const hasAnything=day.pt.length>0||day.attended||day.cardio.length>0||healthRows.length>0;
-  return <div className="mv2-day-detail">
-    {day.pt.map(s=>{
-      const st=buildSessionReportStats(s);
-      return <div key={s.id} className="mv2-day-block pt">
-        <div className="mv2-day-block-head">
-          <b><i className="mk-pt"/>PT 수업 · {formatTypes(s.selectedTypes||s.type)||"운동"}</b>
-          {prSessionIds.has(s.id)&&<em className="mv2-pr-badge">★ PR</em>}
-        </div>
-        <div className="mv2-day-stats">
-          <span>종목 <b>{st.exCount}</b></span>
-          {st.volume>0&&<span>볼륨 <b>{st.volume.toLocaleString()}</b>kg</span>}
-          {st.top>0&&<span>최고 <b>{st.top}</b>kg</span>}
-          {st.rpe!=null&&<span>RPE <b>{st.rpe}</b></span>}
-        </div>
-        {st.soreness&&<p className="mv2-day-sub">근육통 {st.soreness}</p>}
-        {s.trainerComment&&<p className="mv2-day-comment">💬 {s.trainerComment}</p>}
-        {(s.memberFeedback?.memo)&&<p className="mv2-day-sub">내 메모: {s.memberFeedback.memo}</p>}
-        <button type="button" className="mv2-day-link" onClick={()=>onOpenSession(s.id)}>수업일지 보기 →</button>
-      </div>;
-    })}
-
-    <div className="mv2-day-block">
-      <div className="mv2-day-block-head"><b><i className="lg lg-solo" style={{width:14,height:14,borderRadius:5}}/>개인운동</b></div>
-      {day.attended
-        ? <div className="mv2-day-done-row">
-            <p className="mv2-day-sub done">이 날 운동 완료를 기록했어요 👏</p>
-            {editGate?.ok&&<button type="button" className="mv2-day-cancel" disabled={checking} onClick={onUncheck}>{checking?"처리 중...":"완료 취소"}</button>}
-          </div>
-        : editGate?.ok
-          ? <button type="button" className="primary compact" style={{marginTop:6}} disabled={checking} onClick={onCheck}>{checking?"기록 중...":"이 날 운동 완료 체크"}</button>
-          : <p className="mv2-day-sub">{future?"미래 날짜에는 완료 체크를 할 수 없어요.":"최근 30일 안의 날짜만 기록·취소할 수 있어요."}</p>}
-    </div>
-
-    {day.cardio.length>0&&<div className="mv2-day-block">
-      <div className="mv2-day-block-head"><b>🏃 유산소</b></div>
-      {day.cardio.map(l=><div key={l.id||l.date+l.activityType} className="mv2-day-cardio-row">
-        <b>{l.activityType}</b>
-        <span>{l.durationMinutes}분{l.caloriesBurned?` · ${l.caloriesBurned}kcal`:""}{l.averageHeartRate?` · ${l.averageHeartRate}bpm`:""}{l.zoneStatus==="in"?" · Zone2":""}</span>
-        {l.memo&&<small>{l.memo}</small>}
-      </div>)}
-    </div>}
-
-    {healthRows.length>0&&<div className="mv2-day-block">
-      <div className="mv2-day-block-head"><b>❤️ 건강 기록</b></div>
-      <div className="mv2-day-health">{healthRows.map(([l,v])=><span key={l}>{l} <b>{v}</b></span>)}</div>
-    </div>}
-
-    {!hasAnything&&!future&&<p className="mv2-day-empty">이 날의 기록이 아직 없어요.<br/>지난 기록도 지금 남길 수 있어요.</p>}
-    {future&&!hasAnything&&<p className="mv2-day-empty">아직 오지 않은 날이에요.</p>}
-
-    {!future&&<div className="mv2-day-actions">
-      {day.cardio.length===0&&<button type="button" className="ghost compact" onClick={onAddCardio}>유산소 기록 추가</button>}
-      <button type="button" className="ghost compact" onClick={onEditHealth}>건강 기록 입력·수정</button>
-    </div>}
-  </div>;
+  const rows=[];
+  day.pt.forEach(s=>{
+    const st=buildSessionReportStats(s);
+    const sub=[st.volume>0&&`볼륨 ${st.volume.toLocaleString()}kg`,st.top>0&&`최고 ${st.top}kg`,st.rpe!=null&&`RPE ${st.rpe}`,st.soreness&&`근육통 ${st.soreness}`].filter(Boolean).join(" · ");
+    rows.push(<button key={`pt-${s.id}`} type="button" className="mv2-calx-row" onClick={()=>onOpenSession(s.id)} aria-label="수업일지 보기">
+      <span className="mv2-calx-ico pt" aria-hidden="true">👤</span>
+      <span className="mv2-calx-row-main">
+        <b>PT 수업 <em className="mv2-calx-done">완료</em>{prSessionIds.has(s.id)&&<em className="mv2-calx-pr">★ PR</em>}</b>
+        {sub&&<small>{sub}</small>}
+        {s.trainerComment&&<small className="cmt">💬 {s.trainerComment}</small>}
+      </span>
+      <span className="mv2-calx-row-val">{formatTypes(s.selectedTypes||s.type)||"운동"}</span>
+      <span className="mv2-calx-chev" aria-hidden="true">›</span>
+    </button>);
+  });
+  if(day.attended) rows.push(<div key="solo" className="mv2-calx-row static">
+    <span className="mv2-calx-ico solo" aria-hidden="true">🏋️</span>
+    <span className="mv2-calx-row-main"><b>개인 운동 <em className="mv2-calx-done">완료</em></b></span>
+    {editGate?.ok&&<button type="button" className="mv2-calx-cancel" disabled={checking} onClick={onUncheck}>{checking?"처리 중...":"완료 취소"}</button>}
+  </div>);
+  day.cardio.forEach((l,i)=>{
+    const sub=[l.caloriesBurned&&`${l.caloriesBurned}kcal`,l.averageHeartRate&&`${l.averageHeartRate}bpm`,l.zoneStatus==="in"&&"Zone2",l.memo].filter(Boolean).join(" · ");
+    rows.push(<div key={`cd-${l.id||i}`} className="mv2-calx-row static">
+      <span className="mv2-calx-ico cardio" aria-hidden="true">🏃</span>
+      <span className="mv2-calx-row-main"><b>유산소 <em className="mv2-calx-done">완료</em></b>{sub&&<small>{sub}</small>}</span>
+      <span className="mv2-calx-row-val">{l.durationMinutes}분 · {l.activityType}</span>
+    </div>);
+  });
+  if(day.weight!=null) rows.push(<button key="wt" type="button" className="mv2-calx-row" onClick={onEditMeasure} aria-label="체중 기록 수정">
+    <span className="mv2-calx-ico weight" aria-hidden="true">⚖️</span>
+    <span className="mv2-calx-row-main"><b>체중</b></span>
+    <span className="mv2-calx-row-val">{day.weight}kg</span>
+    <span className="mv2-calx-chev" aria-hidden="true">›</span>
+  </button>);
+  if(day.kcal!=null) rows.push(<button key="kc" type="button" className="mv2-calx-row" onClick={onEditMeasure} aria-label="칼로리 기록 수정">
+    <span className="mv2-calx-ico kcal" aria-hidden="true">🔥</span>
+    <span className="mv2-calx-row-main"><b>칼로리</b></span>
+    <span className="mv2-calx-row-val">{Number(day.kcal).toLocaleString()}kcal</span>
+    <span className="mv2-calx-chev" aria-hidden="true">›</span>
+  </button>);
+  if(day.steps) rows.push(<button key="st" type="button" className="mv2-calx-row" onClick={onEditMeasure} aria-label="걸음 수 기록 수정">
+    <span className="mv2-calx-ico steps" aria-hidden="true">👟</span>
+    <span className="mv2-calx-row-main"><b>걸음 수</b></span>
+    <span className="mv2-calx-row-val">{Number(day.steps).toLocaleString()}보</span>
+    <span className="mv2-calx-chev" aria-hidden="true">›</span>
+  </button>);
+  if(day.condition||day.pain) rows.push(<button key="memo" type="button" className="mv2-calx-row" onClick={onEditCondition} aria-label="컨디션 · 메모 수정">
+    <span className="mv2-calx-ico memo" aria-hidden="true">💬</span>
+    <span className="mv2-calx-row-main">
+      <b>메모</b>
+      {day.pain&&<small>통증 {day.pain.part}{day.pain.side&&day.pain.side!=="해당 없음"?` · ${day.pain.side}`:""} · VAS {day.pain.vas??0}{day.pain.memo?` · ${day.pain.memo}`:""}</small>}
+    </span>
+    <span className="mv2-calx-row-val">{day.condition?`컨디션 ${day.condition}`:"통증 기록"}</span>
+    <span className="mv2-calx-chev" aria-hidden="true">›</span>
+  </button>);
+  return <>
+    {rows.length>0
+      ? <div className="mv2-calx-rows">{rows}</div>
+      : <p className="mv2-calx-empty">{future?"아직 오지 않은 날이에요.":<>이 날의 기록이 아직 없어요.<br/>오른쪽 아래 ＋ 버튼으로 기록을 남겨보세요.</>}</p>}
+    {!day.attended&&!future&&editGate?.ok&&<button type="button" className="mv2-calx-quickcheck" disabled={checking} onClick={onCheck}>{checking?"기록 중...":"🏋️ 이 날 운동 완료 체크"}</button>}
+  </>;
 }
 
 // ════════════════════════════════════════════════════
@@ -4106,86 +4204,91 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-home-cal-stats{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
 .mv2-home-cal-stats span{background:#F6F7F9;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;color:#66717C}
 .mv2-home-cal-stats b{color:#20242A}
-/* ── 운동 캘린더 — Apple Calendar식: 큰 날짜·넓은 여백·컬러 바 이벤트·부드러운 민트 선택 ── */
-.mv2-cal-wrap{display:grid;gap:14px}
-.mv2-cal-main{display:grid;gap:14px;min-width:0}
-.mv2-cal-card{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px 12px 12px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
-.mv2-cal-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px;margin-bottom:14px}
-.mv2-cal-head b{font-size:19px;color:#20242A;letter-spacing:-.4px}
-.mv2-cal-head button{width:40px;height:40px;border:0;border-radius:13px;background:#F4F6F8;color:#66717C;font-size:19px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease}
-.mv2-cal-head button:active{background:#E8ECF1}
-.mv2-cal-head button:disabled{opacity:.3;cursor:default}
-.mv2-cal-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:6px}
-.mv2-cal-dow span{text-align:center;font-size:11.5px;font-weight:800;color:#A8B0BA;padding:4px 0}
-.mv2-cal-dow span:first-child{color:#F26D6D}
-.mv2-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
-.mv2-cal-cell{position:relative;min-height:72px;border:1.5px solid transparent;border-radius:14px;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:7px 2px 5px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .18s ease,box-shadow .18s ease,border-color .18s ease}
-.mv2-cal-cell.empty{cursor:default}
-.mv2-cal-cell.future{opacity:.35}
-.mv2-cal-cell.sel{background:rgba(20,184,166,.09);border-color:rgba(20,184,166,.35);box-shadow:0 4px 14px rgba(20,184,166,.14)}
-.mv2-cal-num{font-size:16px;font-weight:800;color:#20242A;line-height:1;font-variant-numeric:tabular-nums;width:27px;height:27px;display:flex;align-items:center;justify-content:center;border-radius:999px}
-.mv2-cal-cell.today .mv2-cal-num{background:#0F9488;color:#fff}
-.mv2-cal-cell.sel:not(.today) .mv2-cal-num{color:#0F766E}
-.mv2-cal-bars{display:flex;flex-direction:column;gap:2px;width:100%;padding:0 3px;min-height:14px}
-.mv2-bar{display:block;font-style:normal;font-size:8.5px;font-weight:900;line-height:1;text-align:center;border-radius:5px;padding:2.5px 0;letter-spacing:.2px;overflow:hidden;white-space:nowrap}
-.bar-pt{background:rgba(20,184,166,.16);color:#0F766E}
-.bar-solo{background:rgba(47,115,246,.13);color:#2359C8}
-.bar-cardio{background:#F1F3F6;color:#66717C;font-variant-numeric:tabular-nums}
-.mv2-cal-under{display:flex;align-items:center;gap:3px;min-height:7px}
-.mv2-dot-wt{display:inline-block;width:4.5px;height:4.5px;border-radius:999px;background:#C4CDD8;font-style:normal}
-.mv2-dot-pr{font-style:normal;color:#F5A623;font-size:8px;line-height:1}
-.mv2-cal-legend{display:flex;gap:14px;justify-content:center;align-items:center;border-top:1px solid #F1F3F6;margin-top:10px;padding:11px 4px 4px}
-.mv2-cal-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#A8B0BA}
-.lg{display:inline-block;width:10px;height:10px;border-radius:4px;font-style:normal}
-.lg-pt{background:#14B8A6}
-.lg-solo{background:#2F73F6}
-.lg-cardio{background:#D6DCE3}
-.mk-pt{display:inline-block;width:8px;height:8px;border-radius:999px;background:#14B8A6;font-style:normal}
-/* 선택 날짜 상세 카드 — 팝업 대신 캘린더 아래에서 자연스럽게 전환 */
-.mv2-day-card{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px;box-shadow:0 2px 14px rgba(15,23,42,.05);animation:memberFadeIn .18s ease}
-.mv2-day-card-head{display:flex;align-items:center;gap:9px;margin-bottom:13px}
-.mv2-day-card-head b{font-size:17px;color:#20242A;letter-spacing:-.3px}
-.mv2-day-card-head em{font-style:normal;background:rgba(20,184,166,.12);color:#0F766E;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:900}
-.mv2-day-done-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.mv2-day-cancel{flex-shrink:0;border:1px solid #FFDBDB;background:#FFF6F6;color:#E05252;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.mv2-day-cancel:disabled{opacity:.55;cursor:default}
-.mv2-sum-headline{font-size:16px;font-weight:900;color:#20242A;letter-spacing:-.3px;margin:2px 2px 13px}
-/* 월간 요약 */
-.mv2-cal-summary{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
-.mv2-sum-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
-.mv2-sum-grid>div{background:#F6F7F9;border-radius:16px;padding:12px 14px}
-.mv2-sum-grid>div.wide{grid-column:1/-1}
-.mv2-sum-grid span{display:block;color:#8B949E;font-size:11.5px;font-weight:800}
-.mv2-sum-grid b{display:block;font-size:21px;color:#20242A;margin-top:5px;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
-.mv2-sum-grid b em{font-style:normal;font-size:12px;color:#8B949E;font-weight:800;margin-left:2px}
-.mv2-sum-bar{display:block;height:6px;border-radius:999px;background:#E8ECF1;margin-top:9px;overflow:hidden}
-.mv2-sum-bar small{display:block;height:100%;background:linear-gradient(90deg,#2F73F6,#14B8A6);border-radius:999px;transition:width .3s ease}
-/* 날짜 상세 */
-.mv2-day-detail{display:grid;gap:10px;padding-top:4px}
-.mv2-day-block{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:18px;padding:14px 15px}
-.mv2-day-block.pt{background:linear-gradient(135deg,#F0FBF9,#FFFFFF);border-color:#BFE9E2}
-.mv2-day-block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.mv2-day-block-head b{display:flex;align-items:center;gap:7px;font-size:14.5px;color:#20242A}
-.mv2-pr-badge{font-style:normal;background:#FFF7E6;color:#B45309;border:1px solid #FCE1AC;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:900;flex-shrink:0}
-.mv2-day-stats{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.mv2-day-stats span{background:#fff;border:1px solid #EEF1F4;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:800;color:#66717C}
-.mv2-day-stats b{color:#20242A;font-variant-numeric:tabular-nums}
-.mv2-day-sub{margin:9px 0 0;color:#66717C;font-weight:700;font-size:12.5px;line-height:1.55}
-.mv2-day-sub.done{color:#0F9488;font-weight:800}
-.mv2-day-comment{margin:10px 0 0;background:#fff;border-radius:12px;padding:10px 12px;color:#0F766E;font-weight:700;font-size:13px;line-height:1.6}
+/* ── 운동 캘린더 — 시안 기준: 월간 요약 카드 · Apple Calendar식 파스텔 하이라이트 바 · 파란 포커스 · Detail Panel · Floating + ── */
+.mv2-cal-wrap{display:grid;gap:12px;padding-bottom:36px}
+/* 월간 요약 카드 */
+.mv2-calx-summary{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:18px;box-shadow:0 2px 14px rgba(15,23,42,.05);display:grid;gap:18px}
+.mv2-calx-sum-main span{display:block;font-size:12.5px;font-weight:800;color:#66717C}
+.mv2-calx-sum-main>b{display:block;font-size:34px;font-weight:900;color:#20242A;letter-spacing:-1px;margin-top:4px;line-height:1.1;font-variant-numeric:tabular-nums}
+.mv2-calx-sum-main>b em{font-style:normal;font-size:17px;font-weight:800;color:#8B949E;margin-left:2px;letter-spacing:0}
+.mv2-calx-sum-main>small{display:block;font-size:12px;font-weight:800;color:#8B949E;margin-top:7px}
+.mv2-calx-progress{display:block;height:6px;border-radius:999px;background:#EEF1F4;margin-top:8px;overflow:hidden;max-width:250px}
+.mv2-calx-progress small{display:block;height:100%;background:#3B82F6;border-radius:999px;transition:width .4s cubic-bezier(.32,.72,.35,1)}
+.mv2-calx-sum-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px 8px}
+.mv2-calx-sum-grid>div{display:flex;align-items:center;gap:8px;min-width:0}
+.mv2-calx-sum-grid small{display:block;font-size:10.5px;font-weight:800;color:#8B949E;white-space:nowrap}
+.mv2-calx-sum-grid b{display:block;font-size:15px;font-weight:900;color:#20242A;margin-top:1px;font-variant-numeric:tabular-nums}
+.mv2-calx-sum-grid b em{font-style:normal;font-size:11px;font-weight:800;color:#8B949E;margin-left:1px}
+.mv2-calx-ico{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;font-size:15px;flex-shrink:0;font-style:normal}
+.mv2-calx-ico.pt{background:#E3EEFC}.mv2-calx-ico.solo{background:#DFF4E9}.mv2-calx-ico.cardio{background:#FDEBDB}.mv2-calx-ico.weight{background:#FBE1EA}.mv2-calx-ico.kcal{background:#FCF2CE}.mv2-calx-ico.steps{background:#E9E5FA}.mv2-calx-ico.memo{background:#F1F3F6}
+/* 월 이동 헤더 */
+.mv2-calx-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px;min-height:40px}
+.mv2-calx-nav{display:flex;align-items:center;gap:2px}
+.mv2-calx-nav b{font-size:19px;color:#20242A;letter-spacing:-.4px;padding:0 6px;font-variant-numeric:tabular-nums}
+.mv2-calx-nav button{width:38px;height:38px;border:0;border-radius:12px;background:transparent;color:#3B82F6;font-size:22px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease}
+.mv2-calx-nav button:active{background:#EEF3FB}
+.mv2-calx-nav button:disabled{opacity:.25;cursor:default}
+.mv2-calx-today{border:1px solid #E5E9EF;background:#fff;color:#3B82F6;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:mv2FadeIn .18s ease}
+/* 캘린더 그리드 — 헤어라인 + 글자 뒤 파스텔 하이라이트 바(테두리·그림자 없음) */
+.mv2-calx-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:12px 8px 10px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-calx-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:2px}
+.mv2-calx-dow span{text-align:center;font-size:11px;font-weight:800;color:#A8B0BA;padding:4px 0}
+.mv2-calx-dow span:last-child{color:#F26D6D}
+.mv2-calx-grid{display:grid;grid-template-columns:repeat(7,1fr)}
+.mv2-calx-cell{position:relative;min-height:86px;border:0;border-top:1px solid #F3F5F8;background:transparent;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:6px 2px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-calx-cell.out{cursor:default}
+.mv2-calx-num{align-self:center;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:14.5px;font-weight:800;color:#3A4353;border-radius:999px;font-variant-numeric:tabular-nums;position:relative;z-index:1;transition:background-color .18s ease,color .18s ease}
+.mv2-calx-cell:nth-child(7n) .mv2-calx-num{color:#F26D6D}
+.mv2-calx-cell.future .mv2-calx-num{color:#A8B0BA}
+.mv2-calx-cell.out .mv2-calx-num{color:#CBD2DA}
+.mv2-calx-cell.today:not(.sel) .mv2-calx-num{color:#3B82F6;font-weight:900}
+.mv2-calx-cell.sel .mv2-calx-num{background:#3B82F6;color:#fff!important}
+.mv2-calx-cell.sel::after{content:"";position:absolute;inset:2px 1px;border:1.5px solid rgba(59,130,246,.5);border-radius:12px;background:rgba(59,130,246,.05);pointer-events:none;animation:mv2FadeIn .15s ease}
+.mv2-calx-evts{display:flex;flex-direction:column;gap:2.5px;width:100%;position:relative;z-index:1;padding:0 2px}
+.mv2-evt{display:block;font-style:normal;font-size:9px;font-weight:800;line-height:1;padding:3.5px 4px;border-radius:4px;text-align:left;white-space:nowrap;overflow:hidden;letter-spacing:-.2px}
+.evt-pt{background:rgba(96,165,250,.22);color:#2C5282}
+.evt-solo{background:rgba(52,199,123,.17);color:#25684A}
+.evt-cardio{background:rgba(251,146,60,.17);color:#8F5322}
+.evt-weight{background:rgba(244,114,182,.16);color:#95376B}
+.evt-kcal{background:rgba(250,204,21,.22);color:#7D680F}
+.evt-steps{background:rgba(139,124,246,.15);color:#54479B}
+.evt-more{background:#F1F3F6;color:#8B949E;text-align:center}
+/* Detail Panel — 캘린더 아래에서 부드럽게 전환 */
+.mv2-calx-panel{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:8px 18px 16px;box-shadow:0 6px 22px rgba(15,23,42,.07);animation:mv2CalPanelIn .26s cubic-bezier(.32,.72,.35,1)}
+@keyframes mv2CalPanelIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.mv2-calx-handle{display:block;width:36px;height:5px;border-radius:999px;background:#E7EBF0;margin:4px auto 10px}
+.mv2-calx-panel-head{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.mv2-calx-panel-head b{font-size:18px;color:#20242A;letter-spacing:-.4px}
+.mv2-calx-panel-head span{font-size:12px;font-weight:800;color:#A8B0BA}
+.mv2-calx-rows{display:flex;flex-direction:column}
+.mv2-calx-row{display:flex;align-items:center;gap:12px;padding:13px 0;border:0;border-top:1px solid #F3F5F8;background:transparent;width:100%;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-calx-row:first-child{border-top:0}
+.mv2-calx-row.static{cursor:default}
+.mv2-calx-row-main{flex:1;min-width:0}
+.mv2-calx-row-main b{display:flex;align-items:center;gap:6px;font-size:14.5px;color:#20242A;font-weight:800;flex-wrap:wrap}
+.mv2-calx-row-main small{margin-top:3px;font-size:11.5px;font-weight:700;color:#8B949E;line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.mv2-calx-row-main small.cmt{color:#0F766E}
+.mv2-calx-row-val{font-size:13.5px;font-weight:800;color:#3A4353;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
+.mv2-calx-chev{color:#C4CDD8;font-size:17px;font-weight:700;flex-shrink:0}
+.mv2-calx-done{font-style:normal;background:#E7F6EE;color:#1B7A4B;border-radius:6px;padding:2.5px 7px;font-size:10px;font-weight:900;flex-shrink:0}
+.mv2-calx-pr{font-style:normal;background:#FFF7E6;color:#B45309;border-radius:6px;padding:2.5px 7px;font-size:10px;font-weight:900;flex-shrink:0}
+.mv2-calx-cancel{flex-shrink:0;border:1px solid #FFDBDB;background:#FFF6F6;color:#E05252;border-radius:999px;padding:7px 12px;font-size:11.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-calx-cancel:disabled{opacity:.55;cursor:default}
+.mv2-calx-quickcheck{width:100%;margin-top:10px;border:1px dashed #C8D7EC;background:#F7FAFF;color:#2F73F6;border-radius:14px;padding:13px;font-size:13.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-calx-quickcheck:disabled{opacity:.55;cursor:default}
+.mv2-calx-empty{text-align:center;color:#8B949E;font-weight:700;font-size:13px;line-height:1.7;padding:16px 0 8px;margin:0}
+/* Floating + — 하단 탭바 위 우측 고정 */
+.mv2-calx-fab{position:fixed;right:max(16px,calc(50vw - 197px));bottom:calc(88px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border:0;border-radius:999px;background:#3B82F6;color:#fff;font-size:25px;font-weight:600;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 26px rgba(59,130,246,.4);cursor:pointer;-webkit-tap-highlight-color:transparent;z-index:60;transition:transform .16s ease,box-shadow .16s ease}
+.mv2-calx-fab:active{transform:scale(.92);box-shadow:0 6px 16px rgba(59,130,246,.35)}
+/* FAB 추가 메뉴 시트 */
+.mv2-calx-menu{display:flex;flex-direction:column}
+.mv2-calx-menu>button{display:flex;align-items:center;gap:12px;border:0;border-top:1px solid #F3F5F8;background:transparent;padding:13px 2px;width:100%;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-calx-menu>button:first-child{border-top:0}
+.mv2-calx-menu>button:disabled{opacity:.45;cursor:default}
+.mv2-calx-menu-txt{flex:1;min-width:0}
+.mv2-calx-menu-txt b{display:block;font-size:14.5px;color:#20242A}
+.mv2-calx-menu-txt small{display:block;color:#8B949E;font-size:11.5px;font-weight:700;margin-top:2px}
 .mv2-day-link{border:0;background:transparent;color:#2F73F6;font-weight:800;font-size:13px;padding:8px 0 0;cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:left}
-.mv2-day-cardio-row{border-top:1px solid #EEF1F4;padding:9px 0 2px;margin-top:8px}
-.mv2-day-cardio-row:first-of-type{border-top:0;margin-top:4px;padding-top:4px}
-.mv2-day-cardio-row b{display:block;font-size:13.5px;color:#20242A}
-.mv2-day-cardio-row span{display:block;color:#66717C;font-weight:700;font-size:12px;margin-top:2px}
-.mv2-day-cardio-row small{display:block;color:#8B949E;font-size:11.5px;margin-top:2px}
-.mv2-day-health{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.mv2-day-health span{background:#fff;border:1px solid #EEF1F4;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:800;color:#66717C}
-.mv2-day-health b{color:#20242A}
-.mv2-day-empty{text-align:center;color:#8B949E;font-weight:700;font-size:13px;line-height:1.7;padding:14px 0 4px}
-.mv2-day-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px}
-.mv2-day-actions .ghost.compact{margin-top:0;height:46px;font-size:13px}
-.mv2-day-actions .ghost.compact:only-child{grid-column:1/-1}
 /* 수업 리포트 요약 행 */
 .mv2-session-stats{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 12px}
 .mv2-session-stats span{background:#F6F7F9;border:1px solid #EEF1F4;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:800;color:#66717C}
@@ -4220,15 +4323,17 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-profile-stats b{display:block;font-size:16px;color:#20242A;margin-top:5px;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
 /* iPad/와이드 — 단순 확대가 아니라 2열 구성 */
 @media(min-width:700px){
-  .mv2-cal-wrap{grid-template-columns:1.35fr 1fr;align-items:start}
   .mv2-today-grid{grid-template-columns:repeat(3,1fr)}
   .mv2-change-strip{grid-template-columns:repeat(4,1fr)}
   .mv2-analysis-hero-grid{grid-template-columns:repeat(5,1fr)}
   .mv2-profile-stats{grid-template-columns:repeat(5,1fr)}
   .mv2-sheet{max-width:520px;border-radius:26px;bottom:auto;top:50%;transform:translate(-50%,-50%);animation:mv2FadeIn .2s ease}
-  .mv2-cal-cell{min-height:82px}
-  .mv2-cal-num{font-size:17px}
-  .mv2-bar{font-size:9.5px;padding:3px 0}
+  /* 캘린더 — 시안(태블릿)처럼 요약 카드는 좌우 배치, 셀은 더 크게 */
+  .mv2-calx-summary{grid-template-columns:auto 1fr;align-items:center;gap:28px;padding:22px 24px}
+  .mv2-calx-cell{min-height:106px;padding:8px 4px}
+  .mv2-calx-num{width:30px;height:30px;font-size:16px}
+  .mv2-evt{font-size:10.5px;padding:4.5px 6px;border-radius:5px}
+  .mv2-calx-fab{right:max(16px,calc(50vw - 362px))}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

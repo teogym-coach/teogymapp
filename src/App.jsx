@@ -1472,7 +1472,13 @@ function getCalDayEvents(v){
   return ev;
 }
 // 날짜 숫자 빨간색 판정 — 일요일 또는 대한민국 공휴일(음력 포함, holiday-kr로 연도별 자동 계산). 운동한 날(파란색)이 우선이므로 이 값은 worked보다 낮은 우선순위로만 쓰인다.
+// holiday-kr이 아직 반영하지 못한 최신 법정 공휴일 재지정만 보완하는 override(연/월/일 숫자로 키를 만들어 toISOString 시간대 이슈 회피).
+const CAL_HOLIDAY_OVERRIDES=new Set([
+  "2026-07-17", // 제헌절 — holiday-kr(설치된 버전)이 아직 공휴일로 반영하지 않음
+]);
 function isCalRedDay(year,month,day){
+  const dateKey=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  if(CAL_HOLIDAY_OVERRIDES.has(dateKey)) return true;
   try{ return !!isKrHoliday(year,month,day); }catch{ return false; }
 }
 function MemberCalendar(p){

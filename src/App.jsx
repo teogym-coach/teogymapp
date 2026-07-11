@@ -1872,7 +1872,6 @@ function MemberHome(p){
   const todayKey=getKoreaDateString();
   const action=pickHomeMainAction(p,todayKey);
   const next=getNextWorkoutInfo(p.profile);
-  const attendedToday=(p.attendance||[]).some(a=>a.date===todayKey);
   return <>
     <MemberHomeHero {...p}/>
     <HomeMainActionCard action={action}/>
@@ -1884,10 +1883,6 @@ function MemberHome(p){
     )}
     <HomeCoachCommentCard sessions={p.sessions} onMore={()=>p.setTab("workout")}/>
     <RecentChangeStrip {...p}/>
-    {/* 오늘 운동 체크 완료 후에는 이번 달 페이스 피드백(기존 AttendanceCard)을 그대로 보여준다 */}
-    {attendedToday&&<AttendanceCard attendance={p.attendance||[]} onCheckin={p.saveAttendanceToday} saving={p.attendanceSaving}/>}
-    <HomeHealthStatus checkins={p.checkins} body={p.body} nutrition={p.nutrition} setTab={p.setTab}/>
-    <HomeCalendarSummaryCard {...p}/>
     <ReviewRoutine {...p}/>
     <NoticeCard notices={p.notices} onOpen={p.openNotice} onAll={()=>p.setTab("profile")}/>
     <DailyConditioningCard items={p.dailyConditioning}/>

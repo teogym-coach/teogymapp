@@ -1165,6 +1165,10 @@ function MemberApp({ onLogout }) {
   const resetMemberScroll=useCallback(()=>scrollMemberAppToTop(pageRef),[]);
   const goMemberTab=useCallback(nextTab=>{setTab(nextTab); resetMemberScroll();},[resetMemberScroll]);
   useEffect(()=>{resetMemberScroll();},[tab,resetMemberScroll]);
+  // ── V2 네비게이션 상태 ──
+  const [workoutView,setWorkoutView]=useState("journal");      // 수업 탭 세그먼트: journal(수업일지) | calendar(운동 캘린더)
+  const [journalFocusId,setJournalFocusId]=useState(null);     // 캘린더 날짜 상세 → 해당 수업일지 바로 열기
+  const [healthIntent,setHealthIntent]=useState(null);         // 홈/캘린더 → 건강 탭 진입 시 자동으로 열 입력 시트 {type:"weight"|"kcal"|"steps"|"condition"|"cardio", date}
   // 키보드/한글 입력 후보창이 하단 탭바를 가리지 않도록, 텍스트 입력 포커스 중엔 탭바를 잠시 숨긴다
   const [navHidden,setNavHidden]=useState(false);
   useEffect(()=>{
@@ -1209,7 +1213,9 @@ function MemberApp({ onLogout }) {
   const saveFeedback=async(sessionId,feedback)=>{assertOwnMember(); await saveSessionMemberFeedback(profile.id,sessionId,feedback); const memo=String(feedback?.memo||"").trim(); if(memo){const session=sessions.find(x=>x.id===sessionId)||{}; await addMemberMessage(profile.id,{date:session.date||today,sessionId,sessionTitle:`${session.date||today} · ${formatTypes(session.selectedTypes||session.type)||"운동"}`,message:memo,memberMessage:memo,source:"memberAppSessionFeedback"});} await load(); alert("수업 후 상태가 저장되었습니다.");};
   const saveProfileInfo=async(data)=>{assertOwnMember(); const result=await saveMemberProfileFields(profile.id,data); const nextData={...data}; setProfile(prev=>prev?{...prev,...nextData}:prev); setOnboarding(prev=>prev?{...prev,...nextData,targetWeightKg:nextData.targetWeightKg??prev.targetWeightKg,targetPeriod:nextData.targetPeriod??prev.targetPeriod,targetPeriodCustom:nextData.targetPeriodCustom??prev.targetPeriodCustom,goal:nextData.goal??prev.goal}:prev); const nextWeight=toPositiveNumber(nextData.currentWeight); if(nextWeight){const dateKey=today; setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`profile_${dateKey}`,date:dateKey,weight:nextWeight,note:"프로필 저장 반영"})}));} await load(); return result;};
   const markSessionsAsRead=async(ids)=>{if(!ids?.length||!profile?.id)return; try{assertOwnMember();}catch{return;} const newIds=ids.filter(id=>id&&!readSessionIds.has(id)); if(!newIds.length)return; setReadSessionIds(prev=>{const next=new Set(prev); newIds.forEach(id=>next.add(id)); return next;}); markSessionsRead(profile.id,newIds).catch(()=>{}); };
-  const saveAttendanceToday=async()=>{if(attendanceSaving||!profile?.id)return; setAttendanceSaving(true); try{assertOwnMember(); const result=await saveAttendance(profile.id,today); if(result.duplicate){alert("오늘은 이미 운동 체크가 완료되었습니다.");}else{alert("오늘 운동이 기록되었습니다."); setAttendance(prev=>[...prev,{date:today,source:"memberApp"}]);}}catch(e){console.error("[출석]",e); alert("출석 기록에 실패했습니다.");}finally{setAttendanceSaving(false);};}; const openNotice=async(notice)=>{if(!notice?.id)return; assertOwnMember(); await markNoticeRead(profile.id,notice.id); alert(`${notice.isImportant?"📌 중요 공지\n":""}${notice.title}\n\n${notice.content}\n\n작성일 ${formatCompactDate(notice.createdAt)}`); await load();};
+  const saveAttendanceToday=async()=>{if(attendanceSaving||!profile?.id)return; setAttendanceSaving(true); try{assertOwnMember(); const result=await saveAttendance(profile.id,today); if(result.duplicate){alert("오늘은 이미 운동 체크가 완료되었습니다.");}else{alert("오늘 운동이 기록되었습니다."); setAttendance(prev=>[...prev,{date:today,source:"memberApp"}]);}}catch(e){console.error("[출석]",e); alert("출석 기록에 실패했습니다.");}finally{setAttendanceSaving(false);};};
+  // 캘린더 날짜별 운동 완료 체크 — 기존 saveAttendance(문서 ID=날짜) 재사용, 중복은 duplicate로 안전 처리. 미래 날짜는 정책상 차단.
+  const saveAttendanceForDate=async(dateKey)=>{ if(!profile?.id||!dateKey) return {duplicate:false,blocked:true}; if(dateKey>today){ alert("미래 날짜에는 운동 완료 체크를 할 수 없어요."); return {duplicate:false,blocked:true}; } assertOwnMember(); const result=await saveAttendance(profile.id,dateKey); if(!result.duplicate) setAttendance(prev=>prev.some(a=>a.date===dateKey)?prev:[...prev,{date:dateKey,source:"memberApp"}]); return result; }; const openNotice=async(notice)=>{if(!notice?.id)return; assertOwnMember(); await markNoticeRead(profile.id,notice.id); alert(`${notice.isImportant?"📌 중요 공지\n":""}${notice.title}\n\n${notice.content}\n\n작성일 ${formatCompactDate(notice.createdAt)}`); await load();};
   // 유산소 기록 저장 — 체중은 최근 바디체크 기록을 자동으로 사용해 MET 기반 칼로리를 계산한다
   const saveCardioEntry=async(entry)=>{
     if(cardioSaving) return;
@@ -1275,7 +1281,7 @@ function MemberApp({ onLogout }) {
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load();
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,cardioSaving,correctionSummaries};
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,healthIntent,setHealthIntent,saveAttendanceForDate,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home","⌂","홈"],["workout","＋","수업"],["health","♥","건강"],["analysis","▥","분석"],["profile","●","프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-block"}}>{i}{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -1290,9 +1296,498 @@ function SelectLine({label,value,opts,onChange,placeholder}){return <div classNa
 function InputLine({label,value,onChange,type="text"}){return <div className="form-line"><label>{label}</label><input type={type} value={value||""} onChange={e=>onChange(e.target.value)}/></div>}
 function NoticeCard({notices=[],onOpen,onAll}){const unread=notices.filter(n=>!n.isRead).length; const featured=notices.find(n=>n.isImportant)||notices[0]; if(!featured)return null; return <section className={`notice-card ${featured.isImportant?"important":""}`} onClick={()=>onOpen?.(featured)}><span>{unread?`📢 새로운 공지 ${unread}건`:featured.isImportant?"📌 중요 공지":"📢 공지사항"}</span><b>{featured.title}</b><button type="button" onClick={e=>{e.stopPropagation();onAll?.();}}>전체보기</button></section>}
 function AttendanceCard({attendance=[],onCheckin,saving}){const today=getKoreaDateString(); const isCheckedIn=attendance.some(a=>a.date===today); const ym=today.slice(0,7); const monthCount=attendance.filter(a=>String(a.date||"").startsWith(ym)).length; const dayOfMonth=Number(today.slice(8,10)); const [ymY,ymM]=ym.split("-").map(Number); const prevYm=ymM===1?`${ymY-1}-12`:`${ymY}-${String(ymM-1).padStart(2,"0")}`; const lastMonthSameDayCount=attendance.filter(a=>{const d=String(a.date||""); return d.startsWith(prevYm)&&Number(d.slice(8,10))<=dayOfMonth;}).length; const comparePhrase=lastMonthSameDayCount>0&&monthCount>lastMonthSameDayCount?"지난달 같은 기간보다 운동 횟수가 늘었어요. ":lastMonthSameDayCount>0&&monthCount===lastMonthSameDayCount&&monthCount>0?"지난달과 비슷한 페이스로 이어가고 있어요. ":""; const feedback=comparePhrase+(monthCount>=15?"정말 꾸준히 운동하고 계세요! 이 페이스라면 다음 달 변화도 기대할 수 있어요.":monthCount>=8?"좋은 흐름으로 운동을 이어가고 있어요. 이번 주도 이 페이스를 유지해보세요.":monthCount>=1?"꾸준히 기록이 쌓이고 있어요. 이번 주도 하나씩 채워가 보세요.":"오늘 첫 기록을 남겨보세요. 작은 시작이 좋은 습관을 만듭니다."); return <MCard title="오늘 운동 체크"><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}><div><div style={{fontSize:13,fontWeight:900,color:isCheckedIn?"#5EEAD4":"#20242A"}}>{isCheckedIn?"✅ 오늘 운동 완료":"아직 운동 체크 전이에요"}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>이번 달 운동 {monthCount}회</div>{isCheckedIn&&<div style={{fontSize:10,color:"#475569",marginTop:3}}>{feedback}</div>}</div>{!isCheckedIn&&<button type="button" className="attendance-check-btn" onClick={onCheckin} disabled={saving}><span className="attendance-check-icon">{saving?"⏳":"✓"}</span><span>{saving?"처리 중...":"오늘 운동 완료"}</span></button>}</div></MCard>;}
-function MemberHome(p){const done=p.sessions.length; const pct=p.totalReg?Math.min(100,Math.round(done/p.totalReg*100)):0; return <><h1>안녕하세요 {p.profile.name}님</h1><p className="sub">대표님이 관리하는 변화 리포트입니다 · 오늘 상태도 건강관리 탭에서 기록하세요</p><div className="hero-card pt-progress"><b>{p.totalReg?"남은 PT":"대표님과 함께한 수업"}</b><strong>{p.totalReg?`${p.remaining}회`:`${done}회`}</strong>{p.totalReg?<><em>진행 {done}/{p.totalReg}회 · {pct}%</em><i><small style={{width:`${pct}%`}}/></i></>:<em>누적 수업 기록이 쌓이고 있어요</em>}</div><div className="grid2 top-metrics"><ChangeReportMetric startW={p.startW} curW={p.curW}/><GoalMetric goal={p.onboarding.goal||"꾸준한 변화"}/><GoalWeightForecastCard {...p}/><NextWorkoutMetric profile={p.profile}/></div><ReviewRoutine {...p}/><NoticeCard notices={p.notices} onOpen={p.openNotice} onAll={()=>p.setTab("profile")}/><DailyConditioningCard items={p.dailyConditioning}/><AttendanceCard attendance={p.attendance||[]} onCheckin={p.saveAttendanceToday} saving={p.attendanceSaving}/></>}
+// ════════════════════════════════════════════════════
+// 회원앱 V2 공통 컴포넌트 — Bottom Sheet / Segmented Control / 섹션 헤더
+// 디자인 토큰(--mb-*)과 .mv2-* 클래스(MEMBER_CSS 하단)를 재사용한다. 저장 로직 없음(표시 전용).
+// ════════════════════════════════════════════════════
+function MemberBottomSheet({open,onClose,title,children}){
+  useEffect(()=>{
+    if(!open) return;
+    const onKey=e=>{ if(e.key==="Escape") onClose?.(); };
+    document.addEventListener("keydown",onKey);
+    return ()=>document.removeEventListener("keydown",onKey);
+  },[open,onClose]);
+  if(!open) return null;
+  return <div className="mv2-sheet-root" role="dialog" aria-modal="true" aria-label={title||"입력"}>
+    <div className="mv2-sheet-overlay" onClick={onClose}/>
+    <div className="mv2-sheet">
+      <div className="mv2-sheet-handle" aria-hidden="true"/>
+      <div className="mv2-sheet-head">
+        <b>{title}</b>
+        <button type="button" className="mv2-sheet-close" onClick={onClose} aria-label="닫기">✕</button>
+      </div>
+      <div className="mv2-sheet-body">{children}</div>
+    </div>
+  </div>;
+}
+function MemberSegment({options=[],value,onChange,ariaLabel}){
+  return <div className="mv2-segment" role="tablist" aria-label={ariaLabel||"보기 전환"}>
+    {options.map(([k,l])=>(
+      <button key={k} type="button" role="tab" aria-selected={value===k} className={value===k?"active":""} onClick={()=>onChange?.(k)}>{l}</button>
+    ))}
+  </div>;
+}
+function MemberSectionHead({title,caption,actionLabel,onAction}){
+  return <div className="mv2-section-head">
+    <div><b>{title}</b>{caption&&<span>{caption}</span>}</div>
+    {actionLabel&&<button type="button" onClick={onAction}>{actionLabel}</button>}
+  </div>;
+}
+
+// ════════════════════════════════════════════════════
+// 나의 운동 캘린더 — 기존 기록(수업일지/운동체크/유산소/건강기록)을 날짜별로 통합한 타임라인.
+// 신규 저장 없음: 데이터 통합은 전부 읽기 전용 계산이며, 날짜 키는 이미 저장된 YYYY-MM-DD 문자열(한국시간 기준 저장)을 그대로 사용한다.
+// ════════════════════════════════════════════════════
+function buildMemberDayMap({sessions=[],attendance=[],cardioLogs=[],checkins=[],body,nutrition}){
+  const map=new Map();
+  const day=k=>{ const key=String(k||"").slice(0,10); if(!key)return null; if(!map.has(key)) map.set(key,{date:key,pt:[],cardio:[],attended:false}); return map.get(key); };
+  sessions.forEach(s=>{ const d=day(s.date); if(d&&isPublishedData(s)) d.pt.push(s); });
+  attendance.forEach(a=>{ const d=day(a.date); if(d) d.attended=true; });
+  cardioLogs.forEach(l=>{ const d=day(l.date); if(d) d.cardio.push(l); });
+  getBodyWeightRecords(body).forEach(r=>{ const d=day(r.date); if(d) d.weight=r.weight; });
+  getKcalLogs(nutrition).forEach(r=>{ const d=day(r.date); if(d) d.kcal=r.kcal; });
+  (checkins||[]).forEach(c=>{
+    const d=day(c.date||c.id); if(!d) return;
+    if(c.steps) d.steps=c.steps;
+    if(c.condition) d.condition=c.condition;
+    const part=c.painPart||c.painRecord?.part;
+    if(part&&part!=="없음") d.pain={part,side:c.painSide||c.painRecord?.side,vas:c.painVas??c.painRecord?.vas,memo:c.painMemo||c.painRecord?.memo};
+  });
+  return map;
+}
+// PR 감지 — 같은 운동(정규화 이름)의 이전 최고 중량을 넘어선 세션만 PR로 표시(첫 기록은 PR 아님)
+function buildSessionPrInfo(sessions=[]){
+  const best=new Map(); const prDates=new Set(); const prSessionIds=new Set();
+  [...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(s=>{
+    let isPr=false;
+    (s.exercises||[]).forEach(e=>{
+      if(!e.name) return;
+      const key=normalizeExerciseName(e.name); if(!key) return;
+      const top=Math.max(0,...getFilledSets(e).map(x=>Number(x.weight)||0));
+      if(top<=0) return;
+      const prev=best.get(key)||0;
+      if(top>prev){ if(prev>0) isPr=true; best.set(key,top); }
+    });
+    if(isPr){ prDates.add(String(s.date).slice(0,10)); prSessionIds.add(s.id); }
+  });
+  return {prDates,prSessionIds};
+}
+// 수업 1회 리포트 요약 — Apple Fitness식 핵심 숫자(종목/볼륨/최고 중량/RPE/근육통). 전부 세션 데이터 계산만.
+function buildSessionReportStats(s={}){
+  const exs=(s.exercises||[]).filter(e=>e.name);
+  let volume=0, top=0;
+  exs.forEach(e=>getFilledSets(e).forEach(st=>{
+    const w=Number(st.weight)||0, r=Number(st.reps)||0;
+    if(w>0&&r>0) volume+=w*r;
+    if(w>top) top=w;
+  }));
+  const fb=s.memberFeedback||{};
+  return {
+    exCount:exs.length, volume:Math.round(volume), top,
+    rpe:Number.isFinite(Number(fb.rpe))?Number(fb.rpe):null,
+    soreness:fb.sorenessLevel&&fb.sorenessLevel!=="없음"?`${formatSorenessBodyParts(fb)} ${fb.sorenessLevel}`:null,
+  };
+}
+// 운동일 = PT 수업 또는 개인운동 완료가 있는 날 (유산소만 있는 날은 활동으로는 보여주되 운동일에는 포함하지 않음 — 기존 주간 운동 카운트 기준과 동일)
+function getWorkoutDaySet(dayMap){
+  return new Set([...dayMap.entries()].filter(([,v])=>v.pt.length>0||v.attended).map(([k])=>k));
+}
+function computeStreakStats(workoutDays,todayKey){
+  const dayBefore=(key,n)=>getKoreaDateString(new Date(new Date(`${key}T12:00:00`).getTime()-n*86400000));
+  let current=0;
+  const startOffset=workoutDays.has(todayKey)?0:1;
+  for(let i=startOffset;;i++){ if(workoutDays.has(dayBefore(todayKey,i))) current++; else break; }
+  // 이번 달 최장 연속
+  const ym=todayKey.slice(0,7);
+  const monthDays=[...workoutDays].filter(d=>d.startsWith(ym)).sort();
+  let longest=0, run=0, prev=null;
+  monthDays.forEach(d=>{
+    run=(prev&&dayBefore(d,1)===prev)?run+1:1;
+    if(run>longest) longest=run;
+    prev=d;
+  });
+  return {current,monthLongest:longest};
+}
+function computeCalendarMonthSummary(dayMap,ym,onboarding,todayKey){
+  const entries=[...dayMap.entries()].filter(([k])=>k.startsWith(ym));
+  const ptCount=entries.reduce((n,[,v])=>n+v.pt.length,0);
+  const soloCount=entries.filter(([,v])=>v.attended).length;
+  const workoutDayCount=entries.filter(([,v])=>v.pt.length>0||v.attended).length;
+  const cardioDays=entries.filter(([,v])=>v.cardio.length>0);
+  const cardioTotal=entries.reduce((n,[,v])=>n+v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0),0);
+  const weightDays=entries.filter(([,v])=>v.weight!=null).length;
+  const streaks=computeStreakStats(getWorkoutDaySet(dayMap),todayKey);
+  const weeklyTarget=parseWorkoutCount(onboarding?.weeklyWorkoutCount);
+  // 목표 운동일: 주간 목표 횟수 × (이번 달 경과 주수) — 이번 달 오늘까지 기준으로 계산해 과대평가하지 않는다
+  let goalRate=null;
+  if(weeklyTarget>0){
+    const dayOfMonth=ym===todayKey.slice(0,7)?Number(todayKey.slice(8,10)):31;
+    const targetSoFar=Math.max(1,Math.round(weeklyTarget*(dayOfMonth/7)));
+    goalRate=Math.min(100,Math.round(workoutDayCount/targetSoFar*100));
+  }
+  return {ptCount,soloCount,workoutDayCount,cardioTotal,cardioAvg:cardioDays.length?Math.round(cardioTotal/cardioDays.length):0,cardioDayCount:cardioDays.length,weightDays,streaks,goalRate};
+}
+
+// 과거 월 조회용 확장 데이터 캐시 — 탭을 오가도 다시 읽지 않도록 세션 동안 유지 (기존 read 함수 재사용, 새 쿼리/컬렉션 없음)
+const MEMBER_CAL_EXT_CACHE=new Map();
+function MemberCalendar(p){
+  const todayKey=getKoreaDateString();
+  const [ym,setYm]=useState(todayKey.slice(0,7));
+  const [ext,setExt]=useState(()=>MEMBER_CAL_EXT_CACHE.get(p.profile.id)||null);
+  const [sheetDate,setSheetDate]=useState(null);
+  const [checking,setChecking]=useState(false);
+  useEffect(()=>{
+    if(MEMBER_CAL_EXT_CACHE.has(p.profile.id)) return;
+    let alive=true;
+    Promise.all([
+      getMemberCheckins(p.profile.id,400).catch(()=>null),
+      getCardioLogs(p.profile.id,400).catch(()=>null),
+      getAttendanceRecent(p.profile.id,366).catch(()=>null),
+    ]).then(([checkins,cardioLogs,attendance])=>{
+      if(!alive) return;
+      const data={checkins,cardioLogs,attendance};
+      MEMBER_CAL_EXT_CACHE.set(p.profile.id,data);
+      setExt(data);
+    });
+    return ()=>{alive=false;};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[p.profile.id]);
+  const checkins=ext?.checkins||p.checkins;
+  const cardioLogs=ext?.cardioLogs||p.cardioLogs;
+  const attendance=useMemo(()=>{
+    // 확장 로드본과 현재 상태를 합쳐 방금 체크한 날짜도 즉시 반영
+    const merged=new Map();
+    (ext?.attendance||[]).forEach(a=>{ if(a.date) merged.set(a.date,a); });
+    (p.attendance||[]).forEach(a=>{ if(a.date) merged.set(a.date,a); });
+    return [...merged.values()];
+  },[ext,p.attendance]);
+  const dayMap=useMemo(
+    ()=>buildMemberDayMap({sessions:p.sessions,attendance,cardioLogs,checkins,body:p.body,nutrition:p.nutrition}),
+    [p.sessions,attendance,cardioLogs,checkins,p.body,p.nutrition]
+  );
+  const prInfo=useMemo(()=>buildSessionPrInfo(p.sessions),[p.sessions]);
+  const summary=useMemo(()=>computeCalendarMonthSummary(dayMap,ym,p.onboarding,todayKey),[dayMap,ym,p.onboarding,todayKey]);
+
+  const [yy,mm]=ym.split("-").map(Number);
+  const firstDow=new Date(yy,mm-1,1).getDay();
+  const daysInMonth=new Date(yy,mm,0).getDate();
+  const cells=[...Array(firstDow).fill(null),...Array.from({length:daysInMonth},(_,i)=>i+1)];
+  const moveMonth=delta=>{
+    const d=new Date(yy,mm-1+delta,1);
+    setYm(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+  };
+  const isThisMonth=ym===todayKey.slice(0,7);
+  const monthLabel=`${yy}년 ${mm}월`;
+
+  const checkDate=async(dateKey)=>{
+    if(checking) return;
+    setChecking(true);
+    try{
+      const result=await p.saveAttendanceForDate(dateKey);
+      if(result?.duplicate){ alert("이미 운동 완료로 기록된 날짜예요."); }
+      else if(!result?.blocked){
+        // 확장 캐시에도 반영해 월 이동 후에도 유지
+        const cached=MEMBER_CAL_EXT_CACHE.get(p.profile.id);
+        if(cached?.attendance&&!cached.attendance.some(a=>a.date===dateKey)){
+          cached.attendance=[...cached.attendance,{date:dateKey,source:"memberApp"}];
+          setExt({...cached});
+        }
+      }
+    }catch(e){ console.error("[캘린더 운동체크]",e); alert(e?.message||"운동 완료 체크에 실패했습니다."); }
+    finally{ setChecking(false); }
+  };
+
+  const sheetDay=sheetDate?dayMap.get(sheetDate)||{date:sheetDate,pt:[],cardio:[],attended:false}:null;
+
+  return <div className="mv2-cal-wrap">
+    <div className="mv2-cal-card">
+      <div className="mv2-cal-head">
+        <button type="button" aria-label="이전 달" onClick={()=>moveMonth(-1)}>‹</button>
+        <b>{monthLabel}</b>
+        <button type="button" aria-label="다음 달" onClick={()=>moveMonth(1)} disabled={isThisMonth}>›</button>
+      </div>
+      <div className="mv2-cal-dow" aria-hidden="true">{["일","월","화","수","목","금","토"].map(d=><span key={d}>{d}</span>)}</div>
+      <div className="mv2-cal-grid">
+        {cells.map((d,i)=>{
+          if(d===null) return <span key={`e${i}`} className="mv2-cal-cell empty"/>;
+          const key=`${ym}-${String(d).padStart(2,"0")}`;
+          const v=dayMap.get(key);
+          const future=key>todayKey;
+          const cardioMin=v?v.cardio.reduce((s,l)=>s+(Number(l.durationMinutes)||0),0):0;
+          const hasAny=!!(v&&(v.pt.length||v.attended||v.cardio.length||v.weight!=null||v.kcal!=null||v.steps||v.condition||v.pain));
+          return <button key={key} type="button"
+            className={`mv2-cal-cell${key===todayKey?" today":""}${future?" future":""}${v?.pt.length?" haspt":""}`}
+            aria-label={`${mm}월 ${d}일${v?.pt.length?" PT 수업":""}${v?.attended?" 개인운동 완료":""}${cardioMin?` 유산소 ${cardioMin}분`:""}`}
+            onClick={()=>setSheetDate(key)}>
+            <span className="mv2-cal-num">{d}</span>
+            <span className="mv2-cal-marks">
+              {v?.pt.length>0&&<i className="mk-pt" title="PT 수업"/>}
+              {v?.attended&&<i className="mk-solo" title="개인운동 완료">✓</i>}
+              {prInfo.prDates.has(key)&&<i className="mk-pr" title="PR">★</i>}
+              {v?.weight!=null&&<i className="mk-wt" title="체중 기록"/>}
+            </span>
+            <span className="mv2-cal-cardio">{cardioMin>0?`${cardioMin}m`:hasAny?"":""}</span>
+          </button>;
+        })}
+      </div>
+      <div className="mv2-cal-legend" aria-hidden="true">
+        <span><i className="mk-pt"/>PT 수업</span>
+        <span><i className="mk-solo">✓</i>개인운동</span>
+        <span><i className="mk-cardio-demo">30m</i>유산소</span>
+        <span><i className="mk-wt"/>체중</span>
+      </div>
+    </div>
+
+    <div className="mv2-cal-summary">
+      <MemberSectionHead title="이번 달 요약" caption={monthLabel}/>
+      <div className="mv2-sum-grid">
+        <div><span>PT 수업</span><b>{summary.ptCount}<em>회</em></b></div>
+        <div><span>개인운동</span><b>{summary.soloCount}<em>회</em></b></div>
+        <div><span>총 운동일</span><b>{summary.workoutDayCount}<em>일</em></b></div>
+        <div><span>유산소</span><b>{summary.cardioTotal}<em>분</em></b></div>
+        {summary.cardioDayCount>0&&<div><span>평균 유산소</span><b>{summary.cardioAvg}<em>분</em></b></div>}
+        <div><span>체중 기록</span><b>{summary.weightDays}<em>일</em></b></div>
+        <div><span>연속 운동</span><b>{summary.streaks.current}<em>일</em></b></div>
+        {summary.streaks.monthLongest>0&&<div><span>이번 달 최장</span><b>{summary.streaks.monthLongest}<em>일</em></b></div>}
+        {summary.goalRate!=null&&<div className="wide"><span>목표 운동일 달성률</span><b>{summary.goalRate}<em>%</em></b><i className="mv2-sum-bar"><small style={{width:`${summary.goalRate}%`}}/></i></div>}
+      </div>
+    </div>
+
+    <MemberBottomSheet open={!!sheetDate} onClose={()=>setSheetDate(null)} title={sheetDate?`${Number(sheetDate.slice(5,7))}월 ${Number(sheetDate.slice(8,10))}일`:""}>
+      {sheetDay&&<MemberDayDetail day={sheetDay} todayKey={todayKey} prSessionIds={prInfo.prSessionIds}
+        checking={checking}
+        onCheck={()=>checkDate(sheetDate)}
+        onOpenSession={sid=>{ setSheetDate(null); p.setJournalFocusId?.(sid); p.setWorkoutView?.("journal"); p.resetMemberScroll?.(); }}
+        onAddCardio={()=>{ setSheetDate(null); p.setHealthIntent?.({type:"cardio",date:sheetDate}); p.setTab?.("health"); }}
+        onEditHealth={()=>{ setSheetDate(null); p.setHealthIntent?.({type:"weight",date:sheetDate}); p.setTab?.("health"); }}
+      />}
+    </MemberBottomSheet>
+  </div>;
+}
+
+// 날짜 상세 — 해당 날짜에 실제로 존재하는 기록만 섹션으로 표시(빈 항목은 숨김)
+function MemberDayDetail({day,todayKey,prSessionIds,checking,onCheck,onOpenSession,onAddCardio,onEditHealth}){
+  const future=day.date>todayKey;
+  const healthRows=[
+    day.weight!=null&&["체중",`${day.weight}kg`],
+    day.kcal!=null&&["섭취 칼로리",`${Number(day.kcal).toLocaleString()}kcal`],
+    day.steps&&["걸음수",`${Number(day.steps).toLocaleString()}보`],
+    day.condition&&["컨디션",day.condition],
+    day.pain&&["통증",`${day.pain.part}${day.pain.side&&day.pain.side!=="해당 없음"?` · ${day.pain.side}`:""} · VAS ${day.pain.vas??0}`],
+  ].filter(Boolean);
+  const hasAnything=day.pt.length>0||day.attended||day.cardio.length>0||healthRows.length>0;
+  return <div className="mv2-day-detail">
+    {day.pt.map(s=>{
+      const st=buildSessionReportStats(s);
+      return <div key={s.id} className="mv2-day-block pt">
+        <div className="mv2-day-block-head">
+          <b><i className="mk-pt"/>PT 수업 · {formatTypes(s.selectedTypes||s.type)||"운동"}</b>
+          {prSessionIds.has(s.id)&&<em className="mv2-pr-badge">★ PR</em>}
+        </div>
+        <div className="mv2-day-stats">
+          <span>종목 <b>{st.exCount}</b></span>
+          {st.volume>0&&<span>볼륨 <b>{st.volume.toLocaleString()}</b>kg</span>}
+          {st.top>0&&<span>최고 <b>{st.top}</b>kg</span>}
+          {st.rpe!=null&&<span>RPE <b>{st.rpe}</b></span>}
+        </div>
+        {st.soreness&&<p className="mv2-day-sub">근육통 {st.soreness}</p>}
+        {s.trainerComment&&<p className="mv2-day-comment">💬 {s.trainerComment}</p>}
+        {(s.memberFeedback?.memo)&&<p className="mv2-day-sub">내 메모: {s.memberFeedback.memo}</p>}
+        <button type="button" className="mv2-day-link" onClick={()=>onOpenSession(s.id)}>수업일지 보기 →</button>
+      </div>;
+    })}
+
+    <div className="mv2-day-block">
+      <div className="mv2-day-block-head"><b><i className="mk-solo">✓</i>개인운동</b></div>
+      {day.attended
+        ? <p className="mv2-day-sub done">이 날 운동 완료를 기록했어요 👏</p>
+        : future
+          ? <p className="mv2-day-sub">미래 날짜에는 완료 체크를 할 수 없어요.</p>
+          : <button type="button" className="primary compact" style={{marginTop:6}} disabled={checking} onClick={onCheck}>{checking?"기록 중...":"이 날 운동 완료 체크"}</button>}
+    </div>
+
+    {day.cardio.length>0&&<div className="mv2-day-block">
+      <div className="mv2-day-block-head"><b>🏃 유산소</b></div>
+      {day.cardio.map(l=><div key={l.id||l.date+l.activityType} className="mv2-day-cardio-row">
+        <b>{l.activityType}</b>
+        <span>{l.durationMinutes}분{l.caloriesBurned?` · ${l.caloriesBurned}kcal`:""}{l.averageHeartRate?` · ${l.averageHeartRate}bpm`:""}{l.zoneStatus==="in"?" · Zone2":""}</span>
+        {l.memo&&<small>{l.memo}</small>}
+      </div>)}
+    </div>}
+
+    {healthRows.length>0&&<div className="mv2-day-block">
+      <div className="mv2-day-block-head"><b>❤️ 건강 기록</b></div>
+      <div className="mv2-day-health">{healthRows.map(([l,v])=><span key={l}>{l} <b>{v}</b></span>)}</div>
+    </div>}
+
+    {!hasAnything&&!future&&<p className="mv2-day-empty">이 날의 기록이 아직 없어요.<br/>지난 기록도 지금 남길 수 있어요.</p>}
+    {future&&!hasAnything&&<p className="mv2-day-empty">아직 오지 않은 날이에요.</p>}
+
+    {!future&&<div className="mv2-day-actions">
+      {day.cardio.length===0&&<button type="button" className="ghost compact" onClick={onAddCardio}>유산소 기록 추가</button>}
+      <button type="button" className="ghost compact" onClick={onEditHealth}>건강 기록 입력·수정</button>
+    </div>}
+  </div>;
+}
+
+// ════════════════════════════════════════════════════
+// 홈 V2 — 목표 현황 Hero / 오늘의 메인 액션 / 대표 코멘트 / 최근 변화 / 캘린더 요약
+// 전부 기존 데이터 계산만 사용(신규 저장 없음).
+// ════════════════════════════════════════════════════
+function MemberHomeHero(p){
+  const hour=new Date().getHours();
+  const greet=hour<12?"좋은 아침이에요":hour<18?"좋은 오후예요":"오늘 하루도 수고했어요";
+  const forecast=getWeightForecast(p);
+  const weekly=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
+  const done=p.sessions.length;
+  const pct=p.totalReg?Math.min(100,Math.round(done/p.totalReg*100)):0;
+  return <div className="mv2-hero">
+    <span className="mv2-hero-greet">{greet}</span>
+    <h1 className="mv2-hero-name">{p.profile.name}님</h1>
+    {forecast.target&&forecast.remain>0
+      ? <p className="mv2-hero-goal">목표까지 <b>{forecast.remain.toFixed(1)}kg</b> 남았어요</p>
+      : forecast.target&&forecast.remain===0
+        ? <p className="mv2-hero-goal">🎉 목표 체중에 도달했어요</p>
+        : <p className="mv2-hero-goal">{p.onboarding.goal||"꾸준한 변화"}를 함께 만들어가고 있어요</p>}
+    <div className="mv2-hero-meta">
+      {weekly.target>0&&<span>이번 주 운동 <b>{weekly.count}/{weekly.target}회</b></span>}
+      {weekly.target===0&&weekly.count>0&&<span>이번 주 운동 <b>{weekly.count}회</b></span>}
+      {p.totalReg>0&&<span>PT <b>{done}/{p.totalReg}회</b></span>}
+      {!p.totalReg&&done>0&&<span>누적 PT <b>{done}회</b></span>}
+    </div>
+    {forecast.target&&forecast.remain>0&&<p className="mv2-hero-pace">{forecast.risk==="high"?"목표 기간이 다소 빠듯해요 — 대표님과 페이스를 조율해보세요":`지금 흐름을 유지하면 약 ${forecast.weeks}주 뒤 도달이 예상돼요`}</p>}
+    {p.totalReg>0&&<i className="mv2-hero-bar"><small style={{width:`${pct}%`}}/></i>}
+  </div>;
+}
+// 오늘의 메인 액션 — 우선순위가 가장 높은 행동 하나만 크게 (여러 버튼 나열 금지)
+function pickHomeMainAction(p,todayKey){
+  const unread=p.sessions.filter(s=>s.isPublished&&!p.readSessionIds?.has(s.id)&&getSessionPublishDate(s)>=SESSION_UNREAD_CUTOFF).length;
+  if(unread>0) return {key:"feedback",icon:"📋",title:"대표 피드백 확인하기",desc:`새로 도착한 수업일지 ${unread}건이 있어요`,cta:"수업일지 열기",onClick:()=>p.setTab("workout")};
+  const attended=(p.attendance||[]).some(a=>a.date===todayKey);
+  if(!attended) return {key:"workout",icon:"💪",title:"오늘 운동 완료 체크",desc:"PT나 개인운동을 마쳤다면 오늘을 기록해보세요",cta:"운동 완료 체크",onClick:p.saveAttendanceToday,busy:p.attendanceSaving};
+  const hasWeight=getBodyWeightRecords(p.body).some(r=>r.date===todayKey);
+  if(!hasWeight) return {key:"weight",icon:"⚖️",title:"오늘 체중 기록하기",desc:"기록이 쌓일수록 변화가 정확해져요",cta:"체중 입력",onClick:()=>{p.setHealthIntent?.({type:"weight",date:todayKey}); p.setTab("health");}};
+  const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===todayKey)||{};
+  if(!todayCheck.condition) return {key:"condition",icon:"😊",title:"오늘 컨디션 기록하기",desc:"컨디션 기록은 다음 수업 강도 조절에 반영돼요",cta:"컨디션 입력",onClick:()=>{p.setHealthIntent?.({type:"condition",date:todayKey}); p.setTab("health");}};
+  return {key:"done",icon:"🎉",title:"오늘 기록을 모두 마쳤어요",desc:"캘린더에서 이번 달 흐름을 확인해보세요",cta:"운동 캘린더 보기",done:true,onClick:()=>{p.setWorkoutView?.("calendar"); p.setTab("workout");}};
+}
+function HomeMainActionCard({action}){
+  return <div className={`mv2-main-action${action.done?" done":""}`}>
+    <span className="mv2-main-action-icon" aria-hidden="true">{action.icon}</span>
+    <b>{action.title}</b>
+    <p>{action.desc}</p>
+    <button type="button" className="mv2-main-action-btn" disabled={action.busy} onClick={action.onClick}>{action.busy?"처리 중...":action.cta}</button>
+  </div>;
+}
+// 대표 코멘트 — 가장 최근 수업의 trainerComment. 실제 코멘트가 없으면 카드 자체를 숨긴다(가짜 문구 금지).
+function HomeCoachCommentCard({sessions=[],onMore}){
+  const latest=[...sessions].reverse().find(s=>s.trainerComment);
+  if(!latest) return null;
+  return <div className="mv2-coach-card">
+    <div className="mv2-coach-head">
+      <span className="mv2-coach-avatar" aria-hidden="true">TG</span>
+      <div><b>대표 코멘트</b><span>{formatCompactDate(latest.date)} 수업</span></div>
+    </div>
+    <p className="mv2-coach-msg">{latest.trainerComment}</p>
+    <button type="button" className="mv2-day-link" onClick={onMore}>수업일지에서 자세히 보기 →</button>
+  </div>;
+}
+// 최근 변화 — 성과를 즉시 이해할 수 있는 4개 지표(기존 계산 재사용)
+function RecentChangeStrip(p){
+  const w=computeWeightCard(p.body);
+  const week=summarizeCardioWeek(p.cardioLogs||[]);
+  const weekly=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
+  const streak=computeEngagementStreak(p.checkins,p.attendance,p.cardioLogs);
+  const items=[
+    w.delta!=null&&{label:"체중 30일",value:`${w.delta>0?"+":""}${w.delta}kg`,tone:w.delta<=0?"good":"warn"},
+    {label:"이번 주 운동",value:`${weekly.count}회`},
+    week.totalMinutes>0&&{label:"이번 주 유산소",value:`${week.totalMinutes}분`},
+    streak>0&&{label:"연속 기록",value:`${streak}일`,tone:"good"},
+  ].filter(Boolean);
+  if(!items.length) return null;
+  return <div className="mv2-change-strip">
+    {items.map(it=><div key={it.label}><span>{it.label}</span><b className={it.tone||""}>{it.value}</b></div>)}
+  </div>;
+}
+// 홈 캘린더 요약 — 이번 달 흐름만 간단히 + 캘린더로 이동
+function HomeCalendarSummaryCard(p){
+  const todayKey=getKoreaDateString();
+  const dayMap=useMemo(
+    ()=>buildMemberDayMap({sessions:p.sessions,attendance:p.attendance,cardioLogs:p.cardioLogs,checkins:p.checkins,body:p.body,nutrition:p.nutrition}),
+    [p.sessions,p.attendance,p.cardioLogs,p.checkins,p.body,p.nutrition]
+  );
+  const summary=computeCalendarMonthSummary(dayMap,todayKey.slice(0,7),p.onboarding,todayKey);
+  const goCal=()=>{ p.setWorkoutView?.("calendar"); p.setTab("workout"); };
+  return <div className="mv2-home-cal" onClick={goCal} role="button" tabIndex={0} onKeyDown={e=>{if(e.key==="Enter")goCal();}}>
+    <div className="mv2-home-cal-head"><b>이번 달 운동 캘린더</b><span>전체 보기 →</span></div>
+    <div className="mv2-home-cal-stats">
+      <span>PT <b>{summary.ptCount}</b>회</span>
+      <span>개인운동 <b>{summary.soloCount}</b>회</span>
+      <span>운동일 <b>{summary.workoutDayCount}</b>일</span>
+      {summary.cardioTotal>0&&<span>유산소 <b>{summary.cardioTotal}</b>분</span>}
+    </div>
+  </div>;
+}
+
+// 홈 V2 — "오늘 무엇을 하면 되는가 → 잘하고 있는가 → 얼마나 변했는가 → 대표가 어떻게 관리하는가" 순서의 정보 구조.
+// 변화 리포트/현재 목표/목표 예상/다음 수업 정보는 Hero·최근 변화·다음 수업 카드로 재구성해 모두 유지한다.
+function MemberHome(p){
+  const todayKey=getKoreaDateString();
+  const action=pickHomeMainAction(p,todayKey);
+  const next=getNextWorkoutInfo(p.profile);
+  const attendedToday=(p.attendance||[]).some(a=>a.date===todayKey);
+  return <>
+    <MemberHomeHero {...p}/>
+    <HomeMainActionCard action={action}/>
+    {next.daysUntil!=null&&next.daysUntil>=0&&(
+      <div className="mv2-next-workout">
+        <div><span>다음 수업</span><b>{next.part||"미정"}</b><small>{next.dateText}</small></div>
+        <em>{next.dDay}</em>
+      </div>
+    )}
+    <HomeCoachCommentCard sessions={p.sessions} onMore={()=>p.setTab("workout")}/>
+    <RecentChangeStrip {...p}/>
+    {/* 오늘 운동 체크 완료 후에는 이번 달 페이스 피드백(기존 AttendanceCard)을 그대로 보여준다 */}
+    {attendedToday&&<AttendanceCard attendance={p.attendance||[]} onCheckin={p.saveAttendanceToday} saving={p.attendanceSaving}/>}
+    <HomeHealthStatus checkins={p.checkins} body={p.body} nutrition={p.nutrition} setTab={p.setTab}/>
+    <HomeCalendarSummaryCard {...p}/>
+    <ReviewRoutine {...p}/>
+    <NoticeCard notices={p.notices} onOpen={p.openNotice} onAll={()=>p.setTab("profile")}/>
+    <DailyConditioningCard items={p.dailyConditioning}/>
+  </>;
+}
 function HomeHealthStatus({checkins=[],body,nutrition,setTab}){const today=getKoreaDateString(); const todayCheck=(checkins||[]).find(c=>(c.date||c.id)===today)||{}; const hasWeight=getBodyWeightRecords(body).some(r=>r.date===today); const hasKcal=getKcalLogs(nutrition).some(r=>r.date===today); const done=hasWeight||hasKcal||todayCheck.steps||todayCheck.condition||todayCheck.painPart||todayCheck.painMemo; return <section className={`home-health-status ${done?"done":""}`}><div><span>오늘 건강기록</span><b>{done?"입력 완료":"오늘 건강기록을 입력해주세요."}</b></div><button type="button" onClick={()=>setTab?.("health")}>{done?"기록 보기":"입력"}</button></section>}
-function MemberWorkout({sessions,saveFeedback,readSessionIds,markSessionsAsRead}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState("__first__"); const [showAll,setShowAll]=useState(false); const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s,i)=>!!lq||(openId==="__first__"&&i===0)||openId===s.id; const toggleSess=(s,i)=>{setOpenId(prev=>(isExp(s,i)&&!lq)?null:s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);}; useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);},[]);  return <><h1>수업일지</h1><p className="sub">대표님이 공개한 수업 결과 리포트입니다.</p><div className="ex-search-wrap"><input type="search" className="ex-search" placeholder="🔍 운동 검색" value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")}>✕</button>}</div>{displayed.length?displayed.map((s,i)=>{const title=`${s.date} · ${formatTypes(s.selectedTypes||s.type)||'운동'}`; const expanded=isExp(s,i); const dateFmt=String(s.date||"").slice(5).replace(/-/g,"."); const typeName=formatTypes(s.selectedTypes||s.type)||'운동'; const exCount=(s.exercises||[]).filter(e=>e.name).length; if(!expanded)return <button key={s.id} type="button" className="session-collapsed-card" onClick={()=>toggleSess(s,i)}><span className="sess-col-left"><span className="sess-col-date">{dateFmt}</span><span className="sess-col-dot">·</span><span className="sess-col-type">{typeName}</span></span><span className="sess-col-meta">{exCount}개</span><span className="sess-col-arrow">▼</span></button>; return <MCard key={s.id} title={`${s.date} · ${typeName}`}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4}}><button type="button" onClick={()=>toggleSess(s,i)} style={{border:"1px solid #E8ECF1",background:"#F6F7F9",borderRadius:10,padding:"4px 10px",fontSize:12,fontWeight:900,color:"#8B949E",cursor:"pointer"}}>접기 ▲</button></div><SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/></MCard>;}):(lq?<p className="notice soft">검색 결과가 없습니다.</p>:null)}{!lq&&!showAll&&searched.length>5&&<button type="button" className="ghost" style={{marginTop:8}} onClick={()=>setShowAll(true)}>전체 수업 보기 ({searched.length}회)</button>}</>}
+// 수업 탭 V2 — 세그먼트(수업일지 | 캘린더). 수업일지 로직은 MemberJournal로 그대로 이동(기능 동일).
+function MemberWorkout(p){
+  const view=p.workoutView||"journal";
+  return <>
+    <h1>수업</h1>
+    <p className="sub">{view==="journal"?"대표님이 공개한 수업 결과 리포트입니다.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
+    <MemberSegment ariaLabel="수업 보기 전환" options={[["journal","수업일지"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
+    {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
+  </>;
+}
+// 수업 1회 리포트 헤더 — Apple Fitness식 핵심 숫자 요약(값이 있는 항목만 표시)
+function SessionReportStatsRow({s,isPr}){
+  const st=buildSessionReportStats(s);
+  const chips=[
+    ["종목",`${st.exCount}개`],
+    st.volume>0&&["총 볼륨",`${st.volume.toLocaleString()}kg`],
+    st.top>0&&["최고 중량",`${st.top}kg`],
+    st.rpe!=null&&["RPE",String(st.rpe)],
+  ].filter(Boolean);
+  if(!chips.length&&!isPr) return null;
+  return <div className="mv2-session-stats">
+    {isPr&&<em className="mv2-pr-badge">★ PR</em>}
+    {chips.map(([l,v])=><span key={l}>{l} <b>{v}</b></span>)}
+  </div>;
+}
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState(journalFocusId||"__first__"); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]);
+  // 캘린더 날짜 상세에서 "수업일지 보기"로 진입한 경우 — 해당 수업을 펼치고 읽음 처리
+  useEffect(()=>{ if(journalFocusId){ setOpenId(journalFocusId); setShowAll(true); markSessionsAsRead?.([journalFocusId]); setJournalFocusId?.(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[journalFocusId]);
+  const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s,i)=>!!lq||(openId==="__first__"&&i===0)||openId===s.id; const toggleSess=(s,i)=>{setOpenId(prev=>(isExp(s,i)&&!lq)?null:s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);}; useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);},[]);  return <><div className="ex-search-wrap"><input type="search" className="ex-search" placeholder="🔍 운동 검색" value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")}>✕</button>}</div>{displayed.length?displayed.map((s,i)=>{const title=`${s.date} · ${formatTypes(s.selectedTypes||s.type)||'운동'}`; const expanded=isExp(s,i); const dateFmt=String(s.date||"").slice(5).replace(/-/g,"."); const typeName=formatTypes(s.selectedTypes||s.type)||'운동'; const exCount=(s.exercises||[]).filter(e=>e.name).length; if(!expanded)return <button key={s.id} type="button" className="session-collapsed-card" onClick={()=>toggleSess(s,i)}><span className="sess-col-left"><span className="sess-col-date">{dateFmt}</span><span className="sess-col-dot">·</span><span className="sess-col-type">{typeName}</span></span><span className="sess-col-meta">{exCount}개</span><span className="sess-col-arrow">▼</span></button>; return <MCard key={s.id} title={`${s.date} · ${typeName}`}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4}}><button type="button" onClick={()=>toggleSess(s,i)} style={{border:"1px solid #E8ECF1",background:"#F6F7F9",borderRadius:10,padding:"4px 10px",fontSize:12,fontWeight:900,color:"#8B949E",cursor:"pointer"}}>접기 ▲</button></div><SessionReportStatsRow s={s} isPr={prInfo.prSessionIds.has(s.id)}/><SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/></MCard>;}):(lq?<p className="notice soft">검색 결과가 없습니다.</p>:null)}{!lq&&!showAll&&searched.length>5&&<button type="button" className="ghost" style={{marginTop:8}} onClick={()=>setShowAll(true)}>전체 수업 보기 ({searched.length}회)</button>}</>}
 // ════════════════════════════════════════════════════
 // 건강 탭 대시보드 — 동기부여 지표 계산 (기존 데이터만 사용, 신규 저장 없음)
 // ════════════════════════════════════════════════════
@@ -1413,23 +1908,62 @@ function buildHealthMotivation(p){
   return msgs.slice(0,4);
 }
 
+// 오늘 상태 타일 계산 — Apple Health식 "요약 먼저, 입력은 Bottom Sheet" (읽기 전용 계산 헬퍼)
+function buildTodayHealthTiles(p,today,open){
+  const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
+  const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
+  const todayKcal=getKcalLogs(p.nutrition).find(r=>r.date===today)?.kcal;
+  const todayCardioMin=(p.cardioLogs||[]).filter(l=>l.date===today).reduce((s,l)=>s+(Number(l.durationMinutes)||0),0);
+  const hasTodayPain=!!(todayCheck.painPart&&todayCheck.painPart!=="없음");
+  const lastRecord=buildRecentHealthRecords({checkins:p.checkins,body:p.body,nutrition:p.nutrition})[0];
+  return [
+    {key:"weight",label:"오늘 체중",value:todayWeight!=null?`${todayWeight}kg`:"—",hint:todayWeight!=null?"기록 완료":"탭해서 입력",done:todayWeight!=null,onClick:open.measure},
+    {key:"kcal",label:"오늘 칼로리",value:todayKcal!=null?Number(todayKcal).toLocaleString():"—",hint:todayKcal!=null?"kcal · 기록 완료":"탭해서 입력",done:todayKcal!=null,onClick:open.measure},
+    {key:"steps",label:"오늘 걸음수",value:todayCheck.steps?Number(todayCheck.steps).toLocaleString():"—",hint:todayCheck.steps?"보 · 기록 완료":"탭해서 입력",done:!!todayCheck.steps,onClick:open.measure},
+    {key:"condition",label:"오늘 컨디션",value:todayCheck.condition||"—",hint:hasTodayPain?`통증 ${todayCheck.painPart}`:(todayCheck.condition?"기록 완료":"탭해서 입력"),done:!!todayCheck.condition,warn:hasTodayPain,onClick:open.condition},
+    {key:"cardio",label:"오늘 유산소",value:todayCardioMin>0?`${todayCardioMin}분`:"—",hint:todayCardioMin>0?"기록 완료":"탭해서 입력",done:todayCardioMin>0,onClick:open.cardio},
+    {key:"recent",label:"최근 기록",value:lastRecord?String(lastRecord.date).slice(5).replace("-","."):"없음",hint:lastRecord?"마지막 기록일":"오늘 시작해보세요",done:!!lastRecord,onClick:open.measure},
+  ];
+}
 function MemberHealth(p){
-  const [showOpt,setShowOpt]=useState(false);
+  const today=getKoreaDateString();
+  const [sheet,setSheet]=useState(null); // "measure" | "condition" | "cardio"
+  const [cardioDate,setCardioDate]=useState(null);
   const [justSaved,setJustSaved]=useState(false);
   const [justSavedCondition,setJustSavedCondition]=useState(false);
   const [justSavedPain,setJustSavedPain]=useState(false);
-  useEffect(()=>{if(p.form.condition||(p.form.painPart&&p.form.painPart!=="없음")||p.form.painMemo)setShowOpt(true);},[p.form.condition,p.form.painPart,p.form.painMemo]);
+  // 홈/캘린더에서 넘어온 입력 의도(healthIntent) → 해당 시트 자동 열기 + 날짜 프리셋. 저장 로직은 기존 그대로.
+  useEffect(()=>{
+    const it=p.healthIntent; if(!it) return;
+    p.setHealthIntent?.(null);
+    if(it.date) p.setForm(f=>({...f,date:it.date}));
+    if(it.type==="cardio"){ setCardioDate(it.date||today); setSheet("cardio"); }
+    else if(it.type==="condition"||it.type==="pain") setSheet("condition");
+    else setSheet("measure");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[p.healthIntent]);
   const weightCard=computeWeightCard(p.body);
   const weeklyWorkout=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
   const weekCardio=summarizeCardioWeek(p.cardioLogs||[]);
   const highlight=pickHighlightStat(p);
   const motivation=buildHealthMotivation(p);
-  const handleSave=async()=>{ await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); };
-  const handleSaveCondition=async()=>{ await p.saveCondition(); setJustSavedCondition(true); setTimeout(()=>setJustSavedCondition(false),700); };
-  const handleSavePain=async()=>{ await p.savePain(); setJustSavedPain(true); setTimeout(()=>setJustSavedPain(false),700); };
+  const open={
+    measure:()=>{ p.setForm(f=>({...f,date:f.date||today})); setSheet("measure"); },
+    condition:()=>{ p.setForm(f=>({...f,date:f.date||today})); setSheet("condition"); },
+    cardio:()=>{ setCardioDate(today); setSheet("cardio"); },
+  };
+  const tiles=buildTodayHealthTiles(p,today,open);
+  const submitMeasure=async()=>{
+    const w=String(p.form.weight??"").trim(), k=String(p.form.kcal??"").trim(), s=String(p.form.steps??"").trim();
+    if(!w&&!k&&!s){ alert("저장할 건강 기록을 입력해주세요."); return; }
+    if(w&&(!Number.isFinite(Number(w))||Number(w)<=0)){ alert("체중은 0보다 큰 숫자로 입력해주세요."); return; }
+    await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); setSheet(null);
+  };
+  const handleSaveCondition=async()=>{ if(!p.form.condition){alert("컨디션을 선택해주세요.");return;} await p.saveCondition(); setJustSavedCondition(true); setTimeout(()=>setJustSavedCondition(false),700); };
+  const handleSavePain=async()=>{ const noPain=p.form.painPart==="없음"; if(noPain&&String(p.form.painMemo||"").trim()===""){alert("통증 부위나 메모를 입력해주세요.");return;} await p.savePain(); setJustSavedPain(true); setTimeout(()=>setJustSavedPain(false),700); };
   return <>
     <h1>건강관리</h1>
-    <p className="sub">오늘의 건강 상태를 기록하고 운동과 생활습관 변화를 확인하세요</p>
+    <p className="sub">오늘의 상태를 먼저 확인하고, 항목을 눌러 바로 기록하세요</p>
 
     <div className="health-summary-grid">
       <div className="health-summary-tile" key={`w-${weightCard.value}`}>
@@ -1453,31 +1987,43 @@ function MemberHealth(p){
 
     <div className="health-hub">
       <div className="health-block">
-        <div className="health-block-head"><span className="health-block-icon">📋</span><div><b>오늘 건강 기록</b><span>체중·칼로리·걸음수·컨디션을 기록해보세요</span></div></div>
-        <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
-        <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
-        <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
-        <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
-        <button className={`primary${justSaved?" save-success":""}`} onClick={handleSave} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
-        <button type="button" className="health-optional-toggle" onClick={()=>setShowOpt(v=>!v)}>{showOpt?"▲ 접기":"컨디션 · 통증 입력하기 ▼"}</button>
-        <div className={`health-collapse${showOpt?" open":""}`}><div className="health-collapse-inner">
-          <div className="health-optional-section">
-            <SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} placeholder="선택 안 함" onChange={v=>p.setForm({...p.form,condition:v})}/>
-            <button type="button" className={`primary compact${justSavedCondition?" save-success":""}`} onClick={handleSaveCondition} disabled={p.conditionSaving}>{p.conditionSaving?"저장 중...":justSavedCondition?"컨디션 저장 완료 ✓":"컨디션 저장"}</button>
-          </div>
-          <div className="health-optional-section">
-            <PainInput form={p.form} setForm={p.setForm}/>
-            <button type="button" className={`primary compact${justSavedPain?" save-success":""}`} onClick={handleSavePain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"통증 저장"}</button>
-          </div>
-        </div></div>
+        <div className="health-block-head"><span className="health-block-icon">📋</span><div><b>오늘 건강 기록</b><span>항목을 누르면 입력 시트가 바로 열려요</span></div></div>
+        <div className="mv2-today-grid">
+          {tiles.map(t=>(
+            <button key={t.key} type="button" className={`mv2-today-tile${t.done?" done":""}${t.warn?" warn":""}`} onClick={t.onClick} aria-label={`${t.label} ${t.value===`—`?"미입력":t.value}`}>
+              <span>{t.label}</span><b>{t.value}</b><em>{t.hint}</em>
+            </button>
+          ))}
+        </div>
       </div>
-
       <div className="health-hub-divider"/>
-
       <CardioSection {...p}/>
     </div>
 
     <RecentHealthRecords checkins={p.checkins} body={p.body} nutrition={p.nutrition} onDelete={p.deleteHealthRecord}/>
+
+    {/* 입력 Bottom Sheet — 저장은 전부 기존 saveCheck / saveCondition / savePain / saveCardioEntry 재사용 (신규 저장 로직 없음) */}
+    <MemberBottomSheet open={sheet==="measure"} onClose={()=>setSheet(null)} title="건강 기록 입력">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
+      <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
+      <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
+      <button className={`primary${justSaved?" save-success":""}`} onClick={submitMeasure} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="condition"} onClose={()=>setSheet(null)} title="컨디션 · 통증 입력">
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <div className="health-optional-section" style={{borderTop:"none",marginTop:0,paddingTop:0}}>
+        <SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} placeholder="선택 안 함" onChange={v=>p.setForm({...p.form,condition:v})}/>
+        <button type="button" className={`primary compact${justSavedCondition?" save-success":""}`} onClick={handleSaveCondition} disabled={p.conditionSaving}>{p.conditionSaving?"저장 중...":justSavedCondition?"컨디션 저장 완료 ✓":"컨디션 저장"}</button>
+      </div>
+      <div className="health-optional-section">
+        <PainInput form={p.form} setForm={p.setForm}/>
+        <button type="button" className={`primary compact${justSavedPain?" save-success":""}`} onClick={handleSavePain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"통증 저장"}</button>
+      </div>
+    </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title="유산소 기록">
+      <CardioEntryForm p={p} initialDate={cardioDate||today} onSaved={()=>setSheet(null)}/>
+    </MemberBottomSheet>
   </>;
 }
 
@@ -1500,37 +2046,43 @@ function CardioSection(p){
   </div>;
 }
 
-function CardioRecordTab(p){
+// 유산소 입력 폼 — 건강 탭 기록 영역과 Bottom Sheet(오늘 상태 타일/캘린더 진입)에서 공유. 저장은 기존 saveCardioEntry 그대로.
+function CardioEntryForm({p,initialDate,onSaved,onCancel}){
   const today=getKoreaDateString();
-  const [open,setOpen]=useState(false);
   const [justSaved,setJustSaved]=useState(false);
-  const [d,setD]=useState({date:today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
+  const [d,setD]=useState({date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
   const weightUsed=toPositiveNumber(getLatestBodyWeight(p.body)?.weight)||toPositiveNumber(p.profile.currentWeight);
   const met=d.activityType?getCardioMet(d.activityType,d.intensity):null;
   const estCalories=met&&weightUsed&&d.durationMinutes?calcCardioCalories(met,weightUsed,d.durationMinutes):null;
   const submit=async()=>{
+    if(!d.activityType){ alert("유산소 종목을 선택해주세요."); return; }
+    if(!d.durationMinutes||Number(d.durationMinutes)<=0){ alert("운동 시간을 입력해주세요."); return; }
     await p.saveCardioEntry(d);
-    setD({date:today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
+    setD({date:initialDate||today,activityType:"",durationMinutes:"",averageHeartRate:"",intensity:"약간 힘듦",memo:""});
     setJustSaved(true); setTimeout(()=>setJustSaved(false),700);
-    setOpen(false);
+    onSaved?.();
   };
+  return <div className="health-subcard" style={{margin:0}}>
+    {!weightUsed && <p className="notice soft" style={{marginBottom:10}}>체중 정보가 없어요. 건강관리에서 체중을 먼저 입력해주세요.</p>}
+    <InputLine label="날짜" value={d.date} type="date" onChange={v=>setD({...d,date:v})}/>
+    <SelectLine label="유산소 종목" value={d.activityType} opts={CARDIO_ACTIVITIES} placeholder="선택해주세요" onChange={v=>setD({...d,activityType:v})}/>
+    <InputLine label="운동 시간(분)" value={d.durationMinutes} type="number" onChange={v=>setD({...d,durationMinutes:v})}/>
+    <InputLine label="평균 심박수(선택)" value={d.averageHeartRate} type="number" onChange={v=>setD({...d,averageHeartRate:v})}/>
+    <div className="form-line"><label>운동 강도</label><div className="choice-buttons">{CARDIO_INTENSITY_OPTIONS.map(x=><button type="button" key={x} className={d.intensity===x?"active":""} onClick={()=>setD({...d,intensity:x})}>{x}</button>)}</div></div>
+    <InputLine label="메모" value={d.memo} onChange={v=>setD({...d,memo:v})}/>
+    {estCalories!=null && <div className="cardio-estimate"><b>{d.activityType} {d.durationMinutes}분</b><span>예상 소모 칼로리 {estCalories}kcal</span></div>}
+    <p className="notice soft" style={{marginTop:10}}>칼로리는 체중, 속도, 심박수, 기구 설정에 따라 달라질 수 있는 예상값입니다.</p>
+    <button className={`primary${justSaved?" save-success":""}`} onClick={submit} disabled={p.cardioSaving||!weightUsed}>{p.cardioSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
+    {onCancel&&<button className="ghost" onClick={onCancel}>취소</button>}
+  </div>;
+}
+function CardioRecordTab(p){
+  const [open,setOpen]=useState(false);
   const logs=p.cardioLogs||[];
   return <>
     {!open
       ? <button type="button" className="primary" onClick={()=>setOpen(true)}>오늘 유산소 기록하기</button>
-      : <div className="health-subcard">
-          {!weightUsed && <p className="notice soft" style={{marginBottom:10}}>체중 정보가 없어요. 건강관리에서 체중을 먼저 입력해주세요.</p>}
-          <InputLine label="날짜" value={d.date} type="date" onChange={v=>setD({...d,date:v})}/>
-          <SelectLine label="유산소 종목" value={d.activityType} opts={CARDIO_ACTIVITIES} placeholder="선택해주세요" onChange={v=>setD({...d,activityType:v})}/>
-          <InputLine label="운동 시간(분)" value={d.durationMinutes} type="number" onChange={v=>setD({...d,durationMinutes:v})}/>
-          <InputLine label="평균 심박수(선택)" value={d.averageHeartRate} type="number" onChange={v=>setD({...d,averageHeartRate:v})}/>
-          <div className="form-line"><label>운동 강도</label><div className="choice-buttons">{CARDIO_INTENSITY_OPTIONS.map(x=><button type="button" key={x} className={d.intensity===x?"active":""} onClick={()=>setD({...d,intensity:x})}>{x}</button>)}</div></div>
-          <InputLine label="메모" value={d.memo} onChange={v=>setD({...d,memo:v})}/>
-          {estCalories!=null && <div className="cardio-estimate"><b>{d.activityType} {d.durationMinutes}분</b><span>예상 소모 칼로리 {estCalories}kcal</span></div>}
-          <p className="notice soft" style={{marginTop:10}}>칼로리는 체중, 속도, 심박수, 기구 설정에 따라 달라질 수 있는 예상값입니다.</p>
-          <button className={`primary${justSaved?" save-success":""}`} onClick={submit} disabled={p.cardioSaving||!weightUsed}>{p.cardioSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
-          <button className="ghost" onClick={()=>setOpen(false)}>취소</button>
-        </div>}
+      : <CardioEntryForm p={p} onSaved={()=>setOpen(false)} onCancel={()=>setOpen(false)}/>}
     <CardioWeeklySummaryCard logs={logs}/>
     <CardioRecentList logs={logs} onDelete={p.deleteCardioEntry}/>
   </>;
@@ -2065,6 +2617,26 @@ function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, go
     </MCard>
   );
 }
+// 성과 Hero — 보고서보다 성과 먼저. 실제 데이터가 있는 항목만 표시(가짜 수치·문구 없음).
+function AnalysisHeroCard({curW,wDiff,target,monthWorkoutCount,cardioMinutes,periodLabel}){
+  const hasW=Number.isFinite(Number(curW));
+  const remain=hasW&&target?Math.max(0,+(Number(curW)-target).toFixed(1)):null;
+  const items=[
+    hasW&&{label:"현재 체중",value:`${Number(curW).toFixed(1).replace(/\.0$/,"")}kg`},
+    wDiff!=null&&wDiff!==0&&{label:`${periodLabel} 변화`,value:`${wDiff>0?"+":""}${wDiff}kg`,tone:wDiff<0?"good":""},
+    remain!=null&&remain>0&&{label:"목표까지",value:`${remain}kg`},
+    monthWorkoutCount>0&&{label:"이번 달 운동",value:`${monthWorkoutCount}회`},
+    cardioMinutes>0&&{label:`${periodLabel} 유산소`,value:`${cardioMinutes}분`},
+  ].filter(Boolean);
+  if(!items.length) return null;
+  const headline=wDiff!=null&&wDiff<=-1?"축하해요, 변화가 눈에 보여요 🎉":wDiff!=null&&wDiff<0?"좋은 흐름이 이어지고 있어요":"기록이 변화를 만들고 있어요";
+  return <div className="mv2-analysis-hero">
+    <b>{headline}</b>
+    <div className="mv2-analysis-hero-grid">
+      {items.slice(0,5).map(it=><div key={it.label}><span>{it.label}</span><em className={it.tone||""}>{it.value}</em></div>)}
+    </div>
+  </div>;
+}
 function MemberAnalysis(p) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
   const handleSetPeriod = k => { setPeriod(k); try { localStorage.setItem("teogym_analysis_period", k); } catch {} };
@@ -2450,6 +3022,9 @@ function MemberAnalysis(p) {
         </div>
       </div>
 
+      {/* 성과 Hero — 그래프·보고서보다 성과 요약을 가장 먼저 (실제 데이터만) */}
+      <AnalysisHeroCard curW={curW} wDiff={wDiff} target={getTargetWeight(p.profile, p.onboarding)} monthWorkoutCount={monthWorkoutCount} cardioMinutes={cardioMinutes} periodLabel={opt.label}/>
+
       {/* 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를 가장 먼저 표시 */}
       {persona === "diet" && (
         <>
@@ -2709,10 +3284,36 @@ function PartVolumeCard({sessions=[]}){
     </section>
   );
 }
+// 프로필 Hero — 개인정보 표가 아니라 회원의 성과와 운동 정체성을 먼저 보여준다 (전부 기존 데이터 계산)
+function ProfileHeroCard({p,base}){
+  const todayKey=getKoreaDateString();
+  const ym=todayKey.slice(0,7);
+  const monthCount=(p.attendance||[]).filter(a=>String(a.date||"").startsWith(ym)).length;
+  const streak=computeEngagementStreak(p.checkins,p.attendance,p.cardioLogs);
+  const target=toPositiveNumber(base.targetWeightKg);
+  const cur=toPositiveNumber(base.currentWeight);
+  const remain=cur&&target?Math.max(0,+(cur-target).toFixed(1)):null;
+  const stats=[
+    cur&&{label:"현재 체중",value:formatWeightValue(cur)},
+    remain!=null&&remain>0&&{label:"목표까지",value:`${remain}kg`},
+    {label:"누적 PT",value:`${(p.sessions||[]).length}회`},
+    {label:"이번 달 운동",value:`${monthCount}회`},
+    streak>0&&{label:"연속 기록",value:`${streak}일`},
+  ].filter(Boolean);
+  return <div className="mv2-profile-hero">
+    <div className="mv2-profile-hero-top">
+      <div className="avatar">{p.profile.name?.[0]||'T'}</div>
+      <div><h2>{p.profile.name}</h2><p>{base.goal||"꾸준한 변화"}</p></div>
+    </div>
+    <div className="mv2-profile-stats">
+      {stats.slice(0,5).map(s=><div key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
+    </div>
+  </div>;
+}
 function MemberProfile(p){const links=[{title:"교정/운동 영상 보기",label:"인스타그램",url:"https://www.instagram.com/teogym_pt",color:"#E1306C",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" strokeWidth="2.5"/></svg>},{title:"운동 루틴 영상 보기",label:"유튜브",url:"https://youtube.com/@gymteo",color:"#FF0000",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96A29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58A2.78 2.78 0 0 0 3.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.95A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="currentColor" stroke="none"/></svg>},{title:"운동 정보/칼럼 보기",label:"블로그",url:"https://m.blog.naver.com/teogym",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>},{title:"센터 새소식 보기",label:"네이버 플레이스",url:"https://naver.me/5ZJFzvnv",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>}]; const loginEmail=(auth.currentUser?.email||p.profile.memberAppAccountEmail||p.profile.email||"-").trim(); const base={birthYear:p.profile.birthYear||p.onboarding.birthYear||"",birthMonth:p.profile.birthMonth||p.onboarding.birthMonth||"",birthYearMonth:p.profile.birthYearMonth||p.onboarding.birthYearMonth||"",birthDay:p.profile.birthDay||p.onboarding.birthDay||"",workoutFrequency:p.profile.workoutFrequency||p.onboarding.weeklyWorkoutCount||"",height:p.profile.height||p.onboarding.heightCm||"",startWeight:(p.startW&&p.startW!=="-"?p.startW:p.profile.startWeight)||"",currentWeight:(p.curW&&p.curW!=="-"?p.curW:p.profile.currentWeight)||"",targetWeightKg:p.onboarding.targetWeightKg||p.onboarding.targetWeight||p.onboarding.goalWeight||p.profile.targetWeightKg||p.profile.targetWeight||p.profile.goalWeight||"",targetPeriod:p.onboarding.targetPeriod||p.onboarding.goalPeriod||p.profile.targetPeriod||"",targetPeriodCustom:p.onboarding.targetPeriodCustom||p.onboarding.goalDeadline||p.onboarding.targetDate||"",goal:p.onboarding.goal||p.profile.goal||""}; const [editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[msg,setMsg]=useState(""); const [showGoalManage,setShowGoalManage]=useState(false); const [d,setD]=useState(base); useEffect(()=>{if(!editing)setD(base);},[editing,base.workoutFrequency,base.height,base.startWeight,base.currentWeight,base.targetWeightKg,base.birthYear,base.birthMonth,base.birthDay,base.birthYearMonth,base.targetPeriod,base.targetPeriodCustom,base.goal]); const same=(a,b)=>String(a??"").trim()===String(b??"").trim(); const edit=patch=>setD(prev=>({...prev,...patch})); const cancel=()=>{setD(base);setEditing(false);p.resetMemberScroll?.();}; const save=async()=>{if(saving)return; setSaving(true);setMsg("");try{const profilePatch={}; ["birthYear","birthMonth","birthDay","workoutFrequency","height","startWeight","currentWeight","targetWeightKg","goal"].forEach(k=>{if(!same(d[k],base[k]))profilePatch[k]=d[k];}); const deadline=goalDeadlineFromPeriod(d.targetPeriod,d.targetPeriodCustom); if((!same(d.birthYear,base.birthYear)||!same(d.birthMonth,base.birthMonth))&&d.birthYear&&d.birthMonth)profilePatch.birthYearMonth=`${d.birthYear}-${String(d.birthMonth).padStart(2,"0")}`; if(!same(d.targetPeriod,base.targetPeriod)){profilePatch.targetPeriod=d.targetPeriod; profilePatch.goalPeriod=d.targetPeriod; profilePatch.goalPeriodType=d.targetPeriod;} if(!same(d.targetPeriodCustom,base.targetPeriodCustom)){profilePatch.targetPeriodCustom=d.targetPeriodCustom; profilePatch.customGoalDate=d.targetPeriodCustom;} if(deadline&&(!same(d.targetPeriod,base.targetPeriod)||!same(d.targetPeriodCustom,base.targetPeriodCustom))){profilePatch.goalDeadline=deadline; profilePatch.targetDate=deadline;} if(Object.keys(profilePatch).length){console.log("[MemberProfile] saveProfileInfo payload",{path:`members/${p.profile.id}`,fields:Object.keys(profilePatch),payload:profilePatch}); const result=await p.saveProfileInfo(profilePatch); setEditing(false);setMsg((result?.messages||["프로필 저장 성공"]).join("\n"));}else{setEditing(false);setMsg("변경된 정보가 없습니다.");}}catch(e){const paths=[`members/${p.profile.id}`,`members/${p.profile.id}/memberOnboarding/main`,`members/${p.profile.id}/bodyCheck/main`]; console.error("[MemberProfile] profile save failed",{paths,code:e?.code,message:e?.message,results:e?.profileSaveResults,failures:e?.profileSaveFailures}); const failedFields=e?.profileSaveFailures?.join("\n")||e?.message||"권한 규칙에서 허용하지 않는 필드가 포함됐을 수 있습니다."; setMsg(`저장 실패
 확인 경로: ${paths.join(" · ")}
 확인 필드: targetWeightKg / weeklyWorkoutCount / goal / currentWeight
-${failedFields}`);}finally{setSaving(false);}}; if(showGoalManage) return <MemberGoalManageScreen onboarding={p.onboarding} profile={p.profile} onSave={p.saveGoalUpdate} onBack={()=>{setShowGoalManage(false);p.resetMemberScroll?.();}}/>; return <><h1>프로필</h1><div className="profile-head"><div className="avatar">{p.profile.name?.[0]||'T'}</div><div><h2>{p.profile.name}</h2><p>{base.goal}</p></div></div><MCard title="회원 정보"><Info l="로그인 이메일" v={loginEmail}/><EditableInfo editing={editing} l="운동 빈도"><SelectLine label="운동 빈도" value={d.workoutFrequency} opts={[1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} onChange={v=>edit({workoutFrequency:v})}/></EditableInfo>{!editing&&<Info l="운동 빈도" v={base.workoutFrequency||"-"}/>}<EditableInfo editing={editing} l="생년월일"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}><InputLine label="출생연도" type="number" value={d.birthYear} onChange={v=>edit({birthYear:v})}/><SelectLine label="출생월" value={d.birthMonth} opts={["",...Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthMonth:v})}/><SelectLine label="출생일" value={d.birthDay} opts={["",...Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthDay:v})}/></div></EditableInfo>{!editing&&<Info l="생년월일" v={formatBirthYearMonth(base)+(base.birthDay?"-"+String(base.birthDay).padStart(2,"0"):"")}/>} {!editing&&<Info l="나이" v={formatInternationalAgeFromBirth(base)}/>}<EditableInfo editing={editing} l="키"><InputLine label="키(cm)" type="number" value={d.height} onChange={v=>edit({height:v})}/></EditableInfo>{!editing&&<Info l="키" v={base.height?`${base.height}cm`:"-"}/>}<EditableInfo editing={editing} l="시작 체중"><InputLine label="시작 체중(kg)" type="number" value={d.startWeight} onChange={v=>edit({startWeight:v})}/></EditableInfo>{!editing&&<Info l="시작 체중" v={formatWeightValue(base.startWeight)}/>}<EditableInfo editing={editing} l="현재 체중"><InputLine label="현재 체중(kg)" type="number" value={d.currentWeight} onChange={v=>edit({currentWeight:v})}/></EditableInfo>{!editing&&<Info l="현재 체중" v={formatWeightValue(base.currentWeight)}/>}<EditableInfo editing={editing} l="목표 체중"><InputLine label="목표 체중(kg)" type="number" value={d.targetWeightKg} onChange={v=>edit({targetWeightKg:v})}/></EditableInfo>{!editing&&<Info l="목표 체중" v={formatWeightValue(base.targetWeightKg)}/>}<EditableInfo editing={editing} l="목표 기간"><SelectLine label="목표 기간" value={d.targetPeriod} opts={TARGET_PERIOD_OPTIONS} onChange={v=>edit({targetPeriod:v})}/></EditableInfo>{editing&&d.targetPeriod==="직접 입력"&&<EditableInfo editing={editing} l="직접 입력"><InputLine label="목표 기간 직접 입력" type="date" value={d.targetPeriodCustom} onChange={v=>edit({targetPeriodCustom:v})}/></EditableInfo>}{!editing&&<GoalPeriodInfo currentWeight={base.currentWeight} targetWeight={base.targetWeightKg} period={base.targetPeriod} customDate={base.targetPeriodCustom}/>}<EditableInfo editing={editing} l="운동 목표"><SelectLine label="운동 목표" value={d.goal} opts={AI_GOAL_OPTIONS} onChange={v=>edit({goal:v})}/></EditableInfo>{!editing&&<Info l="운동 목표" v={base.goal||"-"}/>}<div className="profile-actions">{editing?<><button className="primary compact" onClick={save} disabled={saving}>{saving?"저장 중...":"저장"}</button><button className="ghost compact" onClick={cancel} disabled={saving}>취소</button></>:<button className="primary compact" onClick={()=>{setD(base);setEditing(true);p.resetMemberScroll?.();}}>정보 수정</button>}</div>{msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}</MCard><MCard title="목표 관리"><p className="notice soft">운동 목적·집중관리 부위·운동 빈도 등 온보딩 때 설정한 목표를 다시 확인하고 수정할 수 있어요.</p><button className="primary compact" onClick={()=>setShowGoalManage(true)}>목표 관리 열기</button></MCard><MemberNoticeList notices={p.notices} onOpen={p.openNotice}/><MemberNotificationCard memberId={p.profile.id}/><MCard title="바로가기"><div className="link-brand-grid">{links.map(x=><a className="link-brand-card" key={x.url} href={x.url} target="_blank" rel="noreferrer"><div className="link-brand-icon" style={{background:x.color+"18",color:x.color}}>{x.icon}</div><div className="link-brand-info"><b>{x.label}</b><span>{x.title}</span></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0C8D3" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>)}</div></MCard><button className="ghost" onClick={p.onLogout}>로그아웃</button></>}
+${failedFields}`);}finally{setSaving(false);}}; if(showGoalManage) return <MemberGoalManageScreen onboarding={p.onboarding} profile={p.profile} onSave={p.saveGoalUpdate} onBack={()=>{setShowGoalManage(false);p.resetMemberScroll?.();}}/>; return <><h1>프로필</h1><ProfileHeroCard p={p} base={base}/><CollapsibleSection label="회원 정보" defaultOpen={false}><MCard title="회원 정보"><Info l="로그인 이메일" v={loginEmail}/><EditableInfo editing={editing} l="운동 빈도"><SelectLine label="운동 빈도" value={d.workoutFrequency} opts={[1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} onChange={v=>edit({workoutFrequency:v})}/></EditableInfo>{!editing&&<Info l="운동 빈도" v={base.workoutFrequency||"-"}/>}<EditableInfo editing={editing} l="생년월일"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}><InputLine label="출생연도" type="number" value={d.birthYear} onChange={v=>edit({birthYear:v})}/><SelectLine label="출생월" value={d.birthMonth} opts={["",...Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthMonth:v})}/><SelectLine label="출생일" value={d.birthDay} opts={["",...Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthDay:v})}/></div></EditableInfo>{!editing&&<Info l="생년월일" v={formatBirthYearMonth(base)+(base.birthDay?"-"+String(base.birthDay).padStart(2,"0"):"")}/>} {!editing&&<Info l="나이" v={formatInternationalAgeFromBirth(base)}/>}<EditableInfo editing={editing} l="키"><InputLine label="키(cm)" type="number" value={d.height} onChange={v=>edit({height:v})}/></EditableInfo>{!editing&&<Info l="키" v={base.height?`${base.height}cm`:"-"}/>}<EditableInfo editing={editing} l="시작 체중"><InputLine label="시작 체중(kg)" type="number" value={d.startWeight} onChange={v=>edit({startWeight:v})}/></EditableInfo>{!editing&&<Info l="시작 체중" v={formatWeightValue(base.startWeight)}/>}<EditableInfo editing={editing} l="현재 체중"><InputLine label="현재 체중(kg)" type="number" value={d.currentWeight} onChange={v=>edit({currentWeight:v})}/></EditableInfo>{!editing&&<Info l="현재 체중" v={formatWeightValue(base.currentWeight)}/>}<EditableInfo editing={editing} l="목표 체중"><InputLine label="목표 체중(kg)" type="number" value={d.targetWeightKg} onChange={v=>edit({targetWeightKg:v})}/></EditableInfo>{!editing&&<Info l="목표 체중" v={formatWeightValue(base.targetWeightKg)}/>}<EditableInfo editing={editing} l="목표 기간"><SelectLine label="목표 기간" value={d.targetPeriod} opts={TARGET_PERIOD_OPTIONS} onChange={v=>edit({targetPeriod:v})}/></EditableInfo>{editing&&d.targetPeriod==="직접 입력"&&<EditableInfo editing={editing} l="직접 입력"><InputLine label="목표 기간 직접 입력" type="date" value={d.targetPeriodCustom} onChange={v=>edit({targetPeriodCustom:v})}/></EditableInfo>}{!editing&&<GoalPeriodInfo currentWeight={base.currentWeight} targetWeight={base.targetWeightKg} period={base.targetPeriod} customDate={base.targetPeriodCustom}/>}<EditableInfo editing={editing} l="운동 목표"><SelectLine label="운동 목표" value={d.goal} opts={AI_GOAL_OPTIONS} onChange={v=>edit({goal:v})}/></EditableInfo>{!editing&&<Info l="운동 목표" v={base.goal||"-"}/>}<div className="profile-actions">{editing?<><button className="primary compact" onClick={save} disabled={saving}>{saving?"저장 중...":"저장"}</button><button className="ghost compact" onClick={cancel} disabled={saving}>취소</button></>:<button className="primary compact" onClick={()=>{setD(base);setEditing(true);p.resetMemberScroll?.();}}>정보 수정</button>}</div>{msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}</MCard></CollapsibleSection><MCard title="목표 관리"><p className="notice soft">운동 목적·집중관리 부위·운동 빈도 등 온보딩 때 설정한 목표를 다시 확인하고 수정할 수 있어요.</p><button className="primary compact" onClick={()=>setShowGoalManage(true)}>목표 관리 열기</button></MCard><MemberNoticeList notices={p.notices} onOpen={p.openNotice}/><MemberNotificationCard memberId={p.profile.id}/><MCard title="바로가기"><div className="link-brand-grid">{links.map(x=><a className="link-brand-card" key={x.url} href={x.url} target="_blank" rel="noreferrer"><div className="link-brand-icon" style={{background:x.color+"18",color:x.color}}>{x.icon}</div><div className="link-brand-info"><b>{x.label}</b><span>{x.title}</span></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0C8D3" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>)}</div></MCard><button className="ghost" onClick={p.onLogout}>로그아웃</button></>}
 
 // 목표 관리 — 온보딩을 전체 재진행하지 않고 주요 목표 항목만 "현재 값 표시 → 수정" 방식으로 부분 수정.
 // 실제 저장은 MemberApp.saveGoalUpdate(onSave)로 위임 — 여기서는 화면/입력값 처리만 담당한다.
@@ -3392,6 +3993,186 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .health-collapse-inner{overflow:hidden}
 .cardio-tab-fade{animation:healthFadeIn .2s ease}
 .primary.save-success,.ghost.save-success{background:#16C784!important;color:#fff!important;box-shadow:0 6px 16px rgba(22,199,132,.3)!important}
+
+/* ═══ 회원앱 V2 (.mv2-*) — 라이트 UI · 콘텐츠 그룹 · 절제된 포인트 컬러(블루=핵심 행동, 민트=PT/코칭) ═══ */
+.member-shell{--mv2-mint:#14B8A6;--mv2-mint-deep:#0F9488;--mv2-amber:#F59E0B;--mv2-coral:#F26D6D}
+@keyframes mv2SheetIn{from{transform:translateY(24%)}to{transform:translateY(0)}}
+@keyframes mv2FadeIn{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.member-shell *,.mv2-sheet,.mv2-sheet-overlay{animation:none!important;transition:none!important}}
+/* Segmented Control — Apple식 */
+.mv2-segment{display:flex;gap:4px;background:#ECEFF3;border-radius:16px;padding:4px;margin:2px 0 16px}
+.mv2-segment button{flex:1;min-width:0;height:42px;border:0;border-radius:13px;background:transparent;color:#66717C;font-weight:800;font-size:14px;transition:background-color .18s ease,color .18s ease,box-shadow .18s ease;-webkit-tap-highlight-color:transparent}
+.mv2-segment button.active{background:#fff;color:#20242A;box-shadow:0 2px 8px rgba(15,23,42,.08)}
+/* Bottom Sheet — iOS 스타일 */
+.mv2-sheet-root{position:fixed;inset:0;z-index:120}
+.mv2-sheet-overlay{position:absolute;inset:0;background:rgba(17,24,32,.38);animation:mv2FadeIn .18s ease}
+.mv2-sheet{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;max-height:88dvh;background:#fff;border-radius:26px 26px 0 0;box-shadow:0 -12px 40px rgba(15,23,42,.18);display:flex;flex-direction:column;animation:mv2SheetIn .24s cubic-bezier(.32,.72,.35,1)}
+.mv2-sheet-handle{width:40px;height:5px;border-radius:999px;background:#E2E7ED;margin:10px auto 0;flex-shrink:0}
+.mv2-sheet-head{display:flex;align-items:center;justify-content:space-between;padding:12px 20px 10px;flex-shrink:0}
+.mv2-sheet-head b{font-size:17px;color:#20242A;letter-spacing:-.2px}
+.mv2-sheet-close{border:0;background:#F1F3F6;color:#66717C;width:30px;height:30px;border-radius:999px;font-size:13px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-sheet-body{padding:2px 20px calc(24px + env(safe-area-inset-bottom,0px));overflow-y:auto;-webkit-overflow-scrolling:touch}
+/* 섹션 헤더 */
+.mv2-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:4px 2px 12px}
+.mv2-section-head b{display:block;font-size:18px;color:#20242A;letter-spacing:-.3px}
+.mv2-section-head span{display:block;color:#8B949E;font-size:12px;font-weight:700;margin-top:3px}
+.mv2-section-head button{border:0;background:transparent;color:#2F73F6;font-weight:800;font-size:13px;padding:0;-webkit-tap-highlight-color:transparent}
+/* ── 홈 Hero ── */
+.mv2-hero{background:#fff;border:1px solid #EEF1F4;border-radius:26px;padding:24px 22px;margin:6px 0 14px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-hero-greet{display:block;color:#8B949E;font-size:13px;font-weight:800}
+.mv2-hero-name{font-size:30px!important;letter-spacing:-1px;margin:6px 0 0!important}
+.mv2-hero-goal{margin:10px 0 0;color:#475569;font-weight:800;font-size:15px}
+.mv2-hero-goal b{color:#2F73F6;font-size:19px}
+.mv2-hero-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.mv2-hero-meta span{background:#F6F7F9;border:1px solid #EEF1F4;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:800;color:#66717C}
+.mv2-hero-meta b{color:#20242A}
+.mv2-hero-pace{margin:12px 0 0;color:#0F9488;font-weight:800;font-size:12.5px;line-height:1.5}
+.mv2-hero-bar{display:block;height:6px;border-radius:999px;background:#EEF1F4;margin-top:14px;overflow:hidden}
+.mv2-hero-bar small{display:block;height:100%;background:linear-gradient(90deg,#2F73F6,#14B8A6);border-radius:999px;transition:width .3s ease}
+/* ── 오늘의 메인 액션 — 우선순위 1개만 크게 ── */
+.mv2-main-action{background:linear-gradient(135deg,#20242A,#37414E);border-radius:26px;padding:22px;margin:14px 0;color:#fff;box-shadow:0 10px 26px rgba(32,36,42,.18)}
+.mv2-main-action.done{background:linear-gradient(135deg,#0F9488,#14B8A6);box-shadow:0 10px 26px rgba(20,184,166,.22)}
+.mv2-main-action-icon{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.14);font-size:20px;margin-bottom:12px}
+.mv2-main-action b{display:block;font-size:20px;letter-spacing:-.4px}
+.mv2-main-action p{margin:6px 0 14px;color:rgba(255,255,255,.75);font-weight:700;font-size:13px;line-height:1.55}
+.mv2-main-action-btn{width:100%;height:52px;border:0;border-radius:15px;background:#fff;color:#20242A;font-weight:800;font-size:15px;cursor:pointer;transition:transform .15s ease,opacity .15s ease;-webkit-tap-highlight-color:transparent}
+.mv2-main-action-btn:active{transform:scale(.97)}
+.mv2-main-action-btn:disabled{opacity:.6}
+/* ── 다음 수업 ── */
+.mv2-next-workout{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:16px 18px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-next-workout span{display:block;color:#8B949E;font-size:12px;font-weight:800}
+.mv2-next-workout b{display:block;font-size:21px;color:#20242A;margin-top:4px;letter-spacing:-.3px}
+.mv2-next-workout small{display:block;color:#66717C;font-weight:800;margin-top:3px;font-size:12px}
+.mv2-next-workout em{flex-shrink:0;font-style:normal;background:#20242A;color:#fff;border-radius:999px;padding:7px 13px;font-weight:900;font-size:13px}
+/* ── 대표 코멘트 — 관리받는 느낌의 핵심 영역 ── */
+.mv2-coach-card{background:linear-gradient(135deg,#F0FBF9,#FFFFFF);border:1px solid #BFE9E2;border-radius:24px;padding:20px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.04)}
+.mv2-coach-head{display:flex;align-items:center;gap:11px}
+.mv2-coach-avatar{width:38px;height:38px;border-radius:13px;background:linear-gradient(135deg,#14B8A6,#0F9488);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;letter-spacing:-.5px;flex-shrink:0}
+.mv2-coach-head b{display:block;font-size:14.5px;color:#20242A}
+.mv2-coach-head span{display:block;color:#8B949E;font-size:11.5px;font-weight:800;margin-top:2px}
+.mv2-coach-msg{margin:13px 0 10px;color:#20242A;font-weight:700;font-size:14.5px;line-height:1.7}
+/* ── 최근 변화 스트립 ── */
+.mv2-change-strip{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:14px 0}
+.mv2-change-strip>div{background:#fff;border:1px solid #EEF1F4;border-radius:18px;padding:14px 15px}
+.mv2-change-strip span{display:block;color:#8B949E;font-size:11.5px;font-weight:800}
+.mv2-change-strip b{display:block;font-size:19px;color:#20242A;margin-top:6px;letter-spacing:-.3px}
+.mv2-change-strip b.good{color:#0F9488}
+.mv2-change-strip b.warn{color:#F59E0B}
+/* ── 홈 캘린더 요약 ── */
+.mv2-home-cal{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:17px 18px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.05);cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .15s ease}
+.mv2-home-cal:active{transform:scale(.985)}
+.mv2-home-cal-head{display:flex;align-items:center;justify-content:space-between}
+.mv2-home-cal-head b{font-size:15.5px;color:#20242A}
+.mv2-home-cal-head span{color:#2F73F6;font-weight:800;font-size:12.5px}
+.mv2-home-cal-stats{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+.mv2-home-cal-stats span{background:#F6F7F9;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;color:#66717C}
+.mv2-home-cal-stats b{color:#20242A}
+/* ── 운동 캘린더 ── */
+.mv2-cal-wrap{display:grid;gap:14px}
+.mv2-cal-card{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px 14px 14px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-cal-head{display:flex;align-items:center;justify-content:space-between;padding:0 6px;margin-bottom:12px}
+.mv2-cal-head b{font-size:17px;color:#20242A;letter-spacing:-.3px}
+.mv2-cal-head button{width:38px;height:38px;border:1px solid #EEF1F4;border-radius:12px;background:#F6F7F9;color:#66717C;font-size:18px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mv2-cal-head button:disabled{opacity:.35;cursor:default}
+.mv2-cal-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px}
+.mv2-cal-dow span{text-align:center;font-size:11px;font-weight:800;color:#A8B0BA;padding:4px 0}
+.mv2-cal-dow span:first-child{color:#F26D6D}
+.mv2-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.mv2-cal-cell{position:relative;min-height:52px;border:0;border-radius:12px;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:5px 0 3px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease}
+.mv2-cal-cell:active{background:#F1F3F6}
+.mv2-cal-cell.empty{cursor:default}
+.mv2-cal-cell.future{opacity:.38}
+.mv2-cal-num{font-size:13.5px;font-weight:800;color:#20242A;line-height:1;font-variant-numeric:tabular-nums}
+.mv2-cal-cell.today .mv2-cal-num{background:#2F73F6;color:#fff;width:24px;height:24px;border-radius:999px;display:flex;align-items:center;justify-content:center;margin-top:-3px}
+.mv2-cal-cell.haspt .mv2-cal-num{color:#0F9488}
+.mv2-cal-marks{display:flex;align-items:center;gap:2px;min-height:10px;margin-top:3px}
+.mv2-cal-marks i,.mv2-cal-legend i{font-style:normal;display:inline-flex;align-items:center;justify-content:center}
+.mk-pt{width:7px;height:7px;border-radius:999px;background:#14B8A6}
+.mk-solo{color:#2F73F6;font-size:9px;font-weight:900;line-height:1}
+.mk-pr{color:#F59E0B;font-size:9px;line-height:1}
+.mk-wt{width:5px;height:5px;border-radius:999px;background:#C9D2DC}
+.mv2-cal-cardio{min-height:12px;font-size:9px;font-weight:800;color:#8B949E;line-height:1.2;margin-top:1px;font-variant-numeric:tabular-nums}
+.mv2-cal-legend{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;border-top:1px solid #F1F3F6;margin-top:10px;padding:10px 4px 0}
+.mv2-cal-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#8B949E}
+.mk-cardio-demo{font-size:9px;font-weight:800;color:#8B949E;background:#F1F3F6;border-radius:6px;padding:2px 4px}
+/* 월간 요약 */
+.mv2-cal-summary{background:#fff;border:1px solid #EEF1F4;border-radius:24px;padding:18px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-sum-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+.mv2-sum-grid>div{background:#F6F7F9;border-radius:16px;padding:12px 14px}
+.mv2-sum-grid>div.wide{grid-column:1/-1}
+.mv2-sum-grid span{display:block;color:#8B949E;font-size:11.5px;font-weight:800}
+.mv2-sum-grid b{display:block;font-size:21px;color:#20242A;margin-top:5px;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.mv2-sum-grid b em{font-style:normal;font-size:12px;color:#8B949E;font-weight:800;margin-left:2px}
+.mv2-sum-bar{display:block;height:6px;border-radius:999px;background:#E8ECF1;margin-top:9px;overflow:hidden}
+.mv2-sum-bar small{display:block;height:100%;background:linear-gradient(90deg,#2F73F6,#14B8A6);border-radius:999px;transition:width .3s ease}
+/* 날짜 상세 */
+.mv2-day-detail{display:grid;gap:10px;padding-top:4px}
+.mv2-day-block{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:18px;padding:14px 15px}
+.mv2-day-block.pt{background:linear-gradient(135deg,#F0FBF9,#FFFFFF);border-color:#BFE9E2}
+.mv2-day-block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mv2-day-block-head b{display:flex;align-items:center;gap:7px;font-size:14.5px;color:#20242A}
+.mv2-pr-badge{font-style:normal;background:#FFF7E6;color:#B45309;border:1px solid #FCE1AC;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:900;flex-shrink:0}
+.mv2-day-stats{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.mv2-day-stats span{background:#fff;border:1px solid #EEF1F4;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:800;color:#66717C}
+.mv2-day-stats b{color:#20242A;font-variant-numeric:tabular-nums}
+.mv2-day-sub{margin:9px 0 0;color:#66717C;font-weight:700;font-size:12.5px;line-height:1.55}
+.mv2-day-sub.done{color:#0F9488;font-weight:800}
+.mv2-day-comment{margin:10px 0 0;background:#fff;border-radius:12px;padding:10px 12px;color:#0F766E;font-weight:700;font-size:13px;line-height:1.6}
+.mv2-day-link{border:0;background:transparent;color:#2F73F6;font-weight:800;font-size:13px;padding:8px 0 0;cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:left}
+.mv2-day-cardio-row{border-top:1px solid #EEF1F4;padding:9px 0 2px;margin-top:8px}
+.mv2-day-cardio-row:first-of-type{border-top:0;margin-top:4px;padding-top:4px}
+.mv2-day-cardio-row b{display:block;font-size:13.5px;color:#20242A}
+.mv2-day-cardio-row span{display:block;color:#66717C;font-weight:700;font-size:12px;margin-top:2px}
+.mv2-day-cardio-row small{display:block;color:#8B949E;font-size:11.5px;margin-top:2px}
+.mv2-day-health{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.mv2-day-health span{background:#fff;border:1px solid #EEF1F4;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:800;color:#66717C}
+.mv2-day-health b{color:#20242A}
+.mv2-day-empty{text-align:center;color:#8B949E;font-weight:700;font-size:13px;line-height:1.7;padding:14px 0 4px}
+.mv2-day-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px}
+.mv2-day-actions .ghost.compact{margin-top:0;height:46px;font-size:13px}
+.mv2-day-actions .ghost.compact:only-child{grid-column:1/-1}
+/* 수업 리포트 요약 행 */
+.mv2-session-stats{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 12px}
+.mv2-session-stats span{background:#F6F7F9;border:1px solid #EEF1F4;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:800;color:#66717C}
+.mv2-session-stats b{color:#20242A;font-variant-numeric:tabular-nums}
+/* 건강 탭 — 오늘 상태 타일 */
+.mv2-today-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+.mv2-today-tile{border:1px solid #EEF1F4;background:#F8FAFC;border-radius:18px;padding:13px 14px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .15s ease,border-color .15s ease}
+.mv2-today-tile:active{transform:scale(.97)}
+.mv2-today-tile span{display:block;color:#8B949E;font-size:11.5px;font-weight:800}
+.mv2-today-tile b{display:block;font-size:19px;color:#20242A;margin-top:6px;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.mv2-today-tile em{display:block;font-style:normal;color:#A8B0BA;font-size:10.5px;font-weight:800;margin-top:5px}
+.mv2-today-tile.done{background:#fff;border-color:#D9EFE9}
+.mv2-today-tile.done em{color:#0F9488}
+.mv2-today-tile.warn{border-color:#FCD9A8;background:#FFFBF3}
+.mv2-today-tile.warn em{color:#B45309}
+/* 변화분석 성과 Hero */
+.mv2-analysis-hero{background:linear-gradient(135deg,#20242A,#37414E);border-radius:26px;padding:22px;margin:4px 0 16px;color:#fff;box-shadow:0 10px 26px rgba(32,36,42,.16)}
+.mv2-analysis-hero>b{display:block;font-size:18px;letter-spacing:-.3px;margin-bottom:14px}
+.mv2-analysis-hero-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.mv2-analysis-hero-grid>div{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:11px 13px}
+.mv2-analysis-hero-grid span{display:block;color:rgba(255,255,255,.6);font-size:11px;font-weight:800}
+.mv2-analysis-hero-grid em{display:block;font-style:normal;font-size:18px;font-weight:900;margin-top:5px;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.mv2-analysis-hero-grid em.good{color:#5EEAD4}
+/* 프로필 Hero */
+.mv2-profile-hero{background:#fff;border:1px solid #EEF1F4;border-radius:26px;padding:22px;margin:6px 0 14px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.mv2-profile-hero-top{display:flex;align-items:center;gap:16px}
+.mv2-profile-hero-top h2{margin:0;font-size:22px;letter-spacing:-.4px}
+.mv2-profile-hero-top p{margin:5px 0 0;color:#0F9488;font-weight:800;font-size:13px}
+.mv2-profile-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+.mv2-profile-stats>div{background:#F6F7F9;border-radius:14px;padding:11px 8px;text-align:center}
+.mv2-profile-stats span{display:block;color:#8B949E;font-size:10.5px;font-weight:800}
+.mv2-profile-stats b{display:block;font-size:16px;color:#20242A;margin-top:5px;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+/* iPad/와이드 — 단순 확대가 아니라 2열 구성 */
+@media(min-width:700px){
+  .mv2-cal-wrap{grid-template-columns:1.35fr 1fr;align-items:start}
+  .mv2-today-grid{grid-template-columns:repeat(3,1fr)}
+  .mv2-change-strip{grid-template-columns:repeat(4,1fr)}
+  .mv2-analysis-hero-grid{grid-template-columns:repeat(5,1fr)}
+  .mv2-profile-stats{grid-template-columns:repeat(5,1fr)}
+  .mv2-sheet{max-width:520px;border-radius:26px;bottom:auto;top:50%;transform:translate(-50%,-50%);animation:mv2FadeIn .2s ease}
+  .mv2-cal-cell{min-height:58px}
+}
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}
 function getFirebaseAuthErrorMessage(code){

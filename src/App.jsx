@@ -8906,6 +8906,15 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
   const [showManage, setShowManage] = useState(false);
   const [showMemo, setShowMemo] = useState(false);
   const [showAllMsgs, setShowAllMsgs] = useState(false);
+  // 가로/세로 분기 — iPad 가로(>=1024px)는 2패널, 그 미만은 1열.
+  // CSS order/display:contents 대신 JS 분기로 렌더링해 Safari 렌더링 편차를 없앤다 (HomeScreen의 winW 패턴 재사용)
+  const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
+  useEffect(()=>{
+    const h=()=>setWinW(window.innerWidth);
+    window.addEventListener("resize",h);
+    return ()=>window.removeEventListener("resize",h);
+  },[]);
+  const isWide = winW >= 1024;
   const [ptSaving, setPtSaving] = useState(false);
   const [ob, setOb] = useState(null);
   const [hubAttendance, setHubAttendance] = useState([]);
@@ -9214,8 +9223,9 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
     && toComparableIso(todaySession?.publishedAt)
     && toComparableIso(todaySession.updatedAt) > toComparableIso(todaySession.publishedAt));
 
-  return (
-    <div className="hub-light" style={{fontFamily:DB.font,color:DB.text}}>
+  // ── 상단 크롬(스타일·생일 배너·헤더 스트립·회원앱 패널) — 가로/세로 공용 ──
+  const topChrome = (
+    <>
       <style>{`
         .hub-light button:focus-visible{outline:2px solid ${DB.mint};outline-offset:2px;}
         /* 가로(>=1024px): 진짜 2패널 — 좌: 오늘 브리핑·최근 수업 / 우: 오늘 수업·다음 수업 준비.
@@ -9226,22 +9236,13 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         .hub-vitals{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${DB.border};border-radius:${DB.radiusSm}px;overflow:hidden;}
         .hub-vitals>div{background:${DB.card};}
         .hub-toolgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
-        /* 세로(<1024px): 1열 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 분석 → 회원관리.
-           display:contents로 래퍼를 투명화해 섹션 order만으로 재배치(DOM 구조·기능 변경 없음) */
-        @media(max-width:1023px){
-          .hub-2panel{display:flex;flex-direction:column;gap:14px;}
-          .hub-side,.hub-main{display:contents;}
-          .hub-sec-today{order:1;}
-          .hub-sec-brief{order:2;}
-          .hub-sec-recent{order:3;}
-          .hub-sec-prep{order:4;}
-          .hub-sec-analysis{order:5;}
-          .hub-sec-manage{order:6;}
-        }
-        @media(max-width:640px){.hub-vitals{grid-template-columns:1fr 1fr;}.hub-toolgrid{grid-template-columns:1fr 1fr;}}
+        /* 세로(<1024px) 1열 배치는 CSS가 아니라 isWide JS 분기로 렌더링 — Safari display:contents 편차 회피.
+           모든 섹션 카드는 부모 폭 100%를 사용하고 가로 overflow를 만들지 않는다 */
+        .hub-light section{width:100%;min-width:0;box-sizing:border-box;}
+        @media(max-width:640px){.hub-vitals{grid-template-columns:1fr 1fr;}.hub-toolgrid{grid-template-columns:1fr 1fr;}.hub-prep-grid{grid-template-columns:1fr !important;}}
       `}</style>
 
-      {isTodayBirthday&&<div style={{background:"rgba(251,191,36,.10)",border:"1px solid rgba(245,158,11,.3)",borderRadius:14,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92600A",lineHeight:1.5}}>🎂 오늘 생일입니다. 수업 시작 전에 축하 멘트를 해주세요.</div>}
+      {isTodayBirthday&&<div style={{background:`linear-gradient(rgba(251,191,36,.12),rgba(251,191,36,.12)), ${DB.card}`,border:"1px solid rgba(245,158,11,.3)",borderRadius:14,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92600A",lineHeight:1.5}}>🎂 오늘 생일입니다. 수업 시작 전에 축하 멘트를 해주세요.</div>}
 
       {/* ══ ① 워크스페이스 헤더 — 정보만 담은 슬림 스트립 ══ */}
       <div style={{...card, marginBottom:14, padding:"11px 16px", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap"}}>
@@ -9260,7 +9261,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </div>
         </div>
         {!loading&&(
-          <div style={{display:"flex",alignItems:"center",marginLeft:"auto",background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:16,padding:"8px 4px",flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",marginLeft:"auto",background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:16,padding:"8px 4px",flexWrap:"wrap",maxWidth:"100%",minWidth:0}}>
             <div style={{padding:"2px 18px"}}>
               <span style={{fontSize:10,fontWeight:700,color:DB.faint,fontFamily:DB.font}}>{t("수업진행","운동진행")}</span>
               <div style={{fontSize:15.5,fontWeight:800,color:DB.text,fontVariantNumeric:"tabular-nums"}}>{usedCount}<small style={{fontSize:10.5,fontWeight:600,color:DB.faint}}>{totalReg>0?` / ${totalReg}`:""}</small></div>
@@ -9288,14 +9289,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
       <div style={{marginBottom: showMemberAppManagement?14:0}}>
         <AdminMemberAppPanel member={member} members={allMembers} onAccountCreated={onMemberPatch} showManagement={showMemberAppManagement} hideGrid={true} hideBriefing={true} />
       </div>
+    </>
+  );
 
-      {/* ══ 2패널 워크스페이스 — 왼쪽 확인 / 오른쪽 기록·준비 ══ */}
-      <div className="hub-2panel">
-
-        {/* ── 좌측: 오늘 브리핑 + 최근 수업 ── */}
-        <div className="hub-side">
-
-          {/* ② 오늘 브리핑 — 수업 전 확인 우선순위: 통증 → 근육통 → 회원 메모 → 수치(컨디션·체중·칼로리·걸음·유산소·RPE) */}
+  // ── 섹션 JSX — 가로(2패널)/세로(1열) 배치에서 그대로 재사용 ──
+  // ② 오늘 브리핑 — 수업 전 확인 우선순위: 통증 → 근육통 → 회원 메모 → 수치(컨디션·체중·칼로리·걸음·유산소·RPE)
+  const secBrief = (
           <section className="hub-sec-brief" style={{...card, padding:"13px 15px 12px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:9,flexWrap:"wrap"}}>
               <span style={cardTitle}>오늘 브리핑</span>
@@ -9388,8 +9387,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               </div>
             )}
           </section>
+  );
 
-          {/* ⑤ 최근 수업 — 날짜 + 부위 + 공개상태만, 펼치면 세부 */}
+  // ⑤ 최근 수업 — 날짜 + 부위 + 공개상태만, 펼치면 세부
+  const secRecent = (
           <section className="hub-sec-recent" style={{...card, padding:"12px 8px 8px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:4,padding:"0 8px"}}>
               <span style={cardTitle}>최근 수업</span>
@@ -9427,13 +9428,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
             )}
             <button onClick={()=>setScreen("history")} style={{display:"block",width:"calc(100% - 16px)",margin:"6px 8px 4px",padding:9,border:"none",background:DB.bg,borderRadius:12,fontSize:11.5,fontWeight:700,color:DB.sub,textAlign:"center",cursor:"pointer",fontFamily:DB.font}}>전체 수업일지 (히스토리) →</button>
           </section>
-        </div>
+  );
 
-        {/* ── 우측: 오늘 수업 기록 + 다음 수업 준비 + 접힘 도구 ── */}
-        <div className="hub-main">
-
-          {/* ③ 오늘 수업 — 옅은 민트 강조 카드, 4가지 상태 */}
-          <section className="hub-sec-today" style={{background:DB.mintTint, border:`1px solid rgba(57,199,184,.35)`, borderRadius:DB.radius, boxShadow:DB.shadowLg, padding:"16px 18px"}}>
+  // ③ 오늘 수업 — 옅은 민트 강조 카드, 4가지 상태.
+  // DB.mintTint는 반투명이라 어두운 앱 셸 위에서 어둡게 합성됨 → 흰 카드 위에 민트 틴트를 얹은 "불투명" 배경으로 밝기 보장
+  const secToday = (
+          <section className="hub-sec-today" style={{background:`linear-gradient(rgba(57,199,184,.10),rgba(57,199,184,.10)), ${DB.card}`, border:`1px solid rgba(57,199,184,.35)`, borderRadius:DB.radius, boxShadow:DB.shadowLg, padding:"16px 18px"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:9}}>
               <span style={{fontSize:15,fontWeight:800,letterSpacing:"-.3px",color:DB.text}}>오늘 {t("수업","운동")} <small style={{fontSize:11.5,fontWeight:600,color:DB.sub,marginLeft:6}}>{usedCount+1}{t("회차","회차")} · {todayStr.slice(5)}</small></span>
               <span style={{marginLeft:"auto",fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:stateStyle.bg,color:stateStyle.fg}}>{STATE_LABEL[todayCardState]}</span>
@@ -9540,8 +9540,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               </>
             )}
           </section>
+  );
 
-          {/* ④ 다음 수업 준비 */}
+  // ④ 다음 수업 준비
+  const secPrep = (
           <section className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12,flexWrap:"wrap"}}>
               <span style={cardTitle}>다음 수업 준비</span>
@@ -9584,8 +9586,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               <span style={{fontSize:11.5,fontWeight:700,color:"#15803D",display:"flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:DB.success}}/>{nextMemoSavedAt?`저장됨 · ${formatWhenLabel(nextMemoSavedAt)||"-"}`:"아직 저장되지 않음"}</span>
             </div>
           </section>
+  );
 
-          {/* ⑥ 분석 도구 (기본 접힘) */}
+  // ⑥ 분석 도구 (기본 접힘)
+  const secAnalysis = (
           <section className="hub-sec-analysis" style={{...card, padding:0}}>
             <button onClick={()=>setShowAnalysis(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"15px 18px",display:"flex",alignItems:"center",gap:12,textAlign:"left",fontFamily:DB.font}}>
               <span style={{width:34,height:34,borderRadius:11,background:DB.bg,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -9658,8 +9662,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               </div>
             )}
           </section>
+  );
 
-          {/* ⑥ 회원 관리 (기본 접힘) */}
+  // ⑥ 회원 관리 (기본 접힘)
+  const secManage = (
           <section className="hub-sec-manage" style={{...card, padding:0}}>
             <button onClick={()=>setShowManage(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"15px 18px",display:"flex",alignItems:"center",gap:12,textAlign:"left",fontFamily:DB.font}}>
               <span style={{width:34,height:34,borderRadius:11,background:DB.bg,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -9695,8 +9701,24 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               </div>
             )}
           </section>
+  );
+
+  return (
+    <div className="hub-light" style={{fontFamily:DB.font,color:DB.text}}>
+      {topChrome}
+
+      {isWide ? (
+        /* 가로(>=1024px): 2패널 — 좌: 브리핑·최근 수업(sticky) / 우: 오늘 수업·다음 준비·분석·회원관리 */
+        <div className="hub-2panel">
+          <div className="hub-side">{secBrief}{secRecent}</div>
+          <div className="hub-main">{secToday}{secPrep}{secAnalysis}{secManage}</div>
         </div>
-      </div>
+      ) : (
+        /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 분석 → 회원관리 */
+        <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",minWidth:0}}>
+          {secToday}{secBrief}{secRecent}{secPrep}{secAnalysis}{secManage}
+        </div>
+      )}
 
       {/* ── 회원앱 미리보기 모달 ── */}
       {showPreview && todaySession && (

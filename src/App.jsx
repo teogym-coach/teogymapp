@@ -966,6 +966,15 @@ body:not(:has(.member-shell)):not(:has(.member-login)) textarea,
 body:not(:has(.member-shell)):not(:has(.member-login)) select{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#fff;}
 body:not(:has(.member-shell)):not(:has(.member-login)) input::placeholder,
 body:not(:has(.member-shell)):not(:has(.member-login)) textarea::placeholder{color:rgba(255,255,255,.4);}
+/* 수업 기록 화면(.session-light) — 홈/회원목록(DB 팔레트)과 동일한 라이트 톤 (색상만 오버라이드) */
+body:not(:has(.member-shell)):not(:has(.member-login)) .session-light input,
+body:not(:has(.member-shell)):not(:has(.member-login)) .session-light textarea,
+body:not(:has(.member-shell)):not(:has(.member-login)) .session-light select{background:#FFFFFF;border:1px solid #EDEFF2;color:#0F172A;}
+body:not(:has(.member-shell)):not(:has(.member-login)) .session-light input::placeholder,
+body:not(:has(.member-shell)):not(:has(.member-login)) .session-light textarea::placeholder{color:#94A3B8;}
+body:not(:has(.member-shell)):not(:has(.member-login)) .session-light label{color:#64748B;}
+.session-light input:focus,.session-light textarea:focus,.session-light select:focus{border-color:#39C7B8;box-shadow:0 0 0 3px rgba(57,199,184,.12);}
+.session-light select option{background:#FFFFFF;color:#0F172A;}
 button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:transparent;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#0B1120;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.10);border-radius:4px;}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -5438,7 +5447,7 @@ export default function App() {
   );
 
   return (
-    <div style={{minHeight:"100vh",background:"#0B1120"}}>
+    <div style={{minHeight:"100vh",background:screen==="session"?"#F6F7F9":"#0B1120"}}>
       <style>{CSS}</style>
 
       {toast && (
@@ -10471,32 +10480,32 @@ function updateEx(ei, key, val) {
   }
 
   return (
-    <div>
+    <div className="session-light">
       {/* ── 임시저장 복원 팝업 ── */}
       {draftPopup && (
         <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
-          background:"rgba(0,0,0,0.7)",padding:20}}>
-          <div style={{background:"#111827",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",
-            border:"1px solid rgba(94,234,212,.3)"}}>
+          background:"rgba(15,23,42,.45)",padding:20}}>
+          <div style={{background:"#FFFFFF",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",
+            border:"1px solid rgba(57,199,184,.3)"}}>
             <div style={{fontSize:18,marginBottom:8,textAlign:"center"}}>📝</div>
-            <Mo c="#e2e8f0" s={13} style={{display:"block",textAlign:"center",fontWeight:700,marginBottom:6}}>
+            <Mo c="#0F172A" s={13} style={{display:"block",textAlign:"center",fontWeight:700,marginBottom:6}}>
               이전에 작성 중이던 기록이 있습니다
             </Mo>
             {draftPopup._savedAt && (
-              <Mo c="#94a3b8" s={9} style={{display:"block",textAlign:"center",marginBottom:16}}>
+              <Mo c="#64748B" s={9} style={{display:"block",textAlign:"center",marginBottom:16}}>
                 저장 시각: {new Date(draftPopup._savedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}
               </Mo>
             )}
             <div style={{display:"flex",gap:8,flexDirection:"column"}}>
               <button onClick={()=>applyDraft(draftPopup)}
                 style={{padding:"11px",borderRadius:9,border:"none",cursor:"pointer",
-                  background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",
-                  color:"#0B1120",fontWeight:800,fontSize:13}}>
+                  background:"linear-gradient(135deg,#39C7B8,#0F9488)",
+                  color:"#fff",fontWeight:800,fontSize:13}}>
                 이어서 작성
               </button>
               <button onClick={()=>{removeDraft(draftKey);setDraftPopup(null);}}
-                style={{padding:"11px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",cursor:"pointer",
-                  background:"transparent",color:"#94a3b8",fontSize:13}}>
+                style={{padding:"11px",borderRadius:9,border:"1px solid #EDEFF2",cursor:"pointer",
+                  background:"transparent",color:"#64748B",fontSize:13}}>
                 삭제 후 새로 작성
               </button>
             </div>
@@ -10505,63 +10514,64 @@ function updateEx(ei, key, val) {
       )}
 
       <SH title={isOwner(member) ? (isEdit?"🔧 운동 수정":"✏️ 운동 기록") : (isEdit?"🔧 수업 수정":"✏️ 수업 기록")} sub={member.name}
+        titleColor="#0F172A" subColor="#64748B"
         right={
           <div style={{display:"flex",gap:4,flexWrap:"nowrap",flexShrink:0,minWidth:0}}>
             {/* 임시저장 상태 표시 */}
             {draftStatus && !isEdit && (
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a4a5a",
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",
                 alignSelf:"center",flexShrink:0,display:"none"}} id="draft-status">{draftStatus}</span>
             )}
             
             <button onClick={handleSaveTop}
-              style={{padding:"5px 9px",borderRadius:8,border:"1px solid #5EEAD4",cursor:"pointer",
-                background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:10,fontWeight:700,
+              style={{padding:"5px 9px",borderRadius:8,border:"1px solid #0F9488",cursor:"pointer",
+                background:"rgba(57,199,184,.15)",color:"#0F9488",fontSize:10,fontWeight:700,
                 whiteSpace:"nowrap"}}>
               {isOwner(member) ? "💾 운동 저장" : "💾 저장"}
             </button>
-            <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
+            <Btn ghost sm onClick={onBack} style={{borderColor:"#EDEFF2",color:"#64748B"}}>← 뒤로</Btn>
           </div>
         } />
 
       {/* 임시저장 상태 - 헤더 아래 */}
       {draftStatus && !isEdit && (
         <div style={{textAlign:"right",marginTop:-6,marginBottom:6,paddingRight:4}}>
-          <Mo c="#3a4a5a" s={8}>{draftStatus}</Mo>
+          <Mo c="#94A3B8" s={8}>{draftStatus}</Mo>
         </div>
       )}
 
       {/* ── 수업 형태 선택 (1:1 / 2:1 / 그룹PT) ─────────────────────── */}
       {!isEdit && (
         <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
-          <Mo c="#94a3b8" s={9} style={{fontWeight:700,flexShrink:0}}>수업 형태:</Mo>
+          <Mo c="#64748B" s={9} style={{fontWeight:700,flexShrink:0}}>수업 형태:</Mo>
           <div style={{display:"flex",gap:4}}>
             {["1:1","2:1","그룹PT"].map(t=>(
               <button key={t} onClick={()=>{setSessionType(t);if(t!=="2:1"){setMember2Id("");setShowM2Picker(false);}}}
                 style={{padding:"4px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
                   fontSize:10,fontWeight:sessionType===t?800:400,
-                  borderColor:sessionType===t?"#a29bfe":"rgba(255,255,255,.1)",
-                  background:sessionType===t?"rgba(162,155,254,.15)":"transparent",
-                  color:sessionType===t?"#a29bfe":"#94a3b8"}}>
+                  borderColor:sessionType===t?"#8B5CF6":"#EDEFF2",
+                  background:sessionType===t?"rgba(139,92,246,.15)":"transparent",
+                  color:sessionType===t?"#8B5CF6":"#64748B"}}>
                 {t}
               </button>
             ))}
           </div>
           {sessionType==="2:1" && (
             <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:4}}>
-              <Mo c="#94a3b8" s={9}>+</Mo>
+              <Mo c="#64748B" s={9}>+</Mo>
               {member2 ? (
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 8px",borderRadius:10,
-                    background:"rgba(162,155,254,.12)",color:"#a29bfe",fontWeight:700}}>
+                    background:"rgba(139,92,246,.12)",color:"#8B5CF6",fontWeight:700}}>
                     {member2.name}
                   </span>
                   <button onClick={()=>{setMember2Id("");setShowM2Picker(false);}}
-                    style={{background:"none",border:"none",cursor:"pointer",color:"#3a4a5a",fontSize:11}}>×</button>
+                    style={{background:"none",border:"none",cursor:"pointer",color:"#94A3B8",fontSize:11}}>×</button>
                 </div>
               ) : (
                 <button onClick={()=>setShowM2Picker(p=>!p)}
-                  style={{padding:"4px 10px",borderRadius:12,border:"1px dashed rgba(162,155,254,.4)",
-                    cursor:"pointer",fontSize:9,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                  style={{padding:"4px 10px",borderRadius:12,border:"1px dashed rgba(139,92,246,.4)",
+                    cursor:"pointer",fontSize:9,color:"#8B5CF6",background:"rgba(139,92,246,.06)"}}>
                   회원2 선택 ▼
                 </button>
               )}
@@ -10572,24 +10582,24 @@ function updateEx(ei, key, val) {
 
       {/* 회원2 선택 드롭다운 */}
       {sessionType==="2:1" && showM2Picker && !member2 && (
-        <div style={{marginBottom:10,background:"#111827",borderRadius:8,
-          border:"1px solid rgba(162,155,254,.2)",padding:"6px",maxHeight:180,overflowY:"auto"}}>
-          <Mo c="#94a3b8" s={8} style={{display:"block",padding:"2px 4px",marginBottom:4}}>회원 선택</Mo>
+        <div style={{marginBottom:10,background:"#FFFFFF",borderRadius:8,
+          border:"1px solid rgba(139,92,246,.2)",padding:"6px",maxHeight:180,overflowY:"auto"}}>
+          <Mo c="#64748B" s={8} style={{display:"block",padding:"2px 4px",marginBottom:4}}>회원 선택</Mo>
           {allMembers.filter(m=>m.id!==member.id).map(m=>(
             <button key={m.id} onClick={()=>{setMember2Id(m.id);setShowM2Picker(false);}}
               style={{display:"block",width:"100%",textAlign:"left",padding:"6px 8px",borderRadius:6,
-                border:"none",cursor:"pointer",background:"transparent",color:"#ddddf0",fontSize:11,
+                border:"none",cursor:"pointer",background:"transparent",color:"#0F172A",fontSize:11,
                 marginBottom:2}}>
               {m.name}
             </button>
           ))}
           {allMembers.filter(m=>m.id!==member.id).length===0 && (
-            <Mo c="#3a4a5a" s={9} style={{padding:"4px"}}>다른 회원이 없습니다.</Mo>
+            <Mo c="#94A3B8" s={9} style={{padding:"4px"}}>다른 회원이 없습니다.</Mo>
           )}
         </div>
       )}
 
-      <Card title="기본 정보">
+      <Card title="기본 정보" style={{background:"#FFFFFF",border:"1px solid #EDEFF2"}} titleStyle={{color:"#0F172A",borderBottomColor:"#EDEFF2"}}>
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>
           <Field label="트레이너" value={trainerName} onChange={setTrainerName} placeholder="홍길동" />
           <Field label="헬스장"   value={gymName}     onChange={setGymName}     placeholder="피트니스 센터" />
@@ -10610,7 +10620,7 @@ function updateEx(ei, key, val) {
                 const bodyW = parseFloat(getLatestBodyWeight(bodyData, sessionDate)?.weight || member?.bodyWeight || 70);
                 const auto = Math.round(met * bodyW * (parseFloat(cardioMinutes)/60));
                 return <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
-                  color:"#fdba74",background:"rgba(249,115,22,.12)",borderRadius:4,padding:"1px 6px"}}>
+                  color:"#F97316",background:"rgba(249,115,22,.12)",borderRadius:4,padding:"1px 6px"}}>
                   ≈ {auto} kcal
                 </span>;
               })()}
@@ -10619,7 +10629,7 @@ function updateEx(ei, key, val) {
               {/* 종류 선택 */}
               <select value={cardioType} onChange={e=>setCardioType(e.target.value)}
                 style={{fontSize:13,padding:"5px 7px",borderRadius:6,flex:"1 1 90px",minWidth:0,
-                  background:"#111827",border:"1px solid rgba(249,115,22,.25)",color:cardioType?"#fdba74":"#94a3b8"}}>
+                  background:"#FFFFFF",border:"1px solid rgba(249,115,22,.25)",color:cardioType?"#F97316":"#64748B"}}>
                 <option value="">종류 선택</option>
                 {["트레드밀","싸이클","천국의 계단","일립티컬","로잉머신","야외 걷기","야외 러닝","기타"].map(t=>(
                   <option key={t} value={t}>{t}</option>
@@ -10630,7 +10640,7 @@ function updateEx(ei, key, val) {
                 <input type="number" value={cardioMinutes} onChange={e=>setCardioMinutes(e.target.value)}
                   placeholder="분" min="0"
                   style={{fontSize:13,padding:"5px 7px",borderRadius:6,width:"100%",boxSizing:"border-box",
-                    background:"#111827",border:"1px solid rgba(249,115,22,.2)",color:"#fdba74",textAlign:"center"}} />
+                    background:"#FFFFFF",border:"1px solid rgba(249,115,22,.2)",color:"#F97316",textAlign:"center"}} />
                 {cardioMinutes && <span style={{position:"absolute",right:5,top:"50%",transform:"translateY(-50%)",
                   fontSize:8,color:"#f97316",pointerEvents:"none"}}>분</span>}
               </div>
@@ -10639,36 +10649,36 @@ function updateEx(ei, key, val) {
                 <input type="number" value={cardioCalories} onChange={e=>setCardioCalories(e.target.value)}
                   placeholder="kcal" min="0"
                   style={{fontSize:13,padding:"5px 7px",borderRadius:6,width:"100%",boxSizing:"border-box",
-                    background:cardioCalories?"rgba(249,115,22,.06)":"#111827",
+                    background:cardioCalories?"rgba(249,115,22,.06)":"#FFFFFF",
                     border:`1px solid ${cardioCalories?"rgba(249,115,22,.4)":"rgba(249,115,22,.15)"}`,
-                    color:"#fdba74",textAlign:"center"}} />
+                    color:"#F97316",textAlign:"center"}} />
                 {!cardioCalories && cardioMinutes && (
                   <span style={{position:"absolute",right:3,top:"50%",transform:"translateY(-50%)",
-                    fontSize:7,color:"#94a3b8",pointerEvents:"none"}}>직접</span>
+                    fontSize:7,color:"#64748B",pointerEvents:"none"}}>직접</span>
                 )}
               </div>
               {/* 강도 버튼 */}
               {["저","중","고"].map(lv=>(
                 <button key={lv} onClick={()=>setCardioIntensity(cardioIntensity===lv+"강도"?"":lv+"강도")}
                   style={{padding:"4px 8px",borderRadius:5,border:"1px solid",fontSize:9,fontWeight:700,cursor:"pointer",
-                    borderColor:cardioIntensity===lv+"강도"?"#f97316":"rgba(255,255,255,0.08)",
+                    borderColor:cardioIntensity===lv+"강도"?"#f97316":"#EDEFF2",
                     background:cardioIntensity===lv+"강도"?"rgba(249,115,22,.15)":"transparent",
-                    color:cardioIntensity===lv+"강도"?"#f97316":"#94a3b8"}}>
+                    color:cardioIntensity===lv+"강도"?"#f97316":"#64748B"}}>
                   {lv}
                 </button>
               ))}
             </div>
             {!cardioType && !cardioMinutes
-              ? <Mo c="#3a3a5a" s={8} style={{marginTop:3}}>유산소 기록 없음</Mo>
+              ? <Mo c="#94A3B8" s={8} style={{marginTop:3}}>유산소 기록 없음</Mo>
               : !cardioCalories && cardioType && cardioMinutes
-              ? <Mo c="#3a3a5a" s={7} style={{marginTop:2}}>kcal는 기기 표시값 직접 입력 가능</Mo>
+              ? <Mo c="#94A3B8" s={7} style={{marginTop:2}}>kcal는 기기 표시값 직접 입력 가능</Mo>
               : null
             }
           </div>
         </div>
         <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginTop:9}}>
           <div style={{gridColumn:"1 / -1",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
-            <label>수업 유형 <span style={{fontWeight:400,fontSize:10,color:"#94a3b8"}}>(복수 선택 가능)</span></label>
+            <label>수업 유형 <span style={{fontWeight:400,fontSize:10,color:"#64748B"}}>(복수 선택 가능)</span></label>
             <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}}>
               {SESSION_TYPE_OPTIONS.map(t => {
                 const active = selectedTypes.includes(t);
@@ -10679,16 +10689,16 @@ function updateEx(ei, key, val) {
                     )}
                     style={{padding:"4px 9px",borderRadius:14,border:"1px solid",cursor:"pointer",
                       fontSize:11,fontWeight:active?700:400,transition:"all .12s",
-                      borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
-                      background:active?"rgba(0,229,160,.15)":"transparent",
-                      color:active?"#5EEAD4":"#94a3b8"}}>
+                      borderColor:active?"#0F9488":"#EDEFF2",
+                      background:active?"rgba(57,199,184,.15)":"transparent",
+                      color:active?"#0F9488":"#64748B"}}>
                     {t}
                   </button>
                 );
               })}
             </div>
             {selectedTypes.length===0 && (
-              <div style={{marginTop:4,fontSize:10,color:"#cbd5e1"}}>선택 없으면 자동으로 "기타"로 저장됩니다</div>
+              <div style={{marginTop:4,fontSize:10,color:"#64748B"}}>선택 없으면 자동으로 "기타"로 저장됩니다</div>
             )}
           </div>
           <div>
@@ -10705,8 +10715,8 @@ function updateEx(ei, key, val) {
                 return (
                   <button key={c} onClick={() => setCondition(c)}
                     style={{flex:1,padding:"6px 0",borderRadius:6,border:"1px solid",
-                      borderColor:active?cfg.color:"rgba(255,255,255,0.08)",background:active?cfg.color+"22":"transparent",
-                      color:active?cfg.color:"#94a3b8",fontSize:11,fontWeight:800,
+                      borderColor:active?cfg.color:"#EDEFF2",background:active?cfg.color+"22":"transparent",
+                      color:active?cfg.color:"#64748B",fontSize:11,fontWeight:800,
                       display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
                     <span style={{fontSize:14}}>{cfg.emoji}</span>
                     <span style={{fontFamily:"'DM Mono',monospace",fontSize:8}}>{c}</span>
@@ -10719,26 +10729,26 @@ function updateEx(ei, key, val) {
       </Card>
 
       {/* ── 통증 기록 카드 ──────────────────────────── */}
-      <Card style={{marginTop:9,border:"1px solid #1a1a2e"}}>
+      <Card style={{marginTop:9,border:"1px solid #EDEFF2",background:"#FFFFFF"}}>
         {/* 헤더 */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showPainBefore||showPainAfter?10:0}}>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <Mo c="#ff9f43" s={10} style={{fontWeight:700}}>💢 통증 기록</Mo>
-            <Mo c="#3a3a5a" s={8}>(선택 입력)</Mo>
+            <Mo c="#F97316" s={10} style={{fontWeight:700}}>💢 통증 기록</Mo>
+            <Mo c="#94A3B8" s={8}>(선택 입력)</Mo>
           </div>
           <div style={{display:"flex",gap:5}}>
             <button onClick={()=>setShowPainBefore(v=>!v)}
               style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                borderColor:showPainBefore?"#ff9f43":"rgba(255,255,255,0.08)",
-                background:showPainBefore?"rgba(255,159,67,.15)":"transparent",
-                color:showPainBefore?"#ff9f43":"#94a3b8"}}>
+                borderColor:showPainBefore?"#F97316":"#EDEFF2",
+                background:showPainBefore?"rgba(249,115,22,.15)":"transparent",
+                color:showPainBefore?"#F97316":"#64748B"}}>
               운동 전
             </button>
             <button onClick={()=>setShowPainAfter(v=>!v)}
               style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                borderColor:showPainAfter?"#5EEAD4":"rgba(255,255,255,0.08)",
-                background:showPainAfter?"rgba(0,229,160,.15)":"transparent",
-                color:showPainAfter?"#5EEAD4":"#94a3b8"}}>
+                borderColor:showPainAfter?"#0F9488":"#EDEFF2",
+                background:showPainAfter?"rgba(57,199,184,.15)":"transparent",
+                color:showPainAfter?"#0F9488":"#64748B"}}>
               운동 후
             </button>
           </div>
@@ -10746,14 +10756,14 @@ function updateEx(ei, key, val) {
 
         {/* 운동 전 통증 */}
         {showPainBefore && (
-          <div style={{background:"#0B1120",borderRadius:8,padding:"10px 12px",marginBottom:showPainAfter?8:0,border:"1px solid rgba(255,159,67,.2)"}}>
-            <Mo c="#ff9f43" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 전 통증</Mo>
+          <div style={{background:"#F6F7F9",borderRadius:8,padding:"10px 12px",marginBottom:showPainAfter?8:0,border:"1px solid rgba(249,115,22,.2)"}}>
+            <Mo c="#F97316" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 전 통증</Mo>
             {/* VAS 슬라이더 */}
             <div style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#94a3b8" s={9}>통증 강도 (VAS)</Mo>
+                <Mo c="#64748B" s={9}>통증 강도 (VAS)</Mo>
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
-                  color:painRecord.before.vas>=7?"#ff6b6b":painRecord.before.vas>=4?"#ffd166":"#5EEAD4"}}>
+                  color:painRecord.before.vas>=7?"#EF4444":painRecord.before.vas>=4?"#F59E0B":"#0F9488"}}>
                   {painRecord.before.vas}/10
                 </span>
               </div>
@@ -10762,9 +10772,9 @@ function updateEx(ei, key, val) {
                   <button key={v} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,vas:v}}))}
                     style={{flex:1,minWidth:26,height:32,borderRadius:5,border:"1px solid",cursor:"pointer",
                       fontSize:11,fontWeight:800,
-                      borderColor:painRecord.before.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#5EEAD4"):"rgba(255,255,255,0.08)",
-                      background:painRecord.before.vas===v?(v>=7?"rgba(255,107,107,.25)":v>=4?"rgba(255,209,102,.25)":"rgba(0,229,160,.25)"):"transparent",
-                      color:painRecord.before.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#5EEAD4"):"#3a3a5a"}}>
+                      borderColor:painRecord.before.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#EDEFF2",
+                      background:painRecord.before.vas===v?(v>=7?"rgba(239,68,68,.25)":v>=4?"rgba(245,158,11,.25)":"rgba(57,199,184,.25)"):"transparent",
+                      color:painRecord.before.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#94A3B8"}}>
                     {v}
                   </button>
                 ))}
@@ -10772,23 +10782,23 @@ function updateEx(ei, key, val) {
             </div>
             {/* 통증 부위 */}
             <div style={{marginBottom:8}}>
-              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>통증 부위</Mo>
+              <Mo c="#64748B" s={9} style={{display:"block",marginBottom:4}}>통증 부위</Mo>
               <input value={painRecord.before.part}
                 onChange={e=>setPainRecord(p=>({...p,before:{...p.before,part:e.target.value}}))}
                 placeholder="예: 우측 무릎 내측"
-                style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid rgba(255,255,255,0.08)",
-                  background:"#111827",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+                style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #EDEFF2",
+                  background:"#FFFFFF",color:"#0F172A",fontSize:12,boxSizing:"border-box"}} />
             </div>
             {/* 발생 상황 */}
             <div style={{marginBottom:8}}>
-              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>발생 상황</Mo>
+              <Mo c="#64748B" s={9} style={{display:"block",marginBottom:4}}>발생 상황</Mo>
               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                 {["아침","오래 앉을 때","걷기","운동 중","특정 동작 시","계단","기타"].map(sit=>(
                   <button key={sit} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,situation:p.before.situation===sit?"":sit}}))}
                     style={{padding:"5px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                      borderColor:painRecord.before.situation===sit?"#ff9f43":"rgba(255,255,255,0.08)",
-                      background:painRecord.before.situation===sit?"rgba(255,159,67,.2)":"transparent",
-                      color:painRecord.before.situation===sit?"#ff9f43":"#94a3b8"}}>
+                      borderColor:painRecord.before.situation===sit?"#F97316":"#EDEFF2",
+                      background:painRecord.before.situation===sit?"rgba(249,115,22,.2)":"transparent",
+                      color:painRecord.before.situation===sit?"#F97316":"#64748B"}}>
                     {sit}
                   </button>
                 ))}
@@ -10799,22 +10809,22 @@ function updateEx(ei, key, val) {
               onChange={e=>setPainRecord(p=>({...p,before:{...p.before,memo:e.target.value}}))}
               placeholder="예: 계단 내려갈 때 통증, 앉았다 일어날 때 불편"
               rows={2}
-              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:11,resize:"none",
+              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #EDEFF2",
+                background:"#FFFFFF",color:"#0F172A",fontSize:11,resize:"none",
                 boxSizing:"border-box",lineHeight:1.6}} />
           </div>
         )}
 
         {/* 운동 후 통증 */}
         {showPainAfter && (
-          <div style={{background:"#0B1120",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)"}}>
-            <Mo c="#5EEAD4" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 후 통증 변화</Mo>
+          <div style={{background:"#F6F7F9",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(57,199,184,.2)"}}>
+            <Mo c="#0F9488" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 후 통증 변화</Mo>
             {/* VAS */}
             <div style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#94a3b8" s={9}>운동 후 통증 강도 (VAS)</Mo>
+                <Mo c="#64748B" s={9}>운동 후 통증 강도 (VAS)</Mo>
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
-                  color:painRecord.after.vas>=7?"#ff6b6b":painRecord.after.vas>=4?"#ffd166":"#5EEAD4"}}>
+                  color:painRecord.after.vas>=7?"#EF4444":painRecord.after.vas>=4?"#F59E0B":"#0F9488"}}>
                   {painRecord.after.vas}/10
                 </span>
               </div>
@@ -10823,9 +10833,9 @@ function updateEx(ei, key, val) {
                   <button key={v} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,vas:v}}))}
                     style={{flex:1,minWidth:26,height:32,borderRadius:5,border:"1px solid",cursor:"pointer",
                       fontSize:11,fontWeight:800,
-                      borderColor:painRecord.after.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#5EEAD4"):"rgba(255,255,255,0.08)",
-                      background:painRecord.after.vas===v?(v>=7?"rgba(255,107,107,.25)":v>=4?"rgba(255,209,102,.25)":"rgba(0,229,160,.25)"):"transparent",
-                      color:painRecord.after.vas===v?(v>=7?"#ff6b6b":v>=4?"#ffd166":"#5EEAD4"):"#3a3a5a"}}>
+                      borderColor:painRecord.after.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#EDEFF2",
+                      background:painRecord.after.vas===v?(v>=7?"rgba(239,68,68,.25)":v>=4?"rgba(245,158,11,.25)":"rgba(57,199,184,.25)"):"transparent",
+                      color:painRecord.after.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#94A3B8"}}>
                     {v}
                   </button>
                 ))}
@@ -10833,15 +10843,15 @@ function updateEx(ei, key, val) {
             </div>
             {/* 변화 선택 */}
             <div style={{marginBottom:8}}>
-              <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:4}}>통증 변화</Mo>
+              <Mo c="#64748B" s={9} style={{display:"block",marginBottom:4}}>통증 변화</Mo>
               <div style={{display:"flex",gap:5}}>
-                {[["감소","#5EEAD4"],["동일","#ffd166"],["증가","#ff6b6b"]].map(([ch,color])=>(
+                {[["감소","#0F9488"],["동일","#F59E0B"],["증가","#EF4444"]].map(([ch,color])=>(
                   <button key={ch} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,change:p.after.change===ch?"":ch}}))}
                     style={{flex:1,padding:"8px 0",borderRadius:7,border:"1px solid",cursor:"pointer",
                       fontSize:12,fontWeight:800,
-                      borderColor:painRecord.after.change===ch?color:"rgba(255,255,255,0.08)",
+                      borderColor:painRecord.after.change===ch?color:"#EDEFF2",
                       background:painRecord.after.change===ch?color+"22":"transparent",
-                      color:painRecord.after.change===ch?color:"#94a3b8"}}>
+                      color:painRecord.after.change===ch?color:"#64748B"}}>
                     {ch==="감소"?"✅ 감소":ch==="동일"?"➡️ 동일":"⚠️ 증가"}
                   </button>
                 ))}
@@ -10852,8 +10862,8 @@ function updateEx(ei, key, val) {
               onChange={e=>setPainRecord(p=>({...p,after:{...p.after,memo:e.target.value}}))}
               placeholder="예: 스쿼트 시 안정감 증가, 허리 압박 감소, 고관절 움직임 편해짐"
               rows={2}
-              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:11,resize:"none",
+              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #EDEFF2",
+                background:"#FFFFFF",color:"#0F172A",fontSize:11,resize:"none",
                 boxSizing:"border-box",lineHeight:1.6}} />
           </div>
         )}
@@ -10861,36 +10871,36 @@ function updateEx(ei, key, val) {
 
       {/* 대표님 전용: 운동 시간 기록 */}
       {isOwner(member) && (
-        <Card style={{marginBottom:11,border:"1px solid rgba(94,234,212,.2)",background:"rgba(94,234,212,.04)"}}>
+        <Card style={{marginBottom:11,border:"1px solid rgba(57,199,184,.2)",background:"rgba(57,199,184,.04)"}}>
           <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:8}}>
-            <Mo c="#5EEAD4" s={11} style={{fontWeight:800}}>🏋️ 대표님 운동 시간</Mo>
-            <Mo c="#3a3a5a" s={8}>(개인 운동 전용)</Mo>
+            <Mo c="#0F9488" s={11} style={{fontWeight:800}}>🏋️ 대표님 운동 시간</Mo>
+            <Mo c="#94A3B8" s={8}>(개인 운동 전용)</Mo>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <div>
-              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>운동 시작</Mo>
+              <Mo c="#64748B" s={8} style={{display:"block",marginBottom:4}}>운동 시작</Mo>
               <div style={{display:"flex",gap:5}}>
                 <input type="time" value={workoutStartTime}
                   onChange={e=>setWorkoutStartTime(e.target.value)}
                   style={{flex:1,fontSize:14,padding:"7px 9px",borderRadius:7,
-                    border:"1px solid rgba(94,234,212,.3)",background:"rgba(94,234,212,.06)",color:"#e2e8f0"}} />
+                    border:"1px solid rgba(57,199,184,.3)",background:"rgba(57,199,184,.06)",color:"#0F172A"}} />
                 <button onClick={()=>setWorkoutStartTime(new Date().toTimeString().slice(0,5))}
-                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(94,234,212,.25)",
-                    background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:10,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(57,199,184,.25)",
+                    background:"rgba(57,199,184,.12)",color:"#0F9488",fontSize:10,fontWeight:700,cursor:"pointer",flexShrink:0}}>
                   지금
                 </button>
               </div>
             </div>
             <div>
-              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>운동 종료</Mo>
+              <Mo c="#64748B" s={8} style={{display:"block",marginBottom:4}}>운동 종료</Mo>
               <div style={{display:"flex",gap:5}}>
                 <input type="time" value={workoutEndTime}
                   onChange={e=>setWorkoutEndTime(e.target.value)}
                   style={{flex:1,fontSize:14,padding:"7px 9px",borderRadius:7,
-                    border:"1px solid rgba(129,140,248,.3)",background:"rgba(129,140,248,.06)",color:"#e2e8f0"}} />
+                    border:"1px solid rgba(139,92,246,.3)",background:"rgba(139,92,246,.06)",color:"#0F172A"}} />
                 <button onClick={()=>setWorkoutEndTime(new Date().toTimeString().slice(0,5))}
-                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(129,140,248,.25)",
-                    background:"rgba(129,140,248,.12)",color:"#a5b4fc",fontSize:10,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+                  style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(139,92,246,.25)",
+                    background:"rgba(139,92,246,.12)",color:"#8B5CF6",fontSize:10,fontWeight:700,cursor:"pointer",flexShrink:0}}>
                   지금
                 </button>
               </div>
@@ -10904,10 +10914,10 @@ function updateEx(ei, key, val) {
             const h = Math.floor(totalMin/60), m = totalMin%60;
             return (
               <div style={{padding:"7px 12px",borderRadius:7,
-                background:"rgba(94,234,212,.1)",border:"1px solid rgba(94,234,212,.2)",
+                background:"rgba(57,199,184,.1)",border:"1px solid rgba(57,199,184,.2)",
                 display:"flex",alignItems:"center",gap:8}}>
-                <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>⏱ 총 운동 시간</Mo>
-                <Mo c="#e2e8f0" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:800}}>
+                <Mo c="#0F9488" s={10} style={{fontWeight:700}}>⏱ 총 운동 시간</Mo>
+                <Mo c="#0F172A" s={12} style={{fontFamily:"'DM Mono',monospace",fontWeight:800}}>
                   {h>0?`${h}시간 `:""}{m}분
                 </Mo>
               </div>
@@ -10916,7 +10926,7 @@ function updateEx(ei, key, val) {
         </Card>
       )}
 
-      <Card title="운동 목록" style={{marginTop:11}}>
+      <Card title="운동 목록" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #EDEFF2"}} titleStyle={{color:"#0F172A",borderBottomColor:"#EDEFF2"}}>
         {exercises.map((ex, ei) => {
           const isDrag = draggingIdx === ei;
           return (
@@ -10926,20 +10936,20 @@ function updateEx(ei, key, val) {
             onPointerCancel={() => { ptrSort.drag.current.active=false; ptrSort.drag.current.fromIdx=null; setDraggingIdx(null); }}
             onFocus={()=>setActiveCardIdx(ei)}
             style={{
-              background: isDrag ? "#0B1120"
-                : activeCardIdx===ei ? "#111d2e"
-                : "#0c1726",
+              background: isDrag ? "#F3F7F6"
+                : activeCardIdx===ei ? "#FFFFFF"
+                : "#FFFFFF",
               border:"1px solid "+(
-                isDrag ? "#7c6fff"
-                : activeCardIdx===ei ? "rgba(255,255,255,0.13)"
-                : "rgba(255,255,255,0.06)"
+                isDrag ? "#8B5CF6"
+                : activeCardIdx===ei ? "#CBD5E1"
+                : "#EDEFF2"
               ),
               borderRadius:10,padding:"9px 8px",marginBottom:14,
               opacity: isDrag ? 0.85
                 : (activeCardIdx===null||activeCardIdx===ei) ? 1 : 0.75,
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
-              boxShadow: isDrag ? "0 8px 28px rgba(124,111,255,.30)"
-                : activeCardIdx===ei ? "0 2px 12px rgba(0,0,0,0.25)"
+              boxShadow: isDrag ? "0 8px 28px rgba(139,92,246,.30)"
+                : activeCardIdx===ei ? "0 2px 12px rgba(15,23,42,.10)"
                 : "none",
               transition:"transform .12s,box-shadow .25s,border-color .25s,opacity .25s,background .25s",
               position:"relative",zIndex:isDrag?20:1,
@@ -10955,14 +10965,14 @@ function updateEx(ei, key, val) {
                 onPointerDown={e => { ptrSort.onHandlePointerDown(ei, e); setDraggingIdx(ei); }}
                 style={{
                   cursor:"grab", flexShrink:0, padding:"4px 6px",
-                  color: isDrag ? "#7c6fff" : "#cbd5e1",
+                  color: isDrag ? "#8B5CF6" : "#64748B",
                   fontSize:16, lineHeight:1,
                   touchAction:"none", userSelect:"none",
                   transition:"color .12s",
                 }}>
                 ⠿
               </div>
-              <Mo c="#2a3a50" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
+              <Mo c="#94A3B8" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
               <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
@@ -10970,24 +10980,24 @@ function updateEx(ei, key, val) {
                   width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",
                   fontWeight:700,fontSize:16,display:"block",
                   height:44,padding:"10px 12px",
-                  background:"rgba(255,255,255,0.05)",
-                  border:"1px solid rgba(255,255,255,0.10)",
+                  background:"#FFFFFF",
+                  border:"1px solid #EDEFF2",
                   borderRadius:8,
-                  color:"#e2e8f0",
+                  color:"#0F172A",
                   transition:"border-color .2s",
                 }} />
                 {/* 자동 추천 / 수동 수정 배지 */}
                 {ex._autoSuggest && (
                   <div style={{display:"flex",alignItems:"center",gap:4,marginTop:3}}>
                     <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",
-                      borderRadius:3,background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontWeight:700}}>
+                      borderRadius:3,background:"rgba(57,199,184,.12)",color:"#0F9488",fontWeight:700}}>
                       ✦ 자동 추천됨
                     </span>
-                    <Mo c="#3a3a5a" s={7}>부위 수정 가능</Mo>
+                    <Mo c="#94A3B8" s={7}>부위 수정 가능</Mo>
                   </div>
                 )}
                 {ex._muscleManual && !ex._autoSuggest && (
-                  <Mo c="#3a3a5a" s={7} style={{marginTop:2,display:"block"}}>✎ 수동 설정됨</Mo>
+                  <Mo c="#94A3B8" s={7} style={{marginTop:2,display:"block"}}>✎ 수동 설정됨</Mo>
                 )}
               </div>
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
@@ -10996,24 +11006,24 @@ function updateEx(ei, key, val) {
                   <button onClick={()=>moveEx(ei,0)} disabled={ei===0}
                     title="맨 위로"
                     style={{background:"none",border:"none",borderRadius:3,
-                      color:ei===0?"rgba(255,255,255,0.1)":"#5EEAD4",fontSize:10,padding:"2px 3px",
+                      color:ei===0?"#CBD5E1":"#0F9488",fontSize:10,padding:"2px 3px",
                       cursor:ei===0?"default":"pointer",fontWeight:700,lineHeight:1}}>⇈</button>
                   <button onClick={()=>moveEx(ei,ei-1)} disabled={ei===0}
                     style={{background:"none",border:"none",borderRadius:3,
-                      color:ei===0?"rgba(255,255,255,0.1)":"#94a3b8",fontSize:11,padding:"2px 3px",cursor:ei===0?"default":"pointer",lineHeight:1}}>▲</button>
+                      color:ei===0?"#CBD5E1":"#64748B",fontSize:11,padding:"2px 3px",cursor:ei===0?"default":"pointer",lineHeight:1}}>▲</button>
                   <button onClick={()=>moveEx(ei,ei+1)} disabled={ei===exercises.length-1}
                     style={{background:"none",border:"none",borderRadius:3,
-                      color:ei===exercises.length-1?"rgba(255,255,255,0.1)":"#94a3b8",fontSize:11,padding:"2px 3px",cursor:ei===exercises.length-1?"default":"pointer",lineHeight:1}}>▼</button>
+                      color:ei===exercises.length-1?"#CBD5E1":"#64748B",fontSize:11,padding:"2px 3px",cursor:ei===exercises.length-1?"default":"pointer",lineHeight:1}}>▼</button>
                   <button onClick={()=>moveEx(ei,exercises.length-1)} disabled={ei===exercises.length-1}
                     title="맨 아래로"
                     style={{background:"none",border:"none",borderRadius:3,
-                      color:ei===exercises.length-1?"rgba(255,255,255,0.1)":"#5EEAD4",fontSize:10,padding:"2px 3px",
+                      color:ei===exercises.length-1?"#CBD5E1":"#0F9488",fontSize:10,padding:"2px 3px",
                       cursor:ei===exercises.length-1?"default":"pointer",fontWeight:700,lineHeight:1}}>⇊</button>
                 </div>
               )}
               {exercises.length > 1 && (
                 <button onClick={() => removeEx(ei)}
-                  style={{background:"none",border:"none",color:"#ff6b6b",fontSize:10,padding:"0 2px",flexShrink:0}}>✕</button>
+                  style={{background:"none",border:"none",color:"#EF4444",fontSize:10,padding:"0 2px",flexShrink:0}}>✕</button>
               )}
             </div>
             {/* ── 실시간 근력 참고 (트레이너 전용, 카드 미포함) ── */}
@@ -11045,13 +11055,13 @@ function updateEx(ei, key, val) {
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",minWidth:0}}>
                       {[["1RM",e1RM],["5RM",e5RM],["10RM",e10RM]].map(([label,val])=>(
                         <span key={label} style={{fontFamily:"'DM Mono',monospace",fontSize:11,
-                          color:"#fca5a5",fontWeight:600,whiteSpace:"nowrap"}}>
-                          <span style={{color:"#94a3b8",fontSize:9}}>{label} </span>{val}kg
+                          color:"#EF4444",fontWeight:600,whiteSpace:"nowrap"}}>
+                          <span style={{color:"#64748B",fontSize:9}}>{label} </span>{val}kg
                         </span>
                       ))}
                     </div>
                   </div>
-                  <Mo c="#3a3a5a" s={8} style={{marginTop:2,display:"block"}}>
+                  <Mo c="#94A3B8" s={8} style={{marginTop:2,display:"block"}}>
                     기준: {parseFloat(bestSet.weight)}kg × {bestSet.reps}회 · Epley 추정
                   </Mo>
                 </div>
@@ -11067,9 +11077,9 @@ function updateEx(ei, key, val) {
               // 기록 없음
               if (!pastRecs.length) {
                 return (
-                  <div style={{marginBottom:9,padding:"7px 10px",background:"#0d0d14",
-                    borderRadius:7,border:"1px dashed #1a1a2e",display:"flex",alignItems:"center",gap:6}}>
-                    <Mo c="#cbd5e1" s={9}>📭 이전 기록 없음 — {ex.name}</Mo>
+                  <div style={{marginBottom:9,padding:"7px 10px",background:"#F6F7F9",
+                    borderRadius:7,border:"1px dashed #EDEFF2",display:"flex",alignItems:"center",gap:6}}>
+                    <Mo c="#64748B" s={9}>📭 이전 기록 없음 — {ex.name}</Mo>
                   </div>
                 );
               }
@@ -11120,17 +11130,17 @@ function updateEx(ei, key, val) {
 
               return (
                 <div style={{marginBottom:9,borderRadius:8,overflow:"hidden",
-                  border:"1px solid rgba(124,111,255,.22)",background:"rgba(124,111,255,.05)"}}>
+                  border:"1px solid rgba(139,92,246,.22)",background:"rgba(139,92,246,.05)"}}>
 
                   {/* 헤더 — 회차 전환 탭 */}
-                  <div style={{display:"flex",alignItems:"center",gap:0,borderBottom:"1px solid rgba(124,111,255,.12)"}}>
-                    <Mo c="#7c6fff" s={8} style={{padding:"6px 10px",flexShrink:0}}>📅 이전 기록</Mo>
+                  <div style={{display:"flex",alignItems:"center",gap:0,borderBottom:"1px solid rgba(139,92,246,.12)"}}>
+                    <Mo c="#8B5CF6" s={8} style={{padding:"6px 10px",flexShrink:0}}>📅 이전 기록</Mo>
                     <div style={{display:"flex",flex:1,gap:0}}>
                       {pastRecs.map((pr,i) => (
                         <button key={i} onClick={()=>updateEx(ei,"_histIdx",i)}
                           style={{flex:1,padding:"6px 4px",background:"none",border:"none",
-                            borderBottom: histIdx===i?"2px solid #7c6fff":"2px solid transparent",
-                            color:histIdx===i?"#a29bfe":"#3a3a5a",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                            borderBottom: histIdx===i?"2px solid #8B5CF6":"2px solid transparent",
+                            color:histIdx===i?"#8B5CF6":"#94A3B8",fontSize:10,fontWeight:700,cursor:"pointer"}}>
                           {i===0?"최근":i===1?"2번전":"3번전"}
                         </button>
                       ))}
@@ -11140,11 +11150,11 @@ function updateEx(ei, key, val) {
                   {/* 기록 내용 */}
                   <div style={{padding:"8px 10px"}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                      <Mo c="#94a3b8" s={9}>{rec.date}</Mo>
-                      {rec.sessionNo && <Mo c="#3a3a5a" s={9}>{rec.sessionNo}회차</Mo>}
+                      <Mo c="#64748B" s={9}>{rec.date}</Mo>
+                      {rec.sessionNo && <Mo c="#94A3B8" s={9}>{rec.sessionNo}회차</Mo>}
                       {ex._loaded && (
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 7px",
-                          borderRadius:3,background:"rgba(0,229,160,.15)",color:"#5EEAD4",fontWeight:700}}>
+                          borderRadius:3,background:"rgba(57,199,184,.15)",color:"#0F9488",fontWeight:700}}>
                           ✓ 불러옴
                         </span>
                       )}
@@ -11160,18 +11170,18 @@ function updateEx(ei, key, val) {
                         return (
                           <span key={si} style={{fontFamily:"'DM Mono',monospace",fontSize:10,
                             padding:"3px 8px",borderRadius:5,fontWeight:700,
-                            background:"rgba(255,255,255,.05)",
-                            color: hasData ? "#ddddf0" : "#cbd5e1",
-                            border:"1px solid #1a1a2e",
+                            background:"#F1F3F6",
+                            color: hasData ? "#0F172A" : "#64748B",
+                            border:"1px solid #EDEFF2",
                             display:"inline-flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
                             {si+1}세트&nbsp;
                             {d !== "" ? (
-                              <span style={{color:"#54a0ff"}}>{d}초</span>
+                              <span style={{color:"#2F73F6"}}>{d}초</span>
                             ) : (
                               <>
-                                <span style={{color:"#5EEAD4"}}>{w !== "" ? w+"kg" : "—"}</span>
+                                <span style={{color:"#0F9488"}}>{w !== "" ? w+"kg" : "—"}</span>
                                 &nbsp;×&nbsp;
-                                <span style={{color:"#ffd166"}}>{r !== "" ? r+"회" : "—"}</span>
+                                <span style={{color:"#F59E0B"}}>{r !== "" ? r+"회" : "—"}</span>
                               </>
                             )}
                           </span>
@@ -11182,35 +11192,35 @@ function updateEx(ei, key, val) {
                     {/* 전체 RPE 참고 안내 (세트별 RPE 없을 때) */}
                     {rec.rpe != null && (
                       <div style={{marginBottom:6,padding:"4px 8px",borderRadius:6,
-                        background:"rgba(124,111,255,.08)",border:"1px solid rgba(124,111,255,.2)",
+                        background:"rgba(139,92,246,.08)",border:"1px solid rgba(139,92,246,.2)",
                         display:"inline-flex",alignItems:"center",gap:6}}>
-                        <Mo c="#a29bfe" s={8} style={{fontWeight:700}}>이전 RPE 참고</Mo>
+                        <Mo c="#8B5CF6" s={8} style={{fontWeight:700}}>이전 RPE 참고</Mo>
                         <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,
-                          color:"#a29bfe",fontWeight:800}}>RPE {rec.rpe}</span>
-                        <Mo c="#94a3b8" s={8}>— {["","극저","매우쉬움","쉬움","가벼움","보통","약간힘","힘듦","매우힘","한계근접","한계"][rec.rpe]||""}</Mo>
+                          color:"#8B5CF6",fontWeight:800}}>RPE {rec.rpe}</span>
+                        <Mo c="#64748B" s={8}>— {["","극저","매우쉬움","쉬움","가벼움","보통","약간힘","힘듦","매우힘","한계근접","한계"][rec.rpe]||""}</Mo>
                       </div>
                     )}
 
                     {rec.feedback && (
-                      <Mo c="#3a3a5a" s={9} style={{display:"block",marginBottom:6}}>💬 {rec.feedback}</Mo>
+                      <Mo c="#94A3B8" s={9} style={{display:"block",marginBottom:6}}>💬 {rec.feedback}</Mo>
                     )}
 
                     {/* 이전 자극도 참고 (트레이너 전용) */}
                     {(rec.stimRating || rec.stimMemo || rec.stimPrimary || rec.stimNote || rec.nextPlan) && (
                       <div style={{marginBottom:6,padding:"5px 8px",borderRadius:6,
-                        background:"rgba(129,140,248,.07)",border:"1px solid rgba(129,140,248,.18)"}}>
+                        background:"rgba(139,92,246,.07)",border:"1px solid rgba(139,92,246,.18)"}}>
                         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                          <Mo c="#818cf8" s={8} style={{fontWeight:700}}>이전 자극도</Mo>
+                          <Mo c="#8B5CF6" s={8} style={{fontWeight:700}}>이전 자극도</Mo>
                           {rec.stimRating && (
                             <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,
-                              color:"#a5b4fc",fontWeight:800}}>{stimRatingLabel(rec.stimRating)}</span>
+                              color:"#8B5CF6",fontWeight:800}}>{stimRatingLabel(rec.stimRating)}</span>
                           )}
-                          {rec.stimPrimary && <Mo c="#a5b4fc" s={8}>주: {rec.stimPrimary}</Mo>}
-                          {rec.stimSecondary && <Mo c="#94a3b8" s={8}>보조: {rec.stimSecondary}</Mo>}
-                          {rec.nextPlan && <Mo c="#ffd166" s={8}>다음 수업: {nextPlanLabel(rec.nextPlan)}</Mo>}
+                          {rec.stimPrimary && <Mo c="#8B5CF6" s={8}>주: {rec.stimPrimary}</Mo>}
+                          {rec.stimSecondary && <Mo c="#64748B" s={8}>보조: {rec.stimSecondary}</Mo>}
+                          {rec.nextPlan && <Mo c="#F59E0B" s={8}>다음 수업: {nextPlanLabel(rec.nextPlan)}</Mo>}
                         </div>
-                        {rec.stimMemo && <Mo c="#a5b4fc" s={8} style={{display:"block",marginTop:2}}>대표 메모: {rec.stimMemo}</Mo>}
-                        {rec.stimNote && <Mo c="#94a3b8" s={8} style={{display:"block",marginTop:2}}>📝 {rec.stimNote}</Mo>}
+                        {rec.stimMemo && <Mo c="#8B5CF6" s={8} style={{display:"block",marginTop:2}}>대표 메모: {rec.stimMemo}</Mo>}
+                        {rec.stimNote && <Mo c="#64748B" s={8} style={{display:"block",marginTop:2}}>📝 {rec.stimNote}</Mo>}
                       </div>
                     )}
 
@@ -11220,8 +11230,8 @@ function updateEx(ei, key, val) {
                       onPointerDown={e => e.stopPropagation()}
                       onPointerUp={e => e.stopPropagation()}
                       style={{width:"100%",padding:"8px",borderRadius:7,border:"none",cursor:"pointer",
-                        background:"linear-gradient(135deg,rgba(124,111,255,.35),rgba(162,155,254,.25))",
-                        color:"#c4bfff",fontSize:12,fontWeight:800,
+                        background:"linear-gradient(135deg,rgba(139,92,246,.35),rgba(139,92,246,.25))",
+                        color:"#8B5CF6",fontSize:12,fontWeight:800,
                         letterSpacing:".02em"}}>
                       📥 이 기록 불러오기 ({rec.sets.length}세트)
                     </button>
@@ -11238,8 +11248,8 @@ function updateEx(ei, key, val) {
                     return (
                       <button key={eq} onClick={() => updateEx(ei,"equipment",eq)}
                         style={{padding:"4px 9px",borderRadius:4,border:"1px solid",
-                          borderColor:active?col:"rgba(255,255,255,0.08)",background:active?col+"22":"transparent",
-                          color:active?col:"#94a3b8",fontSize:10,fontWeight:700}}>{eq}</button>
+                          borderColor:active?col:"#EDEFF2",background:active?col+"22":"transparent",
+                          color:active?col:"#64748B",fontSize:10,fontWeight:700}}>{eq}</button>
                     );
                   })}
                 </div>
@@ -11254,9 +11264,9 @@ function updateEx(ei, key, val) {
                         const active=ex.funcCategory===c.key;
                         return <button key={c.key} onClick={()=>updateEx(ei,"funcCategory",active?"":c.key)}
                           style={{padding:"3px 8px",borderRadius:4,border:"1px solid",
-                            borderColor:active?c.color:"rgba(255,255,255,0.08)",
+                            borderColor:active?c.color:"#EDEFF2",
                             background:active?c.color+"22":"transparent",
-                            color:active?c.color:"#94a3b8",fontSize:9,fontWeight:active?700:400}}>{c.label}</button>;
+                            color:active?c.color:"#64748B",fontSize:9,fontWeight:active?700:400}}>{c.label}</button>;
                       })}
                     </div>
                   </div>
@@ -11267,9 +11277,9 @@ function updateEx(ei, key, val) {
                         const active=ex.funcTool===t;
                         return <button key={t} onClick={()=>updateEx(ei,"funcTool",active?"":t)}
                           style={{padding:"3px 8px",borderRadius:4,border:"1px solid",
-                            borderColor:active?"#ffd166":"rgba(255,255,255,0.08)",
-                            background:active?"rgba(255,209,102,.15)":"transparent",
-                            color:active?"#ffd166":"#94a3b8",fontSize:9}}>{t}</button>;
+                            borderColor:active?"#F59E0B":"#EDEFF2",
+                            background:active?"rgba(245,158,11,.15)":"transparent",
+                            color:active?"#F59E0B":"#64748B",fontSize:9}}>{t}</button>;
                       })}
                     </div>
                   </div>
@@ -11294,7 +11304,7 @@ function updateEx(ei, key, val) {
             <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
               <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:EQUIP_COLOR[ex.equipment]+"22",color:EQUIP_COLOR[ex.equipment]}}>{ex.equipment}</span>
               <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:mColor(ex.muscleTop)+"22",color:mColor(ex.muscleTop)}}>{ex.muscleTop}</span>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.08)",color:"#7070a0"}}>{ex.muscleSub}</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"#F1F3F6",color:"#94A3B8"}}>{ex.muscleSub}</span>
             </div>
             {/* ── 세트 입력 UI ── */}
             {isFuncEx(ex) ? (
@@ -11302,40 +11312,40 @@ function updateEx(ei, key, val) {
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr 18px",gap:4,marginBottom:3}}>
                   {["SET","중량kg","시간초","횟수",""].map((h,i) =>
-                    <Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                    <Mo key={i} c="#64748B" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
                 </div>
                 {ex.sets.map((row, si) => (
                   <div key={si} style={{marginBottom:3}}>
                     <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr 18px",gap:4,alignItems:"center"}}>
-                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111827",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",background:"#F1F3F6",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
                       <input value={row.weight||""} onChange={e => updateSet(ei,si,"weight",e.target.value)}
-                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
+                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#0F172A"}} />
                       <input value={row.durationSec||""} onChange={e => updateSet(ei,si,"durationSec",e.target.value)}
-                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
+                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#0F172A"}} />
                       <input value={row.reps||""} onChange={e => updateSet(ei,si,"reps",e.target.value)}
-                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#ddddf0"}} />
+                        placeholder="선택" style={{textAlign:"center",height:32,padding:"0 4px",fontSize:13,color:"#0F172A"}} />
                       {ex.sets.length>1
-                        ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:11,padding:0,textAlign:"center"}}>✕</button>
+                        ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#64748B",fontSize:11,padding:0,textAlign:"center"}}>✕</button>
                         : <div />}
                     </div>
                     {/* 세트 미리보기 */}
                     {funcSetLabel(row) !== "—" && (
-                      <div style={{marginTop:2,padding:"2px 8px",background:"rgba(84,160,255,.07)",borderRadius:4}}>
-                        <Mo c="#54a0ff" s={9}>{si+1}세트 {funcSetLabel(row)}</Mo>
+                      <div style={{marginTop:2,padding:"2px 8px",background:"rgba(47,115,246,.07)",borderRadius:4}}>
+                        <Mo c="#2F73F6" s={9}>{si+1}세트 {funcSetLabel(row)}</Mo>
                       </div>
                     )}
                   </div>
                 ))}
-                <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed rgba(255,255,255,0.08)",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
+                <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed #CBD5E1",borderRadius:5,background:"none",color:"#94A3B8",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
                 {/* 기능운동 통계 */}
                 {(() => {
                   const vol  = funcExVol(ex);
                   const stat = funcExStats(ex);
                   return (
                     <div style={{marginTop:7,display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {vol > 0 && <Mo c="#5EEAD4" s={9}>볼륨 {vol.toLocaleString()} kg</Mo>}
-                      {stat.totalSec > 0 && <Mo c="#54a0ff" s={9}>총 {stat.totalSec}초</Mo>}
-                      {stat.totalReps > 0 && <Mo c="#ffd166" s={9}>총 {stat.totalReps}회</Mo>}
+                      {vol > 0 && <Mo c="#0F9488" s={9}>볼륨 {vol.toLocaleString()} kg</Mo>}
+                      {stat.totalSec > 0 && <Mo c="#2F73F6" s={9}>총 {stat.totalSec}초</Mo>}
+                      {stat.totalReps > 0 && <Mo c="#F59E0B" s={9}>총 {stat.totalReps}회</Mo>}
                     </div>
                   );
                 })()}
@@ -11348,7 +11358,7 @@ function updateEx(ei, key, val) {
                   const h1 = exType2==="assist" ? "보조kg" : exType2==="bodyweight" ? "추가kg" : "무게kg";
                   return (
                     <div className="set-grid-header" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3,width:"100%"}}>
-                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#cbd5e1" s={8} className={i===3?"vol-col":""} style={{textAlign:"center"}}>{h}</Mo>)}
+                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#64748B" s={8} className={i===3?"vol-col":""} style={{textAlign:"center"}}>{h}</Mo>)}
                     </div>
                   );
                 })()}
@@ -11360,23 +11370,23 @@ function updateEx(ei, key, val) {
                   return (
                     <div key={si} style={{marginBottom:3}}>
                       <div className="set-grid-row" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,alignItems:"center",width:"100%"}}>
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",background:"#111827",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
+                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",background:"#F1F3F6",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
                         <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:36,padding:"0 4px",fontSize:16}} />
                         <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:36,padding:"0 4px",fontSize:16}} />
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,229,160,.06)",borderRadius:5}}>
+                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#0F9488",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(57,199,184,.06)",borderRadius:5}}>
                           {row.volume>0 ? row.volume.toLocaleString() : "—"}
                         </div>
-                        {ex.sets.length>1 ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:11,padding:0,textAlign:"center"}}>✕</button> : <div />}
+                        {ex.sets.length>1 ? <button onClick={() => removeSet(ei,si)} style={{background:"none",border:"none",color:"#64748B",fontSize:11,padding:0,textAlign:"center"}}>✕</button> : <div />}
                       </div>
                       {exTypeRow==="assist" && row.weight && mbwRow && (
-                        <div style={{marginTop:2,padding:"3px 8px",background:"rgba(124,111,255,.08)",borderRadius:5,display:"flex",gap:8,alignItems:"center"}}>
-                          <Mo c="#7c6fff" s={8}>체중 {mbwRow}kg − 보조 {row.weight}kg = 실제 {realWRow}kg</Mo>
+                        <div style={{marginTop:2,padding:"3px 8px",background:"rgba(139,92,246,.08)",borderRadius:5,display:"flex",gap:8,alignItems:"center"}}>
+                          <Mo c="#8B5CF6" s={8}>체중 {mbwRow}kg − 보조 {row.weight}kg = 실제 {realWRow}kg</Mo>
                         </div>
                       )}
                     </div>
                   );
                 })}
-                <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed rgba(255,255,255,0.08)",borderRadius:5,background:"none",color:"#3a3a4e",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
+                <button onClick={() => addSet(ei)} style={{width:"100%",marginTop:3,padding:"6px",border:"1px dashed #CBD5E1",borderRadius:5,background:"none",color:"#94A3B8",fontSize:10,fontWeight:700}}>+ 세트 추가</button>
 
                 {/* ── 2:1 수업: 회원2 개별 입력 (기본) + 공통값 복사 보조 기능 ── */}
                 {sessionType==="2:1" && member2 && (() => {
@@ -11416,30 +11426,30 @@ function updateEx(ei, key, val) {
 
                   return (
                     <div style={{marginTop:6,borderRadius:7,
-                      border:"1px solid rgba(162,155,254,.25)",overflow:"hidden"}}>
+                      border:"1px solid rgba(139,92,246,.25)",overflow:"hidden"}}>
                       {/* 헤더 */}
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                        padding:"5px 10px",background:"rgba(162,155,254,.08)"}}>
-                        <Mo c="#a29bfe" s={9} style={{fontWeight:700}}>⚡ {member2.name}</Mo>
+                        padding:"5px 10px",background:"rgba(139,92,246,.08)"}}>
+                        <Mo c="#8B5CF6" s={9} style={{fontWeight:700}}>⚡ {member2.name}</Mo>
                         {/* 공통값 빠른 복사 버튼들 */}
                         <div style={{display:"flex",gap:3}}>
                           {!isFunc && !isTime && (
                             <button onClick={()=>applyShared('weight')}
-                              style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(162,155,254,.3)",
-                                cursor:"pointer",fontSize:8,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                              style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(139,92,246,.3)",
+                                cursor:"pointer",fontSize:8,color:"#8B5CF6",background:"rgba(139,92,246,.06)"}}>
                               중량 복사
                             </button>
                           )}
                           {isTime && (
                             <button onClick={()=>applyShared('durationSec')}
-                              style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(162,155,254,.3)",
-                                cursor:"pointer",fontSize:8,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                              style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(139,92,246,.3)",
+                                cursor:"pointer",fontSize:8,color:"#8B5CF6",background:"rgba(139,92,246,.06)"}}>
                               시간 복사
                             </button>
                           )}
                           <button onClick={()=>applyShared('reps')}
-                            style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(162,155,254,.3)",
-                              cursor:"pointer",fontSize:8,color:"#a29bfe",background:"rgba(162,155,254,.06)"}}>
+                            style={{padding:"2px 7px",borderRadius:8,border:"1px solid rgba(139,92,246,.3)",
+                              cursor:"pointer",fontSize:8,color:"#8B5CF6",background:"rgba(139,92,246,.06)"}}>
                             횟수 복사
                           </button>
                         </div>
@@ -11455,10 +11465,10 @@ function updateEx(ei, key, val) {
                               ? "20px 1fr 1fr"
                               : "20px 1fr 1fr",
                           gap:4,marginBottom:3}}>
-                          <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>SET</Mo>
-                          {!isFunc && !isTime && <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>{weightLabel}</Mo>}
-                          {isTime && <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>시간(초)</Mo>}
-                          <Mo c="#cbd5e1" s={7} style={{textAlign:"center"}}>횟수</Mo>
+                          <Mo c="#64748B" s={7} style={{textAlign:"center"}}>SET</Mo>
+                          {!isFunc && !isTime && <Mo c="#64748B" s={7} style={{textAlign:"center"}}>{weightLabel}</Mo>}
+                          {isTime && <Mo c="#64748B" s={7} style={{textAlign:"center"}}>시간(초)</Mo>}
+                          <Mo c="#64748B" s={7} style={{textAlign:"center"}}>횟수</Mo>
                         </div>
                         {m2sets.map((row, si) => (
                           <div key={si} style={{display:"grid",
@@ -11468,8 +11478,8 @@ function updateEx(ei, key, val) {
                                 ? "20px 1fr 1fr"
                                 : "20px 1fr 1fr",
                             gap:4,marginBottom:4,alignItems:"center"}}>
-                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a4e",
-                              background:"#111827",borderRadius:4,height:30,display:"flex",
+                            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",
+                              background:"#F1F3F6",borderRadius:4,height:30,display:"flex",
                               alignItems:"center",justifyContent:"center"}}>{si+1}</div>
                             {/* 웨이트: 중량 */}
                             {!isFunc && !isTime && (
@@ -11478,7 +11488,7 @@ function updateEx(ei, key, val) {
                                 onChange={e=>updateM2Set(si,'weight',e.target.value)}
                                 style={{textAlign:"center",height:30,padding:"0 3px",
                                   fontSize:14,fontWeight:700,borderRadius:4,
-                                  border:"1px solid rgba(162,155,254,.25)",background:"#0c1523",color:"#a29bfe"}} />
+                                  border:"1px solid rgba(139,92,246,.25)",background:"#FFFFFF",color:"#8B5CF6"}} />
                             )}
                             {/* 시간 운동: 초 */}
                             {isTime && (
@@ -11487,7 +11497,7 @@ function updateEx(ei, key, val) {
                                 onChange={e=>updateM2Set(si,'durationSec',e.target.value)}
                                 style={{textAlign:"center",height:30,padding:"0 3px",
                                   fontSize:14,fontWeight:700,borderRadius:4,
-                                  border:"1px solid rgba(162,155,254,.25)",background:"#0c1523",color:"#a29bfe"}} />
+                                  border:"1px solid rgba(139,92,246,.25)",background:"#FFFFFF",color:"#8B5CF6"}} />
                             )}
                             {/* 공통: 횟수 */}
                             <input type="number" placeholder="회"
@@ -11495,28 +11505,28 @@ function updateEx(ei, key, val) {
                               onChange={e=>updateM2Set(si,'reps',e.target.value)}
                               style={{textAlign:"center",height:30,padding:"0 3px",
                                 fontSize:14,fontWeight:700,borderRadius:4,
-                                border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#ddddf0"}} />
+                                border:"1px solid rgba(139,92,246,.2)",background:"#FFFFFF",color:"#0F172A"}} />
                           </div>
                         ))}
                         {/* B회원 세트 추가 */}
                         <button onClick={addM2Set}
-                          style={{width:"100%",marginTop:4,padding:"5px",border:"1px dashed rgba(162,155,254,.25)",
-                            borderRadius:5,background:"none",color:"#7070a0",fontSize:9,fontWeight:700,cursor:"pointer"}}>
+                          style={{width:"100%",marginTop:4,padding:"5px",border:"1px dashed rgba(139,92,246,.25)",
+                            borderRadius:5,background:"none",color:"#94A3B8",fontSize:9,fontWeight:700,cursor:"pointer"}}>
                           + {member2?.name} 세트 추가
                         </button>
                         {/* RPE + 메모 */}
                         <div style={{display:"flex",gap:5,marginTop:4,alignItems:"center"}}>
-                          <Mo c="#94a3b8" s={8}>RPE</Mo>
+                          <Mo c="#64748B" s={8}>RPE</Mo>
                           <input type="number" placeholder="—" min="1" max="10"
                             value={m2.rpe??""}
                             onChange={e=>updateM2('rpe',e.target.value)}
                             style={{width:38,textAlign:"center",height:26,padding:"0 3px",
                               fontSize:12,fontWeight:700,borderRadius:4,
-                              border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
+                              border:"1px solid rgba(139,92,246,.2)",background:"#FFFFFF",color:"#8B5CF6"}} />
                           <input placeholder="메모" value={m2.note??""}
                             onChange={e=>updateM2('note',e.target.value)}
                             style={{flex:1,height:26,padding:"0 6px",fontSize:10,borderRadius:4,
-                              border:"1px solid rgba(162,155,254,.12)",background:"#0c1523",color:"#ddddf0"}} />
+                              border:"1px solid rgba(139,92,246,.12)",background:"#FFFFFF",color:"#0F172A"}} />
                         </div>
                       </div>
                     </div>
@@ -11531,14 +11541,14 @@ function updateEx(ei, key, val) {
                   return (
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:7}}>
                       <div style={{display:"flex",alignItems:"center",gap:7}}>
-                        <Mo c="#5EEAD4" s={9}>볼륨 {vol3.toLocaleString()} kg</Mo>
+                        <Mo c="#0F9488" s={9}>볼륨 {vol3.toLocaleString()} kg</Mo>
                         {exType3==="assist" && mbw3 && (
                           <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
-                            background:"rgba(124,111,255,.18)",color:"#7c6fff"}}>체중 {mbw3}kg 기준 보정</span>
+                            background:"rgba(139,92,246,.18)",color:"#8B5CF6"}}>체중 {mbw3}kg 기준 보정</span>
                         )}
                         {exType3==="assist" && !mbw3 && (
                           <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
-                            background:"rgba(255,107,107,.18)",color:"#ff6b6b"}}>⚠ 체중 입력 필요</span>
+                            background:"rgba(239,68,68,.18)",color:"#EF4444"}}>⚠ 체중 입력 필요</span>
                         )}
                         {exType3==="bodyweight" && mbw3 && (
                           <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"2px 6px",borderRadius:4,
@@ -11557,19 +11567,19 @@ function updateEx(ei, key, val) {
             {/* RPE 선택 */}
             <div style={{marginTop:8,marginBottom:5}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                <Mo c="#94a3b8" s={8}>RPE</Mo>
-                {ex.rpe && <Mo c="#ffd166" s={9}>{ex.rpe} — {["","극저강도","매우 쉬움","쉬움","가벼움","보통","약간 힘듦","힘듦","매우 힘듦","한계 근접","한계"][ex.rpe]}</Mo>}
+                <Mo c="#64748B" s={8}>RPE</Mo>
+                {ex.rpe && <Mo c="#F59E0B" s={9}>{ex.rpe} — {["","극저강도","매우 쉬움","쉬움","가벼움","보통","약간 힘듦","힘듦","매우 힘듦","한계 근접","한계"][ex.rpe]}</Mo>}
               </div>
               <div style={{display:"flex",gap:2,flexWrap:"wrap",width:"100%"}}>
                 {[1,2,3,4,5,6,7,8,9,10].map(n => {
                   const active = ex.rpe === n;
-                  const col = n<=4?"#5EEAD4":n<=6?"#ffd166":n<=8?"#ff9f43":"#ff6b6b";
+                  const col = n<=4?"#0F9488":n<=6?"#F59E0B":n<=8?"#F97316":"#EF4444";
                   return (
                     <button key={n} onClick={() => updateEx(ei,"rpe", active ? null : n)}
                       style={{width:28,height:28,borderRadius:6,border:"1px solid",
-                        borderColor:active?col:"rgba(255,255,255,0.08)",
+                        borderColor:active?col:"#EDEFF2",
                         background:active?col+"33":"transparent",
-                        color:active?col:"#cbd5e1",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        color:active?col:"#64748B",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                       {n}
                     </button>
                   );
@@ -11577,7 +11587,7 @@ function updateEx(ei, key, val) {
               </div>
             </div>
             <div style={{marginTop:5}}>
-              <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" onFocus={()=>setActiveCardIdx(ei)} style={{fontSize:16,color:"#8080a0",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:6,padding:"6px 10px",width:"100%",boxSizing:"border-box"}} />
+              <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" onFocus={()=>setActiveCardIdx(ei)} style={{fontSize:16,color:"#64748B",background:"#FFFFFF",border:"1px solid #EDEFF2",borderRadius:6,padding:"6px 10px",width:"100%",boxSizing:"border-box"}} />
             </div>
 
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
@@ -11592,13 +11602,13 @@ function updateEx(ei, key, val) {
                     {(Array.isArray(ex.funcBodyPart)?ex.funcBodyPart:(ex.funcBodyPart?[ex.funcBodyPart]:[])).map(p=>(
                       <span key={p} style={{fontFamily:"'DM Mono',monospace",fontSize:9,
                         padding:"2px 8px",borderRadius:4,
-                        background:"rgba(129,140,248,.2)",color:"#818cf8",
+                        background:"rgba(139,92,246,.2)",color:"#8B5CF6",
                         display:"inline-flex",alignItems:"center",gap:4}}>
                         {p}
                         <button onClick={()=>{
                           const cur = Array.isArray(ex.funcBodyPart)?ex.funcBodyPart:(ex.funcBodyPart?[ex.funcBodyPart]:[]);
                           updateEx(ei,"funcBodyPart",cur.filter(x=>x!==p));
-                        }} style={{background:"none",border:"none",color:"#818cf8",cursor:"pointer",padding:0,fontSize:10,lineHeight:1}}>×</button>
+                        }} style={{background:"none",border:"none",color:"#8B5CF6",cursor:"pointer",padding:0,fontSize:10,lineHeight:1}}>×</button>
                       </span>
                     ))}
                     <button onClick={()=>setActiveCardIdx(ei==="bodyPartModal"?null:`bodyPartModal_${ei}`)}
@@ -11610,8 +11620,8 @@ function updateEx(ei, key, val) {
                   {/* 부위 선택 팝업 */}
                   {activeCardIdx===`bodyPartModal_${ei}` && (
                     <div style={{marginTop:6,padding:"10px",borderRadius:8,
-                      background:"#1e293b",border:"1px solid rgba(34,197,94,.25)",
-                      boxShadow:"0 8px 24px rgba(0,0,0,.5)",zIndex:50,position:"relative"}}>
+                      background:"#FFFFFF",border:"1px solid rgba(34,197,94,.25)",
+                      boxShadow:"0 8px 24px rgba(15,23,42,.15)",zIndex:50,position:"relative"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                         <Mo c="#22c55e" s={8} style={{fontWeight:700}}>부위 선택 (복수 선택 가능)</Mo>
                         <button onClick={()=>setActiveCardIdx(ei)}
@@ -11634,9 +11644,9 @@ function updateEx(ei, key, val) {
                               }
                             }}
                               style={{fontSize:9,padding:"3px 9px",borderRadius:4,border:"1px solid",cursor:"pointer",
-                                borderColor:active?"#818cf8":"rgba(255,255,255,0.07)",
-                                background:active?"rgba(129,140,248,.2)":"rgba(255,255,255,0.03)",
-                                color:active?"#818cf8":"#94a3b8",fontWeight:active?700:400}}>
+                                borderColor:active?"#8B5CF6":"#EDEFF2",
+                                background:active?"rgba(139,92,246,.2)":"#F6F7F9",
+                                color:active?"#8B5CF6":"#64748B",fontWeight:active?700:400}}>
                               {active?"✓ ":""}{p}
                             </button>
                           );
@@ -11654,29 +11664,29 @@ function updateEx(ei, key, val) {
                     onChange={e=>updateEx(ei,"movementPurpose",e.target.value)}
                     placeholder="예: 햄스트링 릴리즈, 고관절 가동성 개선..."
                     style={{fontSize:16,padding:"6px 10px",borderRadius:6,width:"100%",boxSizing:"border-box",
-                      background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.2)",color:"#bbf7d0"}} />
+                      background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.2)",color:"#16A34A"}} />
                 </div>
               </div>
             )}
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
             <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
-              background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.12)"}} onFocus={()=>setActiveCardIdx(ei)}>
+              background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.12)"}} onFocus={()=>setActiveCardIdx(ei)}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-                <Mo c="#818cf8" s={8} style={{fontWeight:700,flexShrink:0}}>🎯 자극도</Mo>
-                {ex.stimRating && <Mo c="#a5b4fc" s={8}>{stimRatingLabel(ex.stimRating)}</Mo>}
-                <Mo c="#3a3a5a" s={7} style={{marginLeft:"auto",flexShrink:0}}>트레이너 전용</Mo>
+                <Mo c="#8B5CF6" s={8} style={{fontWeight:700,flexShrink:0}}>🎯 자극도</Mo>
+                {ex.stimRating && <Mo c="#8B5CF6" s={8}>{stimRatingLabel(ex.stimRating)}</Mo>}
+                <Mo c="#94A3B8" s={7} style={{marginLeft:"auto",flexShrink:0}}>트레이너 전용</Mo>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:4,marginBottom:6}}>
                 {STIM_RATING_OPTIONS.map(opt=>{
                   const active = Number(ex.stimRating)===opt.value;
-                  const cols={1:"#94a3b8",2:"#94a3b8",3:"#5EEAD4",4:"#22c55e",5:"#ef4444"};
+                  const cols={1:"#64748B",2:"#64748B",3:"#0F9488",4:"#22c55e",5:"#ef4444"};
                   const col=cols[opt.value];
                   return (
                     <button key={opt.value} onClick={()=>updateEx(ei,"stimRating",active?null:opt.value)}
                       style={{minHeight:30,borderRadius:6,border:"1px solid",fontSize:11,
-                        borderColor:active?col:"rgba(255,255,255,0.08)",
+                        borderColor:active?col:"#EDEFF2",
                         background:active?col+"22":"transparent",
-                        color:active?col:"#94a3b8",fontWeight:800,cursor:"pointer",padding:"0 4px"}}>
+                        color:active?col:"#64748B",fontWeight:800,cursor:"pointer",padding:"0 4px"}}>
                       {opt.label}
                     </button>
                   );
@@ -11684,17 +11694,17 @@ function updateEx(ei, key, val) {
               </div>
               <input value={ex.stimMemo||""} onChange={e=>updateEx(ei,"stimMemo",e.target.value)}
                 placeholder="대표 메모 · 왼쪽 어깨 불편 / 승모 개입 / 다음 수업 중량 증가 등"
-                style={{fontSize:13,padding:"6px 8px",color:"#c4b5fd",marginBottom:6}} />
+                style={{fontSize:13,padding:"6px 8px",color:"#0F172A",marginBottom:6}} />
               <div style={{marginBottom:6}}>
-                <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:4}}>다음 수업 추천</Mo>
+                <Mo c="#64748B" s={8} style={{display:"block",marginBottom:4}}>다음 수업 추천</Mo>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                   {NEXT_PLAN_OPTIONS.map(opt=>{
                     const active=ex.nextPlan===opt.value;
                     return <button key={opt.value} type="button" onClick={()=>updateEx(ei,"nextPlan",active?"":opt.value)}
                       style={{fontSize:10,padding:"4px 8px",borderRadius:999,border:"1px solid",cursor:"pointer",
-                        borderColor:active?"rgba(94,234,212,.55)":"rgba(255,255,255,.08)",
-                        background:active?"rgba(94,234,212,.14)":"rgba(255,255,255,.02)",
-                        color:active?"#5EEAD4":"#94a3b8",fontWeight:active?800:600}}>{opt.label}</button>;
+                        borderColor:active?"rgba(57,199,184,.55)":"#EDEFF2",
+                        background:active?"rgba(57,199,184,.14)":"#F6F7F9",
+                        color:active?"#0F9488":"#64748B",fontWeight:active?800:600}}>{opt.label}</button>;
                   })}
                 </div>
               </div>
@@ -11703,25 +11713,25 @@ function updateEx(ei, key, val) {
         );})}
         <div style={{display:"flex",gap:8,marginTop:10}}>
           <button onClick={() => setExercises(prev=>[...prev, mkEx()])}
-            style={{flex:1,padding:"9px 0",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:8,
-              background:"transparent",color:"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+            style={{flex:1,padding:"9px 0",border:"1px dashed #CBD5E1",borderRadius:8,
+              background:"transparent",color:"#64748B",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             + 마지막에 추가
           </button>
           <button onClick={() => setExercises(prev=>[mkEx(),...prev])}
-            style={{flex:1,padding:"9px 0",border:"1px dashed rgba(94,234,212,.3)",borderRadius:8,
-              background:"rgba(94,234,212,.05)",color:"#5EEAD4",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+            style={{flex:1,padding:"9px 0",border:"1px dashed rgba(57,199,184,.3)",borderRadius:8,
+              background:"rgba(57,199,184,.05)",color:"#0F9488",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             ↑ 맨 위에 추가
           </button>
         </div>
-        <div style={{marginTop:9,padding:"9px 13px",background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.2)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <Mo c="#94a3b8" s={9}>TOTAL VOLUME</Mo>
-          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#94a3b8"}}>kg</span></span>
+        <div style={{marginTop:9,padding:"9px 13px",background:"linear-gradient(135deg,rgba(57,199,184,.12),rgba(57,199,184,.04))",border:"1px solid rgba(57,199,184,.2)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <Mo c="#64748B" s={9}>TOTAL VOLUME</Mo>
+          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#0F9488"}}>{totalVol.toLocaleString()} <span style={{fontSize:10,fontWeight:400,color:"#64748B"}}>kg</span></span>
         </div>
         <PartVolBadges exercises={exercises} style={{marginTop:6}} />
         {/* 세트 수 (트레이너 전용) */}
         <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
           <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
-            background:"rgba(255,255,255,0.05)",color:"#94a3b8",fontWeight:600,flexShrink:0}}>
+            background:"#F1F3F6",color:"#64748B",fontWeight:600,flexShrink:0}}>
             총 {calcTotalSets(exercises)}세트
           </span>
           <PartSetBadges exercises={exercises} style={{marginTop:0}} />
@@ -11729,16 +11739,16 @@ function updateEx(ei, key, val) {
       </Card>
 
       {/* 대표님 전용 내부 메모 (회원 카드 미노출) */}
-      <Card style={{marginTop:9,border:"1px solid rgba(129,140,248,.15)",background:"rgba(129,140,248,.03)"}}>
+      <Card style={{marginTop:9,border:"1px solid rgba(139,92,246,.15)",background:"rgba(139,92,246,.03)"}}>
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7}}>
-          <Mo c="#818cf8" s={10} style={{fontWeight:700}}>🔒 내부 메모</Mo>
-          <Mo c="#3a3a5a" s={8}>(대표님 전용 · 회원 카드 미노출)</Mo>
+          <Mo c="#8B5CF6" s={10} style={{fontWeight:700}}>🔒 내부 메모</Mo>
+          <Mo c="#94A3B8" s={8}>(대표님 전용 · 회원 카드 미노출)</Mo>
         </div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:7}}>
           {["수면 부족","어깨 긴장↑","집중도 저하","호흡 빠름","회복 지연","자세 불안정","긴장도 높음","평소보다 좋음"].map(tag=>(
             <button key={tag} onClick={()=>setTrainerOnlyNote(n=>(n?n+", ":"")+tag)}
               style={{fontSize:9,padding:"2px 8px",borderRadius:4,cursor:"pointer",
-                border:"1px solid rgba(129,140,248,.2)",background:"rgba(129,140,248,.06)",color:"#a5b4fc"}}>
+                border:"1px solid rgba(139,92,246,.2)",background:"rgba(139,92,246,.06)",color:"#8B5CF6"}}>
               + {tag}
             </button>
           ))}
@@ -11746,11 +11756,11 @@ function updateEx(ei, key, val) {
         <textarea value={trainerOnlyNote} onChange={e=>setTrainerOnlyNote(e.target.value)}
           placeholder="대표님만 보이는 내부 메모..."
           style={{fontSize:14,padding:"8px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",
-            background:"rgba(129,140,248,.05)",border:"1px solid rgba(129,140,248,.2)",
-            color:"#c7d2fe",minHeight:60,resize:"vertical"}} />
+            background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.2)",
+            color:"#0F172A",minHeight:60,resize:"vertical"}} />
       </Card>
 
-      <Card title="추가 기록" style={{marginTop:11}}>
+      <Card title="추가 기록" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #EDEFF2"}} titleStyle={{color:"#0F172A",borderBottomColor:"#EDEFF2"}}>
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
           <TextArea label="스트레칭 / 마무리" value={stretchNotes}   onChange={setStretchNotes}   placeholder="마무리 스트레칭" />
           <TextArea label="다음 수업 계획"    value={nextPlan}        onChange={setNextPlan}        placeholder="다음 수업 집중 포인트" />
@@ -11758,22 +11768,22 @@ function updateEx(ei, key, val) {
             value={trainerComment} onChange={setTrainerComment} placeholder="총평 및 응원 메시지" />
           {sessionType==="2:1" && member2 && (
             <div style={{padding:"8px 10px",borderRadius:7,
-              background:"rgba(162,155,254,.05)",border:"1px solid rgba(162,155,254,.18)"}}>
-              <Mo c="#a29bfe" s={9} style={{display:"block",fontWeight:700,marginBottom:5}}>
+              background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.18)"}}>
+              <Mo c="#8B5CF6" s={9} style={{display:"block",fontWeight:700,marginBottom:5}}>
                 💬 {member2.name} 개별 피드백
               </Mo>
               <textarea value={trainerComment2} onChange={e=>setTrainerComment2(e.target.value)}
                 placeholder={`${member2.name}에게 전달할 총평 및 응원 메시지`}
                 style={{width:"100%",boxSizing:"border-box",minHeight:64,padding:"8px 10px",
                   borderRadius:6,fontSize:11,lineHeight:1.6,resize:"vertical",
-                  border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#ddddf0"}} />
+                  border:"1px solid rgba(139,92,246,.2)",background:"#FFFFFF",color:"#0F172A"}} />
             </div>
           )}
           <Field    label="참고 영상 (선택)"  value={refVideo}        onChange={setRefVideo}        placeholder="https://youtube.com/..." />
         </div>
       </Card>
 
-      <Card title="식단 & 체중 (선택)" style={{marginTop:11}}>
+      <Card title="식단 & 체중 (선택)" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #EDEFF2"}} titleStyle={{color:"#0F172A",borderBottomColor:"#EDEFF2"}}>
         <div className="diet-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
           <Field label="체중 (kg)"   value={bodyWeight} onChange={setBodyWeight} placeholder="75.5" />
           <Field label="섭취 칼로리" value={calories}   onChange={setCalories}   placeholder="2200" />
@@ -11784,7 +11794,7 @@ function updateEx(ei, key, val) {
       </Card>
 
       <div style={{marginTop:14,paddingBottom:32}}>
-        <Btn full onClick={handleSave}>{isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "관리자용 저장 →" : "관리자용 저장 →")}</Btn>
+        <Btn full onClick={handleSave} style={{background:"#39C7B8",color:"#fff"}}>{isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "관리자용 저장 →" : "관리자용 저장 →")}</Btn>
       </div>
 
       <div ref={pRef} style={{display:"none"}}>
@@ -20925,21 +20935,21 @@ function AssessmentAnalysisView({ records=[], member }) {
   );
 }
 
-function SH({ title, sub, right }) {
+function SH({ title, sub, right, titleColor, subColor }) {
   return (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:8,flexWrap:"wrap"}}>
       <div>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:"#fff",letterSpacing:"-0.5px"}}>{title}</div>
-        {sub && <Mo c="#94a3b8" s={9} style={{marginTop:2}}>{sub}</Mo>}
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:19,color:titleColor||"#fff",letterSpacing:"-0.5px"}}>{title}</div>
+        {sub && <Mo c={subColor||"#94a3b8"} s={9} style={{marginTop:2}}>{sub}</Mo>}
       </div>
       {right && <div style={{flexShrink:0,marginLeft:8}}>{right}</div>}
     </div>
   );
 }
-function Card({ title, children, style }) {
+function Card({ title, children, style, titleStyle }) {
   return (
     <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,overflow:"hidden",...(style||{})}}>
-      {title && <div style={{padding:"8px 13px",borderBottom:"1px solid rgba(255,255,255,0.08)",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:11,color:"#ddddf0"}}>{title}</div>}
+      {title && <div style={{padding:"8px 13px",borderBottom:"1px solid rgba(255,255,255,0.08)",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:11,color:"#ddddf0",...(titleStyle||{})}}>{title}</div>}
       <div style={{padding:12}}>{children}</div>
     </div>
   );

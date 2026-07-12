@@ -685,6 +685,8 @@ export async function saveSessionMemberFeedback(memberId, sessionId, feedback) {
     payload.sorenessBodyPart = sorenessBodyParts[0] || "";
   }
   if (feedback.rpe !== undefined) payload.rpe = Number(feedback.rpe);
+  // 통증 성격(일반 근육통/움직일 때 불편함/날카로운 통증) — 회원앱 수업 피드백 카드에서 선택. 근육통 저장 시 함께 갱신된다.
+  if (feedback.sorenessNature !== undefined) payload.sorenessNature = feedback.sorenessNature || "";
   if (feedback.memo !== undefined) payload.memo = feedback.memo || "";
   await setDoc(ref, clean(payload), { merge: true });
 

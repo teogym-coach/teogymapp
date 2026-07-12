@@ -1393,15 +1393,16 @@ function buildSessionPrInfo(sessions=[]){
 // 수업 1회 리포트 요약 — Apple Fitness식 핵심 숫자(종목/볼륨/최고 중량/RPE/근육통). 전부 세션 데이터 계산만.
 function buildSessionReportStats(s={}){
   const exs=(s.exercises||[]).filter(e=>e.name);
-  let volume=0, top=0;
+  let volume=0, top=0, totalSets=0;
   exs.forEach(e=>getFilledSets(e).forEach(st=>{
+    totalSets+=1;
     const w=Number(st.weight)||0, r=Number(st.reps)||0;
     if(w>0&&r>0) volume+=w*r;
     if(w>top) top=w;
   }));
   const fb=s.memberFeedback||{};
   return {
-    exCount:exs.length, volume:Math.round(volume), top,
+    exCount:exs.length, volume:Math.round(volume), top, totalSets,
     rpe:Number.isFinite(Number(fb.rpe))?Number(fb.rpe):null,
     soreness:fb.sorenessLevel&&fb.sorenessLevel!=="없음"?`${formatSorenessBodyParts(fb)} ${fb.sorenessLevel}`:null,
   };
@@ -1915,36 +1916,100 @@ function MemberHome(p){
 }
 function HomeHealthStatus({checkins=[],body,nutrition,setTab}){const today=getKoreaDateString(); const todayCheck=(checkins||[]).find(c=>(c.date||c.id)===today)||{}; const hasWeight=getBodyWeightRecords(body).some(r=>r.date===today); const hasKcal=getKcalLogs(nutrition).some(r=>r.date===today); const done=hasWeight||hasKcal||todayCheck.steps||todayCheck.condition||todayCheck.painPart||todayCheck.painMemo; return <section className={`home-health-status ${done?"done":""}`}><div><span>오늘 건강기록</span><b>{done?"입력 완료":"오늘 건강기록을 입력해주세요."}</b></div><button type="button" onClick={()=>setTab?.("health")}>{done?"기록 보기":"입력"}</button></section>}
 // 수업 탭 V2 — 세그먼트(수업일지 | 캘린더). 수업일지 로직은 MemberJournal로 그대로 이동(기능 동일).
+// ── 수업 탭 리디자인(sj-*) — 인라인 Lucide 스타일 선형 아이콘(이모지 대체, 의존성 추가 없음) ──
+function SjIcon({paths,size=16,strokeWidth=2,className}){return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths.map((p,i)=><path key={i} d={p}/>)}</svg>;}
+const SJ_PATHS={
+  search:["M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z","M21 21l-4.35-4.35"],
+  x:["M18 6 6 18","m6 6 12 12"],
+  chevronDown:["m6 9 6 6 6-6"],
+  chevronUp:["m18 15-6-6-6 6"],
+  activity:["M22 12h-4l-3 9L9 3l-3 9H2"],
+  flame:["M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"],
+  message:["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"],
+  alert:["M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z","M12 9v4","M12 17h.01"],
+  check:["M22 11.08V12a10 10 0 1 1-5.93-9.14","m22 4-10 10.01-3-3"],
+  pencil:["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"],
+};
+const KOREAN_DAY_NAMES=["일","월","화","수","목","금","토"];
+// "2026-07-04" → "7월 4일 토요일" — 회원이 읽기 쉬운 날짜 표기(시스템 날짜 형식 대체)
+function formatKoreanDateLabel(dateStr){const s=String(dateStr||"").slice(0,10); const d=new Date(`${s}T12:00:00`); if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||isNaN(d)) return String(dateStr||""); return `${d.getMonth()+1}월 ${d.getDate()}일 ${KOREAN_DAY_NAMES[d.getDay()]}요일`;}
+// RPE 숫자를 몰라도 고를 수 있게 하는 쉬운 설명(1~2 매우 가벼움 … 10 한계)
+function rpeDescription(v){const n=Number(v); if(!Number.isFinite(n))return ""; if(n<=2)return "매우 가벼웠어요"; if(n<=4)return "가벼웠어요"; if(n<=6)return "적당했어요"; if(n<=8)return "힘들었어요"; if(n<=9)return "매우 힘들었어요"; return "한계였어요";}
 function MemberWorkout(p){
   const view=p.workoutView||"journal";
+  const doneCount=(p.sessions||[]).length;
   return <>
-    <h1>수업</h1>
-    <p className="sub">{view==="journal"?"대표님이 공개한 수업 결과 리포트입니다.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
+    <div className="sj-page-head">
+      <h1 className="sj-page-title">수업</h1>
+      {doneCount>0&&<span className="sj-page-meta">{doneCount}회 진행{p.remaining!=="-"&&p.remaining!=null?` · ${p.remaining}회 남음`:""}</span>}
+    </div>
+    <p className="sub sj-page-sub">{view==="journal"?"대표님과 진행한 운동 기록을 확인해보세요.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
     <MemberSegment ariaLabel="수업 보기 전환" options={[["journal","수업일지"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
     {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
   </>;
-}
-// 수업 1회 리포트 헤더 — Apple Fitness식 핵심 숫자 요약(값이 있는 항목만 표시)
-function SessionReportStatsRow({s,isPr}){
-  const st=buildSessionReportStats(s);
-  const chips=[
-    ["종목",`${st.exCount}개`],
-    st.volume>0&&["총 볼륨",`${st.volume.toLocaleString()}kg`],
-    st.top>0&&["최고 중량",`${st.top}kg`],
-    st.rpe!=null&&["RPE",String(st.rpe)],
-  ].filter(Boolean);
-  if(!chips.length&&!isPr) return null;
-  return <div className="mv2-session-stats">
-    {isPr&&<em className="mv2-pr-badge">★ PR</em>}
-    {chips.map(([l,v])=><span key={l}>{l} <b>{v}</b></span>)}
-  </div>;
 }
 function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState(journalFocusId||"__first__"); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]);
   // 캘린더 날짜 상세에서 "수업일지 보기"로 진입한 경우 — 해당 수업을 펼치고 읽음 처리
   useEffect(()=>{ if(journalFocusId){ setOpenId(journalFocusId); setShowAll(true); markSessionsAsRead?.([journalFocusId]); setJournalFocusId?.(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[journalFocusId]);
-  const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s,i)=>!!lq||(openId==="__first__"&&i===0)||openId===s.id; const toggleSess=(s,i)=>{setOpenId(prev=>(isExp(s,i)&&!lq)?null:s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);}; useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);},[]);  return <><div className="ex-search-wrap"><input type="search" className="ex-search" placeholder="🔍 운동 검색" value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")}>✕</button>}</div>{displayed.length?displayed.map((s,i)=>{const title=`${s.date} · ${formatTypes(s.selectedTypes||s.type)||'운동'}`; const expanded=isExp(s,i); const dateFmt=String(s.date||"").slice(5).replace(/-/g,"."); const typeName=formatTypes(s.selectedTypes||s.type)||'운동'; const exCount=(s.exercises||[]).filter(e=>e.name).length; if(!expanded)return <button key={s.id} type="button" className="session-collapsed-card" onClick={()=>toggleSess(s,i)}><span className="sess-col-left"><span className="sess-col-date">{dateFmt}</span><span className="sess-col-dot">·</span><span className="sess-col-type">{typeName}</span></span><span className="sess-col-meta">{exCount}개</span><span className="sess-col-arrow">▼</span></button>; return <MCard key={s.id} title={`${s.date} · ${typeName}`}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4}}><button type="button" onClick={()=>toggleSess(s,i)} style={{border:"1px solid #E8ECF1",background:"#F6F7F9",borderRadius:10,padding:"4px 10px",fontSize:12,fontWeight:900,color:"#8B949E",cursor:"pointer"}}>접기 ▲</button></div><SessionReportStatsRow s={s} isPr={prInfo.prSessionIds.has(s.id)}/><SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/></MCard>;}):(lq?<p className="notice soft">검색 결과가 없습니다.</p>:null)}{!lq&&!showAll&&searched.length>5&&<button type="button" className="ghost" style={{marginTop:8}} onClick={()=>setShowAll(true)}>전체 수업 보기 ({searched.length}회)</button>}</>}
+  const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);
+  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s,i)=>!!lq||(openId==="__first__"&&i===0)||openId===s.id; const toggleSess=(s,i)=>{setOpenId(prev=>(isExp(s,i)&&!lq)?null:s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);};
+  useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+  const latestId=reversed[0]?.id;
+  // 펼친 수업 카드 — 최근 수업이든 이전 수업이든 같은 구성(날짜/부위/요약/운동 아코디언/피드백 카드)
+  const renderExpanded=(s,i)=>{
+    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const st=buildSessionReportStats(s); const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId;
+    return <section key={s.id} className="sj-session-card">
+      <header className="sj-sess-head">
+        <div className="sj-sess-title">
+          {(isLatest||isPr)&&<span className="sj-badges">{isLatest&&<em className="sj-badge latest">최근 수업</em>}{isPr&&<em className="sj-badge pr">★ PR</em>}</span>}
+          <h2>{formatKoreanDateLabel(s.date)}</h2>
+          <p>{typeName}</p>
+        </div>
+        <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
+      </header>
+      {st.exCount>0&&<div className="sj-sess-summary">
+        <span className="sj-sum-count">{st.exCount}종목{st.totalSets>0?` · ${st.totalSets}세트`:""}</span>
+        {(st.volume>0||st.top>0)&&<span className="sj-sum-nums">{st.volume>0&&<>총 운동량 <b>{st.volume.toLocaleString()}kg</b></>}{st.volume>0&&st.top>0&&<i className="sj-sum-dot">·</i>}{st.top>0&&<>최고 중량 <b>{st.top}kg</b></>}</span>}
+      </div>}
+      <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/>
+    </section>;
+  };
+  // 접힌 이전 수업 카드 — 날짜/부위/종목 수/대표 운동/RPE 기록 여부로 내용을 예측할 수 있게
+  const renderCollapsed=(s,i)=>{
+    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{}; const firstEx=exs.find(e=>getMemberExerciseSection(e)==="웨이트 트레이닝")?.name||exs[0]?.name||"";
+    return <button key={s.id} type="button" className="sj-prev-card" onClick={()=>toggleSess(s,i)}>
+      <span className="sj-prev-main">
+        <b>{formatKoreanDateLabel(s.date)}</b>
+        <span><i className="sj-part">{typeName}</i> · {exs.length}종목</span>
+        {firstEx&&<small>{firstEx}{exs.length>1?` 외 ${exs.length-1}개`:""}</small>}
+      </span>
+      <span className="sj-prev-side">
+        {fb.rpe!=null?<em className="sj-rpe-chip">RPE {fb.rpe}</em>:<em className="sj-rpe-chip empty">기록 전</em>}
+        <i className="sj-chev"><SjIcon paths={SJ_PATHS.chevronDown} size={15}/></i>
+      </span>
+    </button>;
+  };
+  const heroItems=[]; const prevItems=[];
+  displayed.forEach((s,i)=>{ const node=isExp(s,i)?renderExpanded(s,i):renderCollapsed(s,i); if(!lq&&i===0)heroItems.push(node); else prevItems.push(node); });
+  return <>
+    <div className="ex-search-wrap sj-search-wrap">
+      <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
+      <input type="search" className="ex-search sj-search" placeholder="운동 이름으로 기록 찾기" value={q} onChange={e=>setQ(e.target.value)} aria-label="운동 검색"/>
+      {q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")} aria-label="검색어 지우기"><SjIcon paths={SJ_PATHS.x} size={16}/></button>}
+    </div>
+    {displayed.length?<>
+      {heroItems}
+      {prevItems.length>0&&!lq&&<h2 className="sj-section-label">이전 수업</h2>}
+      {prevItems.length>0&&<div className="sj-prev-list">{prevItems}</div>}
+    </>:(lq
+      ?<div className="sj-empty"><b>"{q}" 운동이 포함된 수업이 없어요.</b><span>다른 운동 이름으로 검색해보세요.</span></div>
+      :<div className="sj-empty"><b>아직 공개된 수업 기록이 없어요.</b><span>수업이 공개되면 여기에서 확인할 수 있어요.</span></div>)}
+    {!lq&&!showAll&&searched.length>5&&<button type="button" className="sj-show-all" onClick={()=>setShowAll(true)}>전체 수업 기록 보기<small>총 {searched.length}회</small></button>}
+  </>}
 // ════════════════════════════════════════════════════
 // 건강 탭 대시보드 — 동기부여 지표 계산 (기존 데이터만 사용, 신규 저장 없음)
 // ════════════════════════════════════════════════════
@@ -2241,83 +2306,110 @@ function painKey(r){return `${r.side||"중앙/해당 없음"} ${r.part||"기타"
 function getPainRecords(checkins=[]){return [...checkins].sort((a,b)=>String(a.date||a.id||"").localeCompare(String(b.date||b.id||""))).map(c=>({date:c.date||c.id,part:c.painPart||c.painRecord?.part,side:c.painSide||c.painRecord?.side,vas:Number(c.painVas??c.painRecord?.vas),memo:c.painMemo||c.painRecord?.memo})).filter(r=>r.part&&Number.isFinite(r.vas));}
 function PainInput({form,setForm}){const noPain=form.painPart==="없음"; const updatePainPart=v=>setForm({...form,painPart:v,painSide:v==="없음"?"해당 없음":form.painSide,painVas:v==="없음"?0:form.painVas}); return <div className="pain-input"><SelectLine label="통증 부위" value={form.painPart} opts={PAIN_PARTS} onChange={updatePainPart}/><div className="form-line"><label>좌/우</label><div className="choice-buttons">{PAIN_SIDES.map(x=><button type="button" key={x} className={(noPain?"해당 없음":form.painSide)===x?"active":""} onClick={()=>setForm({...form,painSide:x})} disabled={noPain&&x!=="해당 없음"}>{x}</button>)}</div></div><div className="form-line"><label>VAS 0~10 <small>0 통증 없음 · 10 가장 심함</small></label><div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(noPain?0:form.painVas)===i?"active":""} onClick={()=>setForm({...form,painVas:i})} disabled={noPain&&i!==0}>{i}</button>)}</div></div><InputLine label="통증 메모" value={form.painMemo} onChange={v=>setForm({...form,painMemo:v})}/></div>}
 function PainTrend({checkins=[]}){const rows=getPainRecords(checkins); const groups=[...rows.reduce((m,r)=>m.set(painKey(r),[...(m.get(painKey(r))||[]),r]),new Map()).entries()].filter(([,v])=>v.length>=2).slice(-4); return <MCard title="통증 변화">{groups.length?groups.map(([k,v])=>{const last=v.at(-1), prev=v.at(-2); const state=last.vas<prev.vas?"감소하고 있습니다.":last.vas>prev.vas?"증가했습니다. 무리한 운동은 피해주세요.":"유지되고 있습니다. 다음 수업 때 대표에게 알려주세요."; return <div className="pain-trend" key={k}><b>{k} 통증 변화</b><p>{v.slice(-7).map(x=>x.vas).join(" → ")}</p><em>최근 {k} 통증이 {state}</em>{last.memo&&<small>{last.date} 메모: {last.memo}</small>}</div>}):<p className="notice soft">통증 기록이 2개 이상 쌓이면 좌우별 변화가 표시됩니다.</p>}</MCard>}
-const SORENESS_LEVELS=["없음","약함","보통","강함","매우 강함"];
-const SORENESS_BODY_PARTS=["가슴","등","하체","어깨","이두","삼두","코어","기타"];
+const SORENESS_LEVELS=["없음","약간","보통","심함"];
+const SORENESS_BODY_PARTS=["목","어깨","가슴","등","허리","팔","엉덩이","허벅지 앞","허벅지 뒤","종아리","기타"];
+// 통증 성격 — 일반 근육통과 관절/날카로운 통증을 구분. 위험 신호 선택 시 대표에게 알리라는 안내를 띄운다.
+const SORENESS_NATURES=["일반적인 근육통","움직일 때 불편함","날카롭거나 찌르는 통증"];
+const SORENESS_RISK_NATURES=["움직일 때 불편함","날카롭거나 찌르는 통증"];
 function memberFeedbackParts(existing={}){const raw=Array.isArray(existing.sorenessBodyParts)?existing.sorenessBodyParts:(existing.sorenessBodyPart?[existing.sorenessBodyPart]:[]); return [...new Set(raw.map(v=>String(v||"").trim()).filter(Boolean))];}
 function formatSorenessBodyParts(feedback={}){const parts=memberFeedbackParts(feedback); return parts.length?parts.join("/"):(feedback.sorenessBodyPart||"-");}
 function MemberFeedbackForm({s,onSave}){
   const existing=s.memberFeedback||{};
   const sorenessBodyPartsKey=JSON.stringify(existing.sorenessBodyParts||[]);
-  const [soreness,setSoreness]=useState({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing)});
-  const [rpe,setRpe]=useState(Number.isFinite(Number(existing.rpe))?Number(existing.rpe):5);
+  const initialRpe=()=>{const n=Number(existing.rpe); return Number.isFinite(n)?Math.min(10,Math.max(1,n)):5;};
+  const [soreness,setSoreness]=useState({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
+  const [rpe,setRpe]=useState(initialRpe);
   const [memo,setMemo]=useState(existing.memo||"");
-  // 근육통/RPE/메모는 서로 독립된 섹션으로 각자 저장 버튼을 가진다 — 한 번에 저장/덮어쓰기 되지 않는다.
-  const [openSection,setOpenSection]=useState(null); // "soreness" | "rpe" | "memo" | null
-  const [savingSection,setSavingSection]=useState(null); // 저장 중 중복 클릭 방지
+  const [open,setOpen]=useState(false);
+  const [saving,setSaving]=useState(false); // 저장 중 중복 클릭 방지
+  // 회원이 실제로 건드린 항목만 저장 payload에 담는다 — 안 건드린 항목은 payload에 없어 기존 저장값이 유지된다(덮어쓰기 방지).
+  const [touched,setTouched]=useState({});
+  const mark=k=>setTouched(t=>t[k]?t:{...t,[k]:true});
   useEffect(()=>{
-    setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing)});
-    setRpe(Number.isFinite(Number(existing.rpe))?Number(existing.rpe):5);
+    setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
+    setRpe(initialRpe());
     setMemo(existing.memo||"");
-    setOpenSection(null);
-  },[s.id,existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.rpe,existing.memo]);
-  const togglePart=part=>setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));
-  const toggleSection=key=>{setOpenSection(v=>v===key?null:key); scrollMemberAppToTop();};
-  const saveSection=async(key,payload)=>{
-    if(savingSection)return;
-    setSavingSection(key);
-    try{ await onSave?.(s.id,payload); setOpenSection(null); }
-    finally{ setSavingSection(null); }
-  };
+    setOpen(false); setTouched({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[s.id,existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.sorenessNature,existing.rpe,existing.memo]);
+  const togglePart=part=>{mark("soreness"); setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));};
   const hasSoreness=!!existing.sorenessLevel;
   const hasRpe=existing.rpe!=null;
   const hasMemo=!!existing.memo;
-  return <>
-    {/* 근육통 + RPE — 가로 2분할 소형 카드(요약 행 높이를 줄여 운동종목 아래 공간을 절약). 펼치면 편집 영역은 그대로 전체 너비 */}
-    <div className="member-feedback-form compact-feedback feedback-duo">
-      <div className="feedback-duo-row">
-        <div className="feedback-duo-col">
-          <div className="feedback-duo-summary">
-            <b>💪 근육통</b>
-            <span>{hasSoreness?`${formatSorenessBodyParts(existing)} · ${existing.sorenessLevel}`:"미입력"}</span>
-          </div>
-          <button type="button" className="ghost compact feedback-duo-btn" onClick={()=>toggleSection("soreness")}>{openSection==="soreness"?"닫기":(hasSoreness?"수정":"기록")}</button>
-        </div>
-        <div className="feedback-duo-divider"/>
-        <div className="feedback-duo-col">
-          <div className="feedback-duo-summary">
-            <b>😊 RPE</b>
-            <span>{hasRpe?existing.rpe:"미입력"}</span>
-          </div>
-          <button type="button" className="ghost compact feedback-duo-btn" onClick={()=>toggleSection("rpe")}>{openSection==="rpe"?"닫기":(hasRpe?"수정":"기록")}</button>
+  const hasAny=hasSoreness||hasRpe||hasMemo;
+  const cancel=()=>{
+    setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
+    setRpe(initialRpe()); setMemo(existing.memo||""); setTouched({}); setOpen(false);
+  };
+  const save=async()=>{
+    if(saving)return;
+    const payload={};
+    if(touched.rpe&&(!hasRpe||Number(existing.rpe)!==Number(rpe))) payload.rpe=Number(rpe);
+    const level=soreness.level||"없음";
+    const parts=level==="없음"?[]:soreness.parts;
+    const nature=level==="없음"?"":(soreness.nature||"");
+    const sorenessChanged=(existing.sorenessLevel||"")!==level||JSON.stringify(memberFeedbackParts(existing))!==JSON.stringify(parts)||(existing.sorenessNature||"")!==nature;
+    if(touched.soreness&&sorenessChanged){payload.sorenessLevel=level; payload.sorenessBodyParts=parts; payload.sorenessNature=nature;}
+    if(touched.memo&&memo.trim()!==(existing.memo||"").trim()) payload.memo=memo.trim();
+    if(!Object.keys(payload).length){cancel(); return;}
+    setSaving(true);
+    try{ await onSave?.(s.id,payload); setOpen(false); setTouched({}); }
+    finally{ setSaving(false); }
+  };
+  // 저장 완료 요약 — "미입력" 대신 기록한 내용을 한 줄로 보여준다
+  const summaryBits=[];
+  if(hasRpe) summaryBits.push(`RPE ${existing.rpe}`);
+  if(hasSoreness) summaryBits.push(existing.sorenessLevel==="없음"?"근육통 없음":`${formatSorenessBodyParts(existing)} 근육통 ${existing.sorenessLevel}`);
+  if(hasMemo) summaryBits.push("메모 남김");
+  const riskSelected=SORENESS_RISK_NATURES.includes(soreness.nature)&&soreness.level!=="없음";
+  const riskSaved=SORENESS_RISK_NATURES.includes(existing.sorenessNature||"")&&existing.sorenessLevel&&existing.sorenessLevel!=="없음";
+  return <div className="sj-feedback-card">
+    <div className="sj-fb-head">
+      <div>
+        <b>오늘 수업은 어땠나요?</b>
+        {!hasAny&&!open&&<span>수업 후 상태를 기록하면 다음 수업에 반영됩니다.</span>}
+      </div>
+      {!open&&<button type="button" className="sj-fb-toggle" onClick={()=>setOpen(true)}>{hasAny?<><SjIcon paths={SJ_PATHS.pencil} size={12}/> 수정</>:"기록하기"}</button>}
+    </div>
+    {!open&&(hasAny
+      ?<div className="sj-fb-done">
+        <i className="sj-fb-done-icon"><SjIcon paths={SJ_PATHS.check} size={17}/></i>
+        <div>
+          <b>오늘의 피드백을 기록했어요.</b>
+          {summaryBits.length>0&&<span>{summaryBits.join(" · ")}</span>}
+          {hasMemo&&<small>"{existing.memo}"</small>}
+          {riskSaved&&<em className="sj-fb-warning-inline"><SjIcon paths={SJ_PATHS.alert} size={13}/> 다음 수업 전 대표님께 꼭 알려주세요.</em>}
         </div>
       </div>
-      {openSection==="soreness"&&<div className="feedback-edit">
-        <div className="form-line"><label>근육통 부위 <small>복수 선택 후 강도를 선택해주세요.</small></label>
-          <div className="choice-buttons">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
-        </div>
-        <SelectLine label="근육통 세기" value={soreness.level} opts={SORENESS_LEVELS} onChange={v=>setSoreness(prev=>({...prev,level:v}))}/>
-        <button className="primary compact" disabled={!!savingSection} onClick={()=>saveSection("soreness",{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts})}>{savingSection==="soreness"?"저장 중...":"저장"}</button>
-      </div>}
-      {openSection==="rpe"&&<div className="feedback-edit">
-        <div className="form-line"><label>RPE <details><summary>RPE란?</summary><small>운동이 얼마나 힘들게 느껴졌는지 0~10점으로 표시합니다. 0은 매우 쉬움, 10은 더 반복하기 어려움입니다.</small></details></label>
-          <div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(rpe)===i?"active":""} onClick={()=>setRpe(i)}>{i}</button>)}</div>
-        </div>
-        <button className="primary compact" disabled={!!savingSection} onClick={()=>saveSection("rpe",{rpe})}>{savingSection==="rpe"?"저장 중...":"저장"}</button>
-      </div>}
-    </div>
-    <div className="member-feedback-form compact-feedback">
-      <div className="feedback-summary">
-        <div><b>📝 메모</b><span className={hasMemo?"feedback-compact-line":""}>{hasMemo?existing.memo:"미입력"}</span></div>
-        <button type="button" className="ghost compact" onClick={()=>toggleSection("memo")}>{openSection==="memo"?"닫기":(hasMemo?"수정":"기록하기")}</button>
+      :<p className="sj-fb-empty">수업 후 상태를 기록해주세요.</p>)}
+    {open&&<div className="sj-fb-edit">
+      <div className="sj-fb-section">
+        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>
+        <div className="sj-rpe-display"><b>RPE {rpe}</b><span>{rpeDescription(rpe)}</span></div>
+        <input type="range" className="sj-rpe-slider" min="1" max="10" step="1" value={rpe} onChange={e=>{setRpe(Number(e.target.value)); mark("rpe");}} aria-label="운동 강도 RPE 1에서 10"/>
+        <div className="sj-rpe-scale"><span>1~2 매우 가벼움</span><span>5~6 적당함</span><span>10 한계</span></div>
       </div>
-      {openSection==="memo"&&<div className="feedback-edit">
-        <div className="form-line"><label>대표님께 전달할 메모 <small>이 수업일지 카드와 관리자 회원앱 소통에 표시됩니다.</small></label>
-          <textarea value={memo} onChange={e=>setMemo(e.target.value)}/>
-        </div>
-        <button className="primary compact" disabled={!!savingSection} onClick={()=>saveSection("memo",{memo})}>{savingSection==="memo"?"저장 중...":"저장"}</button>
-      </div>}
-    </div>
-  </>;
+      <div className="sj-fb-section">
+        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 근육통</label>
+        <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>{mark("soreness"); setSoreness(prev=>({...prev,level:lv}));}}>{lv}</button>)}</div>
+        {soreness.level!=="없음"&&<>
+          <span className="sj-fb-sublabel">아픈 부위 (복수 선택 가능)</span>
+          <div className="sj-chip-row">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
+          <span className="sj-fb-sublabel">어떤 느낌인가요?</span>
+          <div className="sj-chip-row">{SORENESS_NATURES.map(n=><button type="button" key={n} className={soreness.nature===n?"active":""} onClick={()=>{mark("soreness"); setSoreness(prev=>({...prev,nature:prev.nature===n?"":n}));}}>{n}</button>)}</div>
+          {riskSelected&&<p className="sj-fb-warning"><SjIcon paths={SJ_PATHS.alert} size={15}/> 다음 수업 전 대표님께 꼭 알려주세요.</p>}
+        </>}
+      </div>
+      <div className="sj-fb-section">
+        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.message} size={14}/> 메모 <small>대표님께 함께 전달됩니다</small></label>
+        <textarea value={memo} onChange={e=>{setMemo(e.target.value); mark("memo");}} placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."/>
+      </div>
+      <div className="sj-fb-actions">
+        <button type="button" className="sj-fb-cancel" disabled={saving} onClick={cancel}>닫기</button>
+        <button type="button" className="sj-fb-save" disabled={saving} onClick={save}>{saving?"저장 중...":"기록 저장"}</button>
+      </div>
+    </div>}
+  </div>;
 }
 const ANALYSIS_PERIODS=[{key:"1m",label:"1개월",days:30},{key:"3m",label:"3개월",days:90},{key:"6m",label:"6개월",days:180},{key:"1y",label:"1년",days:365},{key:"all",label:"전체",days:null}];
 function kgText(v){return Number.isFinite(Number(v))?`${Number(v).toFixed(1)}kg`:"-";}
@@ -4035,9 +4127,56 @@ function EditableInfo({editing,l,children}){return editing?<div className="info 
 function getMemberExerciseSection(ex){const text=[ex.section,ex.category,ex.type,ex.exerciseType,ex.movementPurpose,ex.funcCategory,ex.muscleTop,ex.name].map(v=>String(v||"").toLowerCase()).join(" "); if(/warm|워밍|준비운동|오픈북|월 슬라이드|호흡 리셋|conditioning|컨디셔닝|correct|교정|움직임교정|조직이완|가동성|호흡|밸런스|스트레칭|stretch|모빌리티|mobility|안정화|활성화|릴리즈/.test(text)||isFuncEx(ex))return "움직임 준비"; return "웨이트 트레이닝";}
 function formatMemberSetDose(st){const parts=[]; const w=toPositiveNumber(st.weight); const r=toPositiveNumber(st.reps); const rawD=st.durationSec??st.duration??st.time??st.sec??st.seconds; const d=toPositiveNumber(rawD); if(w)parts.push(`${w}kg`); if(r)parts.push(`${r}회`); if(d)parts.push(d>=60&&d%60===0?`${d/60}분`:`${d}초`); return parts.join(" × ")||"";}
 function formatAssistExerciseDose(ex){const valid=(ex.sets||[]).map(formatMemberSetDose).filter(Boolean); if(!valid.length)return ""; if(valid.length===1)return valid[0]; const unique=[...new Set(valid)]; return unique.length===1?`${valid.length}세트 · ${unique[0]}`:valid.map((v,i)=>`${i+1}세트 · ${v}`).join(" · ");}
-function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){const open=openKeys.has(exKey); return <div className={weight?"exercise-report":"assist-exercise-report"}><button type="button" className="ex-accordion-header" onClick={()=>toggleOpen(exKey)}><b>{e.name||e.movementPurpose||"운동"}</b><span className="ex-accordion-chevron">{open?"▲":"▼"}</span></button>{open&&<div className="ex-accordion-body">{weight?<div className="set-table">{(e.sets||[]).map((x,j)=>{const w=toPositiveNumber(x.weight); const r=toPositiveNumber(x.reps); const rawD=x.durationSec??x.duration??x.time??x.sec??x.seconds; const d=toPositiveNumber(rawD); if(!w&&!r&&!d)return null; return <span key={j}><strong>{j+1}세트</strong>{w?<i>{w}kg</i>:null}{r?<i>{r}회</i>:null}{!r&&d?<i>{d>=60&&d%60===0?`${d/60}분`:`${d}초`}</i>:null}</span>})}</div>:<p>{formatAssistExerciseDose(e)}</p>}{e.feedback&&<em>대표 코멘트: {e.feedback}</em>}{e.stimRating&&<em>자극도: {stimRatingLabel(e.stimRating)}</em>}{e.stimMemo&&<em>대표 메모: {e.stimMemo}</em>}{e.memo&&<em>{e.memo}</em>}</div>}</div>;}
-function ExerciseReportSection({title,items,weight=false,sessionId,openKeys,toggleOpen}){if(!items.length)return null; return <section className={weight?"exercise-report-section weight":"exercise-report-section assist"}><h3>{title}</h3>{items.map((e,i)=><ExerciseAccordionRow key={`${title}-${e.name||i}-${i}`} e={e} weight={weight} exKey={`${sessionId}-${title}-${e.name||i}-${i}`} openKeys={openKeys} toggleOpen={toggleOpen}/>)}</section>}
-function SessionMini({s,exFilter,openKeys,toggleOpen}){const groups={"움직임 준비":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>groups[getMemberExerciseSection(e)]?.push(e)); const filterItems=items=>exFilter?items.filter(e=>(e.name||"").toLowerCase().includes(exFilter)):items; return <div className="session-mini"><ExerciseReportSection title="움직임 준비" items={filterItems(groups["움직임 준비"])} sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/><ExerciseReportSection title="웨이트 트레이닝" items={filterItems(groups["웨이트 트레이닝"])} weight sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
+// 세트 시간 표기 — 60초 단위는 분으로(90초→90초, 120초→2분)
+function formatSetDurationLabel(d){return d>=60&&d%60===0?`${d/60}분`:`${d}초`;}
+function getSetDurationValue(x){return toPositiveNumber(x.durationSec??x.duration??x.time??x.sec??x.seconds);}
+// 접힌 아코디언의 대표 세트 정보 — 최고 중량 세트 기준 "20kg · 12회 · 3세트"
+function summarizeTopSet(e){
+  const sets=getFilledSets(e);
+  if(!sets.length) return "";
+  let best=sets[0]; sets.forEach(x=>{if((Number(x.weight)||0)>(Number(best.weight)||0))best=x;});
+  const w=toPositiveNumber(best.weight), r=toPositiveNumber(best.reps), d=getSetDurationValue(best);
+  const bits=[];
+  if(w)bits.push(`${w}kg`);
+  if(r)bits.push(`${r}회`);
+  if(!w&&!r&&d)bits.push(formatSetDurationLabel(d));
+  bits.push(`${sets.length}세트`);
+  return bits.join(" · ");
+}
+function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
+  const open=openKeys.has(exKey);
+  const sets=getFilledSets(e);
+  const summary=weight?summarizeTopSet(e):formatAssistExerciseDose(e);
+  // 운동 유형에 따라 표의 열을 자동 구성 — 값이 있는 열만 표시(웨이트: 세트·중량·반복 / 맨몸: 세트·반복 / 시간: 세트·시간)
+  const cols=[
+    sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:"중량",fmt:x=>{const w=toPositiveNumber(x.weight); return w?`${w}kg`:"–";}},
+    sets.some(x=>toPositiveNumber(x.reps))&&{key:"reps",label:"반복",fmt:x=>{const r=toPositiveNumber(x.reps); return r?`${r}회`:"–";}},
+    sets.some(getSetDurationValue)&&{key:"dur",label:"시간",fmt:x=>{const d=getSetDurationValue(x); return d?formatSetDurationLabel(d):"–";}},
+  ].filter(Boolean);
+  return <div className={"sj-ex-row"+(weight?"":" assist")}>
+    <button type="button" className="sj-ex-head" onClick={()=>toggleOpen(exKey)} aria-expanded={open}>
+      <span className="sj-ex-name">{e.name||e.movementPurpose||"운동"}</span>
+      {!open&&summary&&<span className="sj-ex-sub">{summary}</span>}
+      <i className="sj-chev"><SjIcon paths={open?SJ_PATHS.chevronUp:SJ_PATHS.chevronDown} size={14}/></i>
+    </button>
+    {open&&<div className="sj-ex-body">
+      {weight&&cols.length>0&&sets.length>0
+        ?<div className="sj-set-table" style={{"--sj-cols":cols.length}}>
+          <div className="sj-set-row head"><span>세트</span>{cols.map(c=><span key={c.key}>{c.label}</span>)}</div>
+          {sets.map((x,j)=><div className="sj-set-row" key={j}><span>{j+1}세트</span>{cols.map(c=><b key={c.key}>{c.fmt(x)}</b>)}</div>)}
+        </div>
+        :(summary?<p className="sj-ex-dose">{summary}</p>:null)}
+      {(e.feedback||e.stimRating||e.stimMemo||e.memo)&&<div className="sj-ex-notes">
+        {e.feedback&&<em>대표 코멘트 · {e.feedback}</em>}
+        {e.stimRating&&<em>자극도 · {stimRatingLabel(e.stimRating)}</em>}
+        {e.stimMemo&&<em>대표 메모 · {e.stimMemo}</em>}
+        {e.memo&&<em>{e.memo}</em>}
+      </div>}
+    </div>}
+  </div>;
+}
+function ExerciseReportSection({title,items,weight=false,sessionId,openKeys,toggleOpen}){if(!items.length)return null; return <section className={weight?"sj-ex-section weight":"sj-ex-section assist"}><h3>{title}</h3>{items.map((e,i)=><ExerciseAccordionRow key={`${title}-${e.name||i}-${i}`} e={e} weight={weight} exKey={`${sessionId}-${title}-${e.name||i}-${i}`} openKeys={openKeys} toggleOpen={toggleOpen}/>)}</section>}
+function SessionMini({s,exFilter,openKeys,toggleOpen}){const groups={"움직임 준비":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>groups[getMemberExerciseSection(e)]?.push(e)); const filterItems=items=>exFilter?items.filter(e=>(e.name||"").toLowerCase().includes(exFilter)):items; return <div className="session-mini sj-session-mini"><ExerciseReportSection title="움직임 준비" items={filterItems(groups["움직임 준비"])} sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/><ExerciseReportSection title="웨이트 트레이닝" items={filterItems(groups["웨이트 트레이닝"])} weight sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
 function SorenessRecorder({s,onSave}){const [open,setOpen]=useState(false); const [d,setD]=useState(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}); useEffect(()=>setD(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}),[s.id,s.sorenessReport]); if(!open)return <button className="ghost compact" onClick={()=>setOpen(true)}>{s.sorenessReport?'근육통 기록 수정':'근육통 기록'}</button>; const save=()=>onSave?.(s.id,{...d,updatedBy:'member',updatedAt:new Date().toISOString()}); return <div className="soreness-form"><h3>근육통 기록</h3><input value={d.part} onChange={e=>setD({...d,part:e.target.value})} placeholder="근육통 부위"/><select value={d.level} onChange={e=>setD({...d,level:e.target.value})}>{['없음','약함','보통','강함','매우 강함'].map(x=><option key={x}>{x}</option>)}</select><select value={d.timing} onChange={e=>setD({...d,timing:e.target.value})}>{['당일','다음날','다다음날'].map(x=><option key={x}>{x}</option>)}</select><textarea value={d.memo} onChange={e=>setD({...d,memo:e.target.value})} placeholder="메모"/><button className="primary compact" onClick={save}>저장</button></div>}
 const MEMBER_CSS=`
 .member-shell,.member-login,.onboard{
@@ -4288,6 +4427,108 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   .mv2-calx-num{width:30px;height:30px;font-size:14.5px}
   .mv2-evt{font-size:9.5px;padding:4.5px 6px;border-radius:5px}
   .mv2-calx-fab{right:max(16px,calc(50vw - 362px))}
+}
+/* ── 수업 탭 리디자인(sj-*) — 밝은 프리미엄 톤, 정보 위계 우선, 이모지 대신 선형 아이콘 ── */
+.sj-page-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:4px}
+.member-page h1.sj-page-title{font-size:24px;letter-spacing:-.6px;margin:4px 0}
+.sj-page-meta{color:#8B949E;font-size:12.5px;font-weight:800;white-space:nowrap}
+.member-page .sj-page-sub{margin-bottom:14px;font-size:13.5px}
+.sj-search-wrap{padding:6px 0 8px}
+.sj-search-icon{position:absolute;left:15px;top:50%;transform:translateY(-51%);color:#A8B0BA;display:flex;pointer-events:none;font-style:normal}
+.ex-search.sj-search{height:44px;border-radius:14px;padding:0 40px 0 41px;font-size:14px}
+.sj-search-wrap .ex-search-clear{display:flex;align-items:center;color:#A8B0BA}
+.sj-section-label{font-size:13px;font-weight:900;color:#8B949E;margin:20px 2px 8px;letter-spacing:-.2px}
+.sj-prev-list{display:grid;gap:8px}
+.sj-prev-card{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:14px 16px;margin:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.04);transition:transform .15s ease,background-color .15s ease}
+.sj-prev-card:active{transform:scale(.985);background:#FBFCFE}
+.sj-prev-main{flex:1;min-width:0;display:grid;gap:3px}
+.sj-prev-main b{font-size:15px;color:#20242A;letter-spacing:-.2px}
+.sj-prev-main span{font-size:12.5px;font-weight:800;color:#66717C}
+.sj-part{color:#F97316;font-style:normal;font-weight:900}
+.sj-prev-main small{font-size:12px;color:#8B949E;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sj-prev-side{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.sj-rpe-chip{font-style:normal;font-size:11px;font-weight:900;color:#2F73F6;background:#EEF5FF;border-radius:999px;padding:4px 9px;white-space:nowrap}
+.sj-rpe-chip.empty{color:#A8B0BA;background:#F1F3F6}
+.sj-chev{color:#C0C8D3;display:flex;font-style:normal;flex-shrink:0}
+.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:20px;margin:12px 0;box-shadow:0 2px 14px rgba(15,23,42,.05);animation:memberCardIn .22s ease}
+.sj-prev-list .sj-session-card{margin:0}
+.sj-sess-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.sj-sess-title{min-width:0}
+.sj-badges{display:flex;gap:6px;margin-bottom:8px}
+.sj-badge{font-style:normal;font-size:10.5px;font-weight:900;border-radius:999px;padding:3.5px 9px;letter-spacing:0}
+.sj-badge.latest{background:#2F73F6;color:#fff}
+.sj-badge.pr{background:#FFF7ED;color:#F97316;border:1px solid #FED7AA}
+.sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#20242A}
+.sj-sess-title p{margin:5px 0 0;color:#F97316;font-weight:900;font-size:13.5px}
+.sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:10px;padding:7px 11px;font-size:12px;font-weight:900;color:#8B949E;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.sj-sess-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 12px;background:#F8FAFC;border:1px solid #EEF1F4;border-radius:16px;padding:12px 15px;margin:14px 0 2px}
+.sj-sum-count{font-size:13.5px;font-weight:900;color:#20242A}
+.sj-sum-nums{font-size:12.5px;font-weight:800;color:#66717C;display:flex;flex-wrap:wrap;align-items:baseline;gap:5px}
+.sj-sum-nums b{color:#20242A;font-size:14px;font-variant-numeric:tabular-nums}
+.sj-sum-dot{color:#C0C8D3;font-style:normal}
+.sj-session-mini>div{padding:0;border-top:0}
+.sj-ex-section{padding:14px 0 2px;border-top:1px solid #EEF1F4;margin-top:14px}
+.sj-ex-section h3{font-size:11.5px;font-weight:900;color:#8B949E;letter-spacing:.5px;margin:0}
+.sj-ex-row{border-top:1px solid #F1F4F8}
+.sj-ex-row:first-of-type{border-top:0}
+.sj-ex-head{width:100%;display:flex;align-items:center;gap:10px;border:0;background:transparent;padding:13px 2px;min-height:48px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-ex-name{flex:1;min-width:0;font-size:15px;font-weight:900;color:#20242A;word-break:keep-all;line-height:1.35}
+.sj-ex-sub{flex-shrink:0;font-size:12.5px;font-weight:800;color:#8B949E;white-space:nowrap;font-variant-numeric:tabular-nums}
+.sj-ex-body{padding:0 2px 14px}
+.sj-set-table{border-radius:14px;background:#F8FAFC;border:1px solid #EEF1F4;padding:2px 14px}
+.sj-set-row{display:grid;grid-template-columns:56px repeat(var(--sj-cols,2),1fr);align-items:center;padding:9px 0;border-top:1px solid #EEF1F4}
+.sj-set-row.head{border-top:0;padding:9px 0 7px}
+.sj-set-row.head span{font-size:11px;font-weight:900;color:#A8B0BA}
+.sj-set-row>span:first-child{font-size:12px;font-weight:900;color:#8B949E}
+.sj-set-row b{font-size:14px;font-weight:900;color:#20242A;font-variant-numeric:tabular-nums;text-align:right}
+.sj-set-row.head span:not(:first-child){text-align:right}
+.sj-ex-dose{margin:2px 0 0;color:#66717C;font-weight:800;font-size:13.5px;line-height:1.5}
+.sj-ex-notes{display:grid;gap:6px;margin-top:10px}
+.sj-ex-notes em{background:#EEF5FF;color:#2F73F6;border-radius:12px;padding:9px 11px;font-style:normal;font-weight:800;font-size:12.5px;line-height:1.5}
+.sj-feedback-card{background:#F8FAFC;border:1px solid #E8ECF1;border-radius:20px;padding:16px;margin-top:16px}
+.sj-fb-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.sj-fb-head b{font-size:16px;color:#20242A;letter-spacing:-.3px}
+.sj-fb-head span{display:block;margin-top:4px;font-size:12px;font-weight:800;color:#8B949E;line-height:1.5}
+.sj-fb-toggle{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(47,115,246,.3);background:#fff;color:#2F73F6;border-radius:999px;height:36px;padding:0 15px;font-size:12.5px;font-weight:900;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.sj-fb-empty{margin:10px 0 0;color:#8B949E;font-weight:800;font-size:13px}
+.sj-fb-done{display:flex;gap:10px;margin-top:12px;background:#fff;border:1px solid #D9F2E4;border-radius:14px;padding:12px 14px}
+.sj-fb-done-icon{color:#16A34A;display:flex;margin-top:1px;flex-shrink:0;font-style:normal}
+.sj-fb-done b{display:block;font-size:13.5px;color:#15803D}
+.sj-fb-done span{display:block;margin-top:4px;font-size:13px;font-weight:900;color:#20242A}
+.sj-fb-done small{display:block;margin-top:5px;font-size:12px;font-weight:800;color:#66717C;line-height:1.5;word-break:break-word}
+.sj-fb-warning-inline{display:flex;align-items:center;gap:5px;margin-top:7px;color:#C2410C;font-style:normal;font-weight:900;font-size:12px}
+.sj-fb-edit{margin-top:14px;display:grid;gap:12px}
+.sj-fb-section{background:#fff;border:1px solid #EEF1F4;border-radius:16px;padding:14px}
+.sj-fb-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:900;color:#334155}
+.sj-fb-label small{color:#A8B0BA;font-weight:800;font-size:11px;margin-left:2px}
+.sj-rpe-display{display:flex;align-items:baseline;gap:9px;margin:12px 0 2px}
+.sj-rpe-display b{font-size:26px;color:#2F73F6;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.sj-rpe-display span{font-size:14px;font-weight:900;color:#20242A}
+.sj-rpe-slider{width:100%;margin:6px 0;accent-color:#2F73F6;height:34px;-webkit-tap-highlight-color:transparent}
+.sj-rpe-scale{display:flex;justify-content:space-between;font-size:10.5px;font-weight:800;color:#A8B0BA}
+.sj-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sj-chip-row button{min-height:40px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:12px;padding:0 13px;font-size:13px;font-weight:900;color:#475569;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,color .15s ease}
+.sj-chip-row button.active{background:#20242A;border-color:#20242A;color:#fff}
+.sj-fb-sublabel{display:block;margin-top:14px;font-size:12px;font-weight:900;color:#8B949E}
+.sj-fb-warning{display:flex;align-items:flex-start;gap:7px;margin:12px 0 0;background:#FFF7ED;border:1px solid #FED7AA;color:#C2410C;border-radius:12px;padding:11px 12px;font-weight:900;font-size:12.5px;line-height:1.5}
+.sj-fb-edit textarea{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:12px;background:#F6F7F9;color:#20242A;padding:11px 12px;font-weight:800;font-size:13.5px;line-height:1.55;min-height:54px;resize:none;margin-top:10px;transition:min-height .2s ease,border-color .15s ease,background-color .15s ease;font-family:inherit}
+.sj-fb-edit textarea:focus{outline:none;border-color:#2F73F6;background:#fff;min-height:110px}
+.sj-fb-edit textarea::placeholder{color:#A8B0BA;font-weight:700}
+.sj-fb-actions{display:flex;gap:8px}
+.sj-fb-cancel{flex:0 0 88px;height:48px;border:1px solid #E8ECF1;background:#fff;border-radius:14px;font-size:14px;font-weight:900;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-fb-save{flex:1;height:48px;border:0;border-radius:14px;background:#2F73F6;color:#fff;font-size:15px;font-weight:900;cursor:pointer;box-shadow:0 6px 16px rgba(47,115,246,.22);-webkit-tap-highlight-color:transparent}
+.sj-fb-save:disabled,.sj-fb-cancel:disabled{opacity:.6;cursor:default}
+.sj-empty{display:grid;gap:5px;place-items:center;text-align:center;padding:34px 16px;border:1px dashed #D9E1EA;border-radius:20px;background:#FBFCFE;margin:10px 0}
+.sj-empty b{font-size:14.5px;color:#475569}
+.sj-empty span{font-size:12.5px;font-weight:800;color:#A8B0BA}
+.sj-show-all{width:100%;display:grid;gap:3px;place-items:center;border:1px solid #E8ECF1;background:#fff;border-radius:18px;padding:14px;margin-top:14px;font-size:14.5px;font-weight:900;color:#20242A;cursor:pointer;box-shadow:0 1px 8px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
+.sj-show-all small{font-size:11.5px;font-weight:800;color:#8B949E}
+@media(min-width:700px){
+  /* 태블릿/PC — 이전 수업 목록 2열, 펼친 카드는 전체 폭. 모바일을 그대로 늘린 느낌이 되지 않게 여백만 키운다 */
+  .sj-prev-list{grid-template-columns:1fr 1fr;gap:10px}
+  .sj-prev-list .sj-session-card{grid-column:1/-1}
+  .sj-session-card{padding:24px}
+  .sj-fb-edit{grid-template-columns:1fr}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

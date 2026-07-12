@@ -772,47 +772,60 @@ const checks = [
     app.includes('.attendance-check-btn:active{transform:scale(.95)')
   ],
 
-  // ── 수업 후 상태 메모 placeholder 제거 ──
-  ['수업 후 상태 메모: placeholder 제거(빈 입력창으로 표시)',
-    !app.includes('대표님께 전달할 내용을 입력해주세요.') &&
-    app.includes('<textarea value={memo} onChange={e=>setMemo(e.target.value)}/>')
+  // ── 수업 탭 리디자인(sj-*) — 통합 피드백 카드 "오늘 수업은 어땠나요?" ──
+  ['수업 후 상태 메모: 요청 placeholder(불편했던 점/좋았던 점) 적용',
+    app.includes('placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."')
   ],
-
-  // ── 근육통/RPE/메모 독립 저장 (3개 섹션 + 저장 버튼 각각 분리) ──
-  ['수업 후 상태: 근육통/RPE/메모가 독립된 3개 섹션으로 분리되어 각각 저장',
-    app.includes('saveSection("soreness",{sorenessLevel:soreness.level,sorenessBodyParts:soreness.parts})') &&
-    app.includes('saveSection("rpe",{rpe})') &&
-    app.includes('saveSection("memo",{memo})')
+  ['수업 후 상태: RPE 슬라이더(1~10)+쉬운 설명, 근육통 정도/부위/성격, 메모가 하나의 피드백 카드로 통합',
+    app.includes('오늘 수업은 어땠나요?') &&
+    app.includes('className="sj-rpe-slider" min="1" max="10"') &&
+    app.includes('function rpeDescription(') &&
+    app.includes('const SORENESS_NATURES=')
   ],
-  ['수업 후 상태: 저장 중 중복 클릭 방지 (savingSection)',
-    app.includes('if(savingSection)return;') &&
-    app.includes('disabled={!!savingSection}')
+  ['수업 후 상태: 회원이 건드린 필드만 payload에 담아 저장(안 건드린 항목 덮어쓰기·메모 중복 전송 방지)',
+    app.includes('if(touched.rpe&&(!hasRpe||Number(existing.rpe)!==Number(rpe))) payload.rpe=Number(rpe);') &&
+    app.includes('if(touched.soreness&&sorenessChanged){payload.sorenessLevel=level; payload.sorenessBodyParts=parts; payload.sorenessNature=nature;}') &&
+    app.includes('if(touched.memo&&memo.trim()!==(existing.memo||"").trim()) payload.memo=memo.trim();')
   ],
-  ['수업일지 카드 순서: 운동종목(SessionMini)이 근육통/RPE/메모(MemberFeedbackForm)보다 먼저 표시',
+  ['수업 후 상태: 저장 중 중복 클릭 방지 (saving)',
+    app.includes('if(saving)return;') &&
+    app.includes('disabled={saving} onClick={save}')
+  ],
+  ['수업 후 상태: 저장 후 "미입력" 대신 기록 요약을 보여주고 언제든 수정 가능',
+    app.includes('오늘의 피드백을 기록했어요.') &&
+    app.includes('수업 후 상태를 기록해주세요.') &&
+    app.includes('summaryBits')
+  ],
+  ['수업 후 상태: 위험 신호(움직일 때 불편함/날카로운 통증) 선택 시 대표에게 알리라는 안내 표시',
+    app.includes('const SORENESS_RISK_NATURES=') &&
+    app.includes('다음 수업 전 대표님께 꼭 알려주세요.')
+  ],
+  ['수업일지 카드 순서: 운동종목(SessionMini)이 피드백 카드(MemberFeedbackForm)보다 먼저 표시',
     (() => {
       const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/>');
       return i !== -1;
     })()
   ],
-  ['수업 후 상태: 근육통/RPE는 가로 2분할 소형 카드로 축소(요약 행 높이 절감), 메모는 기존 크기 유지',
-    app.includes('className="member-feedback-form compact-feedback feedback-duo"') &&
-    app.includes('className="feedback-duo-row"') &&
-    app.includes('.feedback-duo-row{display:flex;align-items:stretch;gap:8px}') &&
-    app.includes('.feedback-duo-btn{width:auto!important;min-width:0!important;height:30px!important;')
+  ['수업일지: 최근 수업 대표 카드 + 이전 수업 프리뷰 카드(날짜·부위·대표 운동·RPE 여부) + 전체 수업 기록 보기',
+    app.includes('className="sj-badge latest">최근 수업') &&
+    app.includes('function formatKoreanDateLabel(') &&
+    app.includes('이전 수업') &&
+    app.includes('전체 수업 기록 보기')
   ],
-  ['수업 후 상태: 근육통/RPE 소형 카드에서도 편집 영역(feedback-edit)은 전체 너비로 그대로 유지(부위 선택·VAS 버튼 공간 확보)',
-    (() => {
-      const i = app.indexOf('className="feedback-duo-row"');
-      const block = app.slice(i, i + 2000);
-      return block.includes('openSection==="soreness"&&<div className="feedback-edit">') &&
-        block.includes('openSection==="rpe"&&<div className="feedback-edit">');
-    })()
+  ['수업일지: 세트 표가 운동 유형별 열 자동 구성(중량/반복/시간, 값 있는 열만 표시)',
+    app.includes('sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:"중량"') &&
+    app.includes('sets.some(x=>toPositiveNumber(x.reps))&&{key:"reps",label:"반복"') &&
+    app.includes('sets.some(getSetDurationValue)&&{key:"dur",label:"시간"')
   ],
-  ['Firestore 저장: saveSessionMemberFeedback이 건드린 필드만 setDoc(merge:true)로 반영, 나머지는 기존값 유지',
+  ['Firestore 저장: saveSessionMemberFeedback이 건드린 필드만 setDoc(merge:true)로 반영, 나머지는 기존값 유지 (+sorenessNature)',
     db.includes('if (feedback.sorenessLevel !== undefined || feedback.sorenessBodyParts !== undefined || feedback.sorenessBodyPart !== undefined) {') &&
     db.includes('if (feedback.rpe !== undefined) payload.rpe = Number(feedback.rpe);') &&
+    db.includes('if (feedback.sorenessNature !== undefined) payload.sorenessNature = feedback.sorenessNature || "";') &&
     db.includes('if (feedback.memo !== undefined) payload.memo = feedback.memo || "";') &&
     db.includes('await setDoc(ref, clean(payload), { merge: true });')
+  ],
+  ['Firestore Rules: memberFeedback 필드 화이트리스트에 sorenessNature 포함',
+    firestoreRules.includes('"sorenessBodyParts", "sorenessNature", "rpe"')
   ],
 
   // ── 관리자앱 PC 로그인 화면 대비 개선 ──

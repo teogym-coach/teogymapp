@@ -9218,20 +9218,33 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
     <div className="hub-light" style={{fontFamily:DB.font,color:DB.text}}>
       <style>{`
         .hub-light button:focus-visible{outline:2px solid ${DB.mint};outline-offset:2px;}
-        .hub-2panel{display:grid;grid-template-columns:356px 1fr;gap:20px;align-items:start;}
-        .hub-side{display:flex;flex-direction:column;gap:20px;min-width:0;position:sticky;top:0;}
-        .hub-main{display:flex;flex-direction:column;gap:20px;min-width:0;}
+        /* 가로(>=1024px): 진짜 2패널 — 좌: 오늘 브리핑·최근 수업 / 우: 오늘 수업·다음 수업 준비.
+           첫 화면에서 브리핑+오늘 수업이 동시에 보이도록 카드 간격·패딩을 압축 */
+        .hub-2panel{display:grid;grid-template-columns:356px 1fr;gap:16px;align-items:start;}
+        .hub-side{display:flex;flex-direction:column;gap:14px;min-width:0;position:sticky;top:10px;}
+        .hub-main{display:flex;flex-direction:column;gap:14px;min-width:0;}
         .hub-vitals{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${DB.border};border-radius:${DB.radiusSm}px;overflow:hidden;}
         .hub-vitals>div{background:${DB.card};}
         .hub-toolgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
-        @media(max-width:1080px){.hub-2panel{grid-template-columns:1fr;}.hub-side{position:static;order:0;}.hub-main{order:1;}}
+        /* 세로(<1024px): 1열 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 분석 → 회원관리.
+           display:contents로 래퍼를 투명화해 섹션 order만으로 재배치(DOM 구조·기능 변경 없음) */
+        @media(max-width:1023px){
+          .hub-2panel{display:flex;flex-direction:column;gap:14px;}
+          .hub-side,.hub-main{display:contents;}
+          .hub-sec-today{order:1;}
+          .hub-sec-brief{order:2;}
+          .hub-sec-recent{order:3;}
+          .hub-sec-prep{order:4;}
+          .hub-sec-analysis{order:5;}
+          .hub-sec-manage{order:6;}
+        }
         @media(max-width:640px){.hub-vitals{grid-template-columns:1fr 1fr;}.hub-toolgrid{grid-template-columns:1fr 1fr;}}
       `}</style>
 
       {isTodayBirthday&&<div style={{background:"rgba(251,191,36,.10)",border:"1px solid rgba(245,158,11,.3)",borderRadius:14,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92600A",lineHeight:1.5}}>🎂 오늘 생일입니다. 수업 시작 전에 축하 멘트를 해주세요.</div>}
 
       {/* ══ ① 워크스페이스 헤더 — 정보만 담은 슬림 스트립 ══ */}
-      <div style={{...card, marginBottom:16, padding:"13px 18px", display:"flex", alignItems:"center", gap:16, flexWrap:"wrap"}}>
+      <div style={{...card, marginBottom:14, padding:"11px 16px", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap"}}>
         <button onClick={()=>setScreen("members")} style={{border:`1px solid ${DB.border}`,background:DB.card,borderRadius:11,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",color:DB.sub,cursor:"pointer",flexShrink:0}} aria-label="회원 목록으로">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
         </button>
@@ -9272,7 +9285,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <button onClick={()=>setShowMemberAppManagement(v=>!v)} style={{border:`1px solid ${DB.border}`,background:DB.card,color:"#2563EB",borderRadius:11,padding:"9px 14px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer",boxShadow:DB.shadow,flexShrink:0}}>회원앱 관리 {showMemberAppManagement?"▲":"▼"}</button>
         <AdminMemberAppInviteButton member={member} onAccountCreated={onMemberPatch} />
       </div>
-      <div style={{marginBottom:16}}>
+      <div style={{marginBottom: showMemberAppManagement?14:0}}>
         <AdminMemberAppPanel member={member} members={allMembers} onAccountCreated={onMemberPatch} showManagement={showMemberAppManagement} hideGrid={true} hideBriefing={true} />
       </div>
 
@@ -9282,9 +9295,9 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         {/* ── 좌측: 오늘 브리핑 + 최근 수업 ── */}
         <div className="hub-side">
 
-          {/* ② 오늘 브리핑 */}
-          <section style={{...card, padding:"16px 18px 14px"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:11,flexWrap:"wrap"}}>
+          {/* ② 오늘 브리핑 — 수업 전 확인 우선순위: 통증 → 근육통 → 회원 메모 → 수치(컨디션·체중·칼로리·걸음·유산소·RPE) */}
+          <section className="hub-sec-brief" style={{...card, padding:"13px 15px 12px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:9,flexWrap:"wrap"}}>
               <span style={cardTitle}>오늘 브리핑</span>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setScreen("healthhub")} style={{border:"none",background:DB.mintTint,color:DB.mintSoft,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>건강관리 허브 →</button>
@@ -9293,65 +9306,39 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
             </div>
             {/* 통증 — "없음(확인됨)"과 "오늘 미입력(기록 자체가 없음)"은 안전상 반드시 구분해서 표시한다 */}
             {ciPainRec && ciPainRec.part!=="없음" ? (
-              <div style={{display:"flex",alignItems:"center",gap:9,padding:"10px 13px",borderRadius:DB.radiusSm,background:"rgba(239,68,68,.07)",color:"#B02A2A",fontSize:12.5,fontWeight:700,marginBottom:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",borderRadius:DB.radiusSm,background:"rgba(239,68,68,.07)",color:"#B02A2A",fontSize:12.5,fontWeight:700,marginBottom:7,flexWrap:"wrap"}}>
                 <span style={{width:8,height:8,borderRadius:"50%",background:DB.danger,flexShrink:0}}/>
                 통증 · {ciPainRec.part}{ciPainRec.side&&ciPainRec.side!=="해당 없음"?` · ${ciPainRec.side}`:""} · VAS {ciPainRec.vas??0}
                 <span style={{marginLeft:"auto"}}>{whenChip(painWhen||"입력 시점 확인 불가", whenToneOf(painWhen))}</span>
               </div>
             ) : ciPainRec && ciPainRec.part==="없음" ? (
-              <div style={{display:"flex",alignItems:"center",gap:9,padding:"10px 13px",borderRadius:DB.radiusSm,background:DB.mintTint,color:DB.mintSoft,fontSize:12.5,fontWeight:700,marginBottom:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",borderRadius:DB.radiusSm,background:DB.mintTint,color:DB.mintSoft,fontSize:12.5,fontWeight:700,marginBottom:7,flexWrap:"wrap"}}>
                 <span style={{width:8,height:8,borderRadius:"50%",background:DB.mint,flexShrink:0}}/>
                 통증 없음 확인됨
                 <span style={{marginLeft:"auto"}}>{whenChip(painWhen||"입력 시점 확인 불가", whenToneOf(painWhen))}</span>
               </div>
             ) : (
-              <div style={{display:"flex",alignItems:"center",gap:9,padding:"10px 13px",borderRadius:DB.radiusSm,background:"rgba(15,23,42,.04)",color:DB.faint,fontSize:12.5,fontWeight:700,marginBottom:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",borderRadius:DB.radiusSm,background:"rgba(15,23,42,.04)",color:DB.faint,fontSize:12.5,fontWeight:700,marginBottom:7,flexWrap:"wrap"}}>
                 <span style={{width:8,height:8,borderRadius:"50%",background:DB.faint,flexShrink:0}}/>
                 통증 · 오늘 미입력
               </div>
             )}
             {soreInfo && (
-              <div style={{display:"flex",alignItems:"center",gap:9,padding:"10px 13px",borderRadius:DB.radiusSm,background:"rgba(245,158,11,.09)",color:"#92600A",fontSize:12.5,fontWeight:700,marginBottom:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",borderRadius:DB.radiusSm,background:"rgba(245,158,11,.09)",color:"#92600A",fontSize:12.5,fontWeight:700,marginBottom:7,flexWrap:"wrap"}}>
                 <span style={{width:8,height:8,borderRadius:"50%",background:DB.warning,flexShrink:0}}/>
                 근육통 · {soreInfo.parts.join("/")||"-"}{soreInfo.level?` (${soreInfo.level})`:""}
                 <span style={{marginLeft:"auto"}}>{whenChip(sorenessWhen, whenToneOf(sorenessWhen))}</span>
               </div>
             )}
-            <div className="hub-vitals" style={{marginBottom:12}}>
-              <div style={{padding:"10px 13px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>컨디션</span>{whenChip(condWhen, whenToneOf(condWhen))}</div>
-                <div style={{fontSize:14,fontWeight:800,marginTop:3,color:ciCond?"#15803D":condLabel?condColor:DB.faint}}>{ciCond?ciCond.condition:(condLabel||"최근 입력 없음")}</div>
-              </div>
-              <div style={{padding:"10px 13px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>체중</span>{whenChip(weightWhen, whenToneOf(weightWhen))}</div>
-                <div style={{fontSize:14,fontWeight:800,marginTop:3,fontVariantNumeric:"tabular-nums"}}>{wLast?`${wLast} kg`:"미입력"}</div>
-              </div>
-              <div style={{padding:"10px 13px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>칼로리</span>{whenChip(kcalWhen, whenToneOf(kcalWhen))}</div>
-                <div style={{fontSize:14,fontWeight:800,marginTop:3,fontVariantNumeric:"tabular-nums"}}>{latestKcalLog?.kcal?`${Number(latestKcalLog.kcal).toLocaleString()} kcal`:"미입력"}</div>
-              </div>
-              <div style={{padding:"10px 13px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>걸음수</span>{whenChip(stepsWhen, whenToneOf(stepsWhen))}</div>
-                <div style={{fontSize:14,fontWeight:800,marginTop:3,fontVariantNumeric:"tabular-nums"}}>{latestStepsCi?.steps?`${Number(latestStepsCi.steps).toLocaleString()} 보`:"미입력"}</div>
-              </div>
-              <div style={{padding:"10px 13px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>유산소</span>{whenChip(cardioWhen, whenToneOf(cardioWhen))}</div>
-                <div style={{fontSize:14,fontWeight:800,marginTop:3}}>{latestCardio?`${latestCardio.activityType||"운동"} ${latestCardio.durationMinutes||0}분`:"미입력"}</div>
-              </div>
-              <div style={{padding:"10px 13px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>최근 RPE</span>{whenChip(rpeWhen, whenToneOf(rpeWhen))}</div>
-                <div style={{fontSize:14,fontWeight:800,marginTop:3,fontVariantNumeric:"tabular-nums"}}>{memberRpe?memberRpe.rpe:(rpeAvg||"최근 입력 없음")}</div>
-              </div>
-            </div>
-            <div style={{padding:"11px 13px",borderRadius:DB.radiusSm,background:DB.mintTint,borderLeft:`3px solid ${DB.mint}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}>
+            <div style={{padding:"9px 12px",borderRadius:DB.radiusSm,background:DB.mintTint,borderLeft:`3px solid ${DB.mint}`,marginBottom:9}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:5}}>
                 <span style={{fontSize:10.5,fontWeight:800,color:DB.mintSoft}}>회원 메모{ms.length?` (${ms.length})`:""}</span>
                 {whenChip(memoWhen, whenToneOf(memoWhen))}
               </div>
               {ms.length ? (
-                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {(showAllMsgs?ms:ms.slice(0,3)).map(m=>(
-                    <div key={m.id} style={{fontSize:12.5,color:DB.text,lineHeight:1.55}}>
+                    <div key={m.id} style={{fontSize:12,color:DB.text,lineHeight:1.5}}>
                       <span style={{fontSize:9.5,fontWeight:700,color:DB.mintSoft,marginRight:6}}>{formatWhenLabel(m.createdAt)||String(m.date||"").slice(5)||""}</span>
                       {m.memberMessage||m.message}
                     </div>
@@ -9363,6 +9350,32 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                   )}
                 </div>
               ) : <span style={{fontSize:11.5,color:DB.faint}}>최근 입력 없음</span>}
+            </div>
+            <div className="hub-vitals">
+              <div style={{padding:"7px 11px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10,fontWeight:700,color:DB.faint}}>컨디션</span>{whenChip(condWhen, whenToneOf(condWhen))}</div>
+                <div style={{fontSize:13,fontWeight:800,marginTop:2,color:ciCond?"#15803D":condLabel?condColor:DB.faint}}>{ciCond?ciCond.condition:(condLabel||"최근 입력 없음")}</div>
+              </div>
+              <div style={{padding:"7px 11px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10,fontWeight:700,color:DB.faint}}>체중</span>{whenChip(weightWhen, whenToneOf(weightWhen))}</div>
+                <div style={{fontSize:13,fontWeight:800,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{wLast?`${wLast} kg`:"미입력"}</div>
+              </div>
+              <div style={{padding:"7px 11px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10,fontWeight:700,color:DB.faint}}>칼로리</span>{whenChip(kcalWhen, whenToneOf(kcalWhen))}</div>
+                <div style={{fontSize:13,fontWeight:800,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{latestKcalLog?.kcal?`${Number(latestKcalLog.kcal).toLocaleString()} kcal`:"미입력"}</div>
+              </div>
+              <div style={{padding:"7px 11px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10,fontWeight:700,color:DB.faint}}>걸음수</span>{whenChip(stepsWhen, whenToneOf(stepsWhen))}</div>
+                <div style={{fontSize:13,fontWeight:800,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{latestStepsCi?.steps?`${Number(latestStepsCi.steps).toLocaleString()} 보`:"미입력"}</div>
+              </div>
+              <div style={{padding:"7px 11px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10,fontWeight:700,color:DB.faint}}>유산소</span>{whenChip(cardioWhen, whenToneOf(cardioWhen))}</div>
+                <div style={{fontSize:13,fontWeight:800,marginTop:2}}>{latestCardio?`${latestCardio.activityType||"운동"} ${latestCardio.durationMinutes||0}분`:"미입력"}</div>
+              </div>
+              <div style={{padding:"7px 11px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6}}><span style={{fontSize:10,fontWeight:700,color:DB.faint}}>최근 RPE</span>{whenChip(rpeWhen, whenToneOf(rpeWhen))}</div>
+                <div style={{fontSize:13,fontWeight:800,marginTop:2,fontVariantNumeric:"tabular-nums"}}>{memberRpe?memberRpe.rpe:(rpeAvg||"최근 입력 없음")}</div>
+              </div>
             </div>
             {member.painArea&&<div style={{marginTop:8,padding:"8px 12px",background:"rgba(239,68,68,.06)",borderRadius:10,fontSize:11,color:"#B02A2A",borderLeft:"2px solid rgba(239,68,68,.4)"}}>고정 통증 메모 · {member.painArea}</div>}
             {member.memo&&(
@@ -9376,9 +9389,9 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
             )}
           </section>
 
-          {/* ⑤ 최근 수업 — 날짜 + 부위만, 펼치면 세부 */}
-          <section style={{...card, padding:"14px 10px 10px"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:6,padding:"0 8px"}}>
+          {/* ⑤ 최근 수업 — 날짜 + 부위 + 공개상태만, 펼치면 세부 */}
+          <section className="hub-sec-recent" style={{...card, padding:"12px 8px 8px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:4,padding:"0 8px"}}>
               <span style={cardTitle}>최근 수업</span>
               {last?.date&&<span style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font}}>최근 {last.date}</span>}
             </div>
@@ -9390,14 +9403,14 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                   const open = expandedRecentId===s.id;
                   return (
                     <li key={s.id||i} style={{borderTop:i>0?`1px solid rgba(15,23,42,.05)`:"none"}}>
-                      <button onClick={()=>setExpandedRecentId(open?null:s.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,background:"none",border:"none",padding:"10px 12px",borderRadius:14,textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
-                        <span style={{fontSize:12,fontWeight:700,color:DB.faint,width:44,flexShrink:0,fontVariantNumeric:"tabular-nums"}}>{String(s.date||"").slice(5)}</span>
-                        <span style={{fontSize:13.5,fontWeight:800,color:DB.text,letterSpacing:"-.2px"}}>{recentPartsOf(s)}</span>
+                      <button onClick={()=>setExpandedRecentId(open?null:s.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:"8px 10px",borderRadius:12,textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
+                        <span style={{fontSize:11.5,fontWeight:700,color:DB.faint,width:40,flexShrink:0,fontVariantNumeric:"tabular-nums"}}>{String(s.date||"").slice(5)}</span>
+                        <span style={{fontSize:13,fontWeight:800,color:DB.text,letterSpacing:"-.2px"}}>{recentPartsOf(s)}</span>
                         <span style={{marginLeft:"auto",fontSize:9.5,fontWeight:700,padding:"1px 7px",borderRadius:999,background:s.isPublished?DB.mintTintStrong:"rgba(245,158,11,.10)",color:s.isPublished?DB.mintSoft:"#92600A",flexShrink:0}}>{s.isPublished?"공개":"비공개"}</span>
                         <span style={{color:DB.faint,fontSize:10,flexShrink:0,transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}>▼</span>
                       </button>
                       {open&&(
-                        <div style={{padding:"2px 12px 12px 56px"}}>
+                        <div style={{padding:"2px 10px 10px 50px"}}>
                           {(s.exercises||[]).map((e,ei)=>(
                             <div key={ei} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12,color:DB.sub,padding:"4px 0",fontVariantNumeric:"tabular-nums"}}>
                               <b style={{color:DB.text,fontWeight:700}}>{e.name||"운동"}</b>
@@ -9420,7 +9433,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <div className="hub-main">
 
           {/* ③ 오늘 수업 — 옅은 민트 강조 카드, 4가지 상태 */}
-          <section style={{background:DB.mintTint, border:`1px solid rgba(57,199,184,.35)`, borderRadius:DB.radius, boxShadow:DB.shadowLg, padding:"18px 20px"}}>
+          <section className="hub-sec-today" style={{background:DB.mintTint, border:`1px solid rgba(57,199,184,.35)`, borderRadius:DB.radius, boxShadow:DB.shadowLg, padding:"16px 18px"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:9}}>
               <span style={{fontSize:15,fontWeight:800,letterSpacing:"-.3px",color:DB.text}}>오늘 {t("수업","운동")} <small style={{fontSize:11.5,fontWeight:600,color:DB.sub,marginLeft:6}}>{usedCount+1}{t("회차","회차")} · {todayStr.slice(5)}</small></span>
               <span style={{marginLeft:"auto",fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:stateStyle.bg,color:stateStyle.fg}}>{STATE_LABEL[todayCardState]}</span>
@@ -9432,10 +9445,13 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
             </div>
 
             {todayCardState==="idle" && (
-              <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                <button onClick={handleContinueDraft} style={{flex:"1 1 auto",minHeight:48,border:"none",borderRadius:14,padding:"13px 24px",fontSize:14,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:"pointer"}}>기록 시작하기</button>
-                {recentSameParts&&<button onClick={()=>handleLoadTemplate(recentSameParts)} style={{minHeight:48,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>최근 같은 부위 ({recentSameParts.date?.slice(5)}) 불러오기</button>}
-              </div>
+              <>
+                <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                  <button onClick={handleContinueDraft} style={{flex:"2 1 auto",minHeight:52,border:"none",borderRadius:14,padding:"13px 24px",fontSize:15,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:"pointer",letterSpacing:"-.2px"}}>기록 시작하기</button>
+                  {recentSameParts&&<button onClick={()=>handleLoadTemplate(recentSameParts)} style={{minHeight:52,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>최근 같은 부위 ({recentSameParts.date?.slice(5)}) 불러오기</button>}
+                </div>
+                {recentSameParts&&<div style={{fontSize:11,color:DB.sub,marginTop:8}}>불러오기는 종목·세트 구성만 복사하며 새 기록으로 시작합니다.</div>}
+              </>
             )}
 
             {todayCardState==="draft" && (
@@ -9448,11 +9464,13 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                     {todayDraft?._savedAt&&<span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:8,background:DB.bg,color:DB.sub,border:`1px solid ${DB.border}`}}>저장 <b>{formatWhenLabel(todayDraft._savedAt)||"-"}</b></span>}
                   </div>
                 </div>
+                {/* 가장 중요한 CTA — 이어서 기록하기: 전체 폭 최상단, 가장 크게 */}
+                <button onClick={handleContinueDraft} style={{width:"100%",minHeight:56,border:"none",borderRadius:15,padding:"14px 24px",fontSize:16,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 8px 22px rgba(57,199,184,.36)",cursor:"pointer",letterSpacing:"-.2px",marginBottom:9}}>이어서 기록하기</button>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                  <button onClick={handleContinueDraft} style={{flex:"1 1 auto",minHeight:48,border:"none",borderRadius:14,padding:"13px 24px",fontSize:14,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:"pointer"}}>이어서 기록하기</button>
-                  <button onClick={handleStartFresh} style={{minHeight:48,border:`1px solid ${DB.border}`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>새 기록으로 시작</button>
-                  {recentSameParts&&<button onClick={()=>handleLoadTemplate(recentSameParts)} style={{minHeight:48,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>최근 같은 부위 불러오기</button>}
+                  <button onClick={handleStartFresh} style={{minHeight:44,border:`1px solid ${DB.border}`,borderRadius:14,padding:"11px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>새 기록으로 시작</button>
+                  {recentSameParts&&<button onClick={()=>handleLoadTemplate(recentSameParts)} style={{minHeight:44,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"11px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>최근 같은 부위 불러오기</button>}
                 </div>
+                <div style={{fontSize:11,color:DB.sub,marginTop:8}}>새 기록으로 시작해도 기존 임시저장은 삭제 여부를 확인한 뒤에만 지워집니다.</div>
                 {otherDrafts.length>0 && (
                   <div style={{marginTop:10}}>
                     <button onClick={()=>setShowOtherDraft(v=>!v)} style={{border:"none",background:"none",fontSize:11.5,fontWeight:700,color:DB.sub,textDecoration:"underline",textUnderlineOffset:"3px",cursor:"pointer",padding:0,fontFamily:DB.font}}>다른 임시저장 {otherDrafts.length}건 보기 {showOtherDraft?"▲":"▾"}</button>
@@ -9524,7 +9542,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
 
           {/* ④ 다음 수업 준비 */}
-          <section style={{...card, padding:"16px 18px 18px"}}>
+          <section className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12,flexWrap:"wrap"}}>
               <span style={cardTitle}>다음 수업 준비</span>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
@@ -9559,7 +9577,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
             <div style={{marginTop:14}}>
               <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:7}}>준비 메모</span>
               <textarea value={nextMemoDraft} onChange={e=>onNextMemoChange(e.target.value)} placeholder="다음 수업에서 진행할 내용을 메모하세요"
-                style={{width:"100%",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"13px 15px",fontFamily:DB.font,fontSize:13,color:DB.text,resize:"none",minHeight:72,lineHeight:1.6}}/>
+                style={{width:"100%",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"11px 14px",fontFamily:DB.font,fontSize:13,color:DB.text,resize:"none",minHeight:60,lineHeight:1.6}}/>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
               <button onClick={()=>handleSaveNextMemo(nextMemoDraft)} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
@@ -9568,7 +9586,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
 
           {/* ⑥ 분석 도구 (기본 접힘) */}
-          <section style={{...card, padding:0}}>
+          <section className="hub-sec-analysis" style={{...card, padding:0}}>
             <button onClick={()=>setShowAnalysis(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"15px 18px",display:"flex",alignItems:"center",gap:12,textAlign:"left",fontFamily:DB.font}}>
               <span style={{width:34,height:34,borderRadius:11,background:DB.bg,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="2" y="14" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="14" rx="1"/><rect x="18" y="4" width="4" height="18" rx="1"/></svg>
@@ -9642,7 +9660,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
 
           {/* ⑥ 회원 관리 (기본 접힘) */}
-          <section style={{...card, padding:0}}>
+          <section className="hub-sec-manage" style={{...card, padding:0}}>
             <button onClick={()=>setShowManage(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"15px 18px",display:"flex",alignItems:"center",gap:12,textAlign:"left",fontFamily:DB.font}}>
               <span style={{width:34,height:34,borderRadius:11,background:DB.bg,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="7" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>

@@ -2321,41 +2321,38 @@ function MemberFeedbackForm({s,onSave}){
   const [rpe,setRpe]=useState(initialRpe);
   const [memo,setMemo]=useState(existing.memo||"");
   const [open,setOpen]=useState(false);
-  const [saving,setSaving]=useState(false); // 저장 중 중복 클릭 방지
-  // 회원이 실제로 건드린 항목만 저장 payload에 담는다 — 안 건드린 항목은 payload에 없어 기존 저장값이 유지된다(덮어쓰기 방지).
-  const [touched,setTouched]=useState({});
-  const mark=k=>setTouched(t=>t[k]?t:{...t,[k]:true});
+  // RPE·근육통·메모는 서로 독립된 저장 버튼을 가진다 — 한 항목을 저장해도 다른 두 항목의 기존 저장값은 건드리지 않는다(saveSessionMemberFeedback이 전달된 필드만 merge 저장).
+  const [savingSection,setSavingSection]=useState(null); // "rpe" | "soreness" | "memo" | null — 저장 중 중복 클릭 방지
   useEffect(()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
     setRpe(initialRpe());
     setMemo(existing.memo||"");
-    setOpen(false); setTouched({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[s.id,existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.sorenessNature,existing.rpe,existing.memo]);
-  const togglePart=part=>{mark("soreness"); setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));};
+  },[existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.sorenessNature,existing.rpe,existing.memo]);
+  useEffect(()=>{ setOpen(false); },[s.id]);
+  const togglePart=part=>setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));
   const hasSoreness=!!existing.sorenessLevel;
   const hasRpe=existing.rpe!=null;
   const hasMemo=!!existing.memo;
   const hasAny=hasSoreness||hasRpe||hasMemo;
   const cancel=()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
-    setRpe(initialRpe()); setMemo(existing.memo||""); setTouched({}); setOpen(false);
+    setRpe(initialRpe()); setMemo(existing.memo||""); setOpen(false);
   };
-  const save=async()=>{
-    if(saving)return;
-    const payload={};
-    if(touched.rpe&&(!hasRpe||Number(existing.rpe)!==Number(rpe))) payload.rpe=Number(rpe);
+  const saveSection=async(key,payload)=>{
+    if(savingSection)return;
+    setSavingSection(key);
+    try{ await onSave?.(s.id,payload); }
+    finally{ setSavingSection(null); }
+  };
+  const saveRpe=()=>saveSection("rpe",{rpe:Number(rpe)});
+  const saveSorenessSection=()=>{
     const level=soreness.level||"없음";
     const parts=level==="없음"?[]:soreness.parts;
     const nature=level==="없음"?"":(soreness.nature||"");
-    const sorenessChanged=(existing.sorenessLevel||"")!==level||JSON.stringify(memberFeedbackParts(existing))!==JSON.stringify(parts)||(existing.sorenessNature||"")!==nature;
-    if(touched.soreness&&sorenessChanged){payload.sorenessLevel=level; payload.sorenessBodyParts=parts; payload.sorenessNature=nature;}
-    if(touched.memo&&memo.trim()!==(existing.memo||"").trim()) payload.memo=memo.trim();
-    if(!Object.keys(payload).length){cancel(); return;}
-    setSaving(true);
-    try{ await onSave?.(s.id,payload); setOpen(false); setTouched({}); }
-    finally{ setSaving(false); }
+    saveSection("soreness",{sorenessLevel:level,sorenessBodyParts:parts,sorenessNature:nature});
   };
+  const saveMemo=()=>saveSection("memo",{memo:memo.trim()});
   // 저장 완료 요약 — "미입력" 대신 기록한 내용을 한 줄로 보여준다
   const summaryBits=[];
   if(hasRpe) summaryBits.push(`RPE ${existing.rpe}`);
@@ -2386,25 +2383,27 @@ function MemberFeedbackForm({s,onSave}){
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>
         <div className="sj-rpe-display"><b>RPE {rpe}</b><span>{rpeDescription(rpe)}</span></div>
-        <input type="range" className="sj-rpe-slider" min="1" max="10" step="1" value={rpe} onChange={e=>{setRpe(Number(e.target.value)); mark("rpe");}} aria-label="운동 강도 RPE 1에서 10"/>
+        <input type="range" className="sj-rpe-slider" min="1" max="10" step="1" value={rpe} onChange={e=>setRpe(Number(e.target.value))} aria-label="운동 강도 RPE 1에서 10"/>
         <div className="sj-rpe-scale"><span>1~2 매우 가벼움</span><span>5~6 적당함</span><span>10 한계</span></div>
+        <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveRpe}>{savingSection==="rpe"?"저장 중...":"RPE 저장"}</button>
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 근육통</label>
-        <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>{mark("soreness"); setSoreness(prev=>({...prev,level:lv}));}}>{lv}</button>)}</div>
+        <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>setSoreness(prev=>({...prev,level:lv}))}>{lv}</button>)}</div>
         {soreness.level!=="없음"&&<>
-          <span className="sj-fb-sublabel">아픈 부위 (복수 선택 가능)</span>
+          <span className="sj-fb-sublabel">근육통 부위 (복수 선택 가능)</span>
           <div className="sj-chip-row">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
           {riskSelected&&<p className="sj-fb-warning"><SjIcon paths={SJ_PATHS.alert} size={15}/> 다음 수업 전 대표님께 꼭 알려주세요.</p>}
         </>}
+        <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveSorenessSection}>{savingSection==="soreness"?"저장 중...":"근육통 저장"}</button>
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.message} size={14}/> 메모 <small>대표님께 함께 전달됩니다</small></label>
-        <textarea value={memo} onChange={e=>{setMemo(e.target.value); mark("memo");}} placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."/>
+        <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."/>
+        <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveMemo}>{savingSection==="memo"?"저장 중...":"메모 저장"}</button>
       </div>
       <div className="sj-fb-actions">
-        <button type="button" className="sj-fb-cancel" disabled={saving} onClick={cancel}>닫기</button>
-        <button type="button" className="sj-fb-save" disabled={saving} onClick={save}>{saving?"저장 중...":"기록 저장"}</button>
+        <button type="button" className="sj-fb-cancel" disabled={!!savingSection} onClick={cancel}>닫기</button>
       </div>
     </div>}
   </div>;
@@ -4513,9 +4512,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-fb-edit textarea:focus{outline:none;border-color:#2F73F6;background:#fff;min-height:110px}
 .sj-fb-edit textarea::placeholder{color:#A8B0BA;font-weight:700}
 .sj-fb-actions{display:flex;gap:8px}
-.sj-fb-cancel{flex:0 0 88px;height:48px;border:1px solid #E8ECF1;background:#fff;border-radius:14px;font-size:14px;font-weight:900;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-fb-save{flex:1;height:48px;border:0;border-radius:14px;background:#2F73F6;color:#fff;font-size:15px;font-weight:900;cursor:pointer;box-shadow:0 6px 16px rgba(47,115,246,.22);-webkit-tap-highlight-color:transparent}
-.sj-fb-save:disabled,.sj-fb-cancel:disabled{opacity:.6;cursor:default}
+.sj-fb-cancel{flex:1;height:48px;border:1px solid #E8ECF1;background:#fff;border-radius:14px;font-size:14px;font-weight:900;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-fb-section-save{width:100%;box-sizing:border-box;margin-top:12px;height:44px;border:0;border-radius:12px;background:#2F73F6;color:#fff;font-size:13.5px;font-weight:900;cursor:pointer;box-shadow:0 6px 16px rgba(47,115,246,.18);-webkit-tap-highlight-color:transparent}
+.sj-fb-section-save:disabled,.sj-fb-cancel:disabled{opacity:.6;cursor:default}
 .sj-empty{display:grid;gap:5px;place-items:center;text-align:center;padding:34px 16px;border:1px dashed #D9E1EA;border-radius:20px;background:#FBFCFE;margin:10px 0}
 .sj-empty b{font-size:14.5px;color:#475569}
 .sj-empty span{font-size:12.5px;font-weight:800;color:#A8B0BA}

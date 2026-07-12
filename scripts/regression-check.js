@@ -783,14 +783,16 @@ const checks = [
     app.includes('const SORENESS_RISK_NATURES=') &&
     !app.includes('어떤 느낌인가요?')
   ],
-  ['수업 후 상태: 회원이 건드린 필드만 payload에 담아 저장(안 건드린 항목 덮어쓰기·메모 중복 전송 방지)',
-    app.includes('if(touched.rpe&&(!hasRpe||Number(existing.rpe)!==Number(rpe))) payload.rpe=Number(rpe);') &&
-    app.includes('if(touched.soreness&&sorenessChanged){payload.sorenessLevel=level; payload.sorenessBodyParts=parts; payload.sorenessNature=nature;}') &&
-    app.includes('if(touched.memo&&memo.trim()!==(existing.memo||"").trim()) payload.memo=memo.trim();')
+  ['수업 후 상태: RPE·근육통·메모가 각각 독립된 저장 버튼을 가지며 한 항목 저장이 다른 항목을 건드리지 않음(공통 "기록 저장" 버튼 제거)',
+    app.includes('const saveRpe=()=>saveSection("rpe",{rpe:Number(rpe)});') &&
+    app.includes('saveSection("soreness",{sorenessLevel:level,sorenessBodyParts:parts,sorenessNature:nature});') &&
+    app.includes('const saveMemo=()=>saveSection("memo",{memo:memo.trim()});') &&
+    app.includes('"RPE 저장"') && app.includes('"근육통 저장"') && app.includes('"메모 저장"') &&
+    !app.includes('"기록 저장"')
   ],
-  ['수업 후 상태: 저장 중 중복 클릭 방지 (saving)',
-    app.includes('if(saving)return;') &&
-    app.includes('disabled={saving} onClick={save}')
+  ['수업 후 상태: 저장 중 중복 클릭 방지 (savingSection)',
+    app.includes('if(savingSection)return;') &&
+    app.includes('setSavingSection(key)')
   ],
   ['수업 후 상태: 저장 후 "미입력" 대신 기록 요약을 보여주고 언제든 수정 가능',
     app.includes('오늘의 피드백을 기록했어요.') &&

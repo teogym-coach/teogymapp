@@ -776,11 +776,12 @@ const checks = [
   ['수업 후 상태 메모: 요청 placeholder(불편했던 점/좋았던 점) 적용',
     app.includes('placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."')
   ],
-  ['수업 후 상태: RPE 슬라이더(1~10)+쉬운 설명, 근육통 정도/부위/성격, 메모가 하나의 피드백 카드로 통합',
+  ['수업 후 상태: RPE 슬라이더(1~10)+쉬운 설명, 근육통 정도/부위, 메모가 하나의 피드백 카드로 통합 ("어떤 느낌인가요?" 선택 UI는 회원 요청으로 제거됨, sorenessNature 필드·저장 로직은 과거 기록 호환용으로 유지)',
     app.includes('오늘 수업은 어땠나요?') &&
     app.includes('className="sj-rpe-slider" min="1" max="10"') &&
     app.includes('function rpeDescription(') &&
-    app.includes('const SORENESS_NATURES=')
+    app.includes('const SORENESS_RISK_NATURES=') &&
+    !app.includes('어떤 느낌인가요?')
   ],
   ['수업 후 상태: 회원이 건드린 필드만 payload에 담아 저장(안 건드린 항목 덮어쓰기·메모 중복 전송 방지)',
     app.includes('if(touched.rpe&&(!hasRpe||Number(existing.rpe)!==Number(rpe))) payload.rpe=Number(rpe);') &&

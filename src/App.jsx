@@ -2308,8 +2308,8 @@ function PainInput({form,setForm}){const noPain=form.painPart==="없음"; const 
 function PainTrend({checkins=[]}){const rows=getPainRecords(checkins); const groups=[...rows.reduce((m,r)=>m.set(painKey(r),[...(m.get(painKey(r))||[]),r]),new Map()).entries()].filter(([,v])=>v.length>=2).slice(-4); return <MCard title="통증 변화">{groups.length?groups.map(([k,v])=>{const last=v.at(-1), prev=v.at(-2); const state=last.vas<prev.vas?"감소하고 있습니다.":last.vas>prev.vas?"증가했습니다. 무리한 운동은 피해주세요.":"유지되고 있습니다. 다음 수업 때 대표에게 알려주세요."; return <div className="pain-trend" key={k}><b>{k} 통증 변화</b><p>{v.slice(-7).map(x=>x.vas).join(" → ")}</p><em>최근 {k} 통증이 {state}</em>{last.memo&&<small>{last.date} 메모: {last.memo}</small>}</div>}):<p className="notice soft">통증 기록이 2개 이상 쌓이면 좌우별 변화가 표시됩니다.</p>}</MCard>}
 const SORENESS_LEVELS=["없음","약간","보통","심함"];
 const SORENESS_BODY_PARTS=["목","어깨","가슴","등","허리","팔","엉덩이","허벅지 앞","허벅지 뒤","종아리","기타"];
-// 통증 성격 — 일반 근육통과 관절/날카로운 통증을 구분. 위험 신호 선택 시 대표에게 알리라는 안내를 띄운다.
-const SORENESS_NATURES=["일반적인 근육통","움직일 때 불편함","날카롭거나 찌르는 통증"];
+// 통증 성격 선택 UI(느낌 유형 3종 chip-row)는 제거됨(회원 요청). sorenessNature 필드·저장 로직·위험 신호 판정은
+// 기존 저장값과의 호환을 위해 그대로 유지한다(신규 입력 경로만 없어짐, 과거 기록의 risk 배지는 계속 표시됨).
 const SORENESS_RISK_NATURES=["움직일 때 불편함","날카롭거나 찌르는 통증"];
 function memberFeedbackParts(existing={}){const raw=Array.isArray(existing.sorenessBodyParts)?existing.sorenessBodyParts:(existing.sorenessBodyPart?[existing.sorenessBodyPart]:[]); return [...new Set(raw.map(v=>String(v||"").trim()).filter(Boolean))];}
 function formatSorenessBodyParts(feedback={}){const parts=memberFeedbackParts(feedback); return parts.length?parts.join("/"):(feedback.sorenessBodyPart||"-");}
@@ -2395,8 +2395,6 @@ function MemberFeedbackForm({s,onSave}){
         {soreness.level!=="없음"&&<>
           <span className="sj-fb-sublabel">아픈 부위 (복수 선택 가능)</span>
           <div className="sj-chip-row">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
-          <span className="sj-fb-sublabel">어떤 느낌인가요?</span>
-          <div className="sj-chip-row">{SORENESS_NATURES.map(n=><button type="button" key={n} className={soreness.nature===n?"active":""} onClick={()=>{mark("soreness"); setSoreness(prev=>({...prev,nature:prev.nature===n?"":n}));}}>{n}</button>)}</div>
           {riskSelected&&<p className="sj-fb-warning"><SjIcon paths={SJ_PATHS.alert} size={15}/> 다음 수업 전 대표님께 꼭 알려주세요.</p>}
         </>}
       </div>

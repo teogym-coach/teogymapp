@@ -5502,7 +5502,7 @@ export default function App() {
       )}
 
       {/* SCREENS */}
-      <div className="noprint" style={(screen==="home"||screen==="members") ? {width:"100%"} : {
+      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub") ? {width:"100%"} : {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
@@ -9235,10 +9235,11 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
       <style>{`
         .hub-light button:focus-visible{outline:2px solid ${DB.mint};outline-offset:2px;}
         /* 가로(>=1024px): 진짜 2패널 — 좌: 오늘 브리핑·최근 수업 / 우: 오늘 수업·다음 수업 준비.
-           첫 화면에서 브리핑+오늘 수업이 동시에 보이도록 카드 간격·패딩을 압축 */
-        .hub-2panel{display:grid;grid-template-columns:356px 1fr;gap:16px;align-items:start;}
+           우측에 부위 버튼·전송 버튼 등 콘텐츠가 많아 좌:우 = 0.8fr:1.3fr(약 38:62)로 우측을 더 넓게 배분 */
+        .hub-2panel{display:grid;grid-template-columns:minmax(320px,0.8fr) minmax(480px,1.3fr);gap:16px;align-items:start;}
         .hub-side{display:flex;flex-direction:column;gap:14px;min-width:0;position:sticky;top:10px;}
         .hub-main{display:flex;flex-direction:column;gap:14px;min-width:0;}
+        .hub-toolrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
         .hub-vitals{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${DB.border};border-radius:${DB.radiusSm}px;overflow:hidden;}
         .hub-vitals>div{background:${DB.card};}
         .hub-toolgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
@@ -9729,15 +9730,22 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
   );
 
+  // 회원 상세 화면 전체 컨테이너 폭 — 홈화면(HomeScreen)과 동일한 기준(padding-x 38px, maxWidth 1240, margin auto)을 재사용.
+  // 이전에는 App.jsx 최상위 래퍼가 hub 화면에 maxWidth:820을 강제해 아이패드 가로모드에서도 좁은 중앙열로 렌더링됐음 — App.jsx의 screen==="hub" 예외 추가로 그 제한을 해제하고, 대신 이 컴포넌트가 스스로 폭을 관리한다.
+  const HUB_PAD = isWide ? "24px 38px 48px" : "18px 14px 32px";
   return (
-    <div className="hub-light" style={{fontFamily:DB.font,color:DB.text}}>
+    <div className="hub-light" style={{fontFamily:DB.font,color:DB.text,width:"100%",maxWidth:1240,margin:"0 auto",padding:HUB_PAD,boxSizing:"border-box"}}>
       {topChrome}
 
       {isWide ? (
-        /* 가로(>=1024px): 2패널 — 좌: 브리핑·최근 수업(sticky) / 우: 오늘 수업·다음 준비·분석·회원관리 */
+        /* 가로(>=1024px): 2패널 — 좌: 브리핑·최근 수업(sticky) / 우: 오늘 수업·다음 준비·분석·회원관리.
+           우측이 더 넓어야 할 콘텐츠(부위 버튼·전송 버튼·다음 수업 준비 그리드)가 많아 좌 0.8fr : 우 1.3fr 비율 사용 */
         <div className="hub-2panel">
           <div className="hub-side">{secBrief}{secRecent}</div>
-          <div className="hub-main">{secToday}{secPrep}{secAnalysis}{secManage}</div>
+          <div className="hub-main">
+            {secToday}{secPrep}
+            <div className="hub-toolrow">{secAnalysis}{secManage}</div>
+          </div>
         </div>
       ) : (
         /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 분석 → 회원관리 */

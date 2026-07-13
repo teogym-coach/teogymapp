@@ -397,6 +397,11 @@ const FUNC_CATEGORIES = [
   {key:"코어",        label:"코어",         color:"#38bdf8", desc:"코어 안정화·강화"},
 ];
 
+// 회원에게 "움직임 개선" 배지로 노출할 카테고리 — 코어는 기존 정책대로 제외(아래 isFuncEx 주석 "맨몸+코어는 기능운동으로 분류하지 않음" 참고).
+// isFuncEx 내부의 FUNC_KEYS와 같은 목록이어야 한다(둘 다 수정할 것) — isFuncEx는 regression-check.js가
+// 텍스트를 잘라 별도 실행하는 함수라 이 상수를 직접 참조하지 못해 부득이하게 각자 인라인으로 들고 있다.
+const FUNC_MOVEMENT_KEYS = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스"];
+
 const FUNC_BODY_PARTS = [
   // 발~발목
   "족저근막","발등",
@@ -720,6 +725,8 @@ function isFuncEx(ex) {
   // 1. 기능 기구로 선택된 경우 (최우선, 이름 없어도 OK)
   if (ex.equipment === "기능") return true;
   // 2. funcCategory가 있는 경우 (이름 없어도 OK)
+  // FUNC_MOVEMENT_KEYS와 같은 목록이지만, scripts/regression-check.js가 isFuncEx~funcSetLabel 구간을
+  // 텍스트로 잘라 별도 실행하므로 외부 상수를 참조하면 그 슬라이스에서 깨진다 — 그대로 인라인 유지.
   const FUNC_KEYS = ["조직이완","가동성","안정화","활성화","움직임교정","호흡","밸런스"];
   if (ex.funcCategory && FUNC_KEYS.includes(ex.funcCategory)) return true;
   // 3. 기존 호환: muscleTop이 기능이거나 recordType:function 세트
@@ -727,6 +734,23 @@ function isFuncEx(ex) {
   if ((ex.sets||[]).some(s => s.recordType === "function")) return true;
   return false;
   // 맨몸+코어는 기능운동으로 분류하지 않음
+}
+
+// 회원에게 보여줄 운동 "이름" — 실제 입력한 운동명(ex.name)을 최우선 사용한다.
+// getFuncExDisplayName은 movementPurpose(목적 설명)를 이름보다 우선하므로 그대로 쓰면
+// "오픈북"처럼 이름을 직접 입력해도 "흉추 가동성 개선" 같은 생성 문구로 바뀌어 버린다 —
+// 이름은 이름대로, 유형은 getExerciseTypeBadge로 별도 배지 표시(운동 이름 ≠ 운동 유형).
+// 이름·카테고리가 모두 없는 완전 공백 항목은 빈 문자열을 반환하니 호출부에서 필터링할 것("운동" 가짜 이름 생성 금지).
+function getMemberExerciseName(ex) {
+  if (ex.name && ex.name.trim()) return ex.name.trim();
+  if (isFuncEx(ex)) return getFuncExDisplayName(ex);
+  return "";
+}
+
+// 회원 화면에 붙일 운동 유형 배지 — "움직임 개선" 카테고리(FUNC_MOVEMENT_KEYS)에 속할 때만 표시.
+// 운동명 키워드 추측이 아니라 관리자가 선택한 funcCategory 값을 그대로 사용한다. 코어는 기존 정책상 제외.
+function getExerciseTypeBadge(ex) {
+  return (ex.funcCategory && FUNC_MOVEMENT_KEYS.includes(ex.funcCategory)) ? "움직임 개선" : null;
 }
 
 // 기능운동 세트 표시 문자열 (입력된 값만)
@@ -4161,7 +4185,8 @@ function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
   ].filter(Boolean);
   return <div className={"sj-ex-row"+(weight?"":" assist")}>
     <button type="button" className="sj-ex-head" onClick={()=>toggleOpen(exKey)} aria-expanded={open}>
-      <span className="sj-ex-name">{e.name||e.movementPurpose||"운동"}</span>
+      <span className="sj-ex-name">{getMemberExerciseName(e)}</span>
+      {getExerciseTypeBadge(e)&&<em className="sj-badge move" style={{flexShrink:0}}>{getExerciseTypeBadge(e)}</em>}
       {!open&&summary&&<span className="sj-ex-sub">{summary}</span>}
       <i className="sj-chev"><SjIcon paths={open?SJ_PATHS.chevronUp:SJ_PATHS.chevronDown} size={14}/></i>
     </button>
@@ -4182,7 +4207,7 @@ function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
   </div>;
 }
 function ExerciseReportSection({title,items,weight=false,sessionId,openKeys,toggleOpen}){if(!items.length)return null; return <section className={weight?"sj-ex-section weight":"sj-ex-section assist"}><h3>{title}</h3>{items.map((e,i)=><ExerciseAccordionRow key={`${title}-${e.name||i}-${i}`} e={e} weight={weight} exKey={`${sessionId}-${title}-${e.name||i}-${i}`} openKeys={openKeys} toggleOpen={toggleOpen}/>)}</section>}
-function SessionMini({s,exFilter,openKeys,toggleOpen}){const groups={"움직임 준비":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>groups[getMemberExerciseSection(e)]?.push(e)); const filterItems=items=>exFilter?items.filter(e=>(e.name||"").toLowerCase().includes(exFilter)):items; return <div className="session-mini sj-session-mini"><ExerciseReportSection title="움직임 준비" items={filterItems(groups["움직임 준비"])} sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/><ExerciseReportSection title="웨이트 트레이닝" items={filterItems(groups["웨이트 트레이닝"])} weight sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
+function SessionMini({s,exFilter,openKeys,toggleOpen}){const groups={"움직임 준비":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>{if(e.name||isFuncEx(e))groups[getMemberExerciseSection(e)]?.push(e);}); const filterItems=items=>exFilter?items.filter(e=>(e.name||"").toLowerCase().includes(exFilter)):items; return <div className="session-mini sj-session-mini"><ExerciseReportSection title="움직임 준비" items={filterItems(groups["움직임 준비"])} sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/><ExerciseReportSection title="웨이트 트레이닝" items={filterItems(groups["웨이트 트레이닝"])} weight sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
 function SorenessRecorder({s,onSave}){const [open,setOpen]=useState(false); const [d,setD]=useState(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}); useEffect(()=>setD(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}),[s.id,s.sorenessReport]); if(!open)return <button className="ghost compact" onClick={()=>setOpen(true)}>{s.sorenessReport?'근육통 기록 수정':'근육통 기록'}</button>; const save=()=>onSave?.(s.id,{...d,updatedBy:'member',updatedAt:new Date().toISOString()}); return <div className="soreness-form"><h3>근육통 기록</h3><input value={d.part} onChange={e=>setD({...d,part:e.target.value})} placeholder="근육통 부위"/><select value={d.level} onChange={e=>setD({...d,level:e.target.value})}>{['없음','약함','보통','강함','매우 강함'].map(x=><option key={x}>{x}</option>)}</select><select value={d.timing} onChange={e=>setD({...d,timing:e.target.value})}>{['당일','다음날','다다음날'].map(x=><option key={x}>{x}</option>)}</select><textarea value={d.memo} onChange={e=>setD({...d,memo:e.target.value})} placeholder="메모"/><button className="primary compact" onClick={save}>저장</button></div>}
 const MEMBER_CSS=`
 .member-shell,.member-login,.onboard{
@@ -4464,6 +4489,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-badge{font-style:normal;font-size:10.5px;font-weight:900;border-radius:999px;padding:3.5px 9px;letter-spacing:0}
 .sj-badge.latest{background:#2F73F6;color:#fff}
 .sj-badge.pr{background:#FFF7ED;color:#F97316;border:1px solid #FED7AA}
+.sj-badge.move{background:rgba(139,92,246,.12);color:#8B5CF6}
 .sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#20242A}
 .sj-sess-title p{margin:5px 0 0;color:#F97316;font-weight:900;font-size:13.5px}
 .sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:10px;padding:7px 11px;font-size:12px;font-weight:900;color:#8B949E;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
@@ -9780,9 +9806,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                     <th style={{fontSize:10,fontWeight:700,color:DB.faint,textAlign:"left",padding:"6px 4px",borderBottom:`1px solid ${DB.border}`}}>반복</th>
                   </tr></thead>
                   <tbody>
-                    {(todaySession.exercises||[]).map((e,i)=>(
+                    {(todaySession.exercises||[]).filter(e=>e.name||isFuncEx(e)).map((e,i)=>(
                       <tr key={i}>
-                        <td style={{fontSize:12,fontWeight:700,padding:"7px 4px",borderBottom:`1px solid rgba(15,23,42,.04)`}}>{e.name||"운동"}</td>
+                        <td style={{fontSize:12,fontWeight:700,padding:"7px 4px",borderBottom:`1px solid rgba(15,23,42,.04)`}}>
+                          {getMemberExerciseName(e)}
+                          {getExerciseTypeBadge(e)&&<span style={{marginLeft:6,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:999,background:"rgba(139,92,246,.12)",color:"#8B5CF6",whiteSpace:"nowrap"}}>{getExerciseTypeBadge(e)}</span>}
+                        </td>
                         <td style={{fontSize:12,fontWeight:600,padding:"7px 4px",borderBottom:`1px solid rgba(15,23,42,.04)`,fontVariantNumeric:"tabular-nums"}}>{e.sets?.length||0}</td>
                         <td style={{fontSize:12,fontWeight:600,padding:"7px 4px",borderBottom:`1px solid rgba(15,23,42,.04)`,fontVariantNumeric:"tabular-nums"}}>{e.sets?.[e.sets.length-1]?.weight||"-"}{e.sets?.[e.sets.length-1]?.weight?"kg":""}</td>
                         <td style={{fontSize:12,fontWeight:600,padding:"7px 4px",borderBottom:`1px solid rgba(15,23,42,.04)`,fontVariantNumeric:"tabular-nums"}}>{e.sets?.[e.sets.length-1]?.reps||"-"}</td>

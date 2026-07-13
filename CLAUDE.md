@@ -1,3 +1,29 @@
+# 언어 규칙
+
+모든 응답, 진행 상황, 작업 완료 보고, recap, next step은 반드시 한국어로 작성한다.
+
+예외:
+- 코드
+- 함수명
+- 변수명
+- 파일명
+- 명령어
+- Git 커밋 해시
+- 에러 원문
+
+위 항목만 영어를 유지한다.
+
+자동으로 생성되는 recap, summary, next step도 반드시 한국어로 작성한다. 영어로 작성하지 않는다.
+"Recap:", "Summary:", "Next:", "Completed:" 등 영문 recap 라벨은 사용하지 않는다.
+
+작업 완료 후에는 반드시 아래 형식을 사용한다.
+
+※ 작업 요약
+- 완료한 작업:
+- 수정한 파일:
+- 커밋:
+- 다음 확인 사항:
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.

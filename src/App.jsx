@@ -9243,7 +9243,8 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
 
   // ── 최근 수업 (날짜 + 부위만, 펼치면 세부) ──
   const recentList = [...sessions].sort((a,b)=>(Number(b.sessionNo)||0)-(Number(a.sessionNo)||0)).slice(0,6);
-  const recentPartsOf = (s) => [...new Set((s.exercises||[]).map(e=>e.muscleTop).filter(Boolean))].join(" · ") || (formatTypes(s.selectedTypes||s.type)||"기타");
+  // muscleTop==="기능"은 저장용 내부 분류값일 뿐 회원에게 의미 있는 부위 정보가 아니므로 표시에서만 제외한다("어느 부위를 했는지"가 핵심).
+  const recentPartsOf = (s) => [...new Set((s.exercises||[]).map(e=>e.muscleTop).filter(v=>v&&v!=="기능"))].join(" · ") || (formatTypes(s.selectedTypes||s.type)||"기타");
 
   const STATE_LABEL = { idle:"기록 전", draft:"작성 중 · 임시저장", review:"저장됨 · 검토 필요 · 비공개", sent:"회원 공개 완료" };
   const STATE_COLOR = { idle:{bg:DB.bg,fg:DB.sub}, draft:{bg:"rgba(245,158,11,.12)",fg:"#92600A"}, review:{bg:DB.mintTintStrong,fg:DB.mintSoft}, sent:{bg:"rgba(34,197,94,.12)",fg:"#15803D"} };
@@ -9794,7 +9795,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 <div style={{fontSize:11,fontWeight:700,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>{formatCompactDate(todaySession.date)} · {todaySession.sessionNo}{t("회차","회차")} · {member.gymName||"테오짐"}</div>
                 <div style={{fontSize:16,fontWeight:800,letterSpacing:"-.3px",marginTop:2}}>오늘의 {t("수업일지","운동기록")}</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>
-                  {[...new Set((todaySession.exercises||[]).map(e=>e.muscleTop).filter(Boolean))].map(p=>(
+                  {[...new Set((todaySession.exercises||[]).map(e=>e.muscleTop).filter(v=>v&&v!=="기능"))].map(p=>(
                     <span key={p} style={{fontSize:10.5,fontWeight:700,padding:"2.5px 9px",borderRadius:999,background:DB.mintTint,color:DB.mintSoft}}>{p}</span>
                   ))}
                 </div>

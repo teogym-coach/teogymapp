@@ -9246,6 +9246,22 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
            모든 섹션 카드는 부모 폭 100%를 사용하고 가로 overflow를 만들지 않는다 */
         .hub-light section{width:100%;min-width:0;box-sizing:border-box;}
         @media(max-width:640px){.hub-vitals{grid-template-columns:1fr 1fr;}.hub-toolgrid{grid-template-columns:1fr 1fr;}.hub-prep-grid{grid-template-columns:1fr !important;}}
+        /* 태블릿 가로모드 밀도 최적화 — 아이패드 등 width 900px+/height 650~950px/landscape에서
+           스크롤을 줄이도록 카드 내부 여백·카드 간격·버튼 높이만 압축한다. 레이아웃 구조·정보·기능은 그대로. */
+        @media (min-width:900px) and (min-height:650px) and (max-height:950px) and (orientation:landscape){
+          .hub-2panel{gap:10px;}
+          .hub-side{gap:9px;}
+          .hub-main{gap:9px;}
+          .hub-sec-brief{padding:9px 12px 8px !important;}
+          .hub-sec-recent{padding:8px 6px 5px !important;}
+          .hub-sec-today{padding:11px 14px !important;}
+          .hub-sec-prep{padding:10px 13px 12px !important;}
+          .hub-vitals>div{padding:5px 9px !important;}
+          .hub-sec-prep textarea{min-height:38px !important;}
+          .hub-sec-analysis>button,.hub-sec-manage>button{padding:9px 14px !important;}
+          /* 액션 버튼(min-height 인라인 스타일이 있는 CTA류)만 선택적으로 압축 — 칩·토글류는 그대로 둔다 */
+          .hub-sec-today button[style*="min-height"],.hub-sec-prep button.hub-cta-compact{min-height:38px !important;padding:9px 18px !important;font-size:13px !important;}
+        }
       `}</style>
 
       {isTodayBirthday&&<div style={{background:`linear-gradient(rgba(251,191,36,.12),rgba(251,191,36,.12)), ${DB.card}`,border:"1px solid rgba(245,158,11,.3)",borderRadius:14,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92600A",lineHeight:1.5}}>🎂 오늘 생일입니다. 수업 시작 전에 축하 멘트를 해주세요.</div>}
@@ -9442,6 +9458,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           <section className="hub-sec-today" style={{background:`linear-gradient(rgba(57,199,184,.10),rgba(57,199,184,.10)), ${DB.card}`, border:`1px solid rgba(57,199,184,.35)`, borderRadius:DB.radius, boxShadow:DB.shadowLg, padding:"16px 18px"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:9}}>
               <span style={{fontSize:15,fontWeight:800,letterSpacing:"-.3px",color:DB.text}}>오늘 {t("수업","운동")} <small style={{fontSize:11.5,fontWeight:600,color:DB.sub,marginLeft:6}}>{usedCount+1}{t("회차","회차")} · {todayStr.slice(5)}</small></span>
+              <button onClick={()=>setScreen("history")} style={{display:"flex",alignItems:"center",gap:5,border:`1px solid rgba(57,199,184,.4)`,background:DB.card,color:DB.mintSoft,borderRadius:999,padding:"6px 12px",fontSize:11,fontWeight:700,fontFamily:DB.font,cursor:"pointer",whiteSpace:"nowrap",boxShadow:DB.shadow}}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/></svg>
+                {t("수업 히스토리","운동 히스토리")}
+              </button>
               <span style={{marginLeft:"auto",fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:stateStyle.bg,color:stateStyle.fg}}>{STATE_LABEL[todayCardState]}</span>
             </div>
 
@@ -9588,7 +9608,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 style={{width:"100%",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"11px 14px",fontFamily:DB.font,fontSize:13,color:DB.text,resize:"none",minHeight:60,lineHeight:1.6}}/>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
-              <button onClick={()=>handleSaveNextMemo(nextMemoDraft)} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
+              <button className="hub-cta-compact" onClick={()=>handleSaveNextMemo(nextMemoDraft)} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
               <span style={{fontSize:11.5,fontWeight:700,color:"#15803D",display:"flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:DB.success}}/>{nextMemoSavedAt?`저장됨 · ${formatWhenLabel(nextMemoSavedAt)||"-"}`:"아직 저장되지 않음"}</span>
             </div>
           </section>

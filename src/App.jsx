@@ -5956,70 +5956,38 @@ function HomeSectionHead({ title, caption, actionLabel, onAction, isWide }) {
 
 // "오늘 해야 할 일" 액션 카드 — 숫자보다 행동(CTA)이 주인공. count 0이면 조용한 완료 상태.
 // 와이드: 세로 카드 / 모바일: Apple Reminders식 가로 행(전체 탭 영역) — 3장 구성에 최적화.
+// Compact 리스트 행 — "예쁜 카드"보다 "한눈에 보이는 체크리스트"가 목표(홈 화면 정보 밀도 개선).
+// isWide 여부와 무관하게 동일한 한 줄 행을 사용(이전엔 와이드에서 세로로 긴 별도 카드+버튼을 그려 높이가 4배 가까이 컸음).
 function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="mint", onClick, isWide }) {
-  const [hov, setHov] = useState(false);
   const done = !count;
   const tones = {
-    mint:  { fg:DB.mintSoft, bg:"rgba(57,199,184,.10)",  btnBg:"rgba(57,199,184,.12)",  btnBd:"rgba(57,199,184,.28)" },
-    amber: { fg:"#B45309",   bg:"rgba(245,158,11,.10)",  btnBg:"rgba(245,158,11,.10)",  btnBd:"rgba(245,158,11,.28)" },
-    rose:  { fg:"#BE123C",   bg:"rgba(244,63,94,.08)",   btnBg:"rgba(244,63,94,.08)",   btnBd:"rgba(244,63,94,.24)" },
-    slate: { fg:DB.sub,      bg:"rgba(100,116,139,.08)", btnBg:"rgba(100,116,139,.07)", btnBd:"rgba(100,116,139,.2)" },
+    mint:  { fg:DB.mintSoft, bg:"rgba(57,199,184,.10)" },
+    amber: { fg:"#B45309",   bg:"rgba(245,158,11,.10)" },
+    rose:  { fg:"#BE123C",   bg:"rgba(244,63,94,.08)" },
+    slate: { fg:DB.sub,      bg:"rgba(100,116,139,.08)" },
   };
   const t = done ? tones.slate : tones[tone];
   const doneMark = (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.success} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={DB.success} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
   );
-
-  if (!isWide) {
-    return (
-      <div onClick={done?undefined:onClick}
-        style={{
-          background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,
-          padding:"14px 15px",boxShadow:DB.shadow,display:"flex",alignItems:"center",gap:13,
-          cursor:done?"default":"pointer",opacity:done?.78:1,
-        }}>
-        <div style={{width:40,height:40,borderRadius:13,background:t.bg,color:t.fg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{done?doneMark:icon}</div>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text,letterSpacing:"-.2px"}}>{title}</div>
-          <div style={{fontFamily:DB.font,fontSize:11.5,color:done?DB.faint:DB.sub,fontWeight:500,marginTop:2}}>{done?(doneDesc||"모두 완료됐어요"):desc}</div>
-        </div>
-        {!done && (
-          <div style={{display:"flex",alignItems:"baseline",gap:3,flexShrink:0}}>
-            <span style={{fontFamily:DB.font,fontWeight:800,fontSize:20,color:t.fg,letterSpacing:"-.5px",fontVariantNumeric:"tabular-nums"}}>{count}</span>
-            <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,fontWeight:600}}>{unit}</span>
-          </div>
-        )}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={done?DB.border:DB.faint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}><polyline points="9 6 15 12 9 18"/></svg>
-      </div>
-    );
-  }
-
   return (
-    <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+    <div onClick={done?undefined:onClick} title={done?(doneDesc||"모두 완료됐어요"):desc}
       style={{
-        background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,
-        padding:"22px 22px 18px",
-        boxShadow:hov&&!done?DB.shadowLg:DB.shadow,
-        transform:hov&&!done?"translateY(-2px)":"none",
-        transition:"box-shadow .25s ease,transform .25s ease",
-        display:"flex",flexDirection:"column",opacity:done?.75:1,
+        background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,
+        padding:isWide?"10px 14px":"9px 12px",boxShadow:DB.shadow,
+        display:"flex",alignItems:"center",gap:10,
+        cursor:done?"default":"pointer",opacity:done?.7:1,
       }}>
-      <div style={{width:40,height:40,borderRadius:13,background:done?"rgba(34,197,94,.1)":t.bg,color:t.fg,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:14}}>{done?doneMark:icon}</div>
-      <div style={{display:"flex",alignItems:"baseline",gap:4}}>
-        <span style={{fontFamily:DB.font,fontWeight:800,fontSize:30,color:DB.text,lineHeight:1,letterSpacing:"-1px",fontVariantNumeric:"tabular-nums"}}>{count}</span>
-        <span style={{fontFamily:DB.font,fontSize:13,color:DB.sub,fontWeight:600}}>{unit}</span>
-      </div>
-      <div style={{fontFamily:DB.font,fontWeight:800,fontSize:14,color:DB.text,marginTop:8,letterSpacing:"-.2px"}}>{title}</div>
-      <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,fontWeight:500,marginTop:3,marginBottom:14}}>{done?(doneDesc||"모두 완료됐어요"):desc}</div>
-      <button onClick={done?undefined:onClick} disabled={done}
-        style={{
-          marginTop:"auto",width:"100%",padding:"9px 0",borderRadius:12,
-          border:`1px solid ${done?DB.border:t.btnBd}`,background:done?DB.bg:t.btnBg,
-          color:done?DB.faint:t.fg,fontFamily:DB.font,fontWeight:700,fontSize:12.5,
-          cursor:done?"default":"pointer",transition:"all .18s ease",
-        }}>
-        {done?"✓ 완료":`${cta} →`}
-      </button>
+      <div style={{width:26,height:26,borderRadius:9,background:t.bg,color:t.fg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{done?doneMark:icon}</div>
+      <div style={{flex:1,minWidth:0,fontFamily:DB.font,fontWeight:800,fontSize:12.5,color:DB.text,letterSpacing:"-.2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>
+      {done ? (
+        <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10.5,padding:"3px 9px",borderRadius:999,background:DB.bg,color:DB.faint,border:`1px solid ${DB.border}`}}>완료</span>
+      ) : (
+        <span style={{flexShrink:0,display:"flex",alignItems:"baseline",gap:3}}>
+          <span style={{fontFamily:DB.font,fontWeight:800,fontSize:15,color:t.fg,letterSpacing:"-.3px",fontVariantNumeric:"tabular-nums"}}>{count}</span>
+          <span style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,fontWeight:600}}>{unit}</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -6239,7 +6207,6 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [comingSoon, setComingSoon] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [heroImgOk, setHeroImgOk] = useState(true); // public/hero.jpg가 있으면 Hero에 실제 센터 사진 노출, 없으면 브랜드 패널로 폴백
   useEffect(()=>{
     const h=()=>setWinW(window.innerWidth);
     window.addEventListener("resize",h);
@@ -6350,19 +6317,6 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
   const dateStr = new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"long"});
   const aiTip = buildAiCoachingTip(todaySummary);
   const aiMember = todaySummary.attention[0]?.member || null;
-  const highlight = buildTodayHighlight(todaySummary);
-
-  // Hero 문구 — 시간대 인사 + 오늘 요약(긍정형) + 코칭 한 줄 (전부 기존 집계 재사용, 계산만)
-  const hour = new Date().getHours();
-  const greeting = hour<12 ? "Good Morning" : hour<18 ? "Good Afternoon" : "Good Evening";
-  // 미기록 등 부담 문구는 Hero에서 제외 — 오늘의 흐름만 긍정적으로 요약
-  const heroSummary = [
-    todayCount>0 ? `오늘 수업 ${todayCount}건` : null,
-    todaySummary.attention.length>0 ? `회원 체크 ${todaySummary.attention.length}명` : null,
-  ].filter(Boolean).join("  ·  ");
-  const heroCoach = aiTip
-    ? `오늘은 ${aiTip.name} 회원의 ${aiTip.reason} 체크로 시작하세요`
-    : "오늘도 회원들의 건강한 변화를 만들어보세요";
 
   const mainContent = (
     <div style={{flex:1,overflowY:"auto",minHeight:0,height:isWide?VH:undefined,background:DB.bg}}>
@@ -6440,82 +6394,12 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
 
       <div style={{padding:PAD,maxWidth:1240,margin:"0 auto"}}>
 
-        {/* ═══ Hero — Nike Run Club식 브랜드 패널. 인사 + 오늘 요약 + 코칭 한 줄 ═══ */}
-        <div style={{
-          position:"relative",borderRadius:isWide?28:22,overflow:"hidden",
-          marginBottom:GAP,minHeight:isWide?224:0,
-          background:`linear-gradient(118deg,${DB.mintDeep} 0%,${DB.mintDeep2} 58%,#17685E 100%)`,
-          boxShadow:DB.shadowLg,
-          display:"flex",alignItems:"stretch",
-        }}>
-          <div style={{position:"absolute",top:-130,right:isWide?180:-70,width:360,height:360,borderRadius:"50%",background:"radial-gradient(circle,rgba(57,199,184,.30),transparent 65%)",pointerEvents:"none"}}/>
-          <div style={{position:"absolute",bottom:-150,left:-90,width:330,height:330,borderRadius:"50%",background:"radial-gradient(circle,rgba(57,199,184,.13),transparent 65%)",pointerEvents:"none"}}/>
-          <div style={{flex:1,minWidth:0,padding:isWide?"36px 42px":"24px 22px",display:"flex",flexDirection:"column",justifyContent:"center",position:"relative",zIndex:1}}>
-            <div style={{fontFamily:DB.font,fontSize:11.5,color:"rgba(255,255,255,.52)",fontWeight:700,letterSpacing:"2px",textTransform:"uppercase"}}>{dateStr}</div>
-            <div style={{fontFamily:DB.font,fontWeight:800,fontSize:isWide?31:23,color:"#fff",letterSpacing:"-.6px",lineHeight:1.2,marginTop:10}}>
-              {greeting}, 대표님 <span style={{fontSize:isWide?25:19}}>👋</span>
-            </div>
-            {/* 오늘 요약(긍정형) + 브랜드 모토 — 부담을 주는 숫자는 Hero에 두지 않는다 */}
-            {heroSummary && (
-              <div style={{fontFamily:DB.font,fontSize:isWide?14.5:13,color:"rgba(255,255,255,.80)",fontWeight:600,marginTop:12,lineHeight:1.5}}>{heroSummary}</div>
-            )}
-            <div style={{fontFamily:DB.font,fontSize:isWide?13.5:12.5,color:"rgba(255,255,255,.62)",fontWeight:500,marginTop:heroSummary?5:12,lineHeight:1.6}}>
-              오늘도 회원들의 건강한 변화를 만들어봅시다.
-            </div>
-            <div style={{display:"inline-flex",alignItems:"center",gap:8,marginTop:18,alignSelf:"flex-start",padding:"8px 15px",borderRadius:999,background:"rgba(255,255,255,.10)",border:"1px solid rgba(255,255,255,.15)",backdropFilter:"blur(4px)"}}>
-              <span style={{color:DB.mint,display:"flex"}}>{icSpark}</span>
-              <span style={{fontFamily:DB.font,fontSize:12.5,color:"rgba(255,255,255,.92)",fontWeight:600}}>{heroCoach}</span>
-            </div>
-          </div>
-          {isWide && (
-            <div style={{width:"42%",maxWidth:490,flexShrink:0,position:"relative"}}>
-              {heroImgOk ? (
-                <>
-                  {/* 실제 테오짐 센터 사진 (public/hero.jpg) — 좌측 딥그린 패널과 자연스럽게 블렌딩 */}
-                  <img src="/hero.jpg" alt="" onError={()=>setHeroImgOk(false)}
-                    style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}}/>
-                  <div style={{position:"absolute",inset:0,background:`linear-gradient(90deg,${DB.mintDeep2} 0%,rgba(17,82,75,.34) 34%,rgba(17,82,75,.06) 62%,transparent 100%)`}}/>
-                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:70,background:"linear-gradient(0deg,rgba(11,59,54,.42),transparent)"}}/>
-                </>
-              ) : (
-                /* 사진이 없어도 비어 보이지 않는 브랜드 패널 — 링 모노그램 + 워드마크 */
-                <div style={{position:"absolute",inset:0,overflow:"hidden"}}>
-                  <svg width="300" height="300" viewBox="0 0 300 300" style={{position:"absolute",top:"50%",right:-60,transform:"translateY(-50%)",opacity:.5}}>
-                    <circle cx="150" cy="150" r="128" fill="none" stroke="rgba(57,199,184,.30)" strokeWidth="1.5"/>
-                    <circle cx="150" cy="150" r="96"  fill="none" stroke="rgba(57,199,184,.22)" strokeWidth="1.5"/>
-                    <circle cx="150" cy="150" r="64"  fill="none" stroke="rgba(57,199,184,.15)" strokeWidth="1.5"/>
-                    <circle cx="150" cy="22" r="4" fill="rgba(57,199,184,.75)"/>
-                  </svg>
-                  <div style={{position:"absolute",right:32,bottom:26,textAlign:"right"}}>
-                    <div style={{fontFamily:DB.font,fontWeight:800,fontSize:34,color:"rgba(255,255,255,.16)",letterSpacing:"5px",lineHeight:1}}>TEO GYM</div>
-                    <div style={{fontFamily:DB.font,fontWeight:600,fontSize:10.5,color:"rgba(255,255,255,.36)",letterSpacing:"3.5px",marginTop:8}}>PREMIUM COACHING</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ═══ 오늘의 한 줄 — 하루를 시작하는 동기부여 문장 (buildTodayHighlight 재사용) ═══ */}
-        <div style={{
-          display:"flex",alignItems:"flex-start",gap:isWide?16:12,
-          background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,
-          padding:isWide?"22px 26px":"18px 18px",boxShadow:DB.shadow,marginBottom:GAP,
-        }}>
-          <div style={{width:38,height:38,borderRadius:12,flexShrink:0,background:DB.mintTint,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 8C7 8 5 10 5 12.5c0 2.2 1.7 4 3.9 4 .3 0 .5 0 .8-.1-.5 1.3-1.5 2.4-2.9 3.1-.3.2-.4.5-.3.8.1.3.5.5.8.4C10.6 19.6 12.5 16.6 12.5 13 12.5 10.2 11.2 8 9.5 8zm9 0C16 8 14 10 14 12.5c0 2.2 1.7 4 3.9 4 .3 0 .5 0 .8-.1-.5 1.3-1.5 2.4-2.9 3.1-.3.2-.4.5-.3.8.1.3.5.5.8.4 3.3-1.1 5.2-4.1 5.2-7.7C21.5 10.2 20.2 8 18.5 8z"/></svg>
-          </div>
-          <div style={{minWidth:0}}>
-            <div style={{fontFamily:DB.font,fontWeight:700,fontSize:11,color:DB.faint,letterSpacing:"1.6px",textTransform:"uppercase"}}>오늘의 한 줄</div>
-            <div style={{fontFamily:DB.font,fontWeight:700,fontSize:isWide?15.5:14,color:DB.text,lineHeight:1.65,letterSpacing:"-.2px",marginTop:5}}>{highlight}</div>
-          </div>
-        </div>
-
         {/* ═══ 오늘 해야 할 일 — 홈의 주인공. 3초 안에 오늘 할 행동이 보인다.
+             Hero/오늘의 한 줄 카드는 업무 효율 우선 개편으로 삭제(하루 1회성 정보 + AI 코치와 중복) — 첫 화면 최상단으로 승격.
              4→3장으로 정리: "체크 필요 회원"은 아래 전용 카드 + AI 코칭이 담당해 중복 제거 ═══ */}
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:isWide?16:9}}>
+          <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:isWide?10:6}}>
             <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={todayUnpubCount} unit="건" title="오늘 미기록 수업" desc="기록이 필요해요" doneDesc="오늘 수업 기록이 모두 정리됐어요" cta="기록 작성하기" onClick={()=>{loadMembers();setScreen("members");}} />
             <TodayActionCard isWide={isWide} icon={sc4} tone="mint" count={feedItems.length} unit="건" title="회원 입력 확인" desc="새로 입력했어요" doneDesc="새 입력이 모두 확인됐어요" cta="확인하기" onClick={()=>setDrawerOpen(true)} />
             <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />

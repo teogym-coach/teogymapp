@@ -6932,6 +6932,19 @@ function latestActivityByType(log, type){
   (log||[]).forEach(a=>{ if(a.type===type && (!best || (a.at||0) > (best.at||0))) best = a; });
   return best;
 }
+// 체중 변화 — 최신 체중(카드에 이미 표시 중인 값)과 회원 문서의 기존 startWeight(가입 시 시작 체중, 신규 필드 아님)를 화면에서만 비교.
+// Firebase에 다시 저장하지 않음. 잘못된 값(0 이하/숫자 아님)은 비교 대상에서 제외.
+function weightChangeText(currentWeightLabel, startWeight){
+  const current = parseFloat(String(currentWeightLabel||"").replace(/[^0-9.]/g,""));
+  if (!Number.isFinite(current) || current <= 0) return null; // 오늘 표시 중인 체중값 자체가 없음
+  const start = Number(startWeight);
+  if (!Number.isFinite(start) || start <= 0) return { text:"변화 기록 없음", tone:null };
+  const diff = current - start;
+  if (Math.abs(diff) < 0.05) return { text:"첫 측정과 동일", tone:null };
+  const sign = diff > 0 ? "+" : "-";
+  // 감량=긍정색, 증량=목표와 무관하게 중립색(경고색 아님) — 성공/실패를 임의로 단정하지 않는다
+  return { text:`첫 측정 대비 ${sign}${Math.abs(diff).toFixed(1)}kg`, tone: diff < 0 ? DB.mintSoft : DB.sub };
+}
 // 회원 카드 중앙 상태 블록 5종 — 새 데이터 없이 recentActivityLog(ACTIVITY_ICON과 동일 타입)만 재사용
 const MEMBER_CARD_STATUS_FIELDS = [
   {key:"condition",label:"컨디션",icon:"🙂"},
@@ -6954,9 +6967,9 @@ function MemberCardShell({onClick,dim,isWide,children}){
       boxShadow:press?"0 4px 18px rgba(57,199,184,.16)":hov?DB.shadowLg:DB.shadow,
       transform:press?"scale(1.008)":hov?"translateY(-2px)":"none",
       transition:"transform .22s ease,box-shadow .22s ease,border-color .22s ease",
-      padding:isWide?"16px 20px":"16px 16px 15px",
+      padding:isWide?"9px 16px":"10px 13px",
       display:"flex",flexDirection:isWide?"row":"column",alignItems:isWide?"center":"stretch",
-      gap:isWide?18:12,
+      gap:isWide?14:7,
       opacity:dim?.6:1,
     }}>{children}</div>;
 }
@@ -6982,17 +6995,18 @@ function GoalChip({label,tint}){
     slate:{bg:"rgba(100,116,139,.08)",fg:"#64748B",bd:"rgba(100,116,139,.18)"},
   };
   const t=tones[tint]||tones.mint;
-  return <span style={{display:"inline-flex",alignItems:"center",padding:"4px 11px",borderRadius:999,background:t.bg,color:t.fg,border:`1px solid ${t.bd}`,fontSize:11,fontWeight:700,fontFamily:DB.font,whiteSpace:"nowrap"}}>{label}</span>;
+  return <span style={{display:"inline-flex",alignItems:"center",padding:"3px 9px",borderRadius:999,background:t.bg,color:t.fg,border:`1px solid ${t.bd}`,fontSize:10.5,fontWeight:700,fontFamily:DB.font,whiteSpace:"nowrap"}}>{label}</span>;
 }
-// 회원 카드 중앙 — 아이콘 + 항목명 + 값(멀리서도 읽히는 크기). 값이 없으면 "—"로 통일.
-function StatusBlock({icon,label,value,tone,muted}){
+// 회원 카드 상태 셀 — 아이콘+항목명 한 줄, 값 한 줄(+ 체중만 변화량 보조줄). 값이 없으면 "—"로 통일. 배경 박스 없이 낮은 셀 형태.
+function StatusBlock({icon,label,value,tone,muted,sub,subTone}){
   return (
     <div style={{minWidth:0}}>
-      <div style={{display:"flex",alignItems:"center",gap:5}}>
-        <span style={{fontSize:13,flexShrink:0}}>{icon}</span>
-        <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,color:DB.faint,whiteSpace:"nowrap"}}>{label}</span>
+      <div style={{display:"flex",alignItems:"center",gap:4}}>
+        <span style={{fontSize:11,flexShrink:0}}>{icon}</span>
+        <span style={{fontFamily:DB.font,fontSize:10,fontWeight:700,color:DB.faint,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</span>
       </div>
-      <div style={{fontFamily:DB.font,fontSize:15,fontWeight:800,color:muted?"#C3CBD6":tone,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{value}</div>
+      <div style={{fontFamily:DB.font,fontSize:14,fontWeight:800,color:muted?"#C3CBD6":tone,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{value}</div>
+      {sub && <div style={{fontFamily:DB.font,fontSize:9,fontWeight:600,color:subTone||DB.faint,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sub}</div>}
     </div>
   );
 }
@@ -7228,171 +7242,134 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
 
       <div style={{maxWidth:isWide?1400:820,margin:"0 auto",padding:isWide?"20px 28px calc(44px + env(safe-area-inset-bottom,0px))":"16px 16px calc(44px + env(safe-area-inset-bottom,0px))"}}>
 
-      {/* 대표님 전용 운동 기록 버튼 */}
-      {ownerMember && (
-        <div style={{marginBottom:12,padding:"13px 16px",borderRadius:16,
-          background:"linear-gradient(135deg,rgba(57,199,184,.10),#FFFFFF)",
-          border:"1px solid rgba(57,199,184,.28)",boxShadow:DB.shadow,
-          display:"flex",alignItems:"center",justifyContent:"space-between",
-          cursor:"pointer"}}
-          onClick={()=>onSelect(ownerMember)}>
-          <div style={{display:"flex",alignItems:"center",gap:11}}>
-            <div style={{width:38,height:38,borderRadius:12,background:DB.mintTint,
-              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏋️</div>
-            <div>
-              <div style={{fontFamily:DB.font,fontWeight:800,fontSize:14,color:DB.mintSoft}}>대표님 운동 기록</div>
-              <div style={{fontFamily:DB.font,fontSize:11,color:DB.faint,fontWeight:600,marginTop:2}}>{ownerMember.name} · 개인 운동 전용</div>
+      {/* 대표님 전용 운동 기록 버튼 + 테스트 회원 관리 — 한 줄 배치(각 기능·문구·로직은 그대로, 배치만 변경) */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"stretch",marginBottom:12}}>
+        {ownerMember && (
+          <div style={{flex:"1 1 260px",padding:"13px 16px",borderRadius:16,
+            background:"linear-gradient(135deg,rgba(57,199,184,.10),#FFFFFF)",
+            border:"1px solid rgba(57,199,184,.28)",boxShadow:DB.shadow,
+            display:"flex",alignItems:"center",justifyContent:"space-between",
+            cursor:"pointer"}}
+            onClick={()=>onSelect(ownerMember)}>
+            <div style={{display:"flex",alignItems:"center",gap:11}}>
+              <div style={{width:38,height:38,borderRadius:12,background:DB.mintTint,
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏋️</div>
+              <div>
+                <div style={{fontFamily:DB.font,fontWeight:800,fontSize:14,color:DB.mintSoft}}>대표님 운동 기록</div>
+                <div style={{fontFamily:DB.font,fontSize:11,color:DB.faint,fontWeight:600,marginTop:2}}>{ownerMember.name} · 개인 운동 전용</div>
+              </div>
             </div>
+            <span style={{color:DB.mintSoft,fontSize:14,fontWeight:700}}>→</span>
           </div>
-          <span style={{color:DB.mintSoft,fontSize:14,fontWeight:700}}>→</span>
+        )}
+        <button onClick={()=>setShowTestPanel(v=>!v)} style={{flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(139,92,246,.25)",background:"#fff",color:"#7C3AED",borderRadius:11,padding:"0 14px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font,boxShadow:DB.shadow,whiteSpace:"nowrap"}}>
+          🧪 테스트 회원 관리 {showTestPanel?"▲":"▼"}
+        </button>
+      </div>
+      {/* 테스트 회원 관리 (기본 접힘) — docs/member-app-test-accounts.md */}
+      {showTestPanel && (
+        <div style={{marginBottom:12,padding:"12px 14px",borderRadius:14,background:"#fff",border:"1px solid rgba(139,92,246,.2)",boxShadow:DB.shadow}}>
+          <div style={{fontSize:11,color:"#7C3AED",fontWeight:600,fontFamily:DB.font}}>회원앱 로그인/상태차단/공지/2:1 테스트 전용 — 실제 회원과 무관</div>
+          <div style={{display:"grid",gap:6,marginTop:8}}>
+            {TEST_MEMBER_PRESETS.map(preset=>{
+              const exists = members.some(m => (m.email||"").trim().toLowerCase() === preset.email);
+              return (
+                <div key={preset.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                  <div style={{fontSize:11.5,color:DB.text,fontFamily:DB.font}}>{preset.name} <span style={{color:DB.faint}}>({preset.email})</span></div>
+                  <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font}}>
+                    {exists?"생성됨":"생성"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{fontSize:10.5,color:DB.faint,marginTop:8,fontFamily:DB.font,lineHeight:1.6}}>
+            생성 후 회원 상세 → 회원앱 관리 → 회원앱 초대 버튼으로 Firebase Auth 계정을 연결해야 로그인 테스트가 가능합니다.
+          </div>
         </div>
       )}
 
-      {/* 테스트 회원 관리 (기본 접힘) — docs/member-app-test-accounts.md */}
-      <div style={{marginBottom:12}}>
-        <button onClick={()=>setShowTestPanel(v=>!v)} style={{border:"1px solid rgba(139,92,246,.25)",background:"#fff",color:"#7C3AED",borderRadius:11,padding:"7px 12px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font,boxShadow:DB.shadow}}>
-          🧪 테스트 회원 관리 {showTestPanel?"▲":"▼"}
-        </button>
-        {showTestPanel && (
-          <div style={{marginTop:8,padding:"12px 14px",borderRadius:14,background:"#fff",border:"1px solid rgba(139,92,246,.2)",boxShadow:DB.shadow}}>
-            <div style={{fontSize:11,color:"#7C3AED",fontWeight:600,fontFamily:DB.font}}>회원앱 로그인/상태차단/공지/2:1 테스트 전용 — 실제 회원과 무관</div>
-            <div style={{display:"grid",gap:6,marginTop:8}}>
-              {TEST_MEMBER_PRESETS.map(preset=>{
-                const exists = members.some(m => (m.email||"").trim().toLowerCase() === preset.email);
-                return (
-                  <div key={preset.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-                    <div style={{fontSize:11.5,color:DB.text,fontFamily:DB.font}}>{preset.name} <span style={{color:DB.faint}}>({preset.email})</span></div>
-                    <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font}}>
-                      {exists?"생성됨":"생성"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{fontSize:10.5,color:DB.faint,marginTop:8,fontFamily:DB.font,lineHeight:1.6}}>
-              생성 후 회원 상세 → 회원앱 관리 → 회원앱 초대 버튼으로 Firebase Auth 계정을 연결해야 로그인 테스트가 가능합니다.
-            </div>
+      {/* 검색창 — 필터 탭 행 안으로 이동. 검색·필터 로직은 변경 없음, 배치만 변경 */}
+      {(() => {
+        const segmentedControl = (
+          <div style={{flex:isWide?"0 1 auto":1,minWidth:0,display:"flex",gap:4,background:"#ECEFF3",borderRadius:14,padding:4,overflowX:"auto"}}>
+            {SEGMENT_FILTERS.map(f => (
+              <button key={f.key} onClick={()=>setFilter(f.key)}
+                style={{flex:"1 0 auto",minWidth:0,height:36,padding:"0 12px",borderRadius:11,border:"none",cursor:"pointer",
+                  fontSize:12.5,fontWeight:filter===f.key?800:600,fontFamily:DB.font,whiteSpace:"nowrap",
+                  background:filter===f.key?"#fff":"transparent",
+                  color:filter===f.key?DB.text:DB.sub,
+                  boxShadow:filter===f.key?"0 2px 8px rgba(15,23,42,.09)":"none",
+                  transition:"background-color .2s ease,color .2s ease,box-shadow .2s ease"}}>
+                {f.label}
+              </button>
+            ))}
           </div>
-        )}
-      </div>
-
-      {/* 검색창 */}
-      <div style={{position:"relative",marginBottom:12}}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="2" strokeLinecap="round" style={{position:"absolute",left:15,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-        <input
-          value={search} onChange={e=>setSearch(e.target.value)}
-          placeholder="이름 검색 (초성 가능)"
-          style={{width:"100%",height:46,padding:"0 38px 0 40px",borderRadius:14,border:`1px solid ${DB.border}`,
-            background:"#fff",color:DB.text,fontSize:14,fontWeight:600,fontFamily:DB.font,boxSizing:"border-box",
-            boxShadow:DB.shadow,outline:"none"}}
-        />
-        {search && (
-          <button onClick={()=>setSearch("")}
-            style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:22,height:22,borderRadius:"50%",
-              background:DB.bg,border:"none",color:DB.sub,fontSize:11,cursor:"pointer",padding:0}}>✕</button>
-        )}
-      </div>
-
-      {/* 빠른 필터 — Apple Segmented Control + 나머지 조건·정렬은 "필터" 팝오버 */}
-      <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center"}}>
-        <div style={{flex:1,minWidth:0,display:"flex",gap:4,background:"#ECEFF3",borderRadius:14,padding:4,overflowX:"auto"}}>
-          {SEGMENT_FILTERS.map(f => (
-            <button key={f.key} onClick={()=>setFilter(f.key)}
-              style={{flex:"1 0 auto",minWidth:0,height:36,padding:"0 12px",borderRadius:11,border:"none",cursor:"pointer",
-                fontSize:12.5,fontWeight:filter===f.key?800:600,fontFamily:DB.font,whiteSpace:"nowrap",
-                background:filter===f.key?"#fff":"transparent",
-                color:filter===f.key?DB.text:DB.sub,
-                boxShadow:filter===f.key?"0 2px 8px rgba(15,23,42,.09)":"none",
-                transition:"background-color .2s ease,color .2s ease,box-shadow .2s ease"}}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div style={{flexShrink:0,position:"relative"}}>
-          {(()=>{ const moreActive=MORE_FILTERS.find(f=>f.key===filter); return (
-            <button onClick={()=>setShowSort(v=>!v)}
-              style={{height:44,padding:"0 13px",borderRadius:14,border:`1px solid ${moreActive?"rgba(57,199,184,.4)":DB.border}`,cursor:"pointer",
-                background:moreActive?DB.mintTint:"#fff",color:moreActive?DB.mintSoft:DB.sub,
-                fontSize:12.5,fontWeight:700,fontFamily:DB.font,boxShadow:DB.shadow,whiteSpace:"nowrap"}}>
-              {moreActive?moreActive.label:"필터"} ⚙
-            </button>
-          );})()}
-          {showSort && (
-            <div style={{position:"absolute",right:0,top:50,background:"#fff",border:`1px solid ${DB.border}`,
-              borderRadius:16,zIndex:80,minWidth:180,boxShadow:DB.shadowLg,padding:6,overflow:"hidden"}}>
-              <div style={{fontSize:10.5,fontWeight:800,color:DB.faint,padding:"7px 12px 3px",letterSpacing:".6px"}}>조건</div>
-              {MORE_FILTERS.map(f=>(
-                <button key={f.key} onClick={()=>{setFilter(filter===f.key?"active":f.key);setShowSort(false);}}
-                  style={{display:"block",width:"100%",padding:"9px 12px",background:filter===f.key?DB.mintTint:"none",border:"none",borderRadius:10,
-                    color:filter===f.key?DB.mintSoft:DB.text,fontSize:12.5,fontWeight:filter===f.key?800:600,
-                    textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
-                  {filter===f.key?"✓ ":""}{f.label}
-                </button>
-              ))}
-              <div style={{height:1,background:DB.border,margin:"6px 4px"}}/>
-              <div style={{fontSize:10.5,fontWeight:800,color:DB.faint,padding:"5px 12px 3px",letterSpacing:".6px"}}>정렬</div>
-              {SORTS.map(s=>(
-                <button key={s.key} onClick={()=>{setSortBy(s.key);setShowSort(false);}}
-                  style={{display:"block",width:"100%",padding:"9px 12px",background:"none",border:"none",borderRadius:10,
-                    color:sortBy===s.key?DB.mintSoft:DB.text,fontSize:12.5,fontWeight:sortBy===s.key?800:600,
-                    textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
-                  {sortBy===s.key?"✓ ":""}{s.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 오늘 입력 요약 — 항목별 입력 인원을 큰 블록 4개로. 계산 로직은 todayInputCounts 그대로, 표현만 확대 */}
-      <div style={{marginBottom:14,padding:isWide?"16px 18px":"12px 15px",borderRadius:16,background:"#fff",border:`1px solid ${DB.border}`,boxShadow:DB.shadow}}>
-        <div style={{fontFamily:DB.font,fontWeight:800,fontSize:12.5,color:DB.text,marginBottom:10}}>오늘 입력 요약</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:isWide?14:8}}>
-          {[["weight","체중"],["condition","컨디션"],["cardio","유산소"],["rpe","RPE"]].map(([k,l])=>(
-            <div key={k} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:isWide?"16px 8px":"11px 6px",borderRadius:14,background:todayInputCounts[k]>0?DB.mintTint:DB.bg}}>
-              <span style={{fontSize:isWide?26:21}}>{ACTIVITY_ICON[k]}</span>
-              <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:DB.sub}}>{l}</span>
-              <span style={{fontFamily:DB.font,fontSize:isWide?17:15,fontWeight:800,color:todayInputCounts[k]>0?DB.mintSoft:DB.faint,fontVariantNumeric:"tabular-nums"}}>{todayInputCounts[k]}명</span>
-            </div>
-          ))}
-        </div>
-        <button onClick={()=>setShowTodayFeed(v=>!v)}
-          style={{marginTop:10,width:"100%",textAlign:"center",border:"none",background:"none",cursor:"pointer",fontFamily:DB.font,
-            fontSize:11.5,fontWeight:700,color:todayFeedItems.length>0?DB.mintSoft:DB.faint,padding:"3px 0"}}>
-          {todayFeedItems.length===0 ? "오늘 새로운 회원 입력이 없습니다." : `읽지 않은 알림 ${todayFeedItems.length}건`} {showTodayFeed?"▲":"▼"}
-        </button>
-        {showTodayFeed && (
-          <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto"}}>
-            {todayFeedItems.length===0 ? (
-              <div style={{fontSize:11.5,color:DB.faint,fontFamily:DB.font,padding:"4px 0"}}>오늘 새로운 회원 입력이 없습니다.</div>
-            ) : (
-              <>
-                <div style={{display:"flex",justifyContent:"flex-end"}}>
-                  <button disabled={deletingAllFeed} onClick={handleDeleteAllFeed}
-                    style={{border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.05)",color:DB.danger,borderRadius:9,
-                      padding:"5px 11px",fontSize:11,fontWeight:700,cursor:deletingAllFeed?"default":"pointer",fontFamily:DB.font}}>
-                    {deletingAllFeed ? "삭제 중…" : "전체삭제"}
-                  </button>
-                </div>
-                {todayFeedItems.map((item,i) => (
-                  <TodayFeedItemCard
-                    key={item.id||`${item.memberId}-${item.at}-${i}`}
-                    item={item}
-                    deleting={deletingFeedIds.has(item.id)}
-                    onOpen={()=>{
-                      const target = members.find(x=>x.id===item.memberId);
-                      if (!target) return;
-                      onMarkEventsRead?.([item.id]);
-                      onSelect(target, feedItemTarget(item.type));
-                    }}
-                    onDelete={()=>handleDeleteFeedItem(item)}
-                  />
-                ))}
-              </>
+        );
+        const searchBox = (
+          <div style={{position:"relative",flex:isWide?"1 1 200px":1,minWidth:0}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="2" strokeLinecap="round" style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+            <input
+              value={search} onChange={e=>setSearch(e.target.value)}
+              placeholder="이름 검색 (초성 가능)"
+              style={{width:"100%",height:36,padding:"0 32px 0 34px",borderRadius:11,border:`1px solid ${DB.border}`,
+                background:"#fff",color:DB.text,fontSize:12.5,fontWeight:600,fontFamily:DB.font,boxSizing:"border-box",
+                boxShadow:DB.shadow,outline:"none"}}
+            />
+            {search && (
+              <button onClick={()=>setSearch("")}
+                style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",width:18,height:18,borderRadius:"50%",
+                  background:DB.bg,border:"none",color:DB.sub,fontSize:10,cursor:"pointer",padding:0}}>✕</button>
             )}
           </div>
-        )}
-      </div>
+        );
+        const filterBtn = (
+          <div style={{flexShrink:0,position:"relative"}}>
+            {(()=>{ const moreActive=MORE_FILTERS.find(f=>f.key===filter); return (
+              <button onClick={()=>setShowSort(v=>!v)}
+                style={{height:36,padding:"0 13px",borderRadius:11,border:`1px solid ${moreActive?"rgba(57,199,184,.4)":DB.border}`,cursor:"pointer",
+                  background:moreActive?DB.mintTint:"#fff",color:moreActive?DB.mintSoft:DB.sub,
+                  fontSize:12.5,fontWeight:700,fontFamily:DB.font,boxShadow:DB.shadow,whiteSpace:"nowrap"}}>
+                {moreActive?moreActive.label:"필터"} ⚙
+              </button>
+            );})()}
+            {showSort && (
+              <div style={{position:"absolute",right:0,top:42,background:"#fff",border:`1px solid ${DB.border}`,
+                borderRadius:16,zIndex:80,minWidth:180,boxShadow:DB.shadowLg,padding:6,overflow:"hidden"}}>
+                <div style={{fontSize:10.5,fontWeight:800,color:DB.faint,padding:"7px 12px 3px",letterSpacing:".6px"}}>조건</div>
+                {MORE_FILTERS.map(f=>(
+                  <button key={f.key} onClick={()=>{setFilter(filter===f.key?"active":f.key);setShowSort(false);}}
+                    style={{display:"block",width:"100%",padding:"9px 12px",background:filter===f.key?DB.mintTint:"none",border:"none",borderRadius:10,
+                      color:filter===f.key?DB.mintSoft:DB.text,fontSize:12.5,fontWeight:filter===f.key?800:600,
+                      textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
+                    {filter===f.key?"✓ ":""}{f.label}
+                  </button>
+                ))}
+                <div style={{height:1,background:DB.border,margin:"6px 4px"}}/>
+                <div style={{fontSize:10.5,fontWeight:800,color:DB.faint,padding:"5px 12px 3px",letterSpacing:".6px"}}>정렬</div>
+                {SORTS.map(s=>(
+                  <button key={s.key} onClick={()=>{setSortBy(s.key);setShowSort(false);}}
+                    style={{display:"block",width:"100%",padding:"9px 12px",background:"none",border:"none",borderRadius:10,
+                      color:sortBy===s.key?DB.mintSoft:DB.text,fontSize:12.5,fontWeight:sortBy===s.key?800:600,
+                      textAlign:"left",cursor:"pointer",fontFamily:DB.font}}>
+                    {sortBy===s.key?"✓ ":""}{s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+        return isWide ? (
+          <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center"}}>
+            {segmentedControl}{searchBox}{filterBtn}
+          </div>
+        ) : (
+          <>
+            <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>{segmentedControl}</div>
+            <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center"}}>{searchBox}{filterBtn}</div>
+          </>
+        );
+      })()}
 
       {/* 오늘 생일인 회원 요약 */}
       {(() => {
@@ -7434,8 +7411,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
 
       {/* 회원 목록 */}
       {loading ? (
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {[0,1,2,3].map(i=><div key={i} style={{height:104,borderRadius:18,background:"#fff",border:`1px solid ${DB.border}`,opacity:.55}}/>)}
+        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+          {[0,1,2,3].map(i=><div key={i} style={{height:isWide?58:104,borderRadius:18,background:"#fff",border:`1px solid ${DB.border}`,opacity:.55}}/>)}
         </div>
       ) : filtered.length === 0 ? (
         <div style={{padding:"52px 0",textAlign:"center"}}>
@@ -7444,7 +7421,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
           <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginTop:5}}>{members.length===0 ? "+ 회원 추가를 눌러 시작하세요" : "필터나 검색어를 바꿔보세요"}</div>
         </div>
       ) : (
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {filtered.map(m => {
             const meta = getMemberMeta(m);
             const isToday   = meta.lastDate === today;
@@ -7455,15 +7432,25 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
             const live = liveMembersById[m.id];
             const liveMember = live ? { ...m, ...live } : m;
             const activityLog = liveMember.recentActivityLog || [];
-            // 카드 중앙 상태 5종 — 각 타입별 가장 최근 값만 뽑는다 (새 필드 없음, recentActivityLog 재사용)
+            // 카드 상태 5종 — 각 타입별 가장 최근 값만 뽑는다 (새 필드 없음, recentActivityLog 재사용)
             const statusValues = MEMBER_CARD_STATUS_FIELDS.map(f => {
               const a = latestActivityByType(activityLog, f.key);
               return { ...f, value: a?.value || null, tone: a ? activityTone(a) : null };
             });
+            // 세로모드/모바일은 컨디션·근육통·체중 3개만, 가로모드는 5개 모두 — 데이터는 항상 5개 다 계산해두고 표시만 줄인다
+            const visibleFields = isWide ? statusValues : statusValues.filter(f => f.key==="condition"||f.key==="soreness"||f.key==="weight");
+            // 체중 변화 — 카드에 이미 표시 중인 최신 체중과 기존 member.startWeight(가입 시 시작 체중) 비교, 화면 렌더링 시에만 계산
+            const weightChange = weightChangeText(statusValues.find(f=>f.key==="weight")?.value, m.startWeight);
             const isBirthday = isTodayBirthday(m);
             const next = nextSessionInfoLabel(m, meta, today);
             const goalChips = [...new Set([m.goal, (m.survey?.priorityGoal||"").replace(" 우선","")].map(g=>String(g||"").trim()).filter(Boolean))].slice(0,2);
+            // 기존 attentionById는 실제 AI 생성 결과가 아니라 규칙 기반 확인 필요 사유이므로 "확인 필요"로 표시(AI 코멘트 아님)
             const reasons = attentionById.get(m.id);
+            const confirmBadge = !isEnded && reasons ? (
+              <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:8,background:"rgba(245,158,11,.10)",border:"1px solid rgba(245,158,11,.25)",fontFamily:DB.font,fontSize:9.5,fontWeight:700,color:"#B45309",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                ⚠ 확인 필요 · {reasons.slice(0,2).join(" · ")}
+              </span>
+            ) : null;
             const photo = m.photoURL || m.photoUrl || m.profileImage || m.profileImageUrl || "";
             const draftSess = (sessionsMap[m.id] || []).find(s =>
               s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId
@@ -7474,7 +7461,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
               <MemberCardShell dim={isEnded} isWide={isWide} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 좌 — 프로필 + 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
-                  <div style={{display:"flex",alignItems:"flex-start",gap:13,width:isWide?230:"100%",flexShrink:0}}>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isWide?"33%":"100%",maxWidth:isWide?"33%":undefined,flexShrink:0}}>
                     <div style={{position:"relative",flexShrink:0}}>
                       <MemberAvatar name={m.name} photo={photo} tone={visitTone(meta.daysSince,isToday)}/>
                       {!isEnded && hasTodayFeedInput(m) && (
@@ -7483,9 +7470,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                           boxShadow:"0 0 0 2px #fff",letterSpacing:.3,fontFamily:DB.font}}>NEW</span>
                       )}
                     </div>
-                    <div style={{minWidth:0,flex:1,paddingRight:isWide?0:34}}>
+                    <div style={{minWidth:0,flex:1,paddingRight:isWide?0:30}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                        <span style={{fontFamily:DB.font,fontWeight:800,fontSize:17,letterSpacing:"-.3px",
+                        <span style={{fontFamily:DB.font,fontWeight:800,fontSize:16,letterSpacing:"-.3px",
                           color:isEnded?DB.faint:DB.text,
                           overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>
                           {m.name}
@@ -7504,47 +7491,47 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                         )}
                       </div>
                       {/* 다음 수업 */}
-                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:5,minWidth:0}}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        <span style={{fontFamily:DB.font,fontSize:12.5,fontWeight:next.hot?800:600,color:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{next.text}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,minWidth:0}}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:next.hot?800:600,color:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{next.text}</span>
                         {meta.remaining !== null && (
-                          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>
+                          <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>
                         )}
                       </div>
                       {/* 목표 칩 — Apple Wallet 느낌 라운드 칩 */}
                       {!isEnded && goalChips.length>0 && (
-                        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:7}}>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
                           {goalChips.map((g,i)=><GoalChip key={g} label={g} tint={i===0?"mint":"slate"}/>)}
                         </div>
                       )}
                       {/* 최근 운동 부위 */}
-                      <div style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,fontWeight:600,marginTop:7,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,fontWeight:600,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         최근 운동{meta.lastMuscle ? `: ${meta.lastMuscle.split("·").join(" · ")}` : " 기록 없음"}
                       </div>
+                      {/* 확인 필요 배지 — 세로모드/모바일에서는 이름·일정 아래 한 줄 배지로(가로모드는 오른쪽 별도 영역) */}
+                      {!isWide && confirmBadge && <div style={{marginTop:4}}>{confirmBadge}</div>}
                     </div>
                   </div>
 
-                  {/* 중앙 — 회원이 오늘 입력한 상태(컨디션·근육통·체중·유산소·RPE)를 아이콘+항목명+값으로 크게 표시 */}
+                  {/* 상태 — 가로모드 5개(컨디션·근육통·체중·유산소·RPE) / 세로모드·모바일 3개(컨디션·근육통·체중)만 한 줄에 */}
                   {!isEnded && (
-                    <div style={{flex:1,minWidth:isWide?260:"100%",display:"grid",gridTemplateColumns:isWide?"repeat(5,minmax(0,1fr))":"repeat(2,1fr)",gap:isWide?16:10,alignContent:"start"}}>
-                      {statusValues.map(f=>(
-                        <StatusBlock key={f.key} icon={f.icon} label={f.label} value={f.value||"—"} tone={f.tone} muted={!f.value}/>
+                    <div style={{flex:1,minWidth:0,display:"grid",gridTemplateColumns:isWide?"repeat(5,minmax(0,1fr))":"repeat(3,1fr)",gap:isWide?10:8,alignContent:"start"}}>
+                      {visibleFields.map(f=>(
+                        <StatusBlock key={f.key} icon={f.icon} label={f.label} value={f.value||"—"} tone={f.tone} muted={!f.value}
+                          sub={f.key==="weight"?weightChange?.text:undefined} subTone={f.key==="weight"?weightChange?.tone:undefined}/>
                       ))}
                     </div>
                   )}
 
-                  {/* 우 — AI 코멘트: 체크가 필요한 회원만 노출, 없으면 영역 자체를 숨긴다 */}
-                  {!isEnded && reasons && (
-                    <div style={{flexShrink:0,width:isWide?170:"100%",padding:"10px 12px",borderRadius:12,background:"rgba(245,158,11,.09)",border:"1px solid rgba(245,158,11,.22)"}}>
-                      <div style={{fontFamily:DB.font,fontSize:10,fontWeight:800,color:"#B45309",letterSpacing:".3px"}}>AI 코멘트</div>
-                      <div style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:"#92400E",marginTop:3,lineHeight:1.4}}>{reasons.slice(0,2).join(" · ")}</div>
-                    </div>
+                  {/* 우 — 확인 필요: 가로모드에서만 별도 영역(체크 필요 회원 사유), 없으면 영역 자체를 숨긴다 */}
+                  {isWide && confirmBadge && (
+                    <div style={{flexShrink:0,maxWidth:160}}>{confirmBadge}</div>
                   )}
               </MemberCardShell>
               {/* ⋯ 메뉴 트리거 — 카드 우상단 고정 (레이아웃과 무관하게 항상 같은 자리) */}
               <button onClick={e=>{e.stopPropagation();setStatusMenu(statusMenu===m.id?null:m.id);}}
                 aria-label="회원 관리 메뉴"
-                style={{position:"absolute",top:14,right:14,border:"none",background:"rgba(255,255,255,.92)",color:DB.faint,fontSize:16,padding:"4px 8px",borderRadius:9,cursor:"pointer",lineHeight:1,fontWeight:800,boxShadow:DB.shadow,zIndex:2}}>
+                style={{position:"absolute",top:9,right:9,border:"none",background:"rgba(255,255,255,.92)",color:DB.faint,fontSize:15,padding:"3px 7px",borderRadius:8,cursor:"pointer",lineHeight:1,fontWeight:800,boxShadow:DB.shadow,zIndex:2}}>
                 ⋯
               </button>
               {/* ⋯ 메뉴 — 상태 변경 + 삭제 (삭제는 카드 표면에서 제거하고 메뉴로 이동) */}

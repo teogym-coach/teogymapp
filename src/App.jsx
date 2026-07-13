@@ -6953,10 +6953,12 @@ const MEMBER_CARD_STATUS_FIELDS = [
   {key:"cardio",   label:"유산소",icon:"❤️"},
   {key:"rpe",      label:"RPE",  icon:"😊"},
 ];
-// 카드 셸 — hover 리프트 + 클릭 시 민트 보더/살짝 확대 (220ms). isWide면 가로 배치, 아니면 세로로 쌓는다.
-function MemberCardShell({onClick,dim,isWide,children}){
+// 카드 셸 — hover 리프트 + 클릭 시 민트 보더/살짝 확대 (220ms).
+// mode="wide"(가로모드, 사이드바+5개 상태 한 줄) / "tablet"(세로모드지만 폭은 충분 — 좌우 한 줄 2영역, 상태 3개) / "mobile"(폭 부족 — 2줄로 압축)
+function MemberCardShell({onClick,dim,mode,children}){
   const [hov,setHov]=useState(false);
   const [press,setPress]=useState(false);
+  const row = mode!=="mobile";
   return <div onClick={onClick}
     onMouseEnter={()=>setHov(true)} onMouseLeave={()=>{setHov(false);setPress(false);}}
     onMouseDown={()=>setPress(true)} onMouseUp={()=>setPress(false)}
@@ -6967,9 +6969,9 @@ function MemberCardShell({onClick,dim,isWide,children}){
       boxShadow:press?"0 4px 18px rgba(57,199,184,.16)":hov?DB.shadowLg:DB.shadow,
       transform:press?"scale(1.008)":hov?"translateY(-2px)":"none",
       transition:"transform .22s ease,box-shadow .22s ease,border-color .22s ease",
-      padding:isWide?"9px 16px":"10px 13px",
-      display:"flex",flexDirection:isWide?"row":"column",alignItems:isWide?"center":"stretch",
-      gap:isWide?14:7,
+      padding:mode==="wide"?"9px 16px":mode==="tablet"?"7px 14px":"8px 12px",
+      display:"flex",flexDirection:row?"row":"column",alignItems:row?"center":"stretch",
+      gap:mode==="wide"?14:mode==="tablet"?10:6,
       opacity:dim?.6:1,
     }}>{children}</div>;
 }
@@ -7018,7 +7020,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
     window.addEventListener("resize",h);
     return ()=>window.removeEventListener("resize",h);
   },[]);
-  const isWide = winW >= 1024; // iPad Pro 11" 가로모드 기준 — HubScreen의 winW 패턴과 동일 breakpoint
+  const isWide = winW >= 1024; // iPad Pro 11" 가로모드 기준 — HubScreen의 winW 패턴과 동일 breakpoint(사이드바·5개 상태 한 줄, 변경 없음)
+  const isTabletRow = !isWide && winW >= 700; // 아이패드 세로 등 — 사이드바는 없지만 카드는 좌우 한 줄 2영역 구조 유지(상태는 3개만)
+  const isRowLayout = isWide || isTabletRow; // 카드/검색행을 "한 줄" 구조로 그릴지 여부 — 폰 폭에서만 2줄로 접힌다
   const today = new Date().toISOString().split("T")[0];
   const todayKST = getKoreaDateString(); // 오늘 입력 피드/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
   const [search,     setSearch]     = useState("");
@@ -7289,14 +7293,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         </div>
       )}
 
-      {/* 검색창 — 필터 탭 행 안으로 이동. 검색·필터 로직은 변경 없음, 배치만 변경 */}
+      {/* 검색창 — 필터 탭 행 안으로 이동. 검색·필터 로직은 변경 없음, 배치만 변경.
+          가로모드·태블릿 세로(isRowLayout)는 탭|검색|필터 한 줄, 폰 폭에서만 탭 한 줄 + 검색·필터 한 줄로 접힌다 */}
       {(() => {
         const segmentedControl = (
-          <div style={{flex:isWide?"0 1 auto":1,minWidth:0,display:"flex",gap:4,background:"#ECEFF3",borderRadius:14,padding:4,overflowX:"auto"}}>
+          <div style={{flex:isRowLayout?"0 1 auto":1,minWidth:0,display:"flex",gap:4,background:"#ECEFF3",borderRadius:14,padding:4,overflowX:"auto"}}>
             {SEGMENT_FILTERS.map(f => (
               <button key={f.key} onClick={()=>setFilter(f.key)}
-                style={{flex:"1 0 auto",minWidth:0,height:36,padding:"0 12px",borderRadius:11,border:"none",cursor:"pointer",
-                  fontSize:12.5,fontWeight:filter===f.key?800:600,fontFamily:DB.font,whiteSpace:"nowrap",
+                style={{flex:"1 0 auto",minWidth:0,height:36,padding:isWide?"0 12px":"0 9px",borderRadius:11,border:"none",cursor:"pointer",
+                  fontSize:isWide?12.5:11.5,fontWeight:filter===f.key?800:600,fontFamily:DB.font,whiteSpace:"nowrap",
                   background:filter===f.key?"#fff":"transparent",
                   color:filter===f.key?DB.text:DB.sub,
                   boxShadow:filter===f.key?"0 2px 8px rgba(15,23,42,.09)":"none",
@@ -7307,7 +7312,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
           </div>
         );
         const searchBox = (
-          <div style={{position:"relative",flex:isWide?"1 1 200px":1,minWidth:0}}>
+          <div style={{position:"relative",flex:isRowLayout?"1 1 90px":1,minWidth:isRowLayout?64:0}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="2" strokeLinecap="round" style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
             <input
               value={search} onChange={e=>setSearch(e.target.value)}
@@ -7327,9 +7332,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
           <div style={{flexShrink:0,position:"relative"}}>
             {(()=>{ const moreActive=MORE_FILTERS.find(f=>f.key===filter); return (
               <button onClick={()=>setShowSort(v=>!v)}
-                style={{height:36,padding:"0 13px",borderRadius:11,border:`1px solid ${moreActive?"rgba(57,199,184,.4)":DB.border}`,cursor:"pointer",
+                style={{height:36,padding:isWide?"0 13px":"0 10px",borderRadius:11,border:`1px solid ${moreActive?"rgba(57,199,184,.4)":DB.border}`,cursor:"pointer",
                   background:moreActive?DB.mintTint:"#fff",color:moreActive?DB.mintSoft:DB.sub,
-                  fontSize:12.5,fontWeight:700,fontFamily:DB.font,boxShadow:DB.shadow,whiteSpace:"nowrap"}}>
+                  fontSize:isWide?12.5:11.5,fontWeight:700,fontFamily:DB.font,boxShadow:DB.shadow,whiteSpace:"nowrap"}}>
                 {moreActive?moreActive.label:"필터"} ⚙
               </button>
             );})()}
@@ -7359,7 +7364,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
             )}
           </div>
         );
-        return isWide ? (
+        return isRowLayout ? (
           <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center"}}>
             {segmentedControl}{searchBox}{filterBtn}
           </div>
@@ -7412,7 +7417,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
       {/* 회원 목록 */}
       {loading ? (
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
-          {[0,1,2,3].map(i=><div key={i} style={{height:isWide?58:104,borderRadius:18,background:"#fff",border:`1px solid ${DB.border}`,opacity:.55}}/>)}
+          {[0,1,2,3].map(i=><div key={i} style={{height:isWide?58:isTabletRow?62:96,borderRadius:18,background:"#fff",border:`1px solid ${DB.border}`,opacity:.55}}/>)}
         </div>
       ) : filtered.length === 0 ? (
         <div style={{padding:"52px 0",textAlign:"center"}}>
@@ -7455,13 +7460,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
             const draftSess = (sessionsMap[m.id] || []).find(s =>
               s.sessionType === "2:1" && !["recorded","sent"].includes(s.pairStatus) && s.memberBId
             );
+            const cardMode = isWide ? "wide" : isTabletRow ? "tablet" : "mobile";
+            const leftPct = isWide ? "33%" : "40%"; // 가로모드 33% / 태블릿 세로 40% — 모바일은 100%(줄바꿈)
 
             return (
               <div key={m.id} style={{position:"relative"}}
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
-              <MemberCardShell dim={isEnded} isWide={isWide} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
+              <MemberCardShell dim={isEnded} mode={cardMode} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 좌 — 프로필 + 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
-                  <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isWide?"33%":"100%",maxWidth:isWide?"33%":undefined,flexShrink:0}}>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isRowLayout?leftPct:"100%",maxWidth:isRowLayout?leftPct:undefined,flexShrink:0}}>
                     <div style={{position:"relative",flexShrink:0}}>
                       <MemberAvatar name={m.name} photo={photo} tone={visitTone(meta.daysSince,isToday)}/>
                       {!isEnded && hasTodayFeedInput(m) && (
@@ -7470,7 +7477,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                           boxShadow:"0 0 0 2px #fff",letterSpacing:.3,fontFamily:DB.font}}>NEW</span>
                       )}
                     </div>
-                    <div style={{minWidth:0,flex:1,paddingRight:isWide?0:30}}>
+                    <div style={{minWidth:0,flex:1,paddingRight:isRowLayout?0:30}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                         <span style={{fontFamily:DB.font,fontWeight:800,fontSize:16,letterSpacing:"-.3px",
                           color:isEnded?DB.faint:DB.text,
@@ -7508,14 +7515,14 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                       <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,fontWeight:600,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         최근 운동{meta.lastMuscle ? `: ${meta.lastMuscle.split("·").join(" · ")}` : " 기록 없음"}
                       </div>
-                      {/* 확인 필요 배지 — 세로모드/모바일에서는 이름·일정 아래 한 줄 배지로(가로모드는 오른쪽 별도 영역) */}
-                      {!isWide && confirmBadge && <div style={{marginTop:4}}>{confirmBadge}</div>}
+                      {/* 확인 필요 배지 — 모바일(2줄 압축)에서는 이름·일정 아래 한 줄 배지로(가로모드·태블릿 세로는 오른쪽 별도 영역) */}
+                      {!isRowLayout && confirmBadge && <div style={{marginTop:4}}>{confirmBadge}</div>}
                     </div>
                   </div>
 
-                  {/* 상태 — 가로모드 5개(컨디션·근육통·체중·유산소·RPE) / 세로모드·모바일 3개(컨디션·근육통·체중)만 한 줄에 */}
+                  {/* 상태 — 가로모드 5개(컨디션·근육통·체중·유산소·RPE) / 태블릿 세로·모바일 3개(컨디션·근육통·체중)만 한 줄에 */}
                   {!isEnded && (
-                    <div style={{flex:1,minWidth:0,display:"grid",gridTemplateColumns:isWide?"repeat(5,minmax(0,1fr))":"repeat(3,1fr)",gap:isWide?10:8,alignContent:"start"}}>
+                    <div style={{flex:1,minWidth:0,display:"grid",gridTemplateColumns:isWide?"repeat(5,minmax(0,1fr))":"repeat(3,1fr)",gap:isWide?10:isTabletRow?8:6,alignContent:"start"}}>
                       {visibleFields.map(f=>(
                         <StatusBlock key={f.key} icon={f.icon} label={f.label} value={f.value||"—"} tone={f.tone} muted={!f.value}
                           sub={f.key==="weight"?weightChange?.text:undefined} subTone={f.key==="weight"?weightChange?.tone:undefined}/>
@@ -7523,8 +7530,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
                     </div>
                   )}
 
-                  {/* 우 — 확인 필요: 가로모드에서만 별도 영역(체크 필요 회원 사유), 없으면 영역 자체를 숨긴다 */}
-                  {isWide && confirmBadge && (
+                  {/* 우 — 확인 필요: 가로모드·태블릿 세로(한 줄 구조)에서만 별도 영역(체크 필요 회원 사유), 없으면 영역 자체를 숨긴다 */}
+                  {isRowLayout && confirmBadge && (
                     <div style={{flexShrink:0,maxWidth:160}}>{confirmBadge}</div>
                   )}
               </MemberCardShell>

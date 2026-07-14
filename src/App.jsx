@@ -10177,6 +10177,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     const bodyPartsOnly = prev.filter(t => SESSION_BODY_PART_OPTIONS.includes(t));
     return bodyPartsOnly.includes(part) ? bodyPartsOnly.filter(x=>x!==part) : [...bodyPartsOnly, part];
   });
+  const [showBodyPartPicker, setShowBodyPartPicker] = useState(false);
 
   // ── 회원 브리핑(가로모드 좌측 패널) — 현재 DB에 이미 있는 정보만 표시, 새 저장 로직 없음 ──
   const [briefCi, setBriefCi] = useState([]);
@@ -10672,10 +10673,43 @@ function updateEx(ei, key, val) {
               border:"1px solid #D8DEE5",background:"#FFFFFF",color:"#334155",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,cursor:"pointer"}}>←</button>
             <div style={{minWidth:0}}>
-              <div style={{display:"flex",alignItems:"baseline",gap:7,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                 <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:"#0F172A",
                   letterSpacing:"-.4px",whiteSpace:"nowrap"}}>{member.name} 회원</span>
                 <span style={{fontSize:13,fontWeight:800,color:"#0F9488",whiteSpace:"nowrap"}}>{sessionNo || "-"}회차</span>
+                {/* 수업 형태(1:1/2:1/그룹PT) — 회원명 옆, 별도 줄 없이 한 줄 유지 */}
+                {!isEdit && (
+                  <div style={{display:"flex",gap:3,alignItems:"center",flexWrap:"wrap"}}>
+                    {["1:1","2:1","그룹PT"].map(t=>(
+                      <button key={t} onClick={()=>{setSessionType(t);if(t!=="2:1"){setMember2Id("");setShowM2Picker(false);}}}
+                        style={{padding:"3px 8px",borderRadius:12,border:"1px solid",cursor:"pointer",
+                          fontSize:9,fontWeight:sessionType===t?800:400,
+                          borderColor:sessionType===t?"#8B5CF6":"#EDEFF2",
+                          background:sessionType===t?"rgba(139,92,246,.15)":"transparent",
+                          color:sessionType===t?"#8B5CF6":"#64748B"}}>
+                        {t}
+                      </button>
+                    ))}
+                    {sessionType==="2:1" && (
+                      member2 ? (
+                        <div style={{display:"flex",alignItems:"center",gap:3}}>
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:9,
+                            background:"rgba(139,92,246,.12)",color:"#8B5CF6",fontWeight:700}}>
+                            {member2.name}
+                          </span>
+                          <button onClick={()=>{setMember2Id("");setShowM2Picker(false);}}
+                            style={{background:"none",border:"none",cursor:"pointer",color:"#94A3B8",fontSize:10}}>×</button>
+                        </div>
+                      ) : (
+                        <button onClick={()=>setShowM2Picker(p=>!p)}
+                          style={{padding:"3px 8px",borderRadius:10,border:"1px dashed rgba(139,92,246,.4)",
+                            cursor:"pointer",fontSize:9,color:"#8B5CF6",background:"rgba(139,92,246,.06)"}}>
+                          회원2 ▼
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
               </div>
               <div style={{fontSize:11.5,color:"#64748B",fontWeight:600,marginTop:2,whiteSpace:"nowrap"}}>
                 {isOwner(member) ? (isEdit?"운동 수정":"운동 기록") : (isEdit?"수업 수정":"수업 기록")} · {date}
@@ -10744,47 +10778,7 @@ function updateEx(ei, key, val) {
         </aside>
       )}
       <div style={{minWidth:0}}>
-      {/* ── 수업 형태 선택 (1:1 / 2:1 / 그룹PT) ─────────────────────── */}
-      {!isEdit && (
-        <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
-          <Mo c="#64748B" s={9} style={{fontWeight:700,flexShrink:0}}>수업 형태:</Mo>
-          <div style={{display:"flex",gap:4}}>
-            {["1:1","2:1","그룹PT"].map(t=>(
-              <button key={t} onClick={()=>{setSessionType(t);if(t!=="2:1"){setMember2Id("");setShowM2Picker(false);}}}
-                style={{padding:"4px 10px",borderRadius:14,border:"1px solid",cursor:"pointer",
-                  fontSize:10,fontWeight:sessionType===t?800:400,
-                  borderColor:sessionType===t?"#8B5CF6":"#EDEFF2",
-                  background:sessionType===t?"rgba(139,92,246,.15)":"transparent",
-                  color:sessionType===t?"#8B5CF6":"#64748B"}}>
-                {t}
-              </button>
-            ))}
-          </div>
-          {sessionType==="2:1" && (
-            <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:4}}>
-              <Mo c="#64748B" s={9}>+</Mo>
-              {member2 ? (
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 8px",borderRadius:10,
-                    background:"rgba(139,92,246,.12)",color:"#8B5CF6",fontWeight:700}}>
-                    {member2.name}
-                  </span>
-                  <button onClick={()=>{setMember2Id("");setShowM2Picker(false);}}
-                    style={{background:"none",border:"none",cursor:"pointer",color:"#94A3B8",fontSize:11}}>×</button>
-                </div>
-              ) : (
-                <button onClick={()=>setShowM2Picker(p=>!p)}
-                  style={{padding:"4px 10px",borderRadius:12,border:"1px dashed rgba(139,92,246,.4)",
-                    cursor:"pointer",fontSize:9,color:"#8B5CF6",background:"rgba(139,92,246,.06)"}}>
-                  회원2 선택 ▼
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 회원2 선택 드롭다운 */}
+      {/* 회원2 선택 드롭다운 — 수업 형태(1:1/2:1/그룹PT) 선택 자체는 상단 헤더로 이동(회원명 옆) */}
       {sessionType==="2:1" && showM2Picker && !member2 && (
         <div style={{marginBottom:10,background:"#FFFFFF",borderRadius:8,
           border:"1px solid rgba(139,92,246,.2)",padding:"6px",maxHeight:180,overflowY:"auto"}}>
@@ -10811,23 +10805,42 @@ function updateEx(ei, key, val) {
           <div style={{flex:"1 1 92px",minWidth:0}}><Field label="헬스장"   value={gymName}     onChange={setGymName}     placeholder="피트니스 센터" /></div>
           <div style={{flex:"1 1 118px",minWidth:0}}><Field label="날짜"     value={date}        onChange={setDate}         type="date" /></div>
           <div style={{flex:"0 1 64px",minWidth:0}}><Field label="회차 *"   value={String(sessionNo)} onChange={v => setSessionNo(parseInt(v)||v)} placeholder="1" /></div>
-          <div style={{flex:"2 1 260px",minWidth:0}}>
+          <div style={{flex:"2 1 200px",minWidth:0,position:"relative"}}>
             <label>오늘의 운동 부위 <span style={{fontWeight:400,fontSize:10,color:"#64748B"}}>(복수 선택)</span></label>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
-              {SESSION_BODY_PART_OPTIONS.map(part => {
-                const active = selectedTypes.includes(part);
-                return (
-                  <button key={part} type="button" onClick={() => toggleSessionBodyPart(part)}
-                    style={{padding:"6px 11px",borderRadius:14,border:"1px solid",cursor:"pointer",
-                      fontSize:12,fontWeight:active?800:600,transition:"all .12s",
-                      borderColor:active?"#0F9488":"#B9C2CC",
-                      background:active?"rgba(57,199,184,.16)":"transparent",
-                      color:active?"#0F9488":"#475569"}}>
-                    {part}
-                  </button>
-                );
-              })}
-            </div>
+            <button type="button" onClick={() => setShowBodyPartPicker(p=>!p)}
+              style={{marginTop:5,width:"100%",boxSizing:"border-box",textAlign:"left",padding:"9px 10px",
+                borderRadius:8,border:"1.5px solid #D6DCE3",background:"#FFFFFF",cursor:"pointer",height:38,
+                display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,fontWeight:700,
+                color: selectedTypes.filter(t=>SESSION_BODY_PART_OPTIONS.includes(t)).length ? "#0F172A" : "#94A3B8"}}>
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {selectedTypes.filter(t=>SESSION_BODY_PART_OPTIONS.includes(t)).join(", ") || "선택 안 함"}
+              </span>
+              <span style={{color:"#94A3B8",fontSize:11,flexShrink:0,marginLeft:6}}>{showBodyPartPicker ? "▲" : "▼"}</span>
+            </button>
+            {showBodyPartPicker && (
+              <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:4,zIndex:40,
+                background:"#FFFFFF",border:"1px solid #D6DCE3",borderRadius:8,
+                boxShadow:"0 8px 24px rgba(15,23,42,.15)",padding:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 4px 6px",borderBottom:"1px solid #EDEFF2",marginBottom:4}}>
+                  <Mo c="#64748B" s={9} style={{fontWeight:700}}>부위 선택 (복수)</Mo>
+                  <button type="button" onClick={() => setShowBodyPartPicker(false)}
+                    style={{fontSize:9,padding:"2px 8px",borderRadius:10,border:"1px solid rgba(15,148,136,.3)",
+                      background:"rgba(15,148,136,.08)",color:"#0F9488",cursor:"pointer"}}>완료</button>
+                </div>
+                {SESSION_BODY_PART_OPTIONS.map(part => {
+                  const active = selectedTypes.includes(part);
+                  return (
+                    <label key={part} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 8px",
+                      borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:active?800:600,
+                      color:active?"#0F9488":"#334155"}}>
+                      <input type="checkbox" checked={active} onChange={() => toggleSessionBodyPart(part)}
+                        style={{width:16,height:16,accentColor:"#0F9488"}} />
+                      {part}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
         {/* 수업 유형(SESSION_TYPE_OPTIONS) 렌더링은 제거됨 — 상단 "오늘의 운동 부위" 버튼이 selectedTypes를 직접 읽고 쓴다.
@@ -10938,7 +10951,7 @@ function updateEx(ei, key, val) {
                 ⠿
               </div>
               <Mo c="#94A3B8" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
-              <div style={{flex:"0 1 65%",minWidth:0,maxWidth:"65%",overflow:"hidden"}}>
+              <div style={{flex:"1 1 48%",minWidth:0,maxWidth:"48%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
                 placeholder="운동 이름" style={{
@@ -10967,12 +10980,12 @@ function updateEx(ei, key, val) {
               </div>
               {/* 운동명 옆 부위 선택 — 이름 기반 자동 선택 결과를 대표가 즉시 확인/수정 가능(기능운동은 아래 부위 다중선택을 쓰므로 배지만) */}
               {ex.equipment === "기능" ? (
-                <span style={{flex:"0 1 30%",minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace",fontSize:10,padding:"6px 9px",
+                <span style={{flex:"1 1 auto",minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace",fontSize:10,padding:"6px 9px",
                   borderRadius:6,background:"rgba(34,197,94,.14)",color:"#22c55e",fontWeight:700}}>기능</span>
               ) : (
                 <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)}
                   onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
-                  style={{flex:"0 1 30%",minWidth:80,fontSize:13,fontWeight:700,padding:"9px 6px",borderRadius:7,
+                  style={{flex:"1 1 auto",minWidth:80,fontSize:13,fontWeight:700,padding:"9px 6px",borderRadius:7,
                     height:38,color:"#0F172A",border:"1.5px solid #D6DCE3",background:"#FFFFFF"}}>
                   {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
                 </select>
@@ -11218,21 +11231,15 @@ function updateEx(ei, key, val) {
             })()}
             {/* ── 3열 구조: 왼쪽 세트 · 가운데 기구/카테고리/도구 · 오른쪽 자극도(가로/세로모드 공통, CSS Grid로 시각 순서만 배치) ── */}
             <div className="ex-3col">
-            {/* 가운데 열 — 기구(버튼, 빠른 선택)/카테고리/도구(select) 3줄만 표시. 맨몸도 기구 버튼 목록 안에 포함(EQUIP_LIST 그대로) */}
+            {/* 가운데 열 — 기구/카테고리/도구 모두 드롭다운(select)으로 통일. 맨몸도 기구 선택 목록 안에 포함(EQUIP_LIST 그대로) */}
             <div style={{gridColumn:2,gridRow:1,minWidth:0}}>
               <label>기구</label>
-              <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2,marginBottom:6}}>
-                {EQUIP_LIST.map(eq => {
-                  const active = ex.equipment===eq; const col = EQUIP_COLOR[eq];
-                  return (
-                    <button key={eq} type="button" onClick={() => updateEx(ei,"equipment",eq)}
-                      style={{padding:"5px 9px",borderRadius:4,border:"1px solid",cursor:"pointer",
-                        borderColor:active?col:"#B9C2CC",background:active?col+"22":"transparent",
-                        color:active?col:"#475569",fontSize:11,fontWeight:700}}>{eq}</button>
-                  );
-                })}
-              </div>
-              {ex.equipment === "기능" ? (
+              <select value={ex.equipment||""} onChange={e => updateEx(ei,"equipment",e.target.value)}
+                onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
+                style={{fontSize:12,padding:"7px 6px",width:"100%",marginTop:2,marginBottom:6}}>
+                {EQUIP_LIST.map(eq => <option key={eq} value={eq}>{eq}</option>)}
+              </select>
+              {ex.equipment === "기능" && (
                 <>
                   <label>카테고리</label>
                   <select value={ex.funcCategory||""} onChange={e => updateEx(ei,"funcCategory",e.target.value)}
@@ -11247,9 +11254,8 @@ function updateEx(ei, key, val) {
                     {FUNC_TOOLS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </>
-              ) : (
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#94A3B8",padding:"2px 1px"}}>세부부위 · {ex.muscleSub}</div>
               )}
+              {/* 세부부위는 표시를 숨기고 "상세 설정" 안에서만 편집 가능(DB·저장 로직은 그대로 유지) */}
               <button type="button" onClick={()=>toggleDetail(ei)}
                 style={{marginTop:8,background:"none",border:"none",color:"#7C8798",fontSize:9,fontWeight:700,cursor:"pointer",padding:"2px 0"}}>
                 {expandedDetail.has(ei) ? "상세 설정 ▲" : "상세 설정 ▼"}

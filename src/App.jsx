@@ -1177,6 +1177,10 @@ function MemberLanding({ onLogin, loading, error }) {
 function getKoreaDateString(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
+// 섭취 칼로리 입력 기준일(전날) — 아침 공복 체중은 오늘 날짜, 섭취 칼로리는 어제 날짜로 저장한다.
+function getKoreaYesterdayDateString(date = new Date()) {
+  return getKoreaDateString(new Date(date.getTime() - 86400000));
+}
 function isPublishedData(data = {}) {
   const sent = data.status === "published" || data.published === true || data.isPublished === true;
   return sent && data.visible !== false && data.visibility !== "hidden";
@@ -2170,13 +2174,14 @@ const CONDITION_EMOJI={"좋음":"😊","보통":"😐","피곤":"😔","매우 �
 function buildTodayHealthTiles(p,today,open){
   const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
   const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
-  const todayKcal=getKcalLogs(p.nutrition).find(r=>r.date===today)?.kcal;
+  const yesterday=getKoreaYesterdayDateString();
+  const yesterdayKcal=getKcalLogs(p.nutrition).find(r=>r.date===yesterday)?.kcal;
   const todayCardio=(p.cardioLogs||[]).find(l=>l.date===today)||null;
   const hasPainRecord=todayCheck.painPart!==undefined&&todayCheck.painPart!==null&&todayCheck.painPart!=="";
   const hasActualPain=hasPainRecord&&todayCheck.painPart!=="없음";
   return [
     {key:"weight",label:"체중",value:todayWeight!=null?`${todayWeight}kg`:"—",hint:todayWeight!=null?"기록 완료":"탭해서 입력",done:todayWeight!=null,onClick:open.weight},
-    {key:"kcal",label:"칼로리",value:todayKcal!=null?`${Number(todayKcal).toLocaleString()}kcal`:"—",hint:todayKcal!=null?"기록 완료":"탭해서 입력",done:todayKcal!=null,onClick:open.kcal},
+    {key:"kcal",label:"어제 칼로리",value:yesterdayKcal!=null?`${Number(yesterdayKcal).toLocaleString()}kcal`:"—",hint:yesterdayKcal!=null?"기록 완료":"탭해서 입력",done:yesterdayKcal!=null,onClick:open.kcal},
     {key:"steps",label:"걸음수",value:todayCheck.steps?`${Number(todayCheck.steps).toLocaleString()}보`:"—",hint:todayCheck.steps?"기록 완료":"탭해서 입력",done:!!todayCheck.steps,onClick:open.steps},
     {key:"condition",label:"컨디션",value:todayCheck.condition?`${CONDITION_EMOJI[todayCheck.condition]||""} ${todayCheck.condition}`:"—",hint:todayCheck.condition?"기록 완료":"탭해서 입력",done:!!todayCheck.condition,onClick:open.condition},
     {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
@@ -2185,15 +2190,17 @@ function buildTodayHealthTiles(p,today,open){
 }
 function MemberHealth(p){
   const today=getKoreaDateString();
+  const yesterday=getKoreaYesterdayDateString();
   const [sheet,setSheet]=useState(null); // "weight" | "kcal" | "steps" | "condition" | "pain" | "cardio"
   const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
   const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
-  const todayKcal=getKcalLogs(p.nutrition).find(r=>r.date===today)?.kcal;
+  const yesterdayKcal=getKcalLogs(p.nutrition).find(r=>r.date===yesterday)?.kcal;
   const todayCardio=(p.cardioLogs||[]).find(l=>l.date===today)||null;
   // 카드별 열기 — 오늘 이미 입력한 값이 있으면 불러와 채워서 수정(overwrite)할 수 있게 한다. 다른 카드의 입력값이 섞이지 않도록 나머지 필드는 비운다.
+  // 칼로리는 "어제 먹은 것"을 오늘 입력하는 개념이라 기본 날짜를 어제로 연다(날짜는 직접 수정 가능).
   const open={
     weight:()=>{ p.setForm(f=>({...f,date:today,weight:todayWeight!=null?String(todayWeight):"",kcal:"",steps:""})); setSheet("weight"); },
-    kcal:()=>{ p.setForm(f=>({...f,date:today,kcal:todayKcal!=null?String(todayKcal):"",weight:"",steps:""})); setSheet("kcal"); },
+    kcal:()=>{ p.setForm(f=>({...f,date:yesterday,kcal:yesterdayKcal!=null?String(yesterdayKcal):"",weight:"",steps:""})); setSheet("kcal"); },
     steps:()=>{ p.setForm(f=>({...f,date:today,steps:todayCheck.steps?String(todayCheck.steps):"",weight:"",kcal:""})); setSheet("steps"); },
     condition:()=>{ p.setForm(f=>({...f,date:today,condition:todayCheck.condition||""})); setSheet("condition"); },
     pain:()=>{ p.setForm(f=>({...f,date:today,painPart:todayCheck.painPart||"없음",painSide:todayCheck.painSide||"해당 없음",painVas:todayCheck.painVas??0,painMemo:todayCheck.painMemo||""})); setSheet("pain"); },
@@ -2274,10 +2281,11 @@ function MemberHealth(p){
       <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
       <button className={`primary${justSaved?" save-success":""}`} onClick={submitWeight} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="kcal"} onClose={()=>setSheet(null)} title="칼로리 입력">
+    <MemberBottomSheet open={sheet==="kcal"} onClose={()=>setSheet(null)} title="어제 먹은 칼로리">
+      <p className="mv2-sheet-hint">어제 먹은 총칼로리를 입력해주세요.<span>오늘 체중과 함께 분석됩니다.</span></p>
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
       <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
-      <button className={`primary${justSaved?" save-success":""}`} onClick={submitKcal} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
+      <button className={`primary${justSaved?" save-success":""}`} onClick={submitKcal} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"어제 칼로리 저장"}</button>
     </MemberBottomSheet>
     <MemberBottomSheet open={sheet==="steps"} onClose={()=>setSheet(null)} title="걸음수 입력">
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
@@ -4300,6 +4308,8 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-sheet-head b{font-size:17px;color:#20242A;letter-spacing:-.2px}
 .mv2-sheet-close{border:0;background:#F1F3F6;color:#66717C;width:30px;height:30px;border-radius:999px;font-size:13px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .mv2-sheet-body{padding:2px 20px calc(24px + env(safe-area-inset-bottom,0px));overflow-y:auto;-webkit-overflow-scrolling:touch}
+.mv2-sheet-hint{margin:0 0 14px;padding:12px 14px;background:#F6F8FB;border-radius:14px;color:#20242A;font-size:13px;font-weight:800;line-height:1.4}
+.mv2-sheet-hint span{display:block;margin-top:3px;color:#8B949E;font-size:11px;font-weight:700}
 /* 섹션 헤더 */
 .mv2-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:4px 2px 12px}
 .mv2-section-head b{display:block;font-size:18px;color:#20242A;letter-spacing:-.3px}

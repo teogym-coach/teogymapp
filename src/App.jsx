@@ -4117,6 +4117,15 @@ function buildPartVolumeHistory(sessions=[]){
   return result;
 }
 const VOLUME_CARD_PERIODS=[{key:"recent",label:"최근"},{key:"1m",label:"1개월",days:30},{key:"3m",label:"3개월",days:90},{key:"6m",label:"6개월",days:180},{key:"1y",label:"1년",days:365}];
+// 기간별 막대 색상 — 색만 보고도 지금 보는 기간을 바로 알 수 있게 한다. 같은 부위 안에서는 이전→중간→최근 순으로
+// 옅은색→진한색을 써서 왼쪽에서 오른쪽으로 성장하는 흐름을 색으로도 함께 보여준다(연한→중간→진한).
+const VOLUME_PERIOD_COLORS={
+  recent:["#BFDBFE","#60A5FA","#2563EB"],
+  "1m":["#BBF7D0","#4ADE80","#16A34A"],
+  "3m":["#DDD6FE","#A78BFA","#7C3AED"],
+  "6m":["#FED7AA","#FB923C","#EA580C"],
+  "1y":["#C7D2FE","#818CF8","#4F46E5"],
+};
 // 선택한 기간에 맞춰 "처음/중간/최근" 대표 기록 3개를 고른다(항상 3개 유지).
 // 데이터가 부족하면 가장 가까운 기록을 재사용하고, 그마저 부족하면(2개 미만) "기록 부족"으로 표시한다 — 임의 보간·가짜 수치 없음.
 function pickVolumeBars(records=[],periodKey){
@@ -4143,6 +4152,7 @@ function PartVolumeMultiCard({sessions=[]}){
   const [period,setPeriod]=useState("recent");
   const parts=["등","가슴","하체","어깨","팔"];
   const history=buildPartVolumeHistory(sessions);
+  const shades=VOLUME_PERIOD_COLORS[period]||VOLUME_PERIOD_COLORS.recent;
   return (
     <section className="mcard pv-multi-card">
       <div className="pv-multi-head">
@@ -4164,7 +4174,7 @@ function PartVolumeMultiCard({sessions=[]}){
                   {sel.points.map((v,i)=>(
                     <div className="pv-multi-bar-group" key={i}>
                       <span className="pv-multi-bar-value">{v.value.toLocaleString()}</span>
-                      <div className="pv-multi-bar" style={{height:`${Math.max(4,Math.round((v.value/max)*56))}px`}}/>
+                      <div className="pv-multi-bar" style={{height:`${Math.max(4,Math.round((v.value/max)*78))}px`,background:shades[i]||shades[shades.length-1]}}/>
                       <span className="pv-multi-bar-date">{v.date.slice(5)}</span>
                     </div>
                   ))}
@@ -4605,24 +4615,26 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pv-multi-tabs{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .pv-multi-tabs button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:7px 11px;font-weight:900;font-size:11.5px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 .pv-multi-tabs button.active{background:#20242A;color:#fff;border-color:#20242A}
-/* 부위를 세로(행)가 아닌 가로(열)로 배치 — 5개 부위를 스크롤 없이 한 화면에서 동시 비교. 막대는 작고 단순하게(수치는 보조 정보) */
-.pv-multi-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:14px;align-items:end}
+/* 부위를 세로(행)가 아닌 가로(열)로 배치 — 5개 부위를 스크롤 없이 한 화면에서 동시 비교. 막대는 한눈에 변화가 보일 정도로,
+   수치·날짜는 서로 겹치지 않도록 간격을 넉넉히 확보한다(막대색은 JS에서 기간별 shade로 지정) */
+.pv-multi-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:14px;align-items:end}
 .pv-multi-col{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
-.pv-multi-bars{display:flex;align-items:flex-end;justify-content:center;gap:3px;height:60px}
-.pv-multi-bar-group{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;height:100%;min-width:0}
-.pv-multi-bar-value{font-size:8px;font-weight:700;color:#94A3B8;white-space:nowrap}
-.pv-multi-bar{width:9px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#60A5FA,#2F73F6)}
-.pv-multi-bar-date{font-size:7.5px;font-weight:700;color:#B0B8C3;white-space:nowrap}
-.pv-multi-insufficient{display:flex;align-items:center;justify-content:center;text-align:center;height:60px;color:#C0C8D3;font-weight:800;font-size:9.5px;line-height:1.3}
+.pv-multi-bars{display:flex;align-items:flex-end;justify-content:center;gap:5px;height:104px}
+.pv-multi-bar-group{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;height:100%;min-width:0}
+.pv-multi-bar-value{font-size:7.5px;font-weight:700;color:#94A3B8;white-space:nowrap;letter-spacing:-.3px}
+.pv-multi-bar{width:8px;border-radius:3px 3px 0 0}
+.pv-multi-bar-date{font-size:7px;font-weight:700;color:#B0B8C3;white-space:nowrap;letter-spacing:-.2px}
+.pv-multi-insufficient{display:flex;align-items:center;justify-content:center;text-align:center;height:104px;color:#C0C8D3;font-weight:800;font-size:9.5px;line-height:1.3}
 .pv-multi-col-label{font-size:12px;font-weight:900;color:#20242A;margin-top:2px}
 .pv-multi-note{margin:16px 0 0;color:#8B949E;font-weight:700;font-size:11.5px;line-height:1.6}
 @media(min-width:700px){
-  .pv-multi-cols{gap:14px}
-  .pv-multi-bars{gap:6px}
-  .pv-multi-bar{width:18px}
-  .pv-multi-bar-value{font-size:10.5px}
-  .pv-multi-bar-date{font-size:9.5px}
+  .pv-multi-cols{gap:16px}
+  .pv-multi-bars{gap:8px;height:132px}
+  .pv-multi-bar{width:16px}
+  .pv-multi-bar-value{font-size:10px}
+  .pv-multi-bar-date{font-size:9px}
   .pv-multi-col-label{font-size:14px}
+  .pv-multi-insufficient{height:132px}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

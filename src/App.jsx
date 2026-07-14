@@ -4145,19 +4145,18 @@ function PartVolumeMultiCard({sessions=[]}){
           ))}
         </div>
       </div>
-      <div className="pv-multi-rows">
+      <div className="pv-multi-cols">
         {parts.map(part=>{
           const sel=pickVolumeBars(history[part]||[],period);
           const max=sel.status==="ok"?Math.max(1,...sel.points.map(v=>v.value)):1;
           return (
-            <div className="pv-multi-row" key={part}>
-              <span className="pv-multi-row-label">{part}</span>
+            <div className="pv-multi-col" key={part}>
               {sel.status==="ok" ? (
                 <div className="pv-multi-bars">
                   {sel.points.map((v,i)=>(
                     <div className="pv-multi-bar-group" key={i}>
-                      <span className="pv-multi-bar-value">{v.value.toLocaleString()}kg</span>
-                      <div className="pv-multi-bar" style={{height:`${Math.max(6,Math.round((v.value/max)*100))}px`}}/>
+                      <span className="pv-multi-bar-value">{v.value.toLocaleString()}</span>
+                      <div className="pv-multi-bar" style={{height:`${Math.max(4,Math.round((v.value/max)*56))}px`}}/>
                       <span className="pv-multi-bar-date">{v.date.slice(5)}</span>
                     </div>
                   ))}
@@ -4165,6 +4164,7 @@ function PartVolumeMultiCard({sessions=[]}){
               ) : (
                 <div className="pv-multi-insufficient">기록 부족</div>
               )}
+              <span className="pv-multi-col-label">{part}</span>
             </div>
           );
         })}
@@ -4595,22 +4595,24 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pv-multi-tabs{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .pv-multi-tabs button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:7px 11px;font-weight:900;font-size:11.5px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 .pv-multi-tabs button.active{background:#20242A;color:#fff;border-color:#20242A}
-.pv-multi-rows{display:grid;gap:6px;margin-top:12px}
-.pv-multi-row{display:grid;grid-template-columns:34px 1fr;align-items:center;gap:10px;border-top:1px solid #EEF1F4;padding-top:14px}
-.pv-multi-row:first-child{border-top:0;padding-top:0}
-.pv-multi-row-label{font-size:13px;font-weight:900;color:#20242A}
-.pv-multi-bars{display:flex;align-items:flex-end;gap:10px;height:104px}
-.pv-multi-bar-group{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%}
-.pv-multi-bar-value{font-size:10.5px;font-weight:900;color:#2F73F6;white-space:nowrap}
-.pv-multi-bar{width:100%;max-width:40px;border-radius:6px 6px 0 0;background:linear-gradient(180deg,#60A5FA,#2F73F6)}
-.pv-multi-bar-date{font-size:10px;font-weight:800;color:#8B949E}
-.pv-multi-insufficient{display:flex;align-items:center;height:104px;color:#A8B0BA;font-weight:800;font-size:12.5px}
-.pv-multi-note{margin:14px 0 0;color:#8B949E;font-weight:700;font-size:11.5px;line-height:1.6}
+/* 부위를 세로(행)가 아닌 가로(열)로 배치 — 5개 부위를 스크롤 없이 한 화면에서 동시 비교. 막대는 작고 단순하게(수치는 보조 정보) */
+.pv-multi-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:14px;align-items:end}
+.pv-multi-col{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+.pv-multi-bars{display:flex;align-items:flex-end;justify-content:center;gap:3px;height:60px}
+.pv-multi-bar-group{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;height:100%;min-width:0}
+.pv-multi-bar-value{font-size:8px;font-weight:700;color:#94A3B8;white-space:nowrap}
+.pv-multi-bar{width:9px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#60A5FA,#2F73F6)}
+.pv-multi-bar-date{font-size:7.5px;font-weight:700;color:#B0B8C3;white-space:nowrap}
+.pv-multi-insufficient{display:flex;align-items:center;justify-content:center;text-align:center;height:60px;color:#C0C8D3;font-weight:800;font-size:9.5px;line-height:1.3}
+.pv-multi-col-label{font-size:12px;font-weight:900;color:#20242A;margin-top:2px}
+.pv-multi-note{margin:16px 0 0;color:#8B949E;font-weight:700;font-size:11.5px;line-height:1.6}
 @media(min-width:700px){
-  .pv-multi-row{grid-template-columns:56px 1fr}
-  .pv-multi-bar{max-width:64px}
-  .pv-multi-bars{height:130px}
-  .pv-multi-insufficient{height:130px}
+  .pv-multi-cols{gap:14px}
+  .pv-multi-bars{gap:6px}
+  .pv-multi-bar{width:18px}
+  .pv-multi-bar-value{font-size:10.5px}
+  .pv-multi-bar-date{font-size:9.5px}
+  .pv-multi-col-label{font-size:14px}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

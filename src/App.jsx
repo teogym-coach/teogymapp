@@ -4150,16 +4150,47 @@ function pickVolumeBars(records=[],periodKey){
 // 카드 자체의 기간 버튼(최근/1개월/3개월/6개월/1년)으로 대표 시점 3개를 다시 고른다(전체 페이지 기간 필터와는 별개).
 function PartVolumeMultiCard({sessions=[]}){
   const [period,setPeriod]=useState("recent");
+  const [tip,setTip]=useState(null); // {key,date,value,left,top,flip} — 눌린/포커스된 막대 1개의 상세 정보(날짜·볼륨)만 보관
+  const cardRef=useRef(null);
   const parts=["등","가슴","하체","어깨","팔"];
   const history=buildPartVolumeHistory(sessions);
   const shades=VOLUME_PERIOD_COLORS[period]||VOLUME_PERIOD_COLORS.recent;
+
+  // 카드 바깥을 터치/클릭하면 툴팁 닫기
+  useEffect(()=>{
+    if(!tip) return;
+    const onOutside=(e)=>{ if(cardRef.current && !cardRef.current.contains(e.target)) setTip(null); };
+    document.addEventListener("pointerdown",onOutside);
+    return ()=>document.removeEventListener("pointerdown",onOutside);
+  },[tip]);
+
+  const changePeriod=(key)=>{ setPeriod(key); setTip(null); };
+
+  // 막대의 화면 좌표를 기준으로 툴팁 위치를 계산 — 카드 좌우 끝을 넘지 않게 가로 위치를 clamp하고,
+  // 화면 상단에 너무 가까우면(96px 이내) 위 대신 아래로 뒤집어 표시한다.
+  const positionTip=(el,key,v)=>{
+    const cardEl=cardRef.current;
+    if(!cardEl||!el){ setTip({key,date:v.date,value:v.value,left:"50%",top:0,flip:false}); return; }
+    const cardRect=cardEl.getBoundingClientRect();
+    const barRect=el.getBoundingClientRect();
+    const half=58;
+    const rawLeft=barRect.left-cardRect.left+barRect.width/2;
+    const left=Math.min(Math.max(rawLeft,half+6),Math.max(half+6,cardRect.width-half-6));
+    const flip=barRect.top<96;
+    const top=flip?(barRect.bottom-cardRect.top):(barRect.top-cardRect.top);
+    setTip({key,date:v.date,value:v.value,left,top,flip});
+  };
+  const toggleTip=(e,key,v)=>{ if(tip?.key===key){ setTip(null); return; } positionTip(e.currentTarget,key,v); };
+  const hoverTip=(e,key,v)=>positionTip(e.currentTarget,key,v);
+  const clearHoverTip=(key)=>setTip(t=>t?.key===key?null:t);
+
   return (
-    <section className="mcard pv-multi-card">
+    <section className="mcard pv-multi-card" ref={cardRef}>
       <div className="pv-multi-head">
         <h2>부위별 운동 볼륨 변화</h2>
         <div className="pv-multi-tabs">
           {VOLUME_CARD_PERIODS.map(o=>(
-            <button type="button" key={o.key} className={period===o.key?"active":""} onClick={()=>setPeriod(o.key)}>{o.label}</button>
+            <button type="button" key={o.key} className={period===o.key?"active":""} onClick={()=>changePeriod(o.key)}>{o.label}</button>
           ))}
         </div>
       </div>
@@ -4171,13 +4202,23 @@ function PartVolumeMultiCard({sessions=[]}){
             <div className="pv-multi-col" key={part}>
               {sel.status==="ok" ? (
                 <div className="pv-multi-bars">
-                  {sel.points.map((v,i)=>(
-                    <div className="pv-multi-bar-group" key={i}>
-                      <span className="pv-multi-bar-value">{v.value.toLocaleString()}</span>
-                      <div className="pv-multi-bar" style={{height:`${Math.max(4,Math.round((v.value/max)*78))}px`,background:shades[i]||shades[shades.length-1]}}/>
-                      <span className="pv-multi-bar-date">{v.date.slice(5)}</span>
-                    </div>
-                  ))}
+                  {sel.points.map((v,i)=>{
+                    const key=`${part}-${period}-${i}`;
+                    return (
+                      <button
+                        type="button"
+                        key={i}
+                        className="pv-multi-bar"
+                        style={{height:`${Math.max(4,Math.round((v.value/max)*78))}px`,background:shades[i]||shades[shades.length-1]}}
+                        aria-label={`${part} ${v.date.slice(5)} 운동 볼륨 ${v.value.toLocaleString()}kg`}
+                        onClick={e=>toggleTip(e,key,v)}
+                        onMouseEnter={e=>hoverTip(e,key,v)}
+                        onMouseLeave={()=>clearHoverTip(key)}
+                        onFocus={e=>hoverTip(e,key,v)}
+                        onBlur={()=>clearHoverTip(key)}
+                      />
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="pv-multi-insufficient">기록 부족</div>
@@ -4187,6 +4228,11 @@ function PartVolumeMultiCard({sessions=[]}){
           );
         })}
       </div>
+      {tip && (
+        <div className={`pv-vol-tip${tip.flip?" flip":""}`} style={{left:tip.left,top:tip.top}}>
+          {tip.date.slice(5)} · {tip.value.toLocaleString()}kg
+        </div>
+      )}
       <p className="pv-multi-note">운동 종목과 세트 구성에 따라 운동 볼륨은 달라질 수 있습니다.</p>
     </section>
   );
@@ -4615,26 +4661,29 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pv-multi-tabs{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .pv-multi-tabs button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:7px 11px;font-weight:900;font-size:11.5px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 .pv-multi-tabs button.active{background:#20242A;color:#fff;border-color:#20242A}
-/* 부위를 세로(행)가 아닌 가로(열)로 배치 — 5개 부위를 스크롤 없이 한 화면에서 동시 비교. 막대는 한눈에 변화가 보일 정도로,
-   수치·날짜는 서로 겹치지 않도록 간격을 넉넉히 확보한다(막대색은 JS에서 기간별 shade로 지정) */
-.pv-multi-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:14px;align-items:end}
-.pv-multi-col{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
-.pv-multi-bars{display:flex;align-items:flex-end;justify-content:center;gap:5px;height:104px}
-.pv-multi-bar-group{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;height:100%;min-width:0}
-.pv-multi-bar-value{font-size:7.5px;font-weight:700;color:#94A3B8;white-space:nowrap;letter-spacing:-.3px}
-.pv-multi-bar{width:8px;border-radius:3px 3px 0 0}
-.pv-multi-bar-date{font-size:7px;font-weight:700;color:#B0B8C3;white-space:nowrap;letter-spacing:-.2px}
-.pv-multi-insufficient{display:flex;align-items:center;justify-content:center;text-align:center;height:104px;color:#C0C8D3;font-weight:800;font-size:9.5px;line-height:1.3}
+/* 부위를 세로(행)가 아닌 가로(열)로 배치 — 5개 부위를 스크롤 없이 한 화면에서 동시 비교.
+   기본 화면에는 막대만 보이고(수치·날짜는 탭/hover 시 툴팁으로만 노출), 같은 부위 안 막대 3개는 가깝게,
+   부위 그룹 사이는 넓게 띄워 "묶음"이 한눈에 보이게 한다. 막대색은 JS에서 기간별 shade로 지정 */
+.pv-multi-card{position:relative}
+.pv-multi-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:14px;align-items:end}
+.pv-multi-col{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0;padding:0 2px}
+.pv-multi-bars{display:flex;align-items:flex-end;justify-content:center;gap:3px;height:82px;padding:0 4px 2px;border-bottom:1.5px solid #EEF1F4}
+.pv-multi-bar{appearance:none;-webkit-appearance:none;width:8px;border:0;padding:0;border-radius:3px 3px 0 0;-webkit-tap-highlight-color:transparent;cursor:pointer;transition:filter .15s ease,box-shadow .15s ease}
+.pv-multi-bar:hover,.pv-multi-bar:focus-visible{filter:brightness(1.08);box-shadow:0 0 0 2px rgba(32,36,42,.12)}
+.pv-multi-bar:focus-visible{outline:none}
+.pv-multi-insufficient{display:flex;align-items:center;justify-content:center;text-align:center;height:82px;color:#C0C8D3;font-weight:800;font-size:9.5px;line-height:1.3}
 .pv-multi-col-label{font-size:12px;font-weight:900;color:#20242A;margin-top:2px}
 .pv-multi-note{margin:16px 0 0;color:#8B949E;font-weight:700;font-size:11.5px;line-height:1.6}
+.pv-vol-tip{position:absolute;transform:translate(-50%,calc(-100% - 10px));background:#20242A;color:#fff;font-size:11.5px;font-weight:800;padding:6px 10px;border-radius:10px;white-space:nowrap;box-shadow:0 8px 18px rgba(15,23,42,.24);pointer-events:none;z-index:6;letter-spacing:-.1px}
+.pv-vol-tip::after{content:"";position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#20242A}
+.pv-vol-tip.flip{transform:translate(-50%,10px)}
+.pv-vol-tip.flip::after{bottom:auto;top:-4px;border-top-color:transparent;border-bottom-color:#20242A}
 @media(min-width:700px){
-  .pv-multi-cols{gap:16px}
-  .pv-multi-bars{gap:8px;height:132px}
+  .pv-multi-cols{gap:22px}
+  .pv-multi-bars{gap:6px;height:100px}
   .pv-multi-bar{width:16px}
-  .pv-multi-bar-value{font-size:10px}
-  .pv-multi-bar-date{font-size:9px}
   .pv-multi-col-label{font-size:14px}
-  .pv-multi-insufficient{height:132px}
+  .pv-multi-insufficient{height:100px}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

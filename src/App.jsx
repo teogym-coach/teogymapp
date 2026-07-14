@@ -113,7 +113,7 @@ const SESSION_TYPE_OPTIONS = [
   "가슴","등","어깨","하체","팔","이두","삼두",
   "유산소","복합운동","스트레칭/이동성","기타"
 ];
-// ── "오늘의 운동 부위" — 수업 기록 화면 표시/계획용(운동별 muscleTop 자동선택과 무관, UI+임시저장 전용) ──
+// ── "오늘의 운동 부위" — 세션 전체 수업 부위 선택(selectedTypes를 그대로 재사용, 운동별 muscleTop 자동선택과 무관) ──
 const SESSION_BODY_PART_OPTIONS = ["등","가슴","하체","어깨","이두","삼두","상체"];
 // type(string) → selectedTypes(array) 호환 변환
 function normalizeTypes(raw) {
@@ -10171,9 +10171,12 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   // "상세 설정" 아코디언(세부부위/기능 부위·목적/자세 피드백) — 방향 상관없이 항상 기본 접힘
   const [expandedDetail, setExpandedDetail] = useState(() => new Set());
   const toggleDetail = (ei) => setExpandedDetail(prev => { const next = new Set(prev); next.has(ei) ? next.delete(ei) : next.add(ei); return next; });
-  // "오늘의 운동 부위" — 표시/계획용 UI 상태. Firestore에는 저장하지 않고(요청 범위 외) 임시저장(draft)에만 포함한다.
-  const [sessionBodyParts, setSessionBodyParts] = useState(editData?.sessionBodyParts || []);
-  const toggleSessionBodyPart = (part) => setSessionBodyParts(prev => prev.includes(part) ? prev.filter(x=>x!==part) : [...prev, part]);
+  // "오늘의 운동 부위" — 기존 수업 유형(selectedTypes)을 그대로 재사용. 새 필드 추가 없이 히스토리 표시와 동일한 값으로 저장된다.
+  // 이전에 남아있던 비-부위 값("기타" 등 숨겨진 수업 유형 UI 잔여값)은 첫 토글 시 제거하고 부위 값만으로 다시 구성한다.
+  const toggleSessionBodyPart = (part) => setSelectedTypes(prev => {
+    const bodyPartsOnly = prev.filter(t => SESSION_BODY_PART_OPTIONS.includes(t));
+    return bodyPartsOnly.includes(part) ? bodyPartsOnly.filter(x=>x!==part) : [...bodyPartsOnly, part];
+  });
 
   // ── 회원 브리핑(가로모드 좌측 패널) — 현재 DB에 이미 있는 정보만 표시, 새 저장 로직 없음 ──
   const [briefCi, setBriefCi] = useState([]);
@@ -10241,7 +10244,6 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
         exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
         cardioType, cardioMinutes, cardioCalories, cardioIntensity,
         workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
-        sessionBodyParts,
       };
       const ok = saveDraft(draftKey, data);
       const now = new Date();
@@ -10253,8 +10255,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   }, [trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
       exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
       cardioType, cardioMinutes, cardioCalories, cardioIntensity,
-      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
-      sessionBodyParts]);
+      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo]);
 
   // ── 이탈 경고 ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -10289,7 +10290,6 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     if (draft.calories)        setCalories(draft.calories);
     if (draft.dietNote)        setDietNote(draft.dietNote);
     if (draft.refVideo)        setRefVideo(draft.refVideo);
-    if (draft.sessionBodyParts?.length>0) setSessionBodyParts(draft.sessionBodyParts);
     setDraftPopup(null);
     showToast("이전 기록을 불러왔습니다 ✓");
   }
@@ -10812,10 +10812,10 @@ function updateEx(ei, key, val) {
           <div style={{flex:"1 1 118px",minWidth:0}}><Field label="날짜"     value={date}        onChange={setDate}         type="date" /></div>
           <div style={{flex:"0 1 64px",minWidth:0}}><Field label="회차 *"   value={String(sessionNo)} onChange={v => setSessionNo(parseInt(v)||v)} placeholder="1" /></div>
           <div style={{flex:"2 1 260px",minWidth:0}}>
-            <label>오늘의 운동 부위 <span style={{fontWeight:400,fontSize:10,color:"#64748B"}}>(복수 선택, 표시용)</span></label>
+            <label>오늘의 운동 부위 <span style={{fontWeight:400,fontSize:10,color:"#64748B"}}>(복수 선택)</span></label>
             <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
               {SESSION_BODY_PART_OPTIONS.map(part => {
-                const active = sessionBodyParts.includes(part);
+                const active = selectedTypes.includes(part);
                 return (
                   <button key={part} type="button" onClick={() => toggleSessionBodyPart(part)}
                     style={{padding:"6px 11px",borderRadius:14,border:"1px solid",cursor:"pointer",
@@ -10830,8 +10830,8 @@ function updateEx(ei, key, val) {
             </div>
           </div>
         </div>
-        {/* 수업 유형(SESSION_TYPE_OPTIONS) 렌더링은 제거됨 — 상단 "오늘의 운동 부위"와 역할이 겹쳐 화면에서만 숨김.
-            selectedTypes state·handleSave 저장 로직(type/selectedTypes 필드)은 그대로 유지되어 기존 값이 그대로 재저장됨. */}
+        {/* 수업 유형(SESSION_TYPE_OPTIONS) 렌더링은 제거됨 — 상단 "오늘의 운동 부위" 버튼이 selectedTypes를 직접 읽고 쓴다.
+            selectedTypes state·handleSave 저장 로직(type/selectedTypes 필드)은 그대로 유지됨. */}
       </Card>
 
       {/* 대표님 전용: 운동 시간 기록 */}

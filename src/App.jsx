@@ -1040,7 +1040,7 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .vol-col{display:none!important;}
 }
 /* 운동 카드 3열 구조(왼:세트 · 가운데:기구/카테고리/도구 · 오:자극도) — 가로/세로모드 모두 동일 구조, 폭에 따라 비율만 반응형 */
-.ex-3col{display:grid;grid-template-columns:1.5fr 1fr 1.15fr;gap:10px;align-items:start;}
+.ex-3col{display:grid;grid-template-columns:1.5fr 1fr 1.15fr;gap:8px;align-items:start;}
 @media(max-width:640px){
   .ex-3col{grid-template-columns:1.7fr 0.85fr 1fr;gap:6px;}
 }
@@ -10830,28 +10830,8 @@ function updateEx(ei, key, val) {
             </div>
           </div>
         </div>
-        {/* 수업 유형 — 보조 영역(공간을 크게 차지하지 않도록 축소 표시), 기존 저장 로직 그대로 */}
-        <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #EDEFF2",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
-          <Mo c="#94A3B8" s={9} style={{fontWeight:700}}>수업 유형 <span style={{fontWeight:400}}>(복수 선택)</span></Mo>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
-            {SESSION_TYPE_OPTIONS.map(t => {
-              const active = selectedTypes.includes(t);
-              return (
-                <button key={t} type="button"
-                  onClick={() => setSelectedTypes(prev =>
-                    prev.includes(t) ? prev.filter(x=>x!==t) : [...prev, t]
-                  )}
-                  style={{padding:"3px 9px",borderRadius:12,border:"1px solid",cursor:"pointer",
-                    fontSize:10.5,fontWeight:active?800:600,transition:"all .12s",
-                    borderColor:active?"#0F9488":"#D6DCE3",
-                    background:active?"rgba(57,199,184,.12)":"transparent",
-                    color:active?"#0F9488":"#94A3B8"}}>
-                  {t}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {/* 수업 유형(SESSION_TYPE_OPTIONS) 렌더링은 제거됨 — 상단 "오늘의 운동 부위"와 역할이 겹쳐 화면에서만 숨김.
+            selectedTypes state·handleSave 저장 로직(type/selectedTypes 필드)은 그대로 유지되어 기존 값이 그대로 재저장됨. */}
       </Card>
 
       {/* 대표님 전용: 운동 시간 기록 */}
@@ -10929,7 +10909,7 @@ function updateEx(ei, key, val) {
                 : activeCardIdx===ei ? "#CBD5E1"
                 : "#EDEFF2"
               ),
-              borderRadius:10,padding:"9px 8px",marginBottom:14,
+              borderRadius:10,padding:"7px 7px",marginBottom:9,
               opacity: isDrag ? 0.85
                 : (activeCardIdx===null||activeCardIdx===ei) ? 1 : 0.75,
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
@@ -10943,7 +10923,7 @@ function updateEx(ei, key, val) {
               boxSizing:"border-box",overflow:"hidden",
             }}>
             {/* 드래그 핸들 + 헤더 */}
-            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:9,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:6,flexWrap:"wrap",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
               {/* 드래그 핸들 — pointer 이벤트만 처리 */}
               <div
                 title="잡고 위아래로 이동"
@@ -10958,13 +10938,13 @@ function updateEx(ei, key, val) {
                 ⠿
               </div>
               <Mo c="#94A3B8" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
-              <div style={{flex:"1 1 0",minWidth:0,maxWidth:"100%",overflow:"hidden"}}>
+              <div style={{flex:"0 1 65%",minWidth:0,maxWidth:"65%",overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
                 placeholder="운동 이름" style={{
                   width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",
-                  fontWeight:800,fontSize:19,letterSpacing:"-.2px",display:"block",
-                  height:48,padding:"10px 12px",
+                  fontWeight:800,fontSize:17,letterSpacing:"-.2px",display:"block",
+                  height:42,padding:"8px 10px",
                   background:"#FFFFFF",
                   border:"1.5px solid #D6DCE3",
                   borderRadius:8,
@@ -10987,12 +10967,12 @@ function updateEx(ei, key, val) {
               </div>
               {/* 운동명 옆 부위 선택 — 이름 기반 자동 선택 결과를 대표가 즉시 확인/수정 가능(기능운동은 아래 부위 다중선택을 쓰므로 배지만) */}
               {ex.equipment === "기능" ? (
-                <span style={{flexShrink:0,fontFamily:"'DM Mono',monospace",fontSize:10,padding:"6px 9px",
+                <span style={{flex:"0 1 30%",minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace",fontSize:10,padding:"6px 9px",
                   borderRadius:6,background:"rgba(34,197,94,.14)",color:"#22c55e",fontWeight:700}}>기능</span>
               ) : (
                 <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)}
                   onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
-                  style={{flexShrink:0,fontSize:13,fontWeight:700,padding:"9px 6px",borderRadius:7,
+                  style={{flex:"0 1 30%",minWidth:80,fontSize:13,fontWeight:700,padding:"9px 6px",borderRadius:7,
                     height:38,color:"#0F172A",border:"1.5px solid #D6DCE3",background:"#FFFFFF"}}>
                   {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
                 </select>
@@ -11238,13 +11218,20 @@ function updateEx(ei, key, val) {
             })()}
             {/* ── 3열 구조: 왼쪽 세트 · 가운데 기구/카테고리/도구 · 오른쪽 자극도(가로/세로모드 공통, CSS Grid로 시각 순서만 배치) ── */}
             <div className="ex-3col">
-            {/* 가운데 열 — 기구/카테고리/도구: 선택값이 바로 보이고 눌러서 바꿀 수 있는 select, 맨몸도 기구 목록 안에 포함 */}
+            {/* 가운데 열 — 기구(버튼, 빠른 선택)/카테고리/도구(select) 3줄만 표시. 맨몸도 기구 버튼 목록 안에 포함(EQUIP_LIST 그대로) */}
             <div style={{gridColumn:2,gridRow:1,minWidth:0}}>
               <label>기구</label>
-              <select value={ex.equipment} onChange={e => updateEx(ei,"equipment",e.target.value)}
-                style={{fontSize:12,padding:"7px 6px",width:"100%",marginBottom:6}}>
-                {EQUIP_LIST.map(eq => <option key={eq} value={eq}>{eq}</option>)}
-              </select>
+              <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2,marginBottom:6}}>
+                {EQUIP_LIST.map(eq => {
+                  const active = ex.equipment===eq; const col = EQUIP_COLOR[eq];
+                  return (
+                    <button key={eq} type="button" onClick={() => updateEx(ei,"equipment",eq)}
+                      style={{padding:"5px 9px",borderRadius:4,border:"1px solid",cursor:"pointer",
+                        borderColor:active?col:"#B9C2CC",background:active?col+"22":"transparent",
+                        color:active?col:"#475569",fontSize:11,fontWeight:700}}>{eq}</button>
+                  );
+                })}
+              </div>
               {ex.equipment === "기능" ? (
                 <>
                   <label>카테고리</label>

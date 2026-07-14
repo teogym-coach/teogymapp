@@ -35,6 +35,8 @@ import {
 // ─── 운동 분류 상수 ───
 const EQUIP_LIST   = ["바벨","덤벨","케이블","머신","맨몸","기능"];
 const EQUIP_COLOR  = {바벨:"#7c6fff",덤벨:"#5EEAD4",케이블:"#f97316",머신:"#ffd166",맨몸:"#94a3b8",기능:"#22c55e"};
+// 수업 기록 화면(SessionScreen) 입력 UI 전용 — "맨몸"은 "기능"에 통합해서 5개만 노출(과거 EQUIP_LIST 데이터/통계 집계는 그대로 6개 유지)
+const SESSION_EQUIP_LIST = ["바벨","덤벨","케이블","머신","기능"];
 const MUSCLE_MAP   = {
   "가슴":      ["윗가슴","가운데가슴","아랫가슴","전체"],
   "등":        ["등상부","광배근","전체"],
@@ -113,6 +115,8 @@ const SESSION_TYPE_OPTIONS = [
   "가슴","등","어깨","하체","팔","이두","삼두",
   "유산소","복합운동","스트레칭/이동성","기타"
 ];
+// ── "오늘의 운동 부위" — 수업 기록 화면 표시/계획용(운동별 muscleTop 자동선택과 무관, UI+임시저장 전용) ──
+const SESSION_BODY_PART_OPTIONS = ["등","가슴","하체","어깨","이두","삼두","상체"];
 // type(string) → selectedTypes(array) 호환 변환
 function normalizeTypes(raw) {
   if (!raw) return [];
@@ -10114,19 +10118,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       }
       return baseExs;
     }
-    // 대표님 운동 기록: 빈 운동 종목 1개로 시작 (기능 운동 기본 생성 안 함)
-    if (isOwner(member)) {
-      return [mkEx()];
-    }
-    // 회원 수업 기록: 기능 카드 1개로 시작
-    const mkFuncEx = () => ({
-      ...mkEx(),
-      equipment: "기능",
-      muscleTop: "기능",
-      muscleSub: "기능",
-      sets: [{ weight:"", reps:"", durationSec:"", volume:0, recordType:"function" }],
-    });
-    return [mkFuncEx()];
+    // 대표님 운동 기록 · 회원 수업 기록 모두: 빈 웨이트 운동 카드 1개로 시작 (기능 운동 기본 생성 안 함)
+    return [mkEx()];
   });
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
@@ -10155,10 +10148,9 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [dietNote,       setDietNote]       = useState(editData?.dietNote       || "");
   const [romData,        setRomData]        = useState(editData?.romData  || CPARTS.reduce((o,k) => ({...o,[k]:"정상"}), {}));
   const [painData,       setPainData]       = useState(editData?.painData || CPARTS.reduce((o,k) => ({...o,[k]:0}), {}));
-  // 통증 기록 (운동 전/후)
+  // 통증 기록 (운동 전/후) — 회원이 회원앱에서 직접 입력하므로 이 화면 렌더링에서는 제거됨.
+  // state·handleSave 저장 로직은 유지(다른 화면의 통증 조회/기존 기록 재저장 호환성).
   const [painRecord,     setPainRecord]     = useState(editData?.painRecord || { before:{vas:0,part:"",situation:"",memo:""}, after:{vas:0,change:"",memo:""} });
-  const [showPainBefore, setShowPainBefore] = useState(!!(editData?.painRecord?.before?.vas > 0 || editData?.painRecord?.before?.part));
-  const [showPainAfter,  setShowPainAfter]  = useState(!!(editData?.painRecord?.after?.vas > 0 || editData?.painRecord?.after?.memo));
   const [showCard,       setShowCard]       = useState(false);
   const [activeCardIdx, setActiveCardIdx]   = useState(null); // 현재 입력 중인 카드
 
@@ -10175,6 +10167,12 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   // 자극도/대표메모/다음 수업 추천 아코디언 — 가로모드에서만 기본 접힘(세로모드는 항상 펼침, 기존 화면 그대로)
   const [expandedStim, setExpandedStim] = useState(() => new Set());
   const toggleStim = (ei) => setExpandedStim(prev => { const next = new Set(prev); next.has(ei) ? next.delete(ei) : next.add(ei); return next; });
+  // "상세 설정" 아코디언(세부부위/카테고리·도구/자세 피드백) — 방향 상관없이 항상 기본 접힘
+  const [expandedDetail, setExpandedDetail] = useState(() => new Set());
+  const toggleDetail = (ei) => setExpandedDetail(prev => { const next = new Set(prev); next.has(ei) ? next.delete(ei) : next.add(ei); return next; });
+  // "오늘의 운동 부위" — 표시/계획용 UI 상태. Firestore에는 저장하지 않고(요청 범위 외) 임시저장(draft)에만 포함한다.
+  const [sessionBodyParts, setSessionBodyParts] = useState(editData?.sessionBodyParts || []);
+  const toggleSessionBodyPart = (part) => setSessionBodyParts(prev => prev.includes(part) ? prev.filter(x=>x!==part) : [...prev, part]);
 
   // ── 회원 브리핑(가로모드 좌측 패널) — 현재 DB에 이미 있는 정보만 표시, 새 저장 로직 없음 ──
   const [briefCi, setBriefCi] = useState([]);
@@ -10242,6 +10240,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
         exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
         cardioType, cardioMinutes, cardioCalories, cardioIntensity,
         workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
+        sessionBodyParts,
       };
       const ok = saveDraft(draftKey, data);
       const now = new Date();
@@ -10253,7 +10252,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   }, [trainerName, gymName, date, sessionNo, selectedTypes, intensity, condition,
       exercises, stretchNotes, nextPlan, trainerComment, trainerOnlyNote,
       cardioType, cardioMinutes, cardioCalories, cardioIntensity,
-      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo]);
+      workoutStartTime, workoutEndTime, bodyWeight, calories, dietNote, refVideo,
+      sessionBodyParts]);
 
   // ── 이탈 경고 ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -10288,6 +10288,7 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     if (draft.calories)        setCalories(draft.calories);
     if (draft.dietNote)        setDietNote(draft.dietNote);
     if (draft.refVideo)        setRefVideo(draft.refVideo);
+    if (draft.sessionBodyParts?.length>0) setSessionBodyParts(draft.sessionBodyParts);
     setDraftPopup(null);
     showToast("이전 기록을 불러왔습니다 ✓");
   }
@@ -10835,145 +10836,24 @@ function updateEx(ei, key, val) {
         </div>
       </Card>
 
-      {/* ── 통증 기록 카드 ──────────────────────────── */}
-      <Card style={{marginTop:9,border:"1px solid #D6DCE3",background:"#FFFFFF"}}>
-        {/* 헤더 */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showPainBefore||showPainAfter?10:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <Mo c="#F97316" s={10} style={{fontWeight:700}}>💢 통증 기록</Mo>
-            <Mo c="#94A3B8" s={8}>(선택 입력)</Mo>
-          </div>
-          <div style={{display:"flex",gap:5}}>
-            <button onClick={()=>setShowPainBefore(v=>!v)}
-              style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                borderColor:showPainBefore?"#F97316":"#EDEFF2",
-                background:showPainBefore?"rgba(249,115,22,.15)":"transparent",
-                color:showPainBefore?"#F97316":"#64748B"}}>
-              운동 전
-            </button>
-            <button onClick={()=>setShowPainAfter(v=>!v)}
-              style={{padding:"4px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                borderColor:showPainAfter?"#0F9488":"#EDEFF2",
-                background:showPainAfter?"rgba(57,199,184,.15)":"transparent",
-                color:showPainAfter?"#0F9488":"#64748B"}}>
-              운동 후
-            </button>
-          </div>
+      {/* ── 오늘의 운동 부위 — 표시/계획용(운동별 muscleTop 자동선택과는 무관, 저장은 임시저장까지만) ──────────────────────────── */}
+      <Card title="오늘의 운동 부위" style={{marginTop:9,background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
+        <Mo c="#64748B" s={9} style={{display:"block",marginBottom:7}}>해당 부위를 중심으로 오늘 운동을 진행합니다 (복수 선택 가능)</Mo>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {SESSION_BODY_PART_OPTIONS.map(part => {
+            const active = sessionBodyParts.includes(part);
+            return (
+              <button key={part} type="button" onClick={() => toggleSessionBodyPart(part)}
+                style={{padding:"7px 16px",borderRadius:16,border:"1px solid",cursor:"pointer",
+                  fontSize:13,fontWeight:active?800:600,transition:"all .12s",
+                  borderColor:active?"#0F9488":"#B9C2CC",
+                  background:active?"rgba(57,199,184,.16)":"transparent",
+                  color:active?"#0F9488":"#475569"}}>
+                {part}
+              </button>
+            );
+          })}
         </div>
-
-        {/* 운동 전 통증 */}
-        {showPainBefore && (
-          <div style={{background:"#F6F7F9",borderRadius:8,padding:"10px 12px",marginBottom:showPainAfter?8:0,border:"1px solid rgba(249,115,22,.2)"}}>
-            <Mo c="#F97316" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 전 통증</Mo>
-            {/* VAS 슬라이더 */}
-            <div style={{marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#64748B" s={9}>통증 강도 (VAS)</Mo>
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
-                  color:painRecord.before.vas>=7?"#EF4444":painRecord.before.vas>=4?"#F59E0B":"#0F9488"}}>
-                  {painRecord.before.vas}/10
-                </span>
-              </div>
-              <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                {[0,1,2,3,4,5,6,7,8,9,10].map(v=>(
-                  <button key={v} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,vas:v}}))}
-                    style={{flex:1,minWidth:26,height:32,borderRadius:5,border:"1px solid",cursor:"pointer",
-                      fontSize:11,fontWeight:800,
-                      borderColor:painRecord.before.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#EDEFF2",
-                      background:painRecord.before.vas===v?(v>=7?"rgba(239,68,68,.25)":v>=4?"rgba(245,158,11,.25)":"rgba(57,199,184,.25)"):"transparent",
-                      color:painRecord.before.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#94A3B8"}}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 통증 부위 */}
-            <div style={{marginBottom:8}}>
-              <Mo c="#64748B" s={9} style={{display:"block",marginBottom:4}}>통증 부위</Mo>
-              <input value={painRecord.before.part}
-                onChange={e=>setPainRecord(p=>({...p,before:{...p.before,part:e.target.value}}))}
-                placeholder="예: 우측 무릎 내측"
-                style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #EDEFF2",
-                  background:"#FFFFFF",color:"#0F172A",fontSize:12,boxSizing:"border-box"}} />
-            </div>
-            {/* 발생 상황 */}
-            <div style={{marginBottom:8}}>
-              <Mo c="#64748B" s={9} style={{display:"block",marginBottom:4}}>발생 상황</Mo>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {["아침","오래 앉을 때","걷기","운동 중","특정 동작 시","계단","기타"].map(sit=>(
-                  <button key={sit} onClick={()=>setPainRecord(p=>({...p,before:{...p.before,situation:p.before.situation===sit?"":sit}}))}
-                    style={{padding:"5px 10px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:10,fontWeight:700,
-                      borderColor:painRecord.before.situation===sit?"#F97316":"#EDEFF2",
-                      background:painRecord.before.situation===sit?"rgba(249,115,22,.2)":"transparent",
-                      color:painRecord.before.situation===sit?"#F97316":"#64748B"}}>
-                    {sit}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 메모 */}
-            <textarea value={painRecord.before.memo}
-              onChange={e=>setPainRecord(p=>({...p,before:{...p.before,memo:e.target.value}}))}
-              placeholder="예: 계단 내려갈 때 통증, 앉았다 일어날 때 불편"
-              rows={2}
-              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #EDEFF2",
-                background:"#FFFFFF",color:"#0F172A",fontSize:11,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-          </div>
-        )}
-
-        {/* 운동 후 통증 */}
-        {showPainAfter && (
-          <div style={{background:"#F6F7F9",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(57,199,184,.2)"}}>
-            <Mo c="#0F9488" s={9} style={{display:"block",fontWeight:700,marginBottom:8}}>운동 후 통증 변화</Mo>
-            {/* VAS */}
-            <div style={{marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#64748B" s={9}>운동 후 통증 강도 (VAS)</Mo>
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,
-                  color:painRecord.after.vas>=7?"#EF4444":painRecord.after.vas>=4?"#F59E0B":"#0F9488"}}>
-                  {painRecord.after.vas}/10
-                </span>
-              </div>
-              <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                {[0,1,2,3,4,5,6,7,8,9,10].map(v=>(
-                  <button key={v} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,vas:v}}))}
-                    style={{flex:1,minWidth:26,height:32,borderRadius:5,border:"1px solid",cursor:"pointer",
-                      fontSize:11,fontWeight:800,
-                      borderColor:painRecord.after.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#EDEFF2",
-                      background:painRecord.after.vas===v?(v>=7?"rgba(239,68,68,.25)":v>=4?"rgba(245,158,11,.25)":"rgba(57,199,184,.25)"):"transparent",
-                      color:painRecord.after.vas===v?(v>=7?"#EF4444":v>=4?"#F59E0B":"#0F9488"):"#94A3B8"}}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 변화 선택 */}
-            <div style={{marginBottom:8}}>
-              <Mo c="#64748B" s={9} style={{display:"block",marginBottom:4}}>통증 변화</Mo>
-              <div style={{display:"flex",gap:5}}>
-                {[["감소","#0F9488"],["동일","#F59E0B"],["증가","#EF4444"]].map(([ch,color])=>(
-                  <button key={ch} onClick={()=>setPainRecord(p=>({...p,after:{...p.after,change:p.after.change===ch?"":ch}}))}
-                    style={{flex:1,padding:"8px 0",borderRadius:7,border:"1px solid",cursor:"pointer",
-                      fontSize:12,fontWeight:800,
-                      borderColor:painRecord.after.change===ch?color:"#EDEFF2",
-                      background:painRecord.after.change===ch?color+"22":"transparent",
-                      color:painRecord.after.change===ch?color:"#64748B"}}>
-                    {ch==="감소"?"✅ 감소":ch==="동일"?"➡️ 동일":"⚠️ 증가"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 메모 */}
-            <textarea value={painRecord.after.memo}
-              onChange={e=>setPainRecord(p=>({...p,after:{...p.after,memo:e.target.value}}))}
-              placeholder="예: 스쿼트 시 안정감 증가, 허리 압박 감소, 고관절 움직임 편해짐"
-              rows={2}
-              style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #EDEFF2",
-                background:"#FFFFFF",color:"#0F172A",fontSize:11,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-          </div>
-        )}
       </Card>
 
       {/* 대표님 전용: 운동 시간 기록 */}
@@ -11107,6 +10987,18 @@ function updateEx(ei, key, val) {
                   <Mo c="#94A3B8" s={7} style={{marginTop:2,display:"block"}}>✎ 수동 설정됨</Mo>
                 )}
               </div>
+              {/* 운동명 옆 부위 선택 — 이름 기반 자동 선택 결과를 대표가 즉시 확인/수정 가능(기능운동은 아래 부위 다중선택을 쓰므로 배지만) */}
+              {ex.equipment === "기능" ? (
+                <span style={{flexShrink:0,fontFamily:"'DM Mono',monospace",fontSize:10,padding:"6px 9px",
+                  borderRadius:6,background:"rgba(34,197,94,.14)",color:"#22c55e",fontWeight:700}}>기능</span>
+              ) : (
+                <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)}
+                  onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
+                  style={{flexShrink:0,fontSize:13,fontWeight:700,padding:"9px 6px",borderRadius:7,
+                    height:38,color:"#0F172A",border:"1.5px solid #D6DCE3",background:"#FFFFFF"}}>
+                  {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
+                </select>
+              )}
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
                 <div style={{display:"flex",gap:1,flexShrink:0}}>
@@ -11346,73 +11238,86 @@ function updateEx(ei, key, val) {
                 </div>
               );
             })()}
-            <div className="eq-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
-              <div>
-                <label>기구</label>
-                <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
-                  {EQUIP_LIST.map(eq => {
-                    const active = ex.equipment===eq; const col = EQUIP_COLOR[eq];
-                    return (
-                      <button key={eq} onClick={() => updateEx(ei,"equipment",eq)}
-                        style={{padding:"5px 10px",borderRadius:4,border:"1px solid",
-                          borderColor:active?col:"#B9C2CC",background:active?col+"22":"transparent",
-                          color:active?col:"#475569",fontSize:11,fontWeight:700}}>{eq}</button>
-                    );
-                  })}
-                </div>
+            <div style={{marginBottom:8}}>
+              <label>기구</label>
+              <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
+                {SESSION_EQUIP_LIST.map(eq => {
+                  const active = ex.equipment===eq || (eq==="기능" && ex.equipment==="맨몸"); const col = EQUIP_COLOR[eq];
+                  return (
+                    <button key={eq} onClick={() => updateEx(ei,"equipment",eq)}
+                      style={{padding:"5px 10px",borderRadius:4,border:"1px solid",
+                        borderColor:active?col:"#B9C2CC",background:active?col+"22":"transparent",
+                        color:active?col:"#475569",fontSize:11,fontWeight:700}}>{eq}</button>
+                  );
+                })}
               </div>
-              {/* 기능 선택 시: 부위/세부부위 대신 카테고리·도구 표시 */}
+            </div>
+            {/* 요약 칩 — 기본 화면엔 선택된 결과만, 변경은 아래 "상세 설정"에서 */}
+            <div style={{display:"flex",gap:4,marginBottom:6,flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:EQUIP_COLOR[ex.equipment]+"22",color:EQUIP_COLOR[ex.equipment]}}>{ex.equipment}</span>
               {ex.equipment === "기능" ? (
                 <>
-                  <div>
-                    <label>카테고리</label>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
-                      {FUNC_CATEGORIES.map(c=>{
-                        const active=ex.funcCategory===c.key;
-                        return <button key={c.key} onClick={()=>updateEx(ei,"funcCategory",active?"":c.key)}
-                          style={{padding:"4px 9px",borderRadius:4,border:"1px solid",
-                            borderColor:active?c.color:"#B9C2CC",
-                            background:active?c.color+"22":"transparent",
-                            color:active?c.color:"#475569",fontSize:10,fontWeight:active?700:600}}>{c.label}</button>;
-                      })}
-                    </div>
-                  </div>
-                  <div>
-                    <label>도구</label>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
-                      {FUNC_TOOLS.map(t=>{
-                        const active=ex.funcTool===t;
-                        return <button key={t} onClick={()=>updateEx(ei,"funcTool",active?"":t)}
-                          style={{padding:"4px 9px",borderRadius:4,border:"1px solid",
-                            borderColor:active?"#F59E0B":"#B9C2CC",
-                            background:active?"rgba(245,158,11,.15)":"transparent",
-                            color:active?"#F59E0B":"#475569",fontSize:10,fontWeight:active?700:600}}>{t}</button>;
-                      })}
-                    </div>
-                  </div>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"#F1F3F6",color:"#94A3B8"}}>카테고리 · {FUNC_CATEGORIES.find(c=>c.key===ex.funcCategory)?.label || "미설정"}</span>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"#F1F3F6",color:"#94A3B8"}}>도구 · {ex.funcTool || "없음"}</span>
                 </>
               ) : (
                 <>
-                  <div>
-                    <label>부위</label>
-                    <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)} style={{fontSize:12,padding:"6px"}}>
-                      {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:mColor(ex.muscleTop)+"22",color:mColor(ex.muscleTop)}}>{ex.muscleTop}</span>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"#F1F3F6",color:"#94A3B8"}}>{ex.muscleSub}</span>
+                </>
+              )}
+              <button type="button" onClick={()=>toggleDetail(ei)}
+                style={{marginLeft:"auto",background:"none",border:"none",color:"#7C8798",fontSize:9,fontWeight:700,cursor:"pointer",padding:"2px 4px"}}>
+                {expandedDetail.has(ei) ? "상세 설정 ▲" : "상세 설정 ▼"}
+              </button>
+            </div>
+            {/* ── 상세 설정 — 기본 접힘. 세부부위/카테고리·도구/자세 피드백 등 전문 입력 항목 ── */}
+            {expandedDetail.has(ei) && (
+              <div style={{marginBottom:8,padding:"9px 10px",borderRadius:8,background:"#F6F7F9",border:"1px solid #EDEFF2"}}>
+                {ex.equipment === "기능" ? (
+                  <>
+                    <div style={{marginBottom:8}}>
+                      <label>카테고리</label>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
+                        {FUNC_CATEGORIES.map(c=>{
+                          const active=ex.funcCategory===c.key;
+                          return <button key={c.key} onClick={()=>updateEx(ei,"funcCategory",active?"":c.key)}
+                            style={{padding:"4px 9px",borderRadius:4,border:"1px solid",
+                              borderColor:active?c.color:"#B9C2CC",
+                              background:active?c.color+"22":"transparent",
+                              color:active?c.color:"#475569",fontSize:10,fontWeight:active?700:600}}>{c.label}</button>;
+                        })}
+                      </div>
+                    </div>
+                    <div style={{marginBottom:8}}>
+                      <label>도구</label>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>
+                        {FUNC_TOOLS.map(t=>{
+                          const active=ex.funcTool===t;
+                          return <button key={t} onClick={()=>updateEx(ei,"funcTool",active?"":t)}
+                            style={{padding:"4px 9px",borderRadius:4,border:"1px solid",
+                              borderColor:active?"#F59E0B":"#B9C2CC",
+                              background:active?"rgba(245,158,11,.15)":"transparent",
+                              color:active?"#F59E0B":"#475569",fontSize:10,fontWeight:active?700:600}}>{t}</button>;
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{marginBottom:8}}>
                     <label>세부부위</label>
                     <select value={ex.muscleSub} onChange={e => updateEx(ei,"muscleSub",e.target.value)} style={{fontSize:12,padding:"6px"}}>
                       {mSubs(ex.muscleTop).map(s => <option key={s}>{s}</option>)}
                     </select>
                   </div>
-                </>
-              )}
-            </div>
-            <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:EQUIP_COLOR[ex.equipment]+"22",color:EQUIP_COLOR[ex.equipment]}}>{ex.equipment}</span>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:mColor(ex.muscleTop)+"22",color:mColor(ex.muscleTop)}}>{ex.muscleTop}</span>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:4,background:"#F1F3F6",color:"#94A3B8"}}>{ex.muscleSub}</span>
-            </div>
+                )}
+                <div>
+                  <label>자세 피드백</label>
+                  <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" onFocus={()=>setActiveCardIdx(ei)}
+                    style={{marginTop:2,fontSize:15,fontWeight:700,color:"#0F172A",background:"#FFFFFF",border:"1px solid #D6DCE3",borderRadius:6,padding:"9px 10px",width:"100%",boxSizing:"border-box"}} />
+                </div>
+              </div>
+            )}
             {/* ── 세트 입력 UI ── */}
             {isFuncEx(ex) ? (
               /* ── 기능운동 모드 ── */
@@ -11671,9 +11576,7 @@ function updateEx(ei, key, val) {
                 })()}
               </div>
             )}
-            <div style={{marginTop:8}}>
-              <input value={ex.feedback} onChange={e => updateEx(ei,"feedback",e.target.value)} placeholder="자세 피드백 (선택)" onFocus={()=>setActiveCardIdx(ei)} style={{fontSize:16,fontWeight:700,color:"#0F172A",background:"#FFFFFF",border:"1px solid #D6DCE3",borderRadius:6,padding:"9px 10px",width:"100%",boxSizing:"border-box"}} />
-            </div>
+            {/* 자세 피드백 입력은 위 "상세 설정" 아코디언 안으로 이동(같은 ex.feedback 필드, 저장 로직 동일) */}
 
             {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
             {ex.equipment === "기능" && (
@@ -11783,9 +11686,8 @@ function updateEx(ei, key, val) {
                   );
                 })}
               </div>
-              <input value={ex.stimMemo||""} onChange={e=>updateEx(ei,"stimMemo",e.target.value)}
-                placeholder="대표 메모 · 왼쪽 어깨 불편 / 승모 개입 / 다음 수업 중량 증가 등"
-                style={{fontSize:13,fontWeight:600,padding:"8px 9px",color:"#0F172A",background:"#FFFFFF",border:"1px solid #D6DCE3",borderRadius:6,width:"100%",boxSizing:"border-box",marginBottom:6}} />
+              {/* 대표 메모(ex.stimMemo) 입력창은 화면에서 제거됨 — 자극도 평가와 역할이 겹쳐 수업 중 입력 부담을 줄임.
+                  필드·기존 데이터·저장 로직(handleSave)은 그대로 유지되어 과거 기록은 그대로 보존됨. */}
               <div style={{marginBottom:0}}>
                 <Mo c="#475569" s={9} style={{display:"block",marginBottom:4,fontWeight:700}}>다음 수업 추천</Mo>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>

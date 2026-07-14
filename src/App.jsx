@@ -1040,10 +1040,7 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .vol-col{display:none!important;}
 }
 /* 운동 카드 3열 구조(왼:세트 · 가운데:기구/카테고리/도구 · 오:자극도) — 가로/세로모드 모두 동일 구조, 폭에 따라 비율만 반응형 */
-.ex-3col{display:grid;grid-template-columns:1.5fr 1fr 1.15fr;gap:8px;align-items:start;}
-@media(max-width:640px){
-  .ex-3col{grid-template-columns:1.7fr 0.85fr 1fr;gap:6px;}
-}
+.ex-3col{display:grid;grid-template-columns:3fr 1fr 1.2fr;gap:8px;align-items:start;}
 /* iPhone Safari zoom 방지: 모든 input 16px 이상 필수 */
 input,select,textarea{
   max-width:100%!important;
@@ -10178,37 +10175,18 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     return bodyPartsOnly.includes(part) ? bodyPartsOnly.filter(x=>x!==part) : [...bodyPartsOnly, part];
   });
   const [showBodyPartPicker, setShowBodyPartPicker] = useState(false);
-
-  // ── 회원 브리핑(가로모드 좌측 패널) — 현재 DB에 이미 있는 정보만 표시, 새 저장 로직 없음 ──
-  const [briefCi, setBriefCi] = useState([]);
+  const bodyPartPickerRef = useRef(null);
+  // 오늘의 운동 부위 드롭다운 — 외부 영역 클릭(터치 포함) 시 닫힘
   useEffect(() => {
-    if (!member?.id) return;
-    getMemberCheckins(member.id, 5).then(v => setBriefCi(v || [])).catch(() => setBriefCi([]));
-  }, [member?.id]);
-  const briefWeightRecords = (bodyData?.records || []).slice().sort((a,b) => String(a.date||"").localeCompare(String(b.date||"")));
-  const briefWLast = briefWeightRecords.length ? parseFloat(briefWeightRecords[briefWeightRecords.length-1].weight) : null;
-  const briefWPrev = briefWeightRecords.length > 1 ? parseFloat(briefWeightRecords[briefWeightRecords.length-2].weight) : null;
-  const briefWDiff = (briefWLast!=null && briefWPrev!=null) ? Math.round((briefWLast-briefWPrev)*10)/10 : null;
-  const briefCiPain = briefCi.find(c=>c.painRecord?.part||c.painPart) || null;
-  const briefPainRec = briefCiPain ? (briefCiPain.painRecord || {part:briefCiPain.painPart, side:briefCiPain.painSide, vas:briefCiPain.painVas}) : null;
-  const briefCiCond = briefCi.find(c=>c.condition) || null;
-  const briefSoreInfo = (() => {
-    for (let i=sessions.length-1; i>=0; i--) {
-      const s = sessions[i];
-      const f = s.memberFeedback;
-      if (f && (f.sorenessLevel || memberFeedbackParts(f).length)) return {parts:memberFeedbackParts(f), level:f.sorenessLevel||"", date:s.date};
-      const r = s.sorenessReport;
-      if (r && (r.part || r.level)) return {parts:[r.part].filter(Boolean), level:r.level||"", date:s.date};
-    }
-    return null;
-  })();
-  const briefRpe = (() => {
-    for (let i=sessions.length-1; i>=0; i--) {
-      const f = sessions[i].memberFeedback;
-      if (f && f.rpe!=null && f.rpe!=="") return {rpe:f.rpe, date:sessions[i].date};
-    }
-    return null;
-  })();
+    if (!showBodyPartPicker) return;
+    const handler = (e) => {
+      if (bodyPartPickerRef.current && !bodyPartPickerRef.current.contains(e.target)) {
+        setShowBodyPartPicker(false);
+      }
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [showBodyPartPicker]);
 
   const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
 
@@ -10627,7 +10605,7 @@ function updateEx(ei, key, val) {
   }
 
   return (
-    <div className="session-light" style={{width:"100%",maxWidth:isLandscape?1440:1200,margin:"0 auto",padding:"18px 20px 40px",boxSizing:"border-box"}}>
+    <div className="session-light" style={{width:"100%",maxWidth:isLandscape?"100%":1200,margin:"0 auto",padding:"18px 20px 40px",boxSizing:"border-box"}}>
       {/* ── 임시저장 복원 팝업 ── */}
       {draftPopup && (
         <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
@@ -10728,55 +10706,7 @@ function updateEx(ei, key, val) {
         </div>
       </div>
 
-      <div style={isLandscape ? {display:"grid",gridTemplateColumns:"minmax(300px,320px) 1fr",gap:16,alignItems:"start"} : undefined}>
-      {/* ── 가로모드 전용: 좌측 회원 브리핑(항상 보이는 sticky 패널) — 읽기 전용, 현재 DB 데이터만 사용 ── */}
-      {isLandscape && (
-        <aside style={{position:"sticky",top:78,display:"flex",flexDirection:"column",gap:9,minWidth:0}}>
-          <Card title="오늘 회원 입력" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
-                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>컨디션</Mo>
-                <Mo c="#0F172A" s={12} style={{fontWeight:800}}>{briefCiCond?.condition || "미입력"}</Mo>
-              </div>
-              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
-                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>체중</Mo>
-                <Mo c="#0F172A" s={12} style={{fontWeight:800}}>{briefWLast!=null?`${briefWLast}kg`:"미입력"}</Mo>
-              </div>
-              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
-                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>체중 변화</Mo>
-                <Mo c={briefWDiff==null?"#0F172A":briefWDiff<0?"#0F9488":briefWDiff>0?"#F97316":"#0F172A"} s={12} style={{fontWeight:800}}>
-                  {briefWDiff==null?"-":`${briefWDiff>0?"▲":briefWDiff<0?"▼":""} ${Math.abs(briefWDiff)}kg`}
-                </Mo>
-              </div>
-              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
-                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>RPE</Mo>
-                <Mo c="#0F172A" s={12} style={{fontWeight:800}}>{briefRpe?.rpe ?? "-"}</Mo>
-              </div>
-              <div style={{padding:"7px 9px",borderRadius:7,background:briefPainRec&&briefPainRec.part&&briefPainRec.part!=="없음"?"rgba(239,68,68,.08)":"#F6F7F9"}}>
-                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>통증</Mo>
-                <Mo c={briefPainRec&&briefPainRec.part&&briefPainRec.part!=="없음"?"#EF4444":"#0F172A"} s={12} style={{fontWeight:800}}>
-                  {briefPainRec?.part && briefPainRec.part!=="없음" ? `${briefPainRec.part}${briefPainRec.vas!=null?` (VAS ${briefPainRec.vas})`:""}` : "없음"}
-                </Mo>
-              </div>
-              <div style={{padding:"7px 9px",borderRadius:7,background:briefSoreInfo?"rgba(249,115,22,.08)":"#F6F7F9"}}>
-                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>근육통</Mo>
-                <Mo c={briefSoreInfo?"#F97316":"#0F172A"} s={12} style={{fontWeight:800}}>
-                  {briefSoreInfo ? `${briefSoreInfo.parts.join("/")||"-"}${briefSoreInfo.level?` (${briefSoreInfo.level})`:""}` : "없음"}
-                </Mo>
-              </div>
-            </div>
-          </Card>
-          <Card title="최근 수업 메모" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
-            <Mo c="#334155" s={11} style={{lineHeight:1.6}}>{last?.trainerComment || "최근 메모가 없습니다."}</Mo>
-          </Card>
-          <Card title="다음 수업 메모" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
-            <Mo c="#334155" s={11} style={{lineHeight:1.6}}>{member?.nextWorkoutMemo || "등록된 메모가 없습니다."}</Mo>
-          </Card>
-          <Card title="대표 내부 메모" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
-            <Mo c="#334155" s={11} style={{lineHeight:1.6}}>{member?.memo || "등록된 메모가 없습니다."}</Mo>
-          </Card>
-        </aside>
-      )}
+      {/* 좌측 회원 브리핑 sticky 패널 — 아이패드 가로모드에서도 완전히 제거됨(운동 기록 본문이 항상 전체 폭 사용) */}
       <div style={{minWidth:0}}>
       {/* 회원2 선택 드롭다운 — 수업 형태(1:1/2:1/그룹PT) 선택 자체는 상단 헤더로 이동(회원명 옆) */}
       {sessionType==="2:1" && showM2Picker && !member2 && (
@@ -10797,7 +10727,7 @@ function updateEx(ei, key, val) {
         </div>
       )}
 
-      <Card title="기본 정보" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
+      <Card title="기본 정보" style={{background:"#FFFFFF",border:"1px solid #D6DCE3",overflow:"visible"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
         {/* 유산소·강도·컨디션은 회원앱에서 회원이 직접 기록하므로 이 화면에서는 제거(state·저장 필드는 그대로 유지 — handleSave가 기존 값을 그대로 재저장) */}
         {/* 트레이너·헬스장·날짜·회차 + 오늘의 운동 부위(표시/계획용) 한 줄 배치 — 좁을 땐 이 행 전체가 줄바꿈되거나 부위 버튼만 줄바꿈됨 */}
         <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"flex-end"}}>
@@ -10805,18 +10735,34 @@ function updateEx(ei, key, val) {
           <div style={{flex:"1 1 92px",minWidth:0}}><Field label="헬스장"   value={gymName}     onChange={setGymName}     placeholder="피트니스 센터" /></div>
           <div style={{flex:"1 1 118px",minWidth:0}}><Field label="날짜"     value={date}        onChange={setDate}         type="date" /></div>
           <div style={{flex:"0 1 64px",minWidth:0}}><Field label="회차 *"   value={String(sessionNo)} onChange={v => setSessionNo(parseInt(v)||v)} placeholder="1" /></div>
-          <div style={{flex:"2 1 200px",minWidth:0,position:"relative"}}>
+          <div ref={bodyPartPickerRef} style={{flex:"2 1 200px",minWidth:0,position:"relative"}}>
             <label>오늘의 운동 부위 <span style={{fontWeight:400,fontSize:10,color:"#64748B"}}>(복수 선택)</span></label>
-            <button type="button" onClick={() => setShowBodyPartPicker(p=>!p)}
-              style={{marginTop:5,width:"100%",boxSizing:"border-box",textAlign:"left",padding:"9px 10px",
-                borderRadius:8,border:"1.5px solid #D6DCE3",background:"#FFFFFF",cursor:"pointer",height:38,
-                display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,fontWeight:700,
-                color: selectedTypes.filter(t=>SESSION_BODY_PART_OPTIONS.includes(t)).length ? "#0F172A" : "#94A3B8"}}>
-              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                {selectedTypes.filter(t=>SESSION_BODY_PART_OPTIONS.includes(t)).join(", ") || "선택 안 함"}
-              </span>
-              <span style={{color:"#94A3B8",fontSize:11,flexShrink:0,marginLeft:6}}>{showBodyPartPicker ? "▲" : "▼"}</span>
-            </button>
+            {/* 클릭/터치(iPad Safari 포함) 모두 지원 — hover 트리거 사용하지 않음 */}
+            <div role="button" tabIndex={0}
+              onClick={() => setShowBodyPartPicker(p=>!p)}
+              onKeyDown={e => { if (e.key==="Enter"||e.key===" ") { e.preventDefault(); setShowBodyPartPicker(p=>!p); } }}
+              style={{marginTop:5,width:"100%",boxSizing:"border-box",minHeight:40,
+                borderRadius:8,border:"1.5px solid #D6DCE3",background:"#FFFFFF",cursor:"pointer",
+                display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,padding:"5px 8px"}}>
+              <div style={{flex:1,minWidth:0,display:"flex",flexWrap:"wrap",gap:4}}>
+                {selectedTypes.filter(t=>SESSION_BODY_PART_OPTIONS.includes(t)).length ? (
+                  selectedTypes.filter(t=>SESSION_BODY_PART_OPTIONS.includes(t)).map(part => (
+                    <span key={part} style={{display:"inline-flex",alignItems:"center",gap:3,
+                      fontSize:11,fontWeight:800,padding:"3px 5px 3px 9px",borderRadius:12,
+                      background:"rgba(15,148,136,.12)",color:"#0F9488",whiteSpace:"nowrap"}}>
+                      {part}
+                      <button type="button" onClick={(e)=>{e.stopPropagation();toggleSessionBodyPart(part);}}
+                        onPointerDown={e=>e.stopPropagation()}
+                        style={{background:"none",border:"none",cursor:"pointer",color:"#0F9488",
+                          fontSize:13,lineHeight:1,padding:"0 2px",fontWeight:800}}>×</button>
+                    </span>
+                  ))
+                ) : (
+                  <span style={{fontSize:13,fontWeight:700,color:"#94A3B8"}}>운동 부위 선택</span>
+                )}
+              </div>
+              <span style={{color:"#94A3B8",fontSize:11,flexShrink:0}}>{showBodyPartPicker ? "▲" : "▼"}</span>
+            </div>
             {showBodyPartPicker && (
               <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:4,zIndex:40,
                 background:"#FFFFFF",border:"1px solid #D6DCE3",borderRadius:8,
@@ -10922,7 +10868,7 @@ function updateEx(ei, key, val) {
                 : activeCardIdx===ei ? "#CBD5E1"
                 : "#EDEFF2"
               ),
-              borderRadius:10,padding:"7px 7px",marginBottom:9,
+              borderRadius:10,padding:"7px 7px",marginBottom:12,
               opacity: isDrag ? 0.85
                 : (activeCardIdx===null||activeCardIdx===ei) ? 1 : 0.75,
               transform:isDrag?"scale(1.018) translateY(-2px)":"scale(1)",
@@ -10951,13 +10897,13 @@ function updateEx(ei, key, val) {
                 ⠿
               </div>
               <Mo c="#94A3B8" s={8} style={{flexShrink:0}}>EX_{String(ei+1).padStart(2,"0")}</Mo>
-              <div style={{flex:"1 1 48%",minWidth:0,maxWidth:"48%",overflow:"hidden"}}>
+              <div style={{flex:"1 1 200px",minWidth:0,overflow:"hidden"}}>
               <input value={ex.name} onChange={e => updateEx(ei,"name",e.target.value)}
                 onPointerDown={e => e.stopPropagation()}
                 placeholder="운동 이름" style={{
                   width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box",
-                  fontWeight:800,fontSize:17,letterSpacing:"-.2px",display:"block",
-                  height:42,padding:"8px 10px",
+                  fontWeight:800,fontSize:15,letterSpacing:"-.2px",display:"block",
+                  height:38,padding:"7px 10px",
                   background:"#FFFFFF",
                   border:"1.5px solid #D6DCE3",
                   borderRadius:8,
@@ -10978,18 +10924,6 @@ function updateEx(ei, key, val) {
                   <Mo c="#94A3B8" s={7} style={{marginTop:2,display:"block"}}>✎ 수동 설정됨</Mo>
                 )}
               </div>
-              {/* 운동명 옆 부위 선택 — 이름 기반 자동 선택 결과를 대표가 즉시 확인/수정 가능(기능운동은 아래 부위 다중선택을 쓰므로 배지만) */}
-              {ex.equipment === "기능" ? (
-                <span style={{flex:"1 1 auto",minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace",fontSize:10,padding:"6px 9px",
-                  borderRadius:6,background:"rgba(34,197,94,.14)",color:"#22c55e",fontWeight:700}}>기능</span>
-              ) : (
-                <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)}
-                  onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
-                  style={{flex:"1 1 auto",minWidth:80,fontSize:13,fontWeight:700,padding:"9px 6px",borderRadius:7,
-                    height:38,color:"#0F172A",border:"1.5px solid #D6DCE3",background:"#FFFFFF"}}>
-                  {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
-                </select>
-              )}
               {/* 위아래 버튼 + 맨위/맨아래 (보조) */}
               {exercises.length > 1 && (
                 <div style={{display:"flex",gap:1,flexShrink:0}}>
@@ -11229,16 +11163,30 @@ function updateEx(ei, key, val) {
                 </div>
               );
             })()}
-            {/* ── 3열 구조: 왼쪽 세트 · 가운데 기구/카테고리/도구 · 오른쪽 자극도(가로/세로모드 공통, CSS Grid로 시각 순서만 배치) ── */}
-            <div className="ex-3col">
-            {/* 가운데 열 — 기구/카테고리/도구 모두 드롭다운(select)으로 통일. 맨몸도 기구 선택 목록 안에 포함(EQUIP_LIST 그대로) */}
-            <div style={{gridColumn:2,gridRow:1,minWidth:0}}>
+            {/* ── 아이패드 가로모드(isLandscape): 왼쪽 세트 · 가운데 기구/운동 부위 · 오른쪽 자극도를 CSS Grid 3열로 배치
+                 세로모드·모바일: 같은 DOM을 flex-column으로 쌓고 order로 "세트→기구→운동 부위→자극도" 순서만 재배치(가로 스크롤 없음) ── */}
+            <div className={isLandscape ? "ex-3col" : undefined}
+              style={!isLandscape ? {display:"flex",flexDirection:"column",gap:10} : undefined}>
+            {/* 가운데 열 — 기구 + 운동 부위(단일 선택) + 카테고리/도구. 맨몸도 기구 선택 목록 안에 포함(EQUIP_LIST 그대로) */}
+            <div style={{gridColumn:2,gridRow:1,minWidth:0,order:isLandscape?undefined:2}}>
               <label>기구</label>
               <select value={ex.equipment||""} onChange={e => updateEx(ei,"equipment",e.target.value)}
                 onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
                 style={{fontSize:12,padding:"7px 6px",width:"100%",marginTop:2,marginBottom:6}}>
                 {EQUIP_LIST.map(eq => <option key={eq} value={eq}>{eq}</option>)}
               </select>
+              {/* 운동 부위(단일 선택) — 기구 바로 아래, 기존 muscleTop 필드·저장 로직 그대로 재사용 */}
+              {ex.equipment !== "기능" && (
+                <div style={{marginTop:8,marginBottom:6}}>
+                  <label>운동 부위</label>
+                  <select value={ex.muscleTop} onChange={e => updateEx(ei,"muscleTop",e.target.value)}
+                    onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
+                    style={{fontSize:13,fontWeight:700,padding:"9px 6px",width:"100%",height:42,
+                      borderRadius:7,color:"#0F172A",border:"1.5px solid #D6DCE3",background:"#FFFFFF"}}>
+                    {MUSCLE_LIST.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </div>
+              )}
               {ex.equipment === "기능" && (
                 <>
                   <label>카테고리</label>
@@ -11263,7 +11211,7 @@ function updateEx(ei, key, val) {
             </div>
             {/* ── 상세 설정 — 기본 접힘, 전체 폭. 가운데 열과 중복되지 않는 항목만(세부부위 편집/기능 부위·목적/자세 피드백) ── */}
             {expandedDetail.has(ei) && (
-              <div style={{gridColumn:"1 / -1",gridRow:2,marginTop:2,padding:"9px 10px",borderRadius:8,background:"#F6F7F9",border:"1px solid #EDEFF2"}}>
+              <div style={{gridColumn:"1 / -1",gridRow:2,order:isLandscape?undefined:3,marginTop:2,padding:"9px 10px",borderRadius:8,background:"#F6F7F9",border:"1px solid #EDEFF2"}}>
                 {ex.equipment === "기능" ? (
                   <>
                     <div style={{marginBottom:6}}>
@@ -11351,7 +11299,7 @@ function updateEx(ei, key, val) {
               </div>
             )}
             {/* 왼쪽 열 — 세트 입력 */}
-            <div style={{gridColumn:1,gridRow:1,minWidth:0}}>
+            <div style={{gridColumn:1,gridRow:1,minWidth:0,order:isLandscape?undefined:1}}>
             {isFuncEx(ex) ? (
               /* ── 기능운동 모드 ── */
               <div>
@@ -11611,7 +11559,7 @@ function updateEx(ei, key, val) {
             )}
             </div>
             {/* 오른쪽 열 — 이 운동 자극도(운동 종목당 1회) + 다음 수업 추천. 가로/세로모드 모두 항상 노출(세트별 입력 아님) */}
-            <div style={{gridColumn:3,gridRow:1,minWidth:0,borderRadius:8,overflow:"hidden",
+            <div style={{gridColumn:3,gridRow:1,minWidth:0,order:isLandscape?undefined:4,borderRadius:8,overflow:"hidden",
               background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.22)"}} onFocus={()=>setActiveCardIdx(ei)}>
               <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"9px 10px 0"}}>
                 <Mo c="#8B5CF6" s={9} style={{fontWeight:800,flexShrink:0}}>🎯 이 운동 자극도</Mo>
@@ -11719,7 +11667,6 @@ function updateEx(ei, key, val) {
           stretchNotes={stretchNotes} nextPlan={nextPlan} trainerComment={trainerComment}
           bodyWeight={bodyWeight} calories={calories} dietNote={dietNote}
           romData={romData} painData={painData} isCorr={isCorr} />
-      </div>
       </div>
       </div>
     </div>

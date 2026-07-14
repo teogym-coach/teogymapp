@@ -3039,10 +3039,12 @@ function MemberAnalysis(p) {
     latestSummary: latestCorrectionSummary, forecast, calorieAnalysis, monthWeightRange,
   });
   const futurePrediction = buildFuturePrediction(persona, { forecast, topExercises, latestSummary: latestCorrectionSummary });
-  // 다이어트 전용 "다음 수업 전까지" 체크리스트 — 최근 7일(선택한 기간 필터와 무관) 기준
+  // 다이어트 전용 "다음 수업 전까지" 체크리스트 계산 — 회원 화면에서는 더 이상 렌더링하지 않는다(회원이 거의 읽지 않아 제거).
+  // 계산 로직은 관리자앱에서 추후 사용할 예정이라 그대로 유지한다.
   const last7Key = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   const recentKcalCount = getKcalLogs(p.nutrition).filter(r => r.date >= last7Key).length;
   const recentCardioCount = (p.cardioLogs || []).filter(l => String(l.date || "") >= last7Key).length;
+  // eslint-disable-next-line no-unused-vars
   const nextClassChecklist = buildNextClassChecklist({ recentKcalCount, recentCardioCount });
 
   // Before → After — 페르소나별 "가장 중요한 변화" 하나만 골라 숫자 나열 대신 전후 비교로 보여준다.
@@ -3099,17 +3101,26 @@ function MemberAnalysis(p) {
   })();
 
   // ── 재사용 가능한 그래프/카드 조각(기존 마크업 그대로) — 목표별로 순서만 다르게 배치한다 ──
+  // "체중 변화 추이"(선 그래프 단독)와 "체중과 섭취 칼로리"(선+막대) 그래프가 거의 같은 정보를 중복 표시하던 것을
+  // 하나로 통합. 체중은 항상 선 그래프, 섭취 칼로리는 기록된 날에만 막대로 표시(comboData가 날짜 union이라 미기록일은 0kcal이 아니라 값 없음으로 처리됨).
   const weightChart = (
-    <MCard title="체중 변화 추이">
-      <ResponsiveContainer width="100%" height={persona === "diet" ? 240 : 190}>
-        <LineChart data={weightData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
-          <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
-          <YAxis domain={["dataMin-2", "dataMax+2"]} tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" />
-          <Tooltip contentStyle={ttStyle} formatter={v => [`${v}kg`, "체중"]} />
-          <Line dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} />
-        </LineChart>
-      </ResponsiveContainer>
+    <MCard title="체중과 섭취 칼로리">
+      {comboData.length > 0 ? (
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={comboData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
+            <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
+            <YAxis yAxisId="weight" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" domain={["dataMin-2", "dataMax+2"]} />
+            <YAxis yAxisId="kcal" orientation="right" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kcal" />
+            <Tooltip contentStyle={ttStyle} />
+            <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />
+            <Bar yAxisId="kcal" dataKey="kcal" name="섭취 칼로리" fill="#93C5FD" opacity={0.55} radius={[4, 4, 0, 0]} />
+            <Line yAxisId="weight" dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="analysis-empty-state">체중을 기록하면 변화 그래프가 표시됩니다.</div>
+      )}
     </MCard>
   );
   const compositionChart = (
@@ -3244,24 +3255,6 @@ function MemberAnalysis(p) {
       {persona === "diet" && (
         <>
           {weightChart}
-          <MCard title="체중과 섭취 칼로리">
-            {comboData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <ComposedChart data={comboData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
-                  <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
-                  <YAxis yAxisId="weight" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" domain={["dataMin-2", "dataMax+2"]} />
-                  <YAxis yAxisId="kcal" orientation="right" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kcal" />
-                  <Tooltip contentStyle={ttStyle} />
-                  <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />
-                  <Bar yAxisId="kcal" dataKey="kcal" name="섭취 칼로리" fill="#93C5FD" opacity={0.55} radius={[4, 4, 0, 0]} />
-                  <Line yAxisId="weight" dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} connectNulls />
-                </ComposedChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="analysis-empty-state">체중과 칼로리를 함께 기록하면 관계를 비교해 보여드려요.</div>
-            )}
-          </MCard>
           <BeforeAfterCard {...beforeAfter} periodText={periodText} />
           <div className="change-feedback-item">{dietInterpretation}</div>
           <MCard title="이번 달 변화">
@@ -3275,8 +3268,8 @@ function MemberAnalysis(p) {
 
       {persona === "bulk" && (
         <>
-          {/* ① 부위별 운동량 변화 — 누적이 아니라 "최근 운동할 때마다의 볼륨"이라 지난번보다 늘었는지 바로 보임 */}
-          <PartVolumeCard sessions={periodSessions} />
+          {/* ① 부위별 운동 볼륨 변화 — 5개 부위를 한 카드에서 동시에 비교(카드 자체 기간 버튼 사용, 전체 기간 필터와 무관하게 항상 전체 기록 기준) */}
+          <PartVolumeMultiCard sessions={p.sessions} />
 
           {/* ② 운동 수행능력 변화 — 가장 자주 수행한 대표 운동 5개(회원마다 자동 선정)의 중량 전/후 비교 */}
           <MCard title="운동 수행능력 변화">
@@ -3370,13 +3363,11 @@ function MemberAnalysis(p) {
         </>
       )}
 
-      {/* 공통: ⑤성장 리포트 → ⑥대표 코멘트 → ⑦목표 전략 추천(장기)·다음 변화 예상(단기 실행, 다이어트만 체크리스트로 분리) → (최근 변화 요약) */}
+      {/* 공통: ⑤성장 리포트 → ⑥대표 코멘트 → ⑦목표 전략 추천(장기)·다음 변화 예상(단기) → (최근 변화 요약) */}
       <GrowthReportCard report={growthReport} />
       <CoachCommentCard text={coachComment} />
       <WeightGoalStrategyCard {...p} />
-      {persona === "diet"
-        ? <NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />
-        : <FuturePredictionCard text={futurePrediction} />}
+      <FuturePredictionCard text={futurePrediction} />
       {(persona === "diet" || persona === "general") && (
         <MCard title="최근 변화 요약">
           <div style={{ display: "grid", gap: 8 }}>
@@ -3397,7 +3388,7 @@ function MemberAnalysis(p) {
         <CollapsibleSection label="추가 데이터" defaultOpen={false}>
           <div style={{ display: "grid", gap: 16 }}>
             {!primaryUses.has("kcalWeightCard") && kcalWeightCard}
-            {!primaryUses.has("partVolume") && <PartVolumeCard sessions={periodSessions} />}
+            {!primaryUses.has("partVolume") && <PartVolumeMultiCard sessions={p.sessions} />}
             {!primaryUses.has("painVAS") && painVasCard}
             {!primaryUses.has("strength") && <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />}
           </div>
@@ -3458,47 +3449,7 @@ function MemberAnalysis(p) {
 }
 function StrengthChangeCard({sessions=[],allSessions}){const [showAll,setShowAll]=useState(false);const [query,setQuery]=useState('');const allRows=buildPerformanceChanges(sessions);const searchRows=buildPerformanceChanges(allSessions&&allSessions.length?allSessions:sessions);const hasRealData=allRows.length>0&&allRows[0].name!=='대표님과 함께한 수행 기록';const hasSearchData=searchRows.length>0&&searchRows[0].name!=='대표님과 함께한 수행 기록';const filtered=(hasRealData||hasSearchData)&&query?searchRows.filter(r=>matchSearch(r.name,query)):null;const visibleRows=filtered??(hasRealData&&!showAll?allRows.slice(0,3):allRows);const hasMore=hasRealData&&!query&&allRows.length>3;const positive=hasRealData?allRows.filter(r=>r.delta>0):[]; const comment=!hasRealData?"운동 기록이 더 쌓이면 변화 코멘트를 제공할 수 있습니다.":positive.length>=2?`${positive[0].name}, ${positive[1].name} 중량이 꾸준히 증가하고 있습니다.`:positive.length===1?`${positive[0].name} 중량이 향상되고 있습니다.`:"현재 기록을 유지하며 안정적으로 진행 중입니다."; return <MCard title="운동 수행 능력 변화"><p className="strength-comment">{comment}</p>{(hasRealData||hasSearchData)&&<div style={{position:'relative',marginBottom:8}}><input className="ex-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="운동 검색..."/>{query&&<button type="button" className="ex-search-clear" onClick={()=>setQuery('')}>✕</button>}</div>}<div className="strength-list">{visibleRows.length===0?<p style={{color:'#8B949E',fontWeight:800,padding:'8px 0'}}>검색 결과가 없습니다.</p>:visibleRows.map((r,i)=>{const b=Number(String(r.before).replace(/[^0-9.]/g,""));const a=Number(String(r.after).replace(/[^0-9.]/g,""));const pct=b&&a?Math.round((a-b)/b*100):null;return <div key={i} className="strength-row"><b>{r.name}</b><span>{r.before} → {r.after}</span>{pct!==null&&<em>{pct>=0?"▲":"▼"} {Math.abs(pct)}%</em>}</div>;})}</div>{hasMore&&<button type="button" className="linkbtn" onClick={()=>setShowAll(v=>!v)}>{showAll?"▲ 접기":"더보기 ▼"}</button>}</MCard>}
 function WeightGoalStrategyCard(p){const f=getWeightForecast(p); const goal=p.onboarding?.goal||p.profile?.goal||p.nutrition?.goal; const goalType=getCalorieGoalType(goal); const analysis=estimateMaintenance(p.profile,p.onboarding,p.body,p.nutrition,p.checkins,p.sessions); const diff=Number.isFinite(f.cur)&&Number.isFinite(f.target)?f.target-f.cur:0; const gain=Math.max(0,diff); const maintainRange=Number.isFinite(f.target)?`${(f.target-1).toFixed(1)}~${(f.target+1).toFixed(1)}kg`:"목표 체중 ±1kg"; if(goalType==="maintain")return <MCard title="목표 전략 추천"><div className="goal-mini"><span>유지 칼로리 <b>{formatKcal(analysis.maintain)}</b></span><span>현재 체중 <b>{kgText(f.cur)}</b></span><span>유지 범위 <b>{maintainRange}</b></span></div><div className="strategy-box"><b>1순위 추천 전략</b><strong>유지 칼로리</strong><span>체중 유지 범위 · 현재 페이스 유지 가능성 높음</span><p>주간 평균 체중만 확인하며 현재 루틴을 유지하세요.</p></div></MCard>; if(goalType==="bulk")return <MCard title="목표 전략 추천"><div className="goal-mini"><span>목표 체중 <b>{kgText(f.target)}</b></span><span>현재 체중 <b>{kgText(f.cur)}</b></span><span>남은 증량 <b>+{gain.toFixed(1)}kg</b></span></div><div className="strategy-box"><b>1순위 추천 전략</b><strong>주당 0.25~0.50kg</strong><span>예상 기간 약 {gain?Math.ceil(gain/.35):0}주 · 근육 증가 페이스 안정적</span><p>권장 칼로리를 채우고 주요 운동 중량을 천천히 올리세요.</p></div></MCard>; return <MCard title="목표 전략 추천"><div className="goal-mini"><span>목표 체중 <b>{kgText(f.target)}</b></span><span>현재 체중 <b>{kgText(f.cur)}</b></span><span>남은 감량 <b>-{f.remain.toFixed(1)}kg</b></span></div>{f.risk==="high"&&<p className="danger">⚠️ 현재 목표는 매우 공격적인 감량 계획입니다. 권장 기간은 약 {Math.ceil(f.remain/.8)}~{Math.ceil(f.remain/.5)}주입니다.</p>}<div className="strategy-box"><b>1순위 추천 전략</b><strong>주당 {f.recommended.toFixed(2)}kg</strong><span>예상 기간 약 {f.weeks}주 · 목표 달성 가능성 {f.possibility}</span><p>{f.estimatedDate} 전후 도달 예상입니다. 무리하지 말고 현재 페이스를 우선 유지하세요.</p></div></MCard>}
-// 부위를 선택하면 해당 부위의 "최근 운동할 때마다의 볼륨"을 큰 막대그래프로 보여줌(부위별 성장 흐름 확인용)
-function PartVolumeCard({sessions=[]}){
-  const data=buildPartVolumeChart(sessions);
-  const withData=data.filter(d=>d.values.length>0);
-  const [selectedPart,setSelectedPart]=useState((withData[0]||data[0])?.part);
-  const current=data.find(d=>d.part===selectedPart)||withData[0]||data[0];
-  const max=Math.max(1,...(current?.values||[]).map(v=>v.value));
-  return (
-    <section className="part-volume-card">
-      <h2>부위별 운동량이 어떻게 변하고 있을까요?</h2>
-      <p>부위를 선택하면 최근 운동할 때마다의 볼륨 변화를 볼 수 있어요.</p>
-      <div className="part-volume-tabs">
-        {data.map(d => (
-          <button
-            type="button"
-            key={d.part}
-            className={selectedPart===d.part?"active":""}
-            disabled={!d.values.length}
-            onClick={()=>setSelectedPart(d.part)}
-          >{d.part}</button>
-        ))}
-      </div>
-      {current && current.values.length ? (
-        <>
-          <p className="part-volume-count">최근 {current.part} 운동 {current.values.length}회</p>
-          <div className="part-volume-bigchart">
-            {current.values.map((v,i) => (
-              <div className="part-volume-bigbar-group" key={`${current.part}-${v.label}-${i}`}>
-                <span className="part-volume-bigbar-value">{v.value.toLocaleString()}kg</span>
-                <div className="part-volume-bigbar" style={{height:`${Math.max(8,(v.value/max)*140)}px`}} />
-                <span className="part-volume-bigbar-label">{v.label}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="analysis-empty-state">{current?.part||"해당 부위"} 운동 기록이 쌓이면 변화를 보여드려요.</div>
-      )}
-    </section>
-  );
-}
+// 구 "부위별 운동량" 카드(부위 선택 탭 + 단일 그래프)는 PartVolumeMultiCard(5개 부위 동시 비교)로 대체되었다.
 // 프로필 Hero — 개인정보 표가 아니라 회원의 성과와 운동 정체성을 먼저 보여준다 (전부 기존 데이터 계산)
 function ProfileHeroCard({p,base}){
   const todayKey=getKoreaDateString();
@@ -4148,6 +4099,80 @@ function ReviewRoutine({profile,sessions,onboarding,checkins,routineRecommendati
 function buildPartVolumeChange(sessions=[]){const parts=['가슴','등','하체','어깨','팔','코어']; const sorted=[...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')); const first=sorted.slice(0,Math.min(3,sorted.length)); const recent=sorted.slice(-Math.min(3,sorted.length)); const sum=(list,part)=>list.reduce((a,s)=>a+(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0),0); return parts.map(part=>{const f=first.length?sum(first,part)/first.length:0; const r=recent.length?sum(recent,part)/recent.length:0; return {part,first:f,recent:r,delta:r-f};});}
 // 부위별 "최근 운동할 때마다의 볼륨"(누적이 아님) — 최근 5회까지 표시해 회원이 "지난번보다 늘었다"를 바로 느끼게 함
 function buildPartVolumeChart(sessions=[]){const parts=["등","가슴","어깨","하체","팔","코어"]; const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const volume=(s,part)=>(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop||e.type)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0); return parts.map(part=>{const records=sorted.map(s=>({label:String(s.date||"").slice(5)||`${s.sessionNo||""}회`,value:Math.round(volume(s,part))})).filter(r=>r.value>0).slice(-5); return {part,values:records};});}
+// 부위별 운동 볼륨 카드(PartVolumeMultiCard) 전용 — 전체 히스토리(슬라이스 없음)를 부위별로 반환. 볼륨 계산식은 buildPartVolumeChart와 동일하게 재사용한다.
+function buildPartVolumeHistory(sessions=[]){
+  const parts=["등","가슴","하체","어깨","팔"];
+  const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const volume=(s,part)=>(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop||e.type)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0);
+  const result={};
+  parts.forEach(part=>{ result[part]=sorted.map(s=>({date:String(s.date||""),value:Math.round(volume(s,part))})).filter(r=>r.value>0); });
+  return result;
+}
+const VOLUME_CARD_PERIODS=[{key:"recent",label:"최근"},{key:"1m",label:"1개월",days:30},{key:"3m",label:"3개월",days:90},{key:"6m",label:"6개월",days:180},{key:"1y",label:"1년",days:365}];
+// 선택한 기간에 맞춰 "처음/중간/최근" 대표 기록 3개를 고른다(항상 3개 유지).
+// 데이터가 부족하면 가장 가까운 기록을 재사용하고, 그마저 부족하면(2개 미만) "기록 부족"으로 표시한다 — 임의 보간·가짜 수치 없음.
+function pickVolumeBars(records=[],periodKey){
+  if(periodKey==="recent"){
+    const recent=records.slice(-3);
+    return recent.length>=2 ? {status:"ok",points:recent} : {status:"insufficient"};
+  }
+  const opt=VOLUME_CARD_PERIODS.find(o=>o.key===periodKey);
+  const cutoff=new Date(Date.now()-opt.days*86400000).toISOString().slice(0,10);
+  const windowed=records.filter(r=>r.date>=cutoff);
+  const pool=windowed.length>=2?windowed:records; // 선택 기간에 기록이 부족하면 가장 가까운(전체) 기록으로 대체
+  if(pool.length<2) return {status:"insufficient"};
+  const first=pool[0], last=pool[pool.length-1];
+  const midMs=(new Date(first.date).getTime()+new Date(last.date).getTime())/2;
+  const between=pool.slice(1,-1);
+  const middle=between.length
+    ? between.reduce((best,r)=>Math.abs(new Date(r.date).getTime()-midMs)<Math.abs(new Date(best.date).getTime()-midMs)?r:best)
+    : first;
+  return {status:"ok",points:[first,middle,last]};
+}
+// 부위별 운동 볼륨 변화 — 5개 부위(등/가슴/하체/어깨/팔)를 한 카드에서 동시에 비교. 부위 선택 없이 항상 전부 표시하고,
+// 카드 자체의 기간 버튼(최근/1개월/3개월/6개월/1년)으로 대표 시점 3개를 다시 고른다(전체 페이지 기간 필터와는 별개).
+function PartVolumeMultiCard({sessions=[]}){
+  const [period,setPeriod]=useState("recent");
+  const parts=["등","가슴","하체","어깨","팔"];
+  const history=buildPartVolumeHistory(sessions);
+  return (
+    <section className="mcard pv-multi-card">
+      <div className="pv-multi-head">
+        <h2>부위별 운동 볼륨 변화</h2>
+        <div className="pv-multi-tabs">
+          {VOLUME_CARD_PERIODS.map(o=>(
+            <button type="button" key={o.key} className={period===o.key?"active":""} onClick={()=>setPeriod(o.key)}>{o.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="pv-multi-rows">
+        {parts.map(part=>{
+          const sel=pickVolumeBars(history[part]||[],period);
+          const max=sel.status==="ok"?Math.max(1,...sel.points.map(v=>v.value)):1;
+          return (
+            <div className="pv-multi-row" key={part}>
+              <span className="pv-multi-row-label">{part}</span>
+              {sel.status==="ok" ? (
+                <div className="pv-multi-bars">
+                  {sel.points.map((v,i)=>(
+                    <div className="pv-multi-bar-group" key={i}>
+                      <span className="pv-multi-bar-value">{v.value.toLocaleString()}kg</span>
+                      <div className="pv-multi-bar" style={{height:`${Math.max(6,Math.round((v.value/max)*100))}px`}}/>
+                      <span className="pv-multi-bar-date">{v.date.slice(5)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="pv-multi-insufficient">기록 부족</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="pv-multi-note">운동 종목과 세트 구성에 따라 운동 볼륨은 달라질 수 있습니다.</p>
+    </section>
+  );
+}
 function buildPartVolumeTrend(sessions=[]){const parts=['가슴','등','하체','어깨','팔']; const sorted=[...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')); const vol=(s,part)=>(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0); return parts.map(part=>{const data=sorted.map(s=>({name:String(s.date||'').slice(5)||`${s.sessionNo||''}회`,volume:vol(s,part)})).filter(x=>x.volume>0).slice(-3); return {part,data:data.length?data:[{name:'1회',volume:0},{name:'2회',volume:0},{name:'3회',volume:0}]};});}
 // 운동명 정규화(normalizeExerciseName)로 그룹핑 — 표기만 다른 동일 운동("덤벨벤치프레스"/"덤벨 벤치 프레스")의 기록이 갈라지지 않게 한다.
 function buildPerformanceChanges(sessions=[]){const map=new Map(); [...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(s=>(s.exercises||[]).forEach(e=>{const weights=getFilledSets(e).map(st=>Number(st.weight)).filter(n=>Number.isFinite(n)&&n>0); if(!e.name||!weights.length)return; const key=normalizeExerciseName(e.name); if(!key)return; const best=Math.max(...weights); const prev=map.get(key)||{name:e.name,values:[]}; prev.name=e.name||prev.name; prev.values.push(best); map.set(key,prev);})); const rows=[...map.values()].filter(v=>v.values.length>=2).map(v=>({name:v.name,before:`${v.values[0]}kg`,after:`${v.values[v.values.length-1]}kg`,delta:v.values[v.values.length-1]-v.values[0]})).sort((a,b)=>b.delta-a.delta); return rows.length?rows:[{name:'대표님과 함께한 수행 기록',before:'기록 수집 중',after:'다음 공개 수업 후 표시',delta:0}];}
@@ -4563,6 +4588,29 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   .sj-prev-list .sj-session-card{grid-column:1/-1}
   .sj-session-card{padding:24px}
   .sj-fb-edit{grid-template-columns:1fr}
+}
+/* ── 부위별 운동 볼륨 변화(pv-multi-*) — 부위 선택 없이 5개 부위를 한 카드에서 동시에 비교 ── */
+.pv-multi-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.pv-multi-head h2{font-size:17px;margin:0;flex:1;min-width:140px}
+.pv-multi-tabs{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.pv-multi-tabs button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:7px 11px;font-weight:900;font-size:11.5px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.pv-multi-tabs button.active{background:#20242A;color:#fff;border-color:#20242A}
+.pv-multi-rows{display:grid;gap:6px;margin-top:12px}
+.pv-multi-row{display:grid;grid-template-columns:34px 1fr;align-items:center;gap:10px;border-top:1px solid #EEF1F4;padding-top:14px}
+.pv-multi-row:first-child{border-top:0;padding-top:0}
+.pv-multi-row-label{font-size:13px;font-weight:900;color:#20242A}
+.pv-multi-bars{display:flex;align-items:flex-end;gap:10px;height:104px}
+.pv-multi-bar-group{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%}
+.pv-multi-bar-value{font-size:10.5px;font-weight:900;color:#2F73F6;white-space:nowrap}
+.pv-multi-bar{width:100%;max-width:40px;border-radius:6px 6px 0 0;background:linear-gradient(180deg,#60A5FA,#2F73F6)}
+.pv-multi-bar-date{font-size:10px;font-weight:800;color:#8B949E}
+.pv-multi-insufficient{display:flex;align-items:center;height:104px;color:#A8B0BA;font-weight:800;font-size:12.5px}
+.pv-multi-note{margin:14px 0 0;color:#8B949E;font-weight:700;font-size:11.5px;line-height:1.6}
+@media(min-width:700px){
+  .pv-multi-row{grid-template-columns:56px 1fr}
+  .pv-multi-bar{max-width:64px}
+  .pv-multi-bars{height:130px}
+  .pv-multi-insufficient{height:130px}
 }
 `;
 function generateHiddenBootstrapPassword(){return `Teo!${crypto.getRandomValues(new Uint32Array(2)).join("")}!${Date.now()}`;}

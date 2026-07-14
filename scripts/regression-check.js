@@ -905,16 +905,18 @@ const checks = [
     app.includes('if(g.includes("벌크업")||g.includes("증량")||g.includes("근육 키우기")) return "bulk";') &&
     app.includes('if(g.includes("다이어트")||g.includes("감량")) return "diet";')
   ],
-  ['변화분석: 다이어트 회원 - 체중 그래프 + 체중·칼로리 결합 그래프 + 변화 해석이 최상단',
+  ['변화분석: 다이어트 회원 - 체중과 섭취 칼로리 결합 그래프(중복 제거 후 단일 카드) + 변화 해석이 최상단',
     app.includes('{persona === "diet" && (') &&
     app.includes('<MCard title="체중과 섭취 칼로리">') &&
+    (app.match(/<MCard title="체중과 섭취 칼로리">/g) || []).length === 1 &&
+    !app.includes('<MCard title="체중 변화 추이">') &&
     app.includes('function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){')
   ],
-  ['변화분석: 벌크업 회원 - 부위별 운동량 그래프가 최상단, 그다음 대표 운동(빈도 기준 자동 선정) 수행능력 변화, 그다음 변화 요약',
+  ['변화분석: 벌크업 회원 - 부위별 운동 볼륨 카드가 최상단, 그다음 대표 운동(빈도 기준 자동 선정) 수행능력 변화, 그다음 변화 요약',
     (() => {
       const i = app.indexOf('{persona === "bulk" && (');
       if (i === -1) return false;
-      const partVolumeIdx = app.indexOf('<PartVolumeCard sessions={periodSessions} />', i);
+      const partVolumeIdx = app.indexOf('<PartVolumeMultiCard sessions={p.sessions} />', i);
       const strengthIdx = app.indexOf('운동 수행능력 변화', i);
       const summaryIdx = app.indexOf('변화 요약', i);
       const weightIdx = app.indexOf('{weightChart}', i);
@@ -925,15 +927,18 @@ const checks = [
     app.includes('function buildRepEnduranceChanges(sessions=[],exerciseNames=[]){') &&
     app.includes('function buildBulkGrowthSummary({partVolumeData=[],topExercises=[],repEndurance=[],periodLabel="최근"}){')
   ],
-  ['변화분석: 부위별 운동량 - 누적이 아닌 최근 세션별 볼륨을 부위 탭 선택 방식으로 최근 5회까지 표시',
-    app.includes('.filter(r=>r.value>0).slice(-5);') &&
-    app.includes('<div className="part-volume-tabs">') &&
-    app.includes('최근 {current.part} 운동 {current.values.length}회')
+  ['변화분석: 부위별 운동 볼륨 카드 - 부위 선택 없이 5개 부위(등/가슴/하체/어깨/팔)를 동시에 비교, 카드 자체의 기간 버튼(최근/1개월/3개월/6개월/1년)으로 대표 3개 시점을 선택, 데이터 부족 시 "기록 부족" 안내',
+    app.includes('function buildPartVolumeHistory(sessions=[]){') &&
+    app.includes('const VOLUME_CARD_PERIODS=[{key:"recent",label:"최근"},{key:"1m",label:"1개월",days:30},{key:"3m",label:"3개월",days:90},{key:"6m",label:"6개월",days:180},{key:"1y",label:"1년",days:365}];') &&
+    app.includes('function pickVolumeBars(records=[],periodKey){') &&
+    app.includes('function PartVolumeMultiCard({sessions=[]}){') &&
+    !app.includes('<div className="part-volume-tabs">') &&
+    app.includes('기록 부족')
   ],
   ['변화분석: 벌크업 회원 - 체중 변화는 운동 수행능력·변화 요약보다 뒤(보조 지표)에 배치, 골격근량/체지방은 건강 전문 분석에서만 확인(카드 중복 제거)',
     (() => {
       const i = app.indexOf('{persona === "bulk" && (');
-      const partVolIdx = app.indexOf('<PartVolumeCard', i);
+      const partVolIdx = app.indexOf('<PartVolumeMultiCard', i);
       const perfIdx = app.indexOf('title="운동 수행능력 변화"', i);
       const summaryIdx = app.indexOf('title="변화 요약"', i);
       const weightIdx = app.indexOf('{weightChart}', i);
@@ -1012,19 +1017,18 @@ const checks = [
     app.includes('이번 달 가장 잘한 점') &&
     app.includes('조금 더 노력하면 좋아질 점')
   ],
-  ['성장 리포트: "다음 변화 예상" 카드 — 목표 전략 추천 바로 아래 배치(다이어트는 체크리스트로 대체), 페르소나별 템플릿',
+  ['성장 리포트: "다음 변화 예상" 카드 — 목표 전략 추천 바로 아래 배치, 페르소나별 템플릿(회원이 거의 읽지 않던 "다음 수업 전까지" 체크리스트는 렌더링 제거, 계산은 유지)',
     (() => {
       const i = app.indexOf('<WeightGoalStrategyCard {...p} />');
-      return app.slice(i, i + 300).includes('<FuturePredictionCard') &&
-        app.slice(i, i + 300).includes('<NextClassChecklistCard') &&
+      return app.slice(i, i + 200).includes('<FuturePredictionCard') &&
         app.includes('function buildFuturePrediction(persona, { forecast, topExercises = [], latestSummary })');
     })()
   ],
-  ['V3: 다이어트만 "다음 변화 예상" 대신 "다음 수업 전까지" 단기 실행 체크리스트로 대체(목표 전략 추천의 장기 예상일 반복과 중복 제거), 다른 목표는 기존 그대로',
+  ['V3: "다음 수업 전까지" 체크리스트는 회원 화면에서 더 이상 렌더링하지 않음(계산 로직은 관리자앱 사용 대비 유지), 모든 목표가 "다음 변화 예상" 카드로 통일',
     app.includes('function buildNextClassChecklist({ recentKcalCount, recentCardioCount })') &&
     app.includes('function NextClassChecklistCard({ items = [], closing })') &&
-    app.includes('? <NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />') &&
-    app.includes(': <FuturePredictionCard text={futurePrediction} />')
+    !app.includes('<NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />') &&
+    app.includes('<FuturePredictionCard text={futurePrediction} />')
   ],
   ['변화분석: 위상각/신체나이 등 전문 데이터는 "건강 전문 분석"로 통합, 기본 접힘',
     app.includes('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>') &&

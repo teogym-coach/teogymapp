@@ -10041,6 +10041,51 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [showCard,       setShowCard]       = useState(false);
   const [activeCardIdx, setActiveCardIdx]   = useState(null); // 현재 입력 중인 카드
 
+  // ── 가로모드 2패널 레이아웃 (좌: 회원 브리핑 / 우: 운동 기록) — HubScreen·MembersScreen의 winW 판별 패턴 재사용 ──
+  const [winW, setWinW] = useState(typeof window!=="undefined" ? window.innerWidth : 1200);
+  const [winH, setWinH] = useState(typeof window!=="undefined" ? window.innerHeight : 800);
+  useEffect(() => {
+    const h = () => { setWinW(window.innerWidth); setWinH(window.innerHeight); };
+    window.addEventListener("resize", h);
+    window.addEventListener("orientationchange", h);
+    return () => { window.removeEventListener("resize", h); window.removeEventListener("orientationchange", h); };
+  }, []);
+  const isLandscape = winW >= 1024 && winW > winH;
+  // 자극도/대표메모/다음 수업 추천 아코디언 — 가로모드에서만 기본 접힘(세로모드는 항상 펼침, 기존 화면 그대로)
+  const [expandedStim, setExpandedStim] = useState(() => new Set());
+  const toggleStim = (ei) => setExpandedStim(prev => { const next = new Set(prev); next.has(ei) ? next.delete(ei) : next.add(ei); return next; });
+
+  // ── 회원 브리핑(가로모드 좌측 패널) — 현재 DB에 이미 있는 정보만 표시, 새 저장 로직 없음 ──
+  const [briefCi, setBriefCi] = useState([]);
+  useEffect(() => {
+    if (!member?.id) return;
+    getMemberCheckins(member.id, 5).then(v => setBriefCi(v || [])).catch(() => setBriefCi([]));
+  }, [member?.id]);
+  const briefWeightRecords = (bodyData?.records || []).slice().sort((a,b) => String(a.date||"").localeCompare(String(b.date||"")));
+  const briefWLast = briefWeightRecords.length ? parseFloat(briefWeightRecords[briefWeightRecords.length-1].weight) : null;
+  const briefWPrev = briefWeightRecords.length > 1 ? parseFloat(briefWeightRecords[briefWeightRecords.length-2].weight) : null;
+  const briefWDiff = (briefWLast!=null && briefWPrev!=null) ? Math.round((briefWLast-briefWPrev)*10)/10 : null;
+  const briefCiPain = briefCi.find(c=>c.painRecord?.part||c.painPart) || null;
+  const briefPainRec = briefCiPain ? (briefCiPain.painRecord || {part:briefCiPain.painPart, side:briefCiPain.painSide, vas:briefCiPain.painVas}) : null;
+  const briefCiCond = briefCi.find(c=>c.condition) || null;
+  const briefSoreInfo = (() => {
+    for (let i=sessions.length-1; i>=0; i--) {
+      const s = sessions[i];
+      const f = s.memberFeedback;
+      if (f && (f.sorenessLevel || memberFeedbackParts(f).length)) return {parts:memberFeedbackParts(f), level:f.sorenessLevel||"", date:s.date};
+      const r = s.sorenessReport;
+      if (r && (r.part || r.level)) return {parts:[r.part].filter(Boolean), level:r.level||"", date:s.date};
+    }
+    return null;
+  })();
+  const briefRpe = (() => {
+    for (let i=sessions.length-1; i>=0; i--) {
+      const f = sessions[i].memberFeedback;
+      if (f && f.rpe!=null && f.rpe!=="") return {rpe:f.rpe, date:sessions[i].date};
+    }
+    return null;
+  })();
+
   const totalVol = exercises.reduce((s,e) => s+exVol(e), 0);
 
   // 드래그앤드롭 정렬 (Pointer Event 기반)
@@ -10458,7 +10503,7 @@ function updateEx(ei, key, val) {
   }
 
   return (
-    <div className="session-light" style={{width:"100%",maxWidth:1200,margin:"0 auto",padding:"18px 20px 40px",boxSizing:"border-box"}}>
+    <div className="session-light" style={{width:"100%",maxWidth:isLandscape?1440:1200,margin:"0 auto",padding:"18px 20px 40px",boxSizing:"border-box"}}>
       {/* ── 임시저장 복원 팝업 ── */}
       {draftPopup && (
         <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
@@ -10526,6 +10571,56 @@ function updateEx(ei, key, val) {
         </div>
       </div>
 
+      <div style={isLandscape ? {display:"grid",gridTemplateColumns:"minmax(300px,320px) 1fr",gap:16,alignItems:"start"} : undefined}>
+      {/* ── 가로모드 전용: 좌측 회원 브리핑(항상 보이는 sticky 패널) — 읽기 전용, 현재 DB 데이터만 사용 ── */}
+      {isLandscape && (
+        <aside style={{position:"sticky",top:78,display:"flex",flexDirection:"column",gap:9,minWidth:0}}>
+          <Card title="오늘 회원 입력" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
+                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>컨디션</Mo>
+                <Mo c="#0F172A" s={12} style={{fontWeight:800}}>{briefCiCond?.condition || "미입력"}</Mo>
+              </div>
+              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
+                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>체중</Mo>
+                <Mo c="#0F172A" s={12} style={{fontWeight:800}}>{briefWLast!=null?`${briefWLast}kg`:"미입력"}</Mo>
+              </div>
+              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
+                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>체중 변화</Mo>
+                <Mo c={briefWDiff==null?"#0F172A":briefWDiff<0?"#0F9488":briefWDiff>0?"#F97316":"#0F172A"} s={12} style={{fontWeight:800}}>
+                  {briefWDiff==null?"-":`${briefWDiff>0?"▲":briefWDiff<0?"▼":""} ${Math.abs(briefWDiff)}kg`}
+                </Mo>
+              </div>
+              <div style={{padding:"7px 9px",borderRadius:7,background:"#F6F7F9"}}>
+                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>RPE</Mo>
+                <Mo c="#0F172A" s={12} style={{fontWeight:800}}>{briefRpe?.rpe ?? "-"}</Mo>
+              </div>
+              <div style={{padding:"7px 9px",borderRadius:7,background:briefPainRec&&briefPainRec.part&&briefPainRec.part!=="없음"?"rgba(239,68,68,.08)":"#F6F7F9"}}>
+                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>통증</Mo>
+                <Mo c={briefPainRec&&briefPainRec.part&&briefPainRec.part!=="없음"?"#EF4444":"#0F172A"} s={12} style={{fontWeight:800}}>
+                  {briefPainRec?.part && briefPainRec.part!=="없음" ? `${briefPainRec.part}${briefPainRec.vas!=null?` (VAS ${briefPainRec.vas})`:""}` : "없음"}
+                </Mo>
+              </div>
+              <div style={{padding:"7px 9px",borderRadius:7,background:briefSoreInfo?"rgba(249,115,22,.08)":"#F6F7F9"}}>
+                <Mo c="#64748B" s={8} style={{display:"block",fontWeight:700}}>근육통</Mo>
+                <Mo c={briefSoreInfo?"#F97316":"#0F172A"} s={12} style={{fontWeight:800}}>
+                  {briefSoreInfo ? `${briefSoreInfo.parts.join("/")||"-"}${briefSoreInfo.level?` (${briefSoreInfo.level})`:""}` : "없음"}
+                </Mo>
+              </div>
+            </div>
+          </Card>
+          <Card title="최근 수업 메모" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
+            <Mo c="#334155" s={11} style={{lineHeight:1.6}}>{last?.trainerComment || "최근 메모가 없습니다."}</Mo>
+          </Card>
+          <Card title="다음 수업 메모" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
+            <Mo c="#334155" s={11} style={{lineHeight:1.6}}>{member?.nextWorkoutMemo || "등록된 메모가 없습니다."}</Mo>
+          </Card>
+          <Card title="대표 내부 메모" style={{background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:12,borderBottomColor:"#D6DCE3"}}>
+            <Mo c="#334155" s={11} style={{lineHeight:1.6}}>{member?.memo || "등록된 메모가 없습니다."}</Mo>
+          </Card>
+        </aside>
+      )}
+      <div style={{minWidth:0}}>
       {/* ── 수업 형태 선택 (1:1 / 2:1 / 그룹PT) ─────────────────────── */}
       {!isEdit && (
         <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
@@ -11537,14 +11632,20 @@ function updateEx(ei, key, val) {
                 </div>
               </div>
             )}
-            {/* ── 자극도 (트레이너 전용 내부 데이터) ── */}
-            <div style={{marginTop:8,padding:"9px 10px",borderRadius:8,
+            {/* ── 자극도 (트레이너 전용 내부 데이터) — 가로모드에서는 기본 접힌 아코디언, 세로모드는 항상 펼침(기존 화면 그대로) ── */}
+            <div style={{marginTop:8,borderRadius:8,overflow:"hidden",
               background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.22)"}} onFocus={()=>setActiveCardIdx(ei)}>
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+              <div onClick={isLandscape?()=>toggleStim(ei):undefined}
+                style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",
+                  padding: isLandscape?"9px 10px":"9px 10px 0",
+                  marginBottom: isLandscape?0:6,
+                  cursor:isLandscape?"pointer":"default"}}>
                 <Mo c="#8B5CF6" s={9} style={{fontWeight:800,flexShrink:0}}>🎯 자극도</Mo>
                 {ex.stimRating && <Mo c="#8B5CF6" s={9} style={{fontWeight:700}}>{stimRatingLabel(ex.stimRating)}</Mo>}
-                <Mo c="#7C8798" s={8} style={{marginLeft:"auto",flexShrink:0}}>트레이너 전용</Mo>
+                <Mo c="#7C8798" s={8} style={{marginLeft:"auto",flexShrink:0}}>{isLandscape?(expandedStim.has(ei)?"▲ 접기":"▼ 펼치기 · 메모/추천"):"트레이너 전용"}</Mo>
               </div>
+              {(!isLandscape || expandedStim.has(ei)) && (
+              <div style={{padding: isLandscape?"0 10px 9px":"0 10px 9px"}}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:4,marginBottom:6}}>
                 {STIM_RATING_OPTIONS.map(opt=>{
                   const active = Number(ex.stimRating)===opt.value;
@@ -11564,7 +11665,7 @@ function updateEx(ei, key, val) {
               <input value={ex.stimMemo||""} onChange={e=>updateEx(ei,"stimMemo",e.target.value)}
                 placeholder="대표 메모 · 왼쪽 어깨 불편 / 승모 개입 / 다음 수업 중량 증가 등"
                 style={{fontSize:13,fontWeight:600,padding:"8px 9px",color:"#0F172A",background:"#FFFFFF",border:"1px solid #D6DCE3",borderRadius:6,width:"100%",boxSizing:"border-box",marginBottom:6}} />
-              <div style={{marginBottom:6}}>
+              <div style={{marginBottom:0}}>
                 <Mo c="#475569" s={9} style={{display:"block",marginBottom:4,fontWeight:700}}>다음 수업 추천</Mo>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                   {NEXT_PLAN_OPTIONS.map(opt=>{
@@ -11577,6 +11678,8 @@ function updateEx(ei, key, val) {
                   })}
                 </div>
               </div>
+              </div>
+              )}
             </div>
           </div>
         );})}
@@ -11645,6 +11748,8 @@ function updateEx(ei, key, val) {
           stretchNotes={stretchNotes} nextPlan={nextPlan} trainerComment={trainerComment}
           bodyWeight={bodyWeight} calories={calories} dietNote={dietNote}
           romData={romData} painData={painData} isCorr={isCorr} />
+      </div>
+      </div>
       </div>
     </div>
   );

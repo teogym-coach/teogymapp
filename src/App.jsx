@@ -8,7 +8,8 @@ import {
 import { auth, firebaseConfig, app as firebaseApp } from "./firebase-config";
 import { FCM_VAPID_KEY, getNotificationPermission, requestNotificationPermission, getFcmToken } from "./fcm";
 import { isMemberMode } from "./app-mode";
-import { isHoliday as isKrHoliday } from "holiday-kr";
+import { isHoliday as isKrHoliday, getLunar as getKrLunar } from "holiday-kr";
+import { holidayTable as KR_HOLIDAY_TABLE } from "holiday-kr/table";
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   setPersistence, browserLocalPersistence, browserSessionPersistence,
@@ -8022,6 +8023,54 @@ function getMemberNextSessionInfo(m) {
 }
 const upNavBtnStyle = { width: 28, height: 28, borderRadius: 8, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DB.font };
 
+// ── 대한민국 공휴일명 + 대체공휴일 (수업 예정 캘린더 전용) ──────────────────────────
+// 빨간 날 여부 자체는 회원앱 캘린더와 동일한 isCalRedDay(일요일 + holiday-kr 판정 + CAL_HOLIDAY_OVERRIDES)를 그대로 재사용한다(변경 없음).
+// holiday-kr의 isHoliday는 여부만 반환하고 이름이 없어, 이름 조회 + 대체공휴일 계산만 이 화면 전용으로 최소 추가한다.
+// holidayTable(양력 고정 type1 / 음력 고정 type2)은 holiday-kr 패키지 데이터를 그대로 재사용(목록 중복 생성 없음).
+function getKrHolidayNameRaw(year, month, day) {
+  let lunar;
+  try { lunar = getKrLunar(year, month, day); } catch { return ""; }
+  for (const [name, m, d, type] of KR_HOLIDAY_TABLE) {
+    if (type === 1 && m === month && d === day) return name;
+    if (type === 2 && !lunar.leapMonth && m === lunar.month && d === lunar.day) return name;
+  }
+  // "설 전날"은 holiday-kr 표에 없는 가변일(음력 12월 마지막 날)이라, 다음날이 설날(음력 1/1)인지로 보완 판별한다.
+  try {
+    const next = new Date(year, month - 1, day + 1);
+    const nl = getKrLunar(next.getFullYear(), next.getMonth() + 1, next.getDate());
+    if (!nl.leapMonth && nl.month === 1 && nl.day === 1) return "설 전날";
+  } catch {}
+  return "";
+}
+const KR_SUBSTITUTABLE_HOLIDAYS = new Set(["설 전날", "설날", "설 다음날", "추석 전날", "추석", "추석 다음날", "3·1절", "어린이날", "석가탄신일", "광복절", "개천절", "한글날", "성탄절"]);
+function krDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+// 해당 연/월의 날짜별 공휴일명(대체공휴일 포함)을 계산한다. 대체공휴일이 월 경계를 넘나들 수 있어 앞뒤 여유(±10일)까지 함께 판별한다.
+function buildKrHolidayNameMap(year, month) {
+  const map = new Map();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const pad = 10;
+  const named = [];
+  for (let d = 1 - pad; d <= daysInMonth + pad; d++) {
+    const dt = new Date(year, month - 1, d);
+    const name = getKrHolidayNameRaw(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+    if (name) named.push({ date: dt, name });
+  }
+  const inMonth = dt => dt.getFullYear() === year && dt.getMonth() === month - 1;
+  named.forEach(({ date, name }) => { if (inMonth(date)) map.set(krDateKey(date), name); });
+  const holidaySet = new Set(named.map(({ date }) => krDateKey(date)));
+  named.forEach(({ date, name }) => {
+    if (!KR_SUBSTITUTABLE_HOLIDAYS.has(name)) return;
+    const dow = date.getDay();
+    if (dow !== 0 && dow !== 6) return; // 토·일요일과 겹칠 때만 대체공휴일 발생
+    let cand = date;
+    do { cand = new Date(cand.getFullYear(), cand.getMonth(), cand.getDate() + 1); }
+    while (cand.getDay() === 0 || cand.getDay() === 6 || holidaySet.has(krDateKey(cand)));
+    const key = krDateKey(cand);
+    if (inMonth(cand) && !map.has(key)) map.set(key, `${name} 대체공휴일`);
+  });
+  return map;
+}
+
 function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, loadPairSessions, showToast }) {
   const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
   useEffect(() => {
@@ -8048,7 +8097,7 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
   }, [members]);
 
   const [yy, mm] = ym.split("-").map(Number);
-  const firstDow = (new Date(yy, mm - 1, 1).getDay() + 6) % 7; // 월요일 시작(회원앱 캘린더와 동일 규칙)
+  const firstDow = new Date(yy, mm - 1, 1).getDay(); // 일요일 시작(0=일 ... 6=토, Date.getDay()를 그대로 사용)
   const daysInMonth = new Date(yy, mm, 0).getDate();
   const prevDim = new Date(yy, mm - 1, 0).getDate();
   const cells = [];
@@ -8062,8 +8111,9 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
     setYm(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
   const goToday = () => setYm(todayKey.slice(0, 7));
-  const weekdays = ["월", "화", "수", "목", "금", "토", "일"];
+  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   const weekCount = cells.length / 7; // 5주 또는 6주 — 남은 높이를 이 주 수만큼 균등 분배한다
+  const holidayNameMap = useMemo(() => buildKrHolidayNameMap(yy, mm), [yy, mm]);
 
   // 이 화면은 App.jsx 최상위에서 글로벌 헤더(nav)를 조건부로 숨기고 집중 모드로 렌더링된다(가로·세로모드 공통).
   // admin-scroll-shell 클래스가 DOM에 있으면 html/body/#root 높이를 --admin-layout-height(키보드 영향 없는 고정 뷰포트 높이)로 잠가
@@ -8086,10 +8136,10 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
           </div>
         </div>
 
-        {/* 요일 헤더 */}
+        {/* 요일 헤더 — 일요일 시작, 일요일만 빨간색(토요일은 기존 스타일 유지) */}
         <div style={{ flexShrink: 0, display: "grid", gridTemplateColumns: "repeat(7,1fr)", padding: "5px 6px 0" }}>
-          {weekdays.map(w => (
-            <div key={w} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: DB.faint, padding: "3px 0" }}>{w}</div>
+          {weekdays.map((w, i) => (
+            <div key={w} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: i === 0 ? "#F26D6D" : DB.faint, padding: "3px 0" }}>{w}</div>
           ))}
         </div>
 
@@ -8104,13 +8154,19 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
             if (c.out) return <div key={c.key} />;
             const list = byDate.get(c.key) || [];
             const isToday = c.key === todayKey;
+            // 빨간 날 여부 — 일요일·기존 holiday-kr 판정은 isCalRedDay 그대로 재사용, 대체공휴일만 holidayNameMap에서 추가로 합류
+            const isRed = isCalRedDay(yy, mm, c.d) || holidayNameMap.has(c.key);
+            const holidayName = holidayNameMap.get(c.key) || "";
             return (
               <div key={c.key} style={{
                 border: `1px solid ${isToday ? DB.mint : DB.border}`, borderRadius: 7, background: DB.card,
                 padding: "3px 4px", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden",
                 boxShadow: isToday ? `0 0 0 1px ${DB.mint}` : "none",
               }}>
-                <span style={{ fontSize: 10, fontWeight: isToday ? 800 : 700, color: isToday ? DB.mintSoft : DB.sub, flexShrink: 0, marginBottom: 1 }}>{c.d}</span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 3, minWidth: 0, flexShrink: 0, marginBottom: 1 }}>
+                  <span style={{ fontSize: 10, fontWeight: isToday ? 800 : 700, color: isToday ? DB.mintSoft : (isRed ? "#F26D6D" : DB.sub), flexShrink: 0 }}>{c.d}</span>
+                  {holidayName && <span style={{ fontSize: 8.5, fontWeight: 600, color: "#F26D6D", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{holidayName}</span>}
+                </div>
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
                   {list.map(item => (
                     <div key={item.id} title={`${item.name} · ${item.part}`} style={{

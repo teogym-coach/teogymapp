@@ -5688,8 +5688,8 @@ export default function App() {
         </div>
       )}
 
-      {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)·수업 예정(집중 모드, 확보된 높이를 캘린더에 전부 배정)에서는 숨김 */}
-      {screen !== "home" && screen !== "members" && screen !== "upcoming" && (
+      {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)·수업 예정(집중 모드, 확보된 높이를 캘린더에 전부 배정)·회원 상세(오늘 브리핑·오늘 운동·최근 수업·다음 수업 준비 영역을 더 크게 보기 위해 자체 헤더만 사용)에서는 숨김 */}
+      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && (
       <nav className="noprint" style={{
         borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"0 clamp(10px,3vw,16px)",
         paddingTop:"env(safe-area-inset-top, 0px)",
@@ -10269,7 +10269,8 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
 
   // 회원 상세 화면 전체 컨테이너 폭 — 홈화면(HomeScreen)과 동일한 기준(padding-x 38px, maxWidth 1240, margin auto)을 재사용.
   // 이전에는 App.jsx 최상위 래퍼가 hub 화면에 maxWidth:820을 강제해 아이패드 가로모드에서도 좁은 중앙열로 렌더링됐음 — App.jsx의 screen==="hub" 예외 추가로 그 제한을 해제하고, 대신 이 컴포넌트가 스스로 폭을 관리한다.
-  const HUB_PAD = isWide ? "24px 38px 48px" : "18px 14px 32px";
+  // 글로벌 헤더(nav)가 이 화면에서 숨겨져 상단 안전영역(노치·상태바)을 흡수해줄 요소가 없으므로, 상단 패딩에 env(safe-area-inset-top)을 직접 더한다.
+  const HUB_PAD = isWide ? "calc(24px + env(safe-area-inset-top, 0px)) 38px 48px" : "calc(18px + env(safe-area-inset-top, 0px)) 14px 32px";
   return (
     <div className="hub-light" style={{fontFamily:DB.font,color:DB.text,width:"100%",maxWidth:1240,margin:"0 auto",padding:HUB_PAD,boxSizing:"border-box"}}>
       {topChrome}

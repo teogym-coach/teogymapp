@@ -5739,7 +5739,7 @@ export default function App() {
       )}
 
       {/* SCREENS */}
-      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session") ? {width:"100%"} : {
+      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming") ? {width:"100%"} : {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
@@ -5766,6 +5766,7 @@ export default function App() {
         {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="routine_recommend" && member && <RoutineRecommendScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
+        {screen==="upcoming" && <UpcomingSessionsScreen members={members} onBack={()=>setScreen("home")} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="notices" && <NoticeAdminScreen members={members} sessionsMap={sessionsMap} onBack={()=>setScreen("home")} showToast={showToast}/>}
         {screen==="daily_conditioning" && member && <DailyConditioningAdminScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
@@ -6112,10 +6113,12 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
   const icBr = ni(<><rect x="2" y="14" width="4" height="8"/><rect x="9" y="8" width="4" height="14"/><rect x="16" y="4" width="4" height="18"/></>);
   const icBl = ni(<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>);
   const icGr = ni(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>);
+  const icSc = ni(<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><circle cx="16" cy="16" r="2.2"/></>);
 
   const navItems = [
     {key:"home",     label:"홈",           icon:icH,  fn:()=>setScreen("home")},
     {key:"members",  label:"회원 관리",     icon:icMb, fn:()=>{loadMembers&&loadMembers();setScreen("members");}},
+    {key:"upcoming", label:"수업 예정",     icon:icSc, fn:()=>{loadMembers&&loadMembers();setScreen("upcoming");}},
     {key:"pair21",   label:"2:1 수업 관리", icon:icP2, fn:()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}},
     {key:"sessions", label:"수업 기록",     icon:icCl, fn:goCs},
     {key:"diet",     label:"식단 관리",     icon:icDt, fn:goCs},
@@ -8002,6 +8005,123 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
       )}
       </div>
     </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 수업 예정 캘린더 (조회 전용 1차 버전)
+// 회원별로 이미 저장된 다음 수업 날짜(nextWorkoutDate/nextPtDate)·부위(nextWorkoutPart/nextPtPart)를
+// 월간 캘린더로 보여주기만 한다 — 일정 추가/수정/삭제·신규 DB 필드 없음.
+// ════════════════════════════════════════════
+function getMemberNextSessionInfo(m) {
+  const date = String(m?.nextWorkoutDate || m?.nextPtDate || "").slice(0, 10);
+  const rawPart = String(m?.nextWorkoutPart || m?.nextPtPart || "").trim();
+  const part = rawPart && rawPart !== "미정" ? rawPart.split(" · ").filter(Boolean).join("/") : "";
+  return { date, part };
+}
+const upNavBtnStyle = { width: 28, height: 28, borderRadius: 8, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DB.font };
+
+function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, loadPairSessions, showToast }) {
+  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const h = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  const isWide = winW >= 1024; // iPad Pro 11" 가로모드 기준 — AdminSidebar를 쓰는 다른 관리자 화면과 동일 breakpoint
+  const todayKey = getKoreaDateString();
+  const [ym, setYm] = useState(todayKey.slice(0, 7));
+
+  // 날짜별 회원 그룹핑 — 테스트 계정/대표 개인기록 계정 제외, 다음 수업 날짜·부위가 모두 있는 회원만
+  const byDate = useMemo(() => {
+    const map = new Map();
+    members.forEach(m => {
+      if (isExcludedAdminMember(m)) return;
+      const { date, part } = getMemberNextSessionInfo(m);
+      if (!date || !part) return;
+      if (!map.has(date)) map.set(date, []);
+      map.get(date).push({ id: m.id, name: m.name || "이름 미정", part });
+    });
+    map.forEach(list => list.sort((a, b) => a.name.localeCompare(b.name)));
+    return map;
+  }, [members]);
+
+  const [yy, mm] = ym.split("-").map(Number);
+  const firstDow = (new Date(yy, mm - 1, 1).getDay() + 6) % 7; // 월요일 시작(회원앱 캘린더와 동일 규칙)
+  const daysInMonth = new Date(yy, mm, 0).getDate();
+  const prevDim = new Date(yy, mm - 1, 0).getDate();
+  const cells = [];
+  for (let i = firstDow - 1; i >= 0; i--) cells.push({ d: prevDim - i, out: true, key: `out-prev-${i}` });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ d, out: false, key: `${ym}-${String(d).padStart(2, "0")}` });
+  for (let t = 1; cells.length % 7 !== 0; t++) cells.push({ d: t, out: true, key: `out-next-${t}` });
+
+  const monthLabel = `${yy}년 ${mm}월`;
+  const moveMonth = delta => {
+    const d = new Date(yy, mm - 1 + delta, 1);
+    setYm(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+  const goToday = () => setYm(todayKey.slice(0, 7));
+  const weekdays = ["월", "화", "수", "목", "금", "토", "일"];
+
+  return (
+    <div className={isWide ? "admin-scroll-shell" : undefined} style={{ display: "flex", height: isWide ? "var(--admin-layout-height, 100dvh)" : "auto", minHeight: isWide ? undefined : "100dvh", background: DB.bg, overflow: isWide ? "hidden" : "visible" }}>
+      {isWide && (
+        <AdminSidebar active="upcoming" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={() => showToast?.("아직 준비 중인 기능입니다.")} />
+      )}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: isWide ? "hidden" : "visible", minHeight: 0, height: isWide ? "var(--admin-layout-height, 100dvh)" : undefined, background: DB.bg, fontFamily: DB.font }}>
+        {/* 헤더 — 이전 달/현재 연월/다음 달/오늘 버튼만. 조회 전용이라 그 외 조작 UI 없음 */}
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: DB.hairline, background: "rgba(246,247,249,.92)" }}>
+          <button onClick={onBack} aria-label="뒤로" style={upNavBtnStyle}>←</button>
+          <span style={{ fontWeight: 800, fontSize: isWide ? 16 : 15, color: DB.text, letterSpacing: "-.3px", whiteSpace: "nowrap" }}>수업 예정</span>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={() => moveMonth(-1)} aria-label="이전 달" style={upNavBtnStyle}>‹</button>
+            <span style={{ fontWeight: 800, fontSize: 13.5, color: DB.text, minWidth: 82, textAlign: "center" }}>{monthLabel}</span>
+            <button onClick={() => moveMonth(1)} aria-label="다음 달" style={upNavBtnStyle}>›</button>
+            <button onClick={goToday} style={{ ...upNavBtnStyle, width: "auto", padding: "0 12px", fontWeight: 700, fontSize: 12, color: DB.mintSoft, borderColor: DB.mint }}>오늘</button>
+          </div>
+        </div>
+
+        {/* 요일 헤더 */}
+        <div style={{ flexShrink: 0, display: "grid", gridTemplateColumns: "repeat(7,1fr)", padding: "5px 6px 0" }}>
+          {weekdays.map(w => (
+            <div key={w} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: DB.faint, padding: "3px 0" }}>{w}</div>
+          ))}
+        </div>
+
+        {/* 월간 그리드 — 와이드(아이패드 가로)에서는 화면 안에 한 달이 꽉 차도록 고정 높이 + 날짜별 내부 스크롤,
+            좁은 화면(세로모드)에서는 화면 전체 스크롤로 전환해 내용이 눌리지 않게 한다 */}
+        <div style={isWide
+          ? { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "repeat(7,1fr)", gridAutoRows: "1fr", gap: 3, padding: "2px 6px 6px", overflow: "hidden" }
+          : { flex: 1, display: "grid", gridTemplateColumns: "repeat(7,1fr)", gridAutoRows: "minmax(78px,auto)", gap: 3, padding: "2px 6px 10px", overflowY: "auto" }
+        }>
+          {cells.map(c => {
+            if (c.out) return <div key={c.key} />;
+            const list = byDate.get(c.key) || [];
+            const isToday = c.key === todayKey;
+            return (
+              <div key={c.key} style={{
+                border: `1px solid ${isToday ? DB.mint : DB.border}`, borderRadius: 7, background: DB.card,
+                padding: "3px 4px", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden",
+                boxShadow: isToday ? `0 0 0 1px ${DB.mint}` : "none",
+              }}>
+                <span style={{ fontSize: 10, fontWeight: isToday ? 800 : 700, color: isToday ? DB.mintSoft : DB.sub, flexShrink: 0, marginBottom: 1 }}>{c.d}</span>
+                <div style={{ flex: 1, minHeight: 0, overflowY: isWide ? "auto" : "visible", display: "flex", flexDirection: "column", gap: 1 }}>
+                  {list.map(item => (
+                    <div key={item.id} title={`${item.name} · ${item.part}`} style={{
+                      fontSize: 10, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: DB.text,
+                    }}>
+                      <b style={{ fontWeight: 700 }}>{item.name}</b>
+                      <span style={{ color: DB.faint }}> · </span>
+                      <span style={{ color: DB.mintSoft, fontWeight: 700 }}>{item.part}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

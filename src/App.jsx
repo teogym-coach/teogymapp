@@ -979,6 +979,11 @@ html{height:-webkit-fill-available;overflow-x:hidden;width:100%;}
 html,body,#root{min-height:100%;min-height:-webkit-fill-available;}
 body{background:#0B1120;color:#e2e8f0;font-family:'Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;overscroll-behavior:none;overflow-x:hidden;width:100%;max-width:100vw;}
 #root{overflow-x:hidden;width:100%;}
+/* 좌측 고정 사이드바(AdminSidebar, .admin-sidebar)가 실제로 마운트된 화면(아이패드 가로/PC)에서만
+   document 레벨 스크롤을 잠근다. 상위 wrapper의 min-height:100vh가 iPad Safari 주소창 변화로
+   100dvh 뷰포트보다 커지는 순간에 body 자체가 스크롤되며 사이드바 상단이 밀려 잘리는 문제를 방지.
+   사이드바가 없는 화면(모바일 등)은 기존 document 스크롤 동작을 그대로 유지한다. */
+html:has(.admin-sidebar),body:has(.admin-sidebar),#root:has(.admin-sidebar){height:100dvh;overflow:hidden;}
 input,textarea,select{font-family:'Noto Sans KR',sans-serif;background:#111827;border:1px solid rgba(255,255,255,0.10);color:#ddddf0;border-radius:7px;padding:8px 12px;font-size:16px;width:100%;outline:none;transition:border-color .18s;-webkit-appearance:none;}
 input:focus,textarea:focus,select:focus{border-color:#5EEAD4;box-shadow:0 0 0 3px rgba(0,229,160,.07);}
 input::placeholder,textarea::placeholder{color:#2e2e3e;}
@@ -6090,14 +6095,14 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
   ];
 
   return (
-    <aside style={{
+    <aside className="admin-sidebar" style={{
       width:236,minWidth:236,background:DB.side,
       borderRight:`1px solid ${DB.border}`,
       display:"flex",flexDirection:"column",
-      height:"100dvh",overflow:"hidden",flexShrink:0,
+      height:"100dvh",minHeight:0,overflow:"hidden",flexShrink:0,
     }}>
-      {/* 로고 */}
-      <div style={{padding:"22px 18px 17px",borderBottom:`1px solid ${DB.border}`}}>
+      {/* 로고 — 스크롤되지 않는 고정 영역 */}
+      <div style={{padding:"22px 18px 17px",borderBottom:`1px solid ${DB.border}`,flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:11}}>
           <div style={{
             width:38,height:38,borderRadius:12,flexShrink:0,
@@ -6113,15 +6118,15 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
         </div>
       </div>
 
-      {/* 네비게이션 */}
-      <nav style={{flex:1,padding:"14px 11px",overflowY:"auto"}}>
+      {/* 네비게이션 — 메뉴가 길어질 때만 이 영역만 스크롤 (로고/하단 프로필은 고정) */}
+      <nav style={{flex:1,minHeight:0,padding:"14px 11px",overflowY:"auto",overscrollBehavior:"contain"}}>
         {navItems.map(item=>(
           <SideNavItem key={item.key} icon={item.icon} label={item.label} active={item.key===active} onClick={item.fn||undefined} />
         ))}
       </nav>
 
-      {/* 하단 유저 */}
-      <div style={{padding:"14px 16px",borderTop:`1px solid ${DB.border}`,display:"flex",alignItems:"center",gap:10}}>
+      {/* 하단 유저 — 스크롤되지 않는 고정 영역 */}
+      <div style={{padding:"14px 16px",borderTop:`1px solid ${DB.border}`,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         <div style={{
           width:32,height:32,borderRadius:10,flexShrink:0,
           background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,
@@ -6612,7 +6617,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const aiMember = todaySummary.attention[0]?.member || null;
 
   const mainContent = (
-    <div style={{flex:1,overflowY:"auto",minHeight:0,height:isWide?VH:undefined,background:DB.bg}}>
+    <div style={{flex:1,overflowY:"auto",overscrollBehaviorY:"contain",minHeight:0,height:isWide?VH:undefined,background:DB.bg}}>
       {/* Top bar */}
       <div style={{
         display:"flex",alignItems:"center",justifyContent:"space-between",
@@ -7539,7 +7544,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
       {isWide && (
         <AdminSidebar active="members" setScreen={setScreen} loadMembers={onRefresh} loadPairSessions={loadPairSessions} goCs={()=>showToast?.("아직 준비 중인 기능입니다.")} />
       )}
-    <div style={{flex:1,overflowY:isWide?"auto":"visible",minHeight:0,height:isWide?"100dvh":undefined,background:DB.bg,fontFamily:DB.font}}>
+    <div style={{flex:1,overflowY:isWide?"auto":"visible",overscrollBehaviorY:isWide?"contain":undefined,minHeight:0,height:isWide?"100dvh":undefined,background:DB.bg,fontFamily:DB.font}}>
       {/* ═══ 헤더 — 홈 대시보드와 같은 라이트 스티키 헤더 ═══ */}
       <div style={{position:"sticky",top:0,zIndex:60,background:"rgba(246,247,249,.88)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderBottom:DB.hairline}}>
         <div style={{maxWidth:isWide?1400:820,margin:"0 auto",display:"flex",alignItems:"center",gap:10,padding:"11px 16px",paddingTop:"calc(11px + env(safe-area-inset-top,0px))"}}>

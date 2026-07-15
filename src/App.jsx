@@ -2032,7 +2032,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   const latestId=reversed[0]?.id;
   // 펼친 수업 카드 — 최근 수업이든 이전 수업이든 같은 구성(날짜/부위/요약/운동 아코디언/피드백 카드)
   const renderExpanded=(s,i)=>{
-    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const st=buildSessionReportStats(s); const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId;
+    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId;
     return <section key={s.id} className="sj-session-card">
       <header className="sj-sess-head">
         <div className="sj-sess-title">
@@ -2042,10 +2042,6 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
         </div>
         <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
       </header>
-      {st.exCount>0&&<div className="sj-sess-summary">
-        <span className="sj-sum-count">{st.exCount}종목{st.totalSets>0?` · ${st.totalSets}세트`:""}</span>
-        {(st.volume>0||st.top>0)&&<span className="sj-sum-nums">{st.volume>0&&<>총 운동량 <b>{st.volume.toLocaleString()}kg</b></>}{st.volume>0&&st.top>0&&<i className="sj-sum-dot">·</i>}{st.top>0&&<>최고 중량 <b>{st.top}kg</b></>}</span>}
-      </div>}
       <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/>
     </section>;
   };
@@ -4310,7 +4306,6 @@ function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
     <button type="button" className="sj-ex-head" onClick={()=>toggleOpen(exKey)} aria-expanded={open}>
       <span className="sj-ex-name">{getMemberExerciseName(e)}</span>
       {getExerciseTypeBadge(e)&&<em className="sj-badge move" style={{flexShrink:0}}>{getExerciseTypeBadge(e)}</em>}
-      {!open&&summary&&<span className="sj-ex-sub">{summary}</span>}
       <i className="sj-chev"><SjIcon paths={open?SJ_PATHS.chevronUp:SJ_PATHS.chevronDown} size={14}/></i>
     </button>
     {open&&<div className="sj-ex-body">
@@ -4618,19 +4613,13 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#20242A}
 .sj-sess-title p{margin:5px 0 0;color:#F97316;font-weight:900;font-size:13.5px}
 .sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:10px;padding:7px 11px;font-size:12px;font-weight:900;color:#8B949E;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
-.sj-sess-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 12px;background:#F8FAFC;border:1px solid #EEF1F4;border-radius:16px;padding:12px 15px;margin:14px 0 2px}
-.sj-sum-count{font-size:13.5px;font-weight:900;color:#20242A}
-.sj-sum-nums{font-size:12.5px;font-weight:800;color:#66717C;display:flex;flex-wrap:wrap;align-items:baseline;gap:5px}
-.sj-sum-nums b{color:#20242A;font-size:14px;font-variant-numeric:tabular-nums}
-.sj-sum-dot{color:#C0C8D3;font-style:normal}
 .sj-session-mini>div{padding:0;border-top:0}
 .sj-ex-section{padding:14px 0 2px;border-top:1px solid #EEF1F4;margin-top:14px}
 .sj-ex-section h3{font-size:11.5px;font-weight:900;color:#8B949E;letter-spacing:.5px;margin:0}
 .sj-ex-row{border-top:1px solid #F1F4F8}
 .sj-ex-row:first-of-type{border-top:0}
 .sj-ex-head{width:100%;display:flex;align-items:center;gap:10px;border:0;background:transparent;padding:13px 2px;min-height:48px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-ex-name{flex:1;min-width:0;font-size:15px;font-weight:900;color:#20242A;word-break:keep-all;line-height:1.35}
-.sj-ex-sub{flex-shrink:0;font-size:12.5px;font-weight:800;color:#8B949E;white-space:nowrap;font-variant-numeric:tabular-nums}
+.sj-ex-name{flex:1;min-width:0;font-size:15.5px;font-weight:900;color:#20242A;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sj-ex-body{padding:0 2px 14px}
 .sj-set-table{border-radius:14px;background:#F8FAFC;border:1px solid #EEF1F4;padding:2px 14px}
 .sj-set-row{display:grid;grid-template-columns:56px repeat(var(--sj-cols,2),1fr);align-items:center;padding:9px 0;border-top:1px solid #EEF1F4}

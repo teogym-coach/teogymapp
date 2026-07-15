@@ -6529,20 +6529,23 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     [homeMembers, liveMembersById, todayKST]
   );
 
-  const activeCount = homeMembers.filter(m=>!m.isTestMember&&(m.status||"active")!=="ended").length;
-  const todayCount  = Object.values(sessionsMap||{}).reduce((n,ss)=>n+(ss||[]).filter(s=>(s.date||"").slice(0,10)===today).length,0);
+  // 대표(TEO) 개인 운동기록·테스트 계정은 홈 KPI·검색 등 "일반 회원" 집계에서 공통 제외
+  const regularHomeMembers = useMemo(() => homeMembers.filter(isRegularAdminMember), [homeMembers]);
+
+  const activeCount = regularHomeMembers.filter(m=>(m.status||"active")!=="ended").length;
   const draftPair   = (pairSessions||[]).filter(ps=>!ps.splitDone).length;
   // 홈은 "오늘 미기록"만 다룬다 (누적 미기록은 수업기록 화면에서 관리).
   // TODO: 오늘 수업 예약/스케줄 데이터가 연결되면 "오늘 예정 - 오늘 기록됨" 판정으로 교체.
   //       현재는 스케줄 데이터가 없어 근거 없는 숫자를 만들지 않고 0으로 고정한다.
   const todayUnpubCount = 0;
   const weekAgo = new Date(Date.now()-7*86400000).toISOString().slice(0,10);
-  const newThisWeek = homeMembers.filter(m=>!m.isTestMember&&(m.startDate||"")>=weekAgo).length;
+  const newThisWeek = regularHomeMembers.filter(m=>(m.startDate||"")>=weekAgo).length;
 
   const todaySess = [];
-  homeMembers.forEach(m=>(sessionsMap[m.id]||[]).forEach(s=>{
+  regularHomeMembers.forEach(m=>(sessionsMap[m.id]||[]).forEach(s=>{
     if((s.date||"").slice(0,10)===today) todaySess.push({m,s});
   }));
+  const todayCount = todaySess.length;
 
   const goCs = ()=>{ if(showToast) showToast("아직 준비 중인 기능입니다."); else setComingSoon(true); };
   // 알림 클릭 — 읽음 처리 후 type별 목적 화면으로 이동 (회원 목록 피드와 동일 동작)
@@ -6558,7 +6561,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
-    const list = homeMembers.filter(m => !m.isTestMember && String(m.name||"").toLowerCase().includes(q));
+    const list = regularHomeMembers.filter(m => String(m.name||"").toLowerCase().includes(q));
     const rank = (m) => {
       const name = String(m.name||"").toLowerCase();
       if (name === q) return 0;
@@ -6566,7 +6569,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
       return 2;
     };
     return list.sort((a,b) => rank(a)-rank(b) || String(a.name||"").localeCompare(String(b.name||""), "ko"));
-  }, [searchQuery, homeMembers]);
+  }, [searchQuery, regularHomeMembers]);
   const searchResultsShown = searchResults.slice(0, 6);
   const searchHasMore = searchResults.length > 6;
   const todayMemberIds = useMemo(() => new Set(todaySess.map(x => x.m.id)), [todaySess]);
@@ -7098,6 +7101,19 @@ const isOwner = (m) => {
   return false; // 이름 기반 판별 제거 — 마이그레이션 후에는 isOwner/role 필드만 사용
 };
 
+// 관리자용 "일반 회원" 집계 제외 판정 — 대표 개인 운동기록 계정(TEO)과 테스트 계정(test member)을
+// 회원 목록·검색·통계·유입 분석 등 일반 회원 대상 화면에서 공통으로 제외하기 위한 단일 판정 함수.
+// 우선순위: 기존 구분값(isOwner/role, isTestMember) 우선 → 이름 비교는 fallback(대소문자·앞뒤 공백 무시).
+// Firestore 데이터/로그인 계정은 그대로 두고, "일반 회원" 파생 집계에서만 걸러내는 용도.
+function isExcludedAdminMember(m) {
+  if (!m) return false;
+  if (isOwner(m)) return true;
+  if (m.isTestMember === true) return true;
+  const name = String(m.name || "").trim().toLowerCase();
+  return name === "test member" || name === "teo";
+}
+const isRegularAdminMember = (m) => !isExcludedAdminMember(m);
+
 // 회원앱 로그인/상태 차단/공지/2:1 테스트용 프리셋 — docs/member-app-test-accounts.md 참고
 // 계정 1개를 만들어두고 상태(active/paused/ended)만 바꿔가며 재사용한다.
 const TEST_MEMBER_PRESETS = [
@@ -7153,7 +7169,7 @@ function buildTodayFeedItems(members, liveMembersById, notificationReads, todayK
   const readEventIds = notificationReads?.date === todayKST ? new Set(notificationReads.readEventIds || []) : new Set();
   const items = [];
   (members || []).forEach(m => {
-    if (isOwner(m)) return;
+    if (isExcludedAdminMember(m)) return;
     const live = liveMembersById[m.id];
     const liveMember = live ? { ...m, ...live } : m;
     const log = Array.isArray(liveMember.recentActivityLog) ? liveMember.recentActivityLog : [];
@@ -7178,7 +7194,7 @@ function buildTodaySummary(members, liveMembersById, todayKST) {
     attention.set(m.id, cur);
   };
   (members || []).forEach(m => {
-    if (isOwner(m)) return;
+    if (isExcludedAdminMember(m)) return;
     const live = liveMembersById[m.id];
     const liveMember = live ? { ...m, ...live } : m;
     const log = Array.isArray(liveMember.recentActivityLog) ? liveMember.recentActivityLog : [];
@@ -7444,7 +7460,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   const todayAttention = buildTodaySummary(members, liveMembersById, todayKST).attention;
   const attentionById = new Map(todayAttention.map(x=>[x.member.id, x.reasons]));
   // 오늘 입력 요약 — 항목별 입력 인원 수 (기존 todayInputTypes 재사용)
-  const todayInputCounts = (()=>{ const c={weight:0,condition:0,cardio:0,rpe:0}; members.forEach(m=>{ if(isOwner(m)) return; getTodayInputTypes(m).forEach(t=>{ if(c[t]!=null) c[t]++; }); }); return c; })();
+  const todayInputCounts = (()=>{ const c={weight:0,condition:0,cardio:0,rpe:0}; members.forEach(m=>{ if(isExcludedAdminMember(m)) return; getTodayInputTypes(m).forEach(t=>{ if(c[t]!=null) c[t]++; }); }); return c; })();
   // 왼쪽 아이콘 영역 큰 NEW 표시 조건 — 오늘 입력 피드(읽지 않은 알림)에 1건이라도 남아있는 회원만. 작은 NEW 배지는 폐지하고 이 하나로 통일한다.
   function hasTodayFeedInput(m) {
     return todayFeedItems.some(i => i.memberId === m.id);
@@ -7602,13 +7618,14 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   }
 
   // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용
+  // 대표(TEO) 개인 운동기록·테스트 계정은 일반 회원 목록에서 공통 제외
   const filtered = sortMembers(
     members.filter(m => {
-      if (isOwner(m)) return false; // 대표님은 일반 목록 제외
+      if (isExcludedAdminMember(m)) return false;
       return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m));
     })
   ).filter(m => {
-    if (search.trim()) return matchSearch(m.name, search) && !isOwner(m);
+    if (search.trim()) return matchSearch(m.name, search) && !isExcludedAdminMember(m);
     return passFilter(m);
   });
 
@@ -14796,8 +14813,8 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
 function ReferralStatsScreen({ members=[], onBack }) {
   const [period, setPeriod] = useState("all"); // all | 90 | 30
 
-  // 테스트 회원(isTestMember)은 유입 경로 통계에 섞이지 않도록 제외
-  const realMembers = useMemo(()=>members.filter(m=>!m.isTestMember), [members]);
+  // 대표(TEO) 개인 운동기록·테스트 회원(isTestMember)은 유입 경로 통계에 섞이지 않도록 공통 제외
+  const realMembers = useMemo(()=>members.filter(isRegularAdminMember), [members]);
 
   const filtered = useMemo(()=>{
     if (period === "all") return realMembers;

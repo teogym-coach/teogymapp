@@ -979,11 +979,15 @@ html{height:-webkit-fill-available;overflow-x:hidden;width:100%;}
 html,body,#root{min-height:100%;min-height:-webkit-fill-available;}
 body{background:#0B1120;color:#e2e8f0;font-family:'Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;overscroll-behavior:none;overflow-x:hidden;width:100%;max-width:100vw;}
 #root{overflow-x:hidden;width:100%;}
-/* 좌측 고정 사이드바(AdminSidebar, .admin-sidebar)가 실제로 마운트된 화면(아이패드 가로/PC)에서만
-   document 레벨 스크롤을 잠근다. 상위 wrapper의 min-height:100vh가 iPad Safari 주소창 변화로
-   100dvh 뷰포트보다 커지는 순간에 body 자체가 스크롤되며 사이드바 상단이 밀려 잘리는 문제를 방지.
-   사이드바가 없는 화면(모바일 등)은 기존 document 스크롤 동작을 그대로 유지한다. */
-html:has(.admin-sidebar),body:has(.admin-sidebar),#root:has(.admin-sidebar){height:100dvh;overflow:hidden;}
+/* 관리자앱 화면 중 자체 내부 스크롤 구조(본문만 overflow-y:auto)를 이미 갖춘 shell(.admin-scroll-shell —
+   홈 화면 전체, 회원 목록 와이드 레이아웃)이 마운트돼 있을 때만 document 레벨 스크롤을 잠근다.
+   상위 wrapper의 min-height:100vh가 iPad Safari 주소창 변화로 뷰포트보다 커지는 순간, 또는 검색 input
+   focus 시 Safari가 자체적으로 layout viewport를 밀어 올리는 순간에 body 자체가 스크롤되며
+   상단 영역(로고/사이드바 등)이 밀려 잘리는 문제를 방지한다. --admin-vh는 관리자 화면이 떠 있는 동안
+   visualViewport 실측 높이로 갱신되어(App의 useEffect 참고) 키보드가 열려도 정확히 반영된다.
+   내부 스크롤 구조가 없는 화면(회원 목록 모바일, 수업기록 등 document 스크롤에 의존하는 화면)과
+   회원앱·로그인 화면은 이 규칙의 영향을 받지 않고 기존 동작을 그대로 유지한다. */
+html:has(.admin-scroll-shell),body:has(.admin-scroll-shell),#root:has(.admin-scroll-shell){height:var(--admin-vh,100dvh);max-height:var(--admin-vh,100dvh);overflow:hidden;}
 input,textarea,select{font-family:'Noto Sans KR',sans-serif;background:#111827;border:1px solid rgba(255,255,255,0.10);color:#ddddf0;border-radius:7px;padding:8px 12px;font-size:16px;width:100%;outline:none;transition:border-color .18s;-webkit-appearance:none;}
 input:focus,textarea:focus,select:focus{border-color:#5EEAD4;box-shadow:0 0 0 3px rgba(0,229,160,.07);}
 input::placeholder,textarea::placeholder{color:#2e2e3e;}
@@ -5035,6 +5039,44 @@ export default function App() {
     });
   }, [user, memberMode]);
 
+  // 관리자앱 전용 iPad Safari 키보드 대응 — 회원 검색 등 input focus 시 Safari가 layout viewport를
+  // 자체적으로 스크롤시키는 동작은 CSS overflow:hidden으로도 막을 수 없어(overflow는 사용자 터치 스크롤만 차단),
+  // visualViewport 실측 높이를 --admin-vh로 반영하고 blur 이후 남는 window/document 스크롤 오프셋만 복구한다.
+  // 관리자 화면이 마운트된 동안(adminVerified && !memberMode)에만 동작하며 회원앱·로그인 화면에는 영향 없음.
+  // 관리자 shell(adminAppRef) 범위의 focusout만 감지 — 본문 내부 scrollTop(overflow-y:auto 컨테이너)은 건드리지 않는다.
+  const adminAppRef = useRef(null);
+  useEffect(() => {
+    if (!adminVerified || memberMode) return;
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+    const updateAdminVh = () => {
+      const h = viewport?.height || window.innerHeight;
+      root.style.setProperty("--admin-vh", `${h}px`);
+    };
+    const restoreDocumentScroll = () => {
+      window.scrollTo(0, 0);
+      root.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    // 키보드 닫힘 애니메이션/visualViewport 복원이 끝난 뒤 문서 스크롤만 원위치로 복구(2프레임 지연)
+    const onFocusOut = () => {
+      requestAnimationFrame(() => { requestAnimationFrame(restoreDocumentScroll); });
+    };
+    updateAdminVh();
+    viewport?.addEventListener("resize", updateAdminVh);
+    viewport?.addEventListener("scroll", updateAdminVh);
+    window.addEventListener("orientationchange", updateAdminVh);
+    const shellEl = adminAppRef.current;
+    shellEl?.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      viewport?.removeEventListener("resize", updateAdminVh);
+      viewport?.removeEventListener("scroll", updateAdminVh);
+      window.removeEventListener("orientationchange", updateAdminVh);
+      shellEl?.removeEventListener("focusout", onFocusOut, true);
+      root.style.removeProperty("--admin-vh");
+    };
+  }, [adminVerified, memberMode]);
+
   const loadMembers = useCallback(async () => {
     // 이 요청 이후 새로운 loadMembers() 호출이 시작되면(중복 클릭 등) 이 요청의 응답은 무시한다 —
     // 늦게 도착한 이전 요청이 최신 상태를 덮어쓰는 것을 방지.
@@ -5654,7 +5696,7 @@ export default function App() {
   );
 
   return (
-    <div style={{minHeight:"100vh",background:screen==="session"?"#F6F7F9":"#0B1120"}}>
+    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:screen==="session"?"#F6F7F9":"#0B1120"}}>
       <style>{CSS}</style>
 
       {toast && (
@@ -6099,7 +6141,7 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
       width:236,minWidth:236,background:DB.side,
       borderRight:`1px solid ${DB.border}`,
       display:"flex",flexDirection:"column",
-      height:"100dvh",minHeight:0,overflow:"hidden",flexShrink:0,
+      height:"var(--admin-vh, 100dvh)",minHeight:0,overflow:"hidden",flexShrink:0,
     }}>
       {/* 로고 — 스크롤되지 않는 고정 영역 */}
       <div style={{padding:"22px 18px 17px",borderBottom:`1px solid ${DB.border}`,flexShrink:0}}>
@@ -6606,8 +6648,9 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const icAlert = ic(<><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>);
   const icSpark = ic(<><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></>);
 
-  // iPad Pro 11" landscape 기준 높이 (dvh = dynamic viewport height, Safari 주소창 대응)
-  const VH = "100dvh";
+  // iPad Pro 11" landscape 기준 높이 — visualViewport 실측값(--admin-vh, App의 useEffect가 갱신)을
+  // 우선 사용하고, 아직 값이 없으면 100dvh로 폴백(dvh = dynamic viewport height, Safari 주소창 대응)
+  const VH = "var(--admin-vh, 100dvh)";
   const PAD = isWide ? "30px 38px 56px" : "20px 18px 44px";
   const GAP = isWide ? 38 : 28;   // 섹션 간 여백 — 여백 자체가 디자인이 되도록 기존보다 15~20% 여유
   const GAPM = 14;                // 같은 그룹 내 카드 간 여백
@@ -6952,7 +6995,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
 
   return (
     <>
-      <div style={{display:"flex",height:VH,background:DB.bg,overflow:"hidden"}}>
+      <div className="admin-scroll-shell" style={{display:"flex",height:VH,background:DB.bg,overflow:"hidden"}}>
         {/* 사이드바 (와이드 전용) — 공용 AdminSidebar */}
         {isWide && (
           <AdminSidebar active="home" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={goCs} />
@@ -7539,12 +7582,12 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   const ownerMember = members.find(m => isOwner(m));
 
   return (
-    <div style={{display:"flex",height:isWide?"100dvh":"auto",minHeight:isWide?undefined:"100dvh",background:DB.bg,overflow:isWide?"hidden":"visible"}}>
+    <div className={isWide?"admin-scroll-shell":undefined} style={{display:"flex",height:isWide?"var(--admin-vh, 100dvh)":"auto",minHeight:isWide?undefined:"100dvh",background:DB.bg,overflow:isWide?"hidden":"visible"}}>
       {/* 사이드바 (와이드 전용) — 홈 화면과 공유하는 AdminSidebar */}
       {isWide && (
         <AdminSidebar active="members" setScreen={setScreen} loadMembers={onRefresh} loadPairSessions={loadPairSessions} goCs={()=>showToast?.("아직 준비 중인 기능입니다.")} />
       )}
-    <div style={{flex:1,overflowY:isWide?"auto":"visible",overscrollBehaviorY:isWide?"contain":undefined,minHeight:0,height:isWide?"100dvh":undefined,background:DB.bg,fontFamily:DB.font}}>
+    <div style={{flex:1,overflowY:isWide?"auto":"visible",overscrollBehaviorY:isWide?"contain":undefined,minHeight:0,height:isWide?"var(--admin-vh, 100dvh)":undefined,background:DB.bg,fontFamily:DB.font}}>
       {/* ═══ 헤더 — 홈 대시보드와 같은 라이트 스티키 헤더 ═══ */}
       <div style={{position:"sticky",top:0,zIndex:60,background:"rgba(246,247,249,.88)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderBottom:DB.hairline}}>
         <div style={{maxWidth:isWide?1400:820,margin:"0 auto",display:"flex",alignItems:"center",gap:10,padding:"11px 16px",paddingTop:"calc(11px + env(safe-area-inset-top,0px))"}}>

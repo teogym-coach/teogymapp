@@ -4906,6 +4906,14 @@ export default function App() {
   const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
   const [healthHubInitialTab, setHealthHubInitialTab] = useState("대시보드"); // 오늘 입력 피드에서 특정 항목을 눌러 건강관리 허브로 이동할 때 시작 탭
   const [loading,  setLoading]  = useState(false);
+  // 회원 목록 전용 로딩/에러 — 다른 화면들이 공유하는 전역 loading과 분리한다.
+  // (전역 loading은 회원 목록 조회와 무관한 다른 비동기 작업에서도 true/false로 계속 토글되므로,
+  //  같은 플래그로 스켈레톤을 그리면 그 작업들과 경합해 화면이 꼬일 수 있다.)
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [membersError,   setMembersError]   = useState(null);
+  const membersReqIdRef = useRef(0); // 최신 회원 목록 요청만 화면에 반영(늦게 도착한 이전 요청 응답 무시)
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
   const [toast,    setToast]    = useState(null);
   const [loginErr, setLoginErr] = useState("");
   const [memberPrivateData, setMemberPrivateData] = useState(null);
@@ -5023,31 +5031,55 @@ export default function App() {
   }, [user, memberMode]);
 
   const loadMembers = useCallback(async () => {
-    setLoading(true);
+    // 이 요청 이후 새로운 loadMembers() 호출이 시작되면(중복 클릭 등) 이 요청의 응답은 무시한다 —
+    // 늦게 도착한 이전 요청이 최신 상태를 덮어쓰는 것을 방지.
+    const reqId = ++membersReqIdRef.current;
+    const isStale = () => !isMountedRef.current || membersReqIdRef.current !== reqId;
+    if (process.env.NODE_ENV !== "production") console.log("[TEO GYM] loadMembers — 조회 시작");
+    setMembersLoading(true);
+    setMembersError(null);
+
+    let mbs;
     try {
-      const mbs = await getMembers();
-      // ── 레거시 마이그레이션: 이름 기반 대표님 → isOwner 필드로 자동 전환 ──
-      // 기존에 "김태오"로 저장된 대표님 데이터에 isOwner:true 를 1회 자동 추가
-      const needMigrate = mbs.filter(m =>
-        m.name === OWNER_LEGACY_NAME && m.isOwner !== true && m.role !== "owner"
-      );
-      if (needMigrate.length > 0) {
-        await Promise.all(needMigrate.map(m => updateMember(m.id, { isOwner: true }).catch(()=>{})));
-        needMigrate.forEach(m => { m.isOwner = true; });
-      }
-      setMembers(mbs);
-      // 회원 목록 카드용 최근 5세션만 로드 (전량 로드 대비 read 95% 절감)
-      // 실제 수업일지 전체는 회원 선택(goHub) 시 loadMemberData에서 로드됨
-      const entries = await Promise.all(
-        mbs.map(async m => {
-          try { const ss = await getRecentSessions(m.id, 5); return [m.id, ss]; }
-          catch { return [m.id, []]; }
-        })
-      );
-      setSessionsMap(Object.fromEntries(entries));
+      mbs = await getMembers();
+    } catch (e) {
+      console.error("[TEO GYM] loadMembers — 회원 목록 조회 실패:", e.message);
+      if (isStale()) return;
+      setMembersError(e.message || "회원 목록을 불러오지 못했습니다.");
+      setMembersLoading(false);
+      return;
     }
-    catch(e) { showToast("불러오기 실패: "+e.message, "err"); }
-    finally { setLoading(false); }
+    if (isStale()) return;
+
+    // ── 레거시 마이그레이션: 이름 기반 대표님 → isOwner 필드로 자동 전환 ──
+    // 기존에 "김태오"로 저장된 대표님 데이터에 isOwner:true 를 1회 자동 추가
+    const needMigrate = mbs.filter(m =>
+      m.name === OWNER_LEGACY_NAME && m.isOwner !== true && m.role !== "owner"
+    );
+    if (needMigrate.length > 0) {
+      await Promise.all(needMigrate.map(m => updateMember(m.id, { isOwner: true }).catch(()=>{})));
+      needMigrate.forEach(m => { m.isOwner = true; });
+    }
+    if (isStale()) return;
+
+    if (process.env.NODE_ENV !== "production") console.log("[TEO GYM] loadMembers — 조회 성공:", mbs.length, "명");
+    // 회원 기본 목록은 여기서 즉시 화면에 반영 — 아래 부가정보(최근 세션) 조회가
+    // 늦거나 일부 실패해도 회원 목록 자체는 정상적으로 보여야 한다.
+    setMembers(mbs);
+    setMembersError(null);
+    setMembersLoading(false);
+
+    // 회원 목록 카드용 최근 5세션만 로드 (전량 로드 대비 read 95% 절감)
+    // 실제 수업일지 전체는 회원 선택(goHub) 시 loadMemberData에서 로드됨
+    // 회원별로 개별 try/catch → 한 명의 조회 실패가 전체 목록에 영향을 주지 않음(해당 회원만 [] 폴백)
+    const entries = await Promise.all(
+      mbs.map(async m => {
+        try { const ss = await getRecentSessions(m.id, 5); return [m.id, ss]; }
+        catch (e) { console.warn("[TEO GYM] loadMembers — 최근 세션 조회 실패:", m.id, e.message); return [m.id, []]; }
+      })
+    );
+    if (isStale()) return;
+    setSessionsMap(Object.fromEntries(entries));
   }, []);
 
   const loadPairSessions = useCallback(async () => {
@@ -5678,7 +5710,7 @@ export default function App() {
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
-        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={loading} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
@@ -7156,7 +7188,7 @@ function StatusBlock({icon,label,value,tone,muted,sub,subTone}){
   );
 }
 
-function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast }) {
+function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   useEffect(()=>{
     const h=()=>setWinW(window.innerWidth);
@@ -7557,10 +7589,21 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
         </div>
       )}
 
-      {/* 회원 목록 */}
-      {loading ? (
+      {/* 회원 목록 — loading(=membersLoading)은 회원 목록 조회 자체의 상태만 반영(다른 화면 작업과 무관).
+          최초 진입(데이터 없음)일 때만 전체 스켈레톤을 그리고, 이미 불러온 목록이 있으면 백그라운드 재조회 중에도
+          기존 카드를 그대로 유지한다 — 화면 이동마다 목록이 사라지거나 깜빡이는 것을 방지. */}
+      {loading && members.length === 0 ? (
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {[0,1,2,3].map(i=><div key={i} style={{height:isWide?58:isTabletRow?62:96,borderRadius:18,background:"#fff",border:`1px solid ${DB.border}`,opacity:.55}}/>)}
+        </div>
+      ) : membersError && members.length === 0 ? (
+        <div style={{padding:"52px 0",textAlign:"center"}}>
+          <div style={{width:52,height:52,borderRadius:"50%",background:"rgba(239,68,68,.10)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto",fontSize:22}}>⚠️</div>
+          <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,marginTop:14}}>회원 목록을 불러오지 못했습니다.</div>
+          <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginTop:5,wordBreak:"break-all"}}>{membersError}</div>
+          <button onClick={()=>onRefresh?.()} style={{marginTop:16,padding:"9px 20px",borderRadius:10,border:`1px solid ${DB.border}`,background:DB.card,color:DB.text,fontFamily:DB.font,fontWeight:700,fontSize:12.5,cursor:"pointer"}}>
+            다시 시도
+          </button>
         </div>
       ) : filtered.length === 0 ? (
         <div style={{padding:"52px 0",textAlign:"center"}}>

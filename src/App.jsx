@@ -5698,8 +5698,8 @@ export default function App() {
         </div>
       )}
 
-      {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)에서는 숨김 */}
-      {screen !== "home" && screen !== "members" && (
+      {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)·수업 예정(집중 모드, 확보된 높이를 캘린더에 전부 배정)에서는 숨김 */}
+      {screen !== "home" && screen !== "members" && screen !== "upcoming" && (
       <nav className="noprint" style={{
         borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"0 clamp(10px,3vw,16px)",
         paddingTop:"env(safe-area-inset-top, 0px)",
@@ -8063,15 +8063,19 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
   };
   const goToday = () => setYm(todayKey.slice(0, 7));
   const weekdays = ["월", "화", "수", "목", "금", "토", "일"];
+  const weekCount = cells.length / 7; // 5주 또는 6주 — 남은 높이를 이 주 수만큼 균등 분배한다
 
+  // 이 화면은 App.jsx 최상위에서 글로벌 헤더(nav)를 조건부로 숨기고 집중 모드로 렌더링된다(가로·세로모드 공통).
+  // admin-scroll-shell 클래스가 DOM에 있으면 html/body/#root 높이를 --admin-layout-height(키보드 영향 없는 고정 뷰포트 높이)로 잠가
+  // 페이지 전체 스크롤 없이 이 화면 내부 flex 구조만으로 높이를 다 쓰게 한다.
   return (
-    <div className={isWide ? "admin-scroll-shell" : undefined} style={{ display: "flex", height: isWide ? "var(--admin-layout-height, 100dvh)" : "auto", minHeight: isWide ? undefined : "100dvh", background: DB.bg, overflow: isWide ? "hidden" : "visible" }}>
+    <div className="admin-scroll-shell" style={{ display: "flex", height: "var(--admin-layout-height, 100dvh)", background: DB.bg, overflow: "hidden" }}>
       {isWide && (
         <AdminSidebar active="upcoming" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={() => showToast?.("아직 준비 중인 기능입니다.")} />
       )}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: isWide ? "hidden" : "visible", minHeight: 0, height: isWide ? "var(--admin-layout-height, 100dvh)" : undefined, background: DB.bg, fontFamily: DB.font }}>
-        {/* 헤더 — 이전 달/현재 연월/다음 달/오늘 버튼만. 조회 전용이라 그 외 조작 UI 없음 */}
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: DB.hairline, background: "rgba(246,247,249,.92)" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", background: DB.bg, fontFamily: DB.font }}>
+        {/* 헤더 — 이전 달/현재 연월/다음 달/오늘 버튼만. 조회 전용이라 그 외 조작 UI 없음. 글로벌 헤더가 숨겨진 화면이라 상단 안전영역을 이 헤더가 흡수한다 */}
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", paddingTop: "calc(10px + env(safe-area-inset-top, 0px))", borderBottom: DB.hairline, background: "rgba(246,247,249,.92)" }}>
           <button onClick={onBack} aria-label="뒤로" style={upNavBtnStyle}>←</button>
           <span style={{ fontWeight: 800, fontSize: isWide ? 16 : 15, color: DB.text, letterSpacing: "-.3px", whiteSpace: "nowrap" }}>수업 예정</span>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
@@ -8089,12 +8093,13 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
           ))}
         </div>
 
-        {/* 월간 그리드 — 와이드(아이패드 가로)에서는 화면 안에 한 달이 꽉 차도록 고정 높이 + 날짜별 내부 스크롤,
-            좁은 화면(세로모드)에서는 화면 전체 스크롤로 전환해 내용이 눌리지 않게 한다 */}
-        <div style={isWide
-          ? { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "repeat(7,1fr)", gridAutoRows: "1fr", gap: 3, padding: "2px 6px 6px", overflow: "hidden" }
-          : { flex: 1, display: "grid", gridTemplateColumns: "repeat(7,1fr)", gridAutoRows: "minmax(78px,auto)", gap: 3, padding: "2px 6px 10px", overflowY: "auto" }
-        }>
+        {/* 월간 그리드 — 상단바·요일 행이 차지한 나머지 높이(flex:1)를 현재 월의 실제 주 수(weekCount)만큼
+            gridTemplateRows로 균등 분배한다. 5주/6주 어느 쪽이든 마지막 주까지 화면 안에 들어온다. */}
+        <div style={{
+          flex: 1, minHeight: 0, overflow: "hidden",
+          display: "grid", gridTemplateColumns: "repeat(7,1fr)", gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))`,
+          gap: 3, padding: "2px 6px 6px", paddingBottom: "calc(6px + env(safe-area-inset-bottom, 0px))",
+        }}>
           {cells.map(c => {
             if (c.out) return <div key={c.key} />;
             const list = byDate.get(c.key) || [];
@@ -8106,7 +8111,7 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
                 boxShadow: isToday ? `0 0 0 1px ${DB.mint}` : "none",
               }}>
                 <span style={{ fontSize: 10, fontWeight: isToday ? 800 : 700, color: isToday ? DB.mintSoft : DB.sub, flexShrink: 0, marginBottom: 1 }}>{c.d}</span>
-                <div style={{ flex: 1, minHeight: 0, overflowY: isWide ? "auto" : "visible", display: "flex", flexDirection: "column", gap: 1 }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
                   {list.map(item => (
                     <div key={item.id} title={`${item.name} · ${item.part}`} style={{
                       fontSize: 10, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: DB.text,

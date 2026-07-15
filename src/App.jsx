@@ -7097,7 +7097,7 @@ const MEMBER_CARD_STATUS_FIELDS = [
 ];
 // 카드 셸 — hover 리프트 + 클릭 시 민트 보더/살짝 확대 (220ms).
 // mode="wide"(가로모드, 사이드바+5개 상태 한 줄) / "tablet"(세로모드지만 폭은 충분 — 좌우 한 줄 2영역, 상태 3개) / "mobile"(폭 부족 — 2줄로 압축)
-function MemberCardShell({onClick,dim,mode,children}){
+function MemberCardShell({onClick,dim,mode,today,children}){
   const [hov,setHov]=useState(false);
   const [press,setPress]=useState(false);
   const row = mode!=="mobile";
@@ -7106,9 +7106,10 @@ function MemberCardShell({onClick,dim,mode,children}){
     onMouseDown={()=>setPress(true)} onMouseUp={()=>setPress(false)}
     onTouchStart={()=>setPress(true)} onTouchEnd={()=>setPress(false)}
     style={{
-      background:"#fff",borderRadius:18,cursor:"pointer",
-      border:`1.5px solid ${press?DB.mint:hov?"rgba(57,199,184,.35)":DB.border}`,
-      boxShadow:press?"0 4px 18px rgba(57,199,184,.16)":hov?DB.shadowLg:DB.shadow,
+      boxSizing:"border-box",
+      background:today?"rgba(57,199,184,.025)":"#fff",borderRadius:18,cursor:"pointer",
+      border:`${today?2:1.5}px solid ${press?DB.mint:hov?"rgba(57,199,184,.35)":today?DB.mint:DB.border}`,
+      boxShadow:press?"0 4px 18px rgba(57,199,184,.16)":hov?DB.shadowLg:today?"0 0 0 1px rgba(57,199,184,.08), 0 4px 14px rgba(15,148,136,.08)":DB.shadow,
       transform:press?"scale(1.008)":hov?"translateY(-2px)":"none",
       transition:"transform .22s ease,box-shadow .22s ease,border-color .22s ease",
       padding:mode==="wide"?"9px 16px":mode==="tablet"?"7px 14px":"8px 12px",
@@ -7608,7 +7609,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, onSe
             return (
               <div key={m.id} style={{position:"relative"}}
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
-              <MemberCardShell dim={isEnded} mode={cardMode} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
+              <MemberCardShell dim={isEnded} mode={cardMode} today={next.hot} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 좌 — 프로필 + 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
                   <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isRowLayout?leftPct:"100%",maxWidth:isRowLayout?leftPct:undefined,flexShrink:0}}>
                     <div style={{position:"relative",flexShrink:0}}>

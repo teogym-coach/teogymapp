@@ -1604,8 +1604,8 @@ function MemberCalendar(p){
   const summary=useMemo(()=>computeCalendarMonthSummary(dayMap,ym,p.onboarding,todayKey),[dayMap,ym,p.onboarding,todayKey]);
 
   const [yy,mm]=ym.split("-").map(Number);
-  // 월요일 시작(시안 기준) — 앞뒤는 인접 월 날짜(회색, 선택 불가)로 주 단위를 채운다
-  const firstDow=(new Date(yy,mm-1,1).getDay()+6)%7;
+  // 일요일 시작 — 앞뒤는 인접 월 날짜(회색, 선택 불가)로 주 단위를 채운다
+  const firstDow=new Date(yy,mm-1,1).getDay();
   const daysInMonth=new Date(yy,mm,0).getDate();
   const prevDim=new Date(yy,mm-1,0).getDate();
   const cells=[];
@@ -1716,7 +1716,7 @@ function MemberCalendar(p){
 
     {/* 캘린더 — 글자 뒤에 얇고 긴 파스텔 배경이 깔리는 Apple Calendar 일정 스타일 */}
     <div className="mv2-calx-card">
-      <div className="mv2-calx-dow" aria-hidden="true">{["월","화","수","목","금","토","일"].map(d=><span key={d}>{d}</span>)}</div>
+      <div className="mv2-calx-dow" aria-hidden="true">{["일","월","화","수","목","금","토"].map(d=><span key={d}>{d}</span>)}</div>
       <div className="mv2-calx-grid">
         {cells.map((c,i)=>{
           if(c.out) return <span key={`o${i}`} className="mv2-calx-cell out" aria-hidden="true"><span className="mv2-calx-num">{c.d}</span></span>;
@@ -4482,7 +4482,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-calx-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:12px 8px 10px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .mv2-calx-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:2px}
 .mv2-calx-dow span{text-align:center;font-size:11px;font-weight:800;color:#A8B0BA;padding:4px 0}
-.mv2-calx-dow span:last-child{color:#F26D6D}
+.mv2-calx-dow span:first-child{color:#F26D6D}
 .mv2-calx-grid{display:grid;grid-template-columns:repeat(7,1fr)}
 .mv2-calx-cell{position:relative;min-height:86px;border:0;border-top:1px solid #F3F5F8;background:transparent;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:6px 2px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .mv2-calx-cell.out{cursor:default}

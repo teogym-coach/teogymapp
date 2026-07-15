@@ -1039,8 +1039,25 @@ button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:
   .set-grid-header,.set-grid-row{grid-template-columns:20px 1fr 1fr 14px!important;gap:3px!important;}
   .vol-col{display:none!important;}
 }
-/* 운동 카드 3열 구조(왼:세트 · 가운데:기구/카테고리/도구 · 오:자극도) — 가로/세로모드 모두 동일 구조, 폭에 따라 비율만 반응형 */
-.ex-3col{display:grid;grid-template-columns:3fr 1fr 1.2fr;gap:8px;align-items:start;}
+/* 운동 카드 3열 구조(왼:세트 · 가운데:기구/카테고리/도구 · 오:자극도) — 아이패드 가로/세로모드 모두 동일 DOM·동일 3열 Grid 유지(700px 미만 스마트폰에서만 1열로 전환) */
+.ex-3col{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(150px,0.7fr) minmax(230px,1fr);gap:8px;align-items:start;}
+.ex-3col>div{min-width:0;box-sizing:border-box;}
+.ex-col-set{grid-column:1;grid-row:1;}
+.ex-col-mid{grid-column:2;grid-row:1;}
+.ex-col-detail{grid-column:1 / -1;grid-row:2;}
+.ex-col-stim{grid-column:3;grid-row:1;}
+@media(max-width:699px){
+  .ex-3col{grid-template-columns:1fr;gap:10px;}
+  .ex-col-set{grid-column:1;grid-row:1;}
+  .ex-col-mid{grid-column:1;grid-row:2;}
+  .ex-col-detail{grid-column:1;grid-row:3;}
+  .ex-col-stim{grid-column:1;grid-row:4;}
+}
+@media(max-width:834px) and (min-width:700px){
+  /* 아이패드 세로모드: 줄바꿈 대신 3열 폭·간격 압축(입력창 글자는 16px 유지 — iOS 확대 방지 규칙과 충돌 금지) */
+  .ex-3col{grid-template-columns:minmax(0,1.5fr) minmax(120px,0.6fr) minmax(190px,0.9fr);gap:6px;}
+  .ex-3col input,.ex-3col select{padding:0 4px!important;}
+}
 /* iPhone Safari zoom 방지: 모든 input 16px 이상 필수 */
 input,select,textarea{
   max-width:100%!important;
@@ -11163,12 +11180,12 @@ function updateEx(ei, key, val) {
                 </div>
               );
             })()}
-            {/* ── 아이패드 가로모드(isLandscape): 왼쪽 세트 · 가운데 기구/운동 부위 · 오른쪽 자극도를 CSS Grid 3열로 배치
-                 세로모드·모바일: 같은 DOM을 flex-column으로 쌓고 order로 "세트→기구→운동 부위→자극도" 순서만 재배치(가로 스크롤 없음) ── */}
-            <div className={isLandscape ? "ex-3col" : undefined}
-              style={!isLandscape ? {display:"flex",flexDirection:"column",gap:10} : undefined}>
+            {/* ── 왼쪽 세트 · 가운데 기구/운동 부위 · 오른쪽 자극도를 CSS Grid 3열로 배치.
+                 아이패드 가로·세로모드 모두 동일 DOM·동일 3열 유지(폭에 따라 열 비율만 CSS 미디어쿼리로 조정),
+                 700px 미만 스마트폰에서만 .ex-col-* 클래스가 CSS로 세로 1열 재배치됨(가로 스크롤 없음) ── */}
+            <div className="ex-3col">
             {/* 가운데 열 — 기구 + 운동 부위(단일 선택) + 카테고리/도구. 맨몸도 기구 선택 목록 안에 포함(EQUIP_LIST 그대로) */}
-            <div style={{gridColumn:2,gridRow:1,minWidth:0,order:isLandscape?undefined:2}}>
+            <div className="ex-col-mid">
               <label>기구</label>
               <select value={ex.equipment||""} onChange={e => updateEx(ei,"equipment",e.target.value)}
                 onFocus={()=>setActiveCardIdx(ei)} onPointerDown={e => e.stopPropagation()}
@@ -11211,7 +11228,7 @@ function updateEx(ei, key, val) {
             </div>
             {/* ── 상세 설정 — 기본 접힘, 전체 폭. 가운데 열과 중복되지 않는 항목만(세부부위 편집/기능 부위·목적/자세 피드백) ── */}
             {expandedDetail.has(ei) && (
-              <div style={{gridColumn:"1 / -1",gridRow:2,order:isLandscape?undefined:3,marginTop:2,padding:"9px 10px",borderRadius:8,background:"#F6F7F9",border:"1px solid #EDEFF2"}}>
+              <div className="ex-col-detail" style={{marginTop:2,padding:"9px 10px",borderRadius:8,background:"#F6F7F9",border:"1px solid #EDEFF2"}}>
                 {ex.equipment === "기능" ? (
                   <>
                     <div style={{marginBottom:6}}>
@@ -11299,7 +11316,7 @@ function updateEx(ei, key, val) {
               </div>
             )}
             {/* 왼쪽 열 — 세트 입력 */}
-            <div style={{gridColumn:1,gridRow:1,minWidth:0,order:isLandscape?undefined:1}}>
+            <div className="ex-col-set">
             {isFuncEx(ex) ? (
               /* ── 기능운동 모드 ── */
               <div>
@@ -11559,7 +11576,7 @@ function updateEx(ei, key, val) {
             )}
             </div>
             {/* 오른쪽 열 — 이 운동 자극도(운동 종목당 1회) + 다음 수업 추천. 가로/세로모드 모두 항상 노출(세트별 입력 아님) */}
-            <div style={{gridColumn:3,gridRow:1,minWidth:0,order:isLandscape?undefined:4,borderRadius:8,overflow:"hidden",
+            <div className="ex-col-stim" style={{borderRadius:8,overflow:"hidden",
               background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.22)"}} onFocus={()=>setActiveCardIdx(ei)}>
               <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"9px 10px 0"}}>
                 <Mo c="#8B5CF6" s={9} style={{fontWeight:800,flexShrink:0}}>🎯 이 운동 자극도</Mo>

@@ -5709,7 +5709,7 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
@@ -6455,10 +6455,15 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [comingSoon, setComingSoon] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchActiveIdx, setSearchActiveIdx] = useState(-1);
+  const searchWrapRef = useRef(null);
+  const searchInputRef = useRef(null);
   useEffect(()=>{
     const h=()=>setWinW(window.innerWidth);
     window.addEventListener("resize",h);
@@ -6513,6 +6518,66 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
     setDrawerOpen(false);
     onSelectMember?.(target, feedItemTarget(item.type));
   };
+
+  // 회원 검색 — 홈 상단 입력창. 새 Firebase 조회 없이 이미 로드된 homeMembers만 사용해 이름으로 검색.
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const list = homeMembers.filter(m => !m.isTestMember && String(m.name||"").toLowerCase().includes(q));
+    const rank = (m) => {
+      const name = String(m.name||"").toLowerCase();
+      if (name === q) return 0;
+      if (name.startsWith(q)) return 1;
+      return 2;
+    };
+    return list.sort((a,b) => rank(a)-rank(b) || String(a.name||"").localeCompare(String(b.name||""), "ko"));
+  }, [searchQuery, homeMembers]);
+  const searchResultsShown = searchResults.slice(0, 6);
+  const searchHasMore = searchResults.length > 6;
+  const todayMemberIds = useMemo(() => new Set(todaySess.map(x => x.m.id)), [todaySess]);
+  const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료" };
+
+  const closeSearch = () => { setSearchOpen(false); setSearchActiveIdx(-1); };
+  const clearSearch = () => { setSearchQuery(""); closeSearch(); };
+  const openMemberFromSearch = (m) => {
+    if (!m) return;
+    clearSearch();
+    onSelectMember?.(m);
+  };
+  const handleSearchChange = (e) => {
+    const v = e.target.value;
+    setSearchQuery(v);
+    setSearchActiveIdx(-1);
+    if (v.trim().length === 0) closeSearch();
+    else setSearchOpen(true);
+  };
+  const handleSearchFocus = () => {
+    if (searchQuery.trim().length > 0) setSearchOpen(true);
+  };
+  const handleSearchKeyDown = (e) => {
+    if (e.key === "Escape") { e.currentTarget.blur(); closeSearch(); return; }
+    if (!searchResultsShown.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSearchActiveIdx(i => (i+1) % searchResultsShown.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSearchActiveIdx(i => (i-1+searchResultsShown.length) % searchResultsShown.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const pick = searchResultsShown[searchActiveIdx] || searchResultsShown[0];
+      openMemberFromSearch(pick);
+    }
+  };
+  // 검색 결과 바깥 클릭 시 닫기 — cleanup 포함
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onDocMouseDown = (e) => {
+      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target)) closeSearch();
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [searchOpen]);
 
   // Stat card icons — currentColor로 래퍼 div의 color를 그대로 물려받음 (얇고 미니멀한 라인 아이콘)
   const si = (paths) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{paths}</svg>;
@@ -6570,16 +6635,87 @@ function HomeScreen({ setScreen, loadMembers, members, sessionsMap, pairSessions
           </div>
         )}
         <div style={{display:"flex",alignItems:"center",gap:9}}>
-          {/* 회원 검색 — 기존 회원 관리 화면(검색 내장)으로 이동하는 진입점. 새 검색 로직 없음 */}
+          {/* 회원 검색 — 홈 화면을 유지한 채 members 배열 안에서 이름으로 검색하는 실제 input. 새 Firebase 조회 없음 */}
           {isWide && (
-            <button onClick={()=>{loadMembers();setScreen("members");}} style={{
-              display:"flex",alignItems:"center",gap:8,width:190,
-              background:DB.card,border:`1px solid ${DB.border}`,borderRadius:11,
-              padding:"8px 12px",cursor:"pointer",boxShadow:DB.shadow,transition:"border-color .2s",
-            }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-              <span style={{fontFamily:DB.font,fontSize:12,color:DB.faint,fontWeight:500}}>회원 검색</span>
-            </button>
+            <div ref={searchWrapRef} style={{position:"relative",width:200,flexShrink:0}}>
+              <div style={{
+                display:"flex",alignItems:"center",gap:8,
+                background:DB.card,border:`1px solid ${searchOpen?DB.mint:DB.border}`,borderRadius:11,
+                padding:"8px 12px",boxShadow:DB.shadow,transition:"border-color .2s",
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  inputMode="search"
+                  autoComplete="off"
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  onFocus={handleSearchFocus}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="회원 검색"
+                  aria-label="회원 검색"
+                  style={{flex:1,minWidth:0,border:"none",outline:"none",background:"transparent",fontFamily:DB.font,fontSize:16,lineHeight:"18px",color:DB.text,fontWeight:500,padding:0}}
+                />
+                {searchQuery && (
+                  <button type="button" aria-label="검색어 지우기"
+                    onClick={()=>{clearSearch();searchInputRef.current?.focus();}}
+                    style={{border:"none",background:"none",cursor:"pointer",color:DB.faint,padding:0,display:"flex",flexShrink:0}}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                )}
+              </div>
+
+              {searchOpen && searchQuery.trim().length>0 && (
+                <div style={{
+                  position:"absolute",top:"calc(100% + 6px)",left:0,right:0,
+                  background:DB.card,border:`1px solid ${DB.border}`,borderRadius:14,
+                  boxShadow:"0 10px 30px rgba(15,23,42,.10)",overflow:"hidden",zIndex:50,
+                  maxHeight:360,overflowY:"auto",
+                }}>
+                  {homeMembers.length===0 && membersLoading ? (
+                    <div style={{padding:"16px 14px",fontFamily:DB.font,fontSize:12.5,color:DB.faint}}>회원 불러오는 중…</div>
+                  ) : searchResultsShown.length===0 ? (
+                    <div style={{padding:"16px 14px",fontFamily:DB.font,fontSize:12.5,color:DB.faint}}>일치하는 회원이 없습니다</div>
+                  ) : (
+                    <>
+                      {searchResultsShown.map((m,i) => {
+                        const isToday = todayMemberIds.has(m.id);
+                        const statusLabel = SEARCH_STATUS_LABEL[m.status||"active"];
+                        return (
+                          <div key={m.id}
+                            onMouseDown={(e)=>e.preventDefault()}
+                            onClick={()=>openMemberFromSearch(m)}
+                            onMouseEnter={()=>setSearchActiveIdx(i)}
+                            style={{
+                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+                              padding:"10px 14px",cursor:"pointer",
+                              background:i===searchActiveIdx?DB.hover:"transparent",
+                              borderTop:i===0?"none":`1px solid ${DB.border}`,
+                            }}>
+                            <div style={{minWidth:0}}>
+                              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:13,color:DB.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.name}</div>
+                              {statusLabel && <div style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginTop:2}}>{statusLabel}</div>}
+                            </div>
+                            {isToday && (
+                              <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10.5,color:DB.mintSoft,background:DB.mintTint,padding:"3px 8px",borderRadius:999}}>오늘 수업</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {searchHasMore && (
+                        <div
+                          onMouseDown={(e)=>e.preventDefault()}
+                          onClick={()=>{clearSearch();loadMembers();setScreen("members");}}
+                          style={{padding:"10px 14px",textAlign:"center",cursor:"pointer",borderTop:`1px solid ${DB.border}`,fontFamily:DB.font,fontWeight:700,fontSize:12,color:DB.mintSoft}}>
+                          전체 결과 보기
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           {/* 알림 벨 — 읽지 않은 회원 입력 알림 수 배지 */}
           <button onClick={()=>setDrawerOpen(true)} style={{

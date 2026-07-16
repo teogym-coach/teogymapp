@@ -7308,14 +7308,22 @@ function visitTone(daysSince,isToday){
   if(daysSince<=14) return DB.warning;
   return DB.danger;
 }
-// 다음 수업 라벨 — 예약된 다음 수업(nextWorkoutDate)이 있으면 그것을, 없으면 마지막 수업 기준
+// 오늘 수업 회원 통합 판별 — 회원 카드 배지·강조 테두리·전체 목록 정렬·"오늘 수업" 탭 필터가 전부 이 값 하나만 공유한다.
+// 오늘 날짜의 실제 수업 기록(임시저장·작성중 포함, meta.lastDate에 이미 반영됨)을 최우선으로 보고,
+// 그 기록이 없을 때만 예정된 다음 수업(nextWorkoutDate/nextPtDate)이 오늘 날짜인지로 판별한다.
+// → 미래(내일 이후) 준비 기록은 daysUntil이 0이 아니므로 자동으로 제외된다.
+function isTodaySessionMember(m,meta,today){
+  if(meta.lastDate===today) return true;
+  return getMemberNextSessionInfo(m).date===today;
+}
+// 다음 수업 라벨 — 오늘 실제 수업 기록이 최우선(미래 준비 기록에 가려지지 않음), 없으면 예정된 다음 수업(nextWorkoutDate), 그마저 없으면 마지막 수업 기준
 function nextSessionInfoLabel(m,meta,today){
+  if(meta.lastDate===today) return {text:"오늘 수업 완료",hot:true};
   const info=getNextWorkoutInfo(m);
   if(info.daysUntil!=null&&info.daysUntil>=0){
     const when=info.daysUntil===0?"오늘 수업":info.daysUntil===1?"내일":`${info.daysUntil}일 후`;
     return {text:`${when}${info.part&&info.part!=="미정"?` · ${info.part}`:""}`,hot:info.daysUntil===0};
   }
-  if(meta.lastDate===today) return {text:"오늘 수업 완료",hot:true};
   if(meta.daysSince!=null) return {text:`마지막 수업 ${meta.daysSince===0?"오늘":`${meta.daysSince}일 전`}`,hot:false};
   return {text:"수업 기록 없음",hot:false};
 }
@@ -7424,8 +7432,10 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   const isWide = winW >= 1024; // iPad Pro 11" 가로모드 기준 — HubScreen의 winW 패턴과 동일 breakpoint(사이드바·5개 상태 한 줄, 변경 없음)
   const isTabletRow = !isWide && winW >= 700; // 아이패드 세로 등 — 사이드바는 없지만 카드는 좌우 한 줄 2영역 구조 유지(상태는 3개만)
   const isRowLayout = isWide || isTabletRow; // 카드/검색행을 "한 줄" 구조로 그릴지 여부 — 폰 폭에서만 2줄로 접힌다
-  const today = new Date().toISOString().split("T")[0];
-  const todayKST = getKoreaDateString(); // 오늘 입력 피드/배지 전용 — 기존 today(오늘 수업 판정 등)는 그대로 두고 이 기능에만 한국시간 기준 적용
+  // 오늘 수업 판정용 날짜 — toISOString()은 UTC 기준이라 한국시간 00~09시에 하루 전날로 잘못 판정되므로,
+  // 프로젝트 공용 KST 로컬 날짜 키 생성 함수(getKoreaDateString)를 그대로 재사용한다.
+  const today = getKoreaDateString();
+  const todayKST = today; // 오늘 입력 피드/배지 전용 — today와 동일한 KST 기준(getKoreaDateString)이라 값이 같다
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
   const [filter,     setFilter]     = useState("active");
@@ -7566,16 +7576,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
     if (filter === "all")     return true;
     // 아래 필터는 active/paused만 (종료 회원 제외, 검색 시 포함)
     if (!isSearching && status === "ended") return false;
-    if (filter === "today") {
-      // 1. meta.lastDate === today (getMemberMeta에서 이미 오늘 세션 반영됨)
-      if (meta.lastDate === today) return true;
-      // 2. sessionsMap에서 직접 오늘 날짜 세션 탐색 (방어적 이중 체크)
-      const ss = sessionsMap[m.id] || [];
-      return ss.some(s => {
-        const d = s.date || s.sessionDate || s.createdAt?.split?.("T")?.[0] || "";
-        return d === today;
-      });
-    }
+    if (filter === "today") return isTodaySessionMember(m, meta, today);
     if (filter === "7days")   return meta.daysSince !== null && meta.daysSince > 7;
     if (filter === "14days")  return meta.daysSince !== null && meta.daysSince > 14;
     if (filter === "consult") return (m.status||"").includes("상담") || (m.programType||"").includes("상담");
@@ -7588,21 +7589,23 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
     return true;
   }
 
-  // 정렬 적용
+  // 정렬 적용 — 정렬 기준(sortBy)과 무관하게 오늘 수업 회원(isTodaySessionMember 공통 기준)을 최상단으로 올리는 안정 정렬을 먼저 적용하고,
+  // 같은 그룹(오늘 수업끼리 / 일반 회원끼리) 안에서는 기존 정렬 기준을 그대로 사용한다.
   function sortMembers(list) {
     return [...list].sort((a, b) => {
+      const metaA = getMemberMeta(a), metaB = getMemberMeta(b);
+      const aToday = isTodaySessionMember(a, metaA, today) ? 1 : 0;
+      const bToday = isTodaySessionMember(b, metaB, today) ? 1 : 0;
+      if (bToday !== aToday) return bToday - aToday;
+
       if (sortBy === "name")      return (a.name||"").localeCompare(b.name||"");
       if (sortBy === "startDate") return (b.startDate||"").localeCompare(a.startDate||"");
       if (sortBy === "remaining") {
-        const ra = getMemberMeta(a).remaining ?? 9999;
-        const rb = getMemberMeta(b).remaining ?? 9999;
+        const ra = metaA.remaining ?? 9999;
+        const rb = metaB.remaining ?? 9999;
         return ra - rb;
       }
-      // recent: 오늘 수업 1순위 → 최근 세션일 2순위 → 이름 3순위
-      const metaA = getMemberMeta(a), metaB = getMemberMeta(b);
-      const aToday = metaA.lastDate === today ? 1 : 0;
-      const bToday = metaB.lastDate === today ? 1 : 0;
-      if (bToday !== aToday) return bToday - aToday;
+      // recent: 최근 세션일 → 이름
       const da = metaA.lastDate || "0000-00-00";
       const db = metaB.lastDate || "0000-00-00";
       if (da !== db) return db.localeCompare(da);
@@ -7842,7 +7845,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {filtered.map(m => {
             const meta = getMemberMeta(m);
-            const isToday   = meta.lastDate === today;
+            const isToday   = isTodaySessionMember(m, meta, today);
             const status    = mStatus(m);
             const isEnded   = status === "ended";
             const isPaused  = status === "paused";

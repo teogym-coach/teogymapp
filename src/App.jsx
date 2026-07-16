@@ -7316,6 +7316,24 @@ function isTodaySessionMember(m,meta,today){
   if(meta.lastDate===today) return true;
   return getMemberNextSessionInfo(m).date===today;
 }
+// 오늘 수업 회원 세부 상태 — isTodaySessionMember(판별 로직)는 그대로 두고, 오늘 수업 회원 안에서만
+// UI 표시용으로 "예정/기록 중/완료" 3단계를 나눈다. 새 Firebase 필드 없이 기존 sessionsMap(isPublished)만 사용.
+// scheduled: 오늘 날짜 실제 세션 문서 없음(예정만) · recording: 오늘 세션 문서는 있지만 아직 비공개 · done: 오늘 세션 공개 완료
+function getTodaySessionStatus(m, meta, sessionsMap, today) {
+  if (!isTodaySessionMember(m, meta, today)) return null;
+  const todayDocs = (sessionsMap[m.id] || []).filter(s => {
+    const d = s.date || s.sessionDate || s.createdAt?.split?.("T")?.[0] || "";
+    return String(d).slice(0, 10) === today;
+  });
+  if (!todayDocs.length) return "scheduled";
+  return todayDocs.some(s => s.isPublished) ? "done" : "recording";
+}
+// 오늘 수업 상태별 표현 톤 — 오늘 예정(민트, 기존 유지) / 기록 중(주황 강조) / 오늘 완료(초록 강조)
+const TODAY_STATUS_STYLE = {
+  scheduled: { label:"오늘 예정", rgb:"57,199,184",  solid:DB.mint,  soft:DB.mintSoft, tint:DB.mintTint },
+  recording: { label:"기록 중",   rgb:"245,158,11",  solid:"#F59E0B", soft:"#B45309",   tint:"rgba(245,158,11,.12)" },
+  done:      { label:"오늘 완료", rgb:"34,197,94",   solid:"#22C55E", soft:"#15803D",   tint:"rgba(34,197,94,.12)" },
+};
 // 다음 수업 라벨 — 오늘 실제 수업 기록이 최우선(미래 준비 기록에 가려지지 않음), 없으면 예정된 다음 수업(nextWorkoutDate), 그마저 없으면 마지막 수업 기준
 function nextSessionInfoLabel(m,meta,today){
   if(meta.lastDate===today) return {text:"오늘 수업 완료",hot:true};
@@ -7363,19 +7381,21 @@ const MEMBER_CARD_STATUS_FIELDS = [
 ];
 // 카드 셸 — hover 리프트 + 클릭 시 민트 보더/살짝 확대 (220ms).
 // mode="wide"(가로모드, 사이드바+5개 상태 한 줄) / "tablet"(세로모드지만 폭은 충분 — 좌우 한 줄 2영역, 상태 3개) / "mobile"(폭 부족 — 2줄로 압축)
-function MemberCardShell({onClick,dim,mode,today,children}){
+function MemberCardShell({onClick,dim,mode,accent,children}){
   const [hov,setHov]=useState(false);
   const [press,setPress]=useState(false);
   const row = mode!=="mobile";
+  const rgb = accent?.rgb || "57,199,184";
+  const solid = accent?.solid || DB.mint;
   return <div onClick={onClick}
     onMouseEnter={()=>setHov(true)} onMouseLeave={()=>{setHov(false);setPress(false);}}
     onMouseDown={()=>setPress(true)} onMouseUp={()=>setPress(false)}
     onTouchStart={()=>setPress(true)} onTouchEnd={()=>setPress(false)}
     style={{
       boxSizing:"border-box",
-      background:today?"rgba(57,199,184,.025)":"#fff",borderRadius:18,cursor:"pointer",
-      border:`${today?2:1.5}px solid ${press?DB.mint:hov?"rgba(57,199,184,.35)":today?DB.mint:DB.border}`,
-      boxShadow:press?"0 4px 18px rgba(57,199,184,.16)":hov?DB.shadowLg:today?"0 0 0 1px rgba(57,199,184,.08), 0 4px 14px rgba(15,148,136,.08)":DB.shadow,
+      background:accent?`rgba(${rgb},.025)`:"#fff",borderRadius:18,cursor:"pointer",
+      border:`${accent?2:1.5}px solid ${press?solid:hov?"rgba(57,199,184,.35)":accent?solid:DB.border}`,
+      boxShadow:press?`0 4px 18px rgba(${rgb},.16)`:hov?DB.shadowLg:accent?`0 0 0 1px rgba(${rgb},.08), 0 4px 14px rgba(${rgb},.08)`:DB.shadow,
       transform:press?"scale(1.008)":hov?"translateY(-2px)":"none",
       transition:"transform .22s ease,box-shadow .22s ease,border-color .22s ease",
       padding:mode==="wide"?"9px 16px":mode==="tablet"?"7px 14px":"8px 12px",
@@ -7439,6 +7459,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
   const [filter,     setFilter]     = useState("active");
+  const [todaySubFilter, setTodaySubFilter] = useState("all"); // "오늘 수업" 탭 전용 서브 필터(전체/기록 중/예정/완료) — isTodaySessionMember 판별과 무관한 표시 전용
+  useEffect(() => { setTodaySubFilter("all"); }, [filter]);
   const [showTodayFeed, setShowTodayFeed] = useState(false); // 오늘 회원 입력 피드 펼침 상태
   const [deletingFeedIds, setDeletingFeedIds] = useState(() => new Set()); // 개별 삭제 진행 중인 피드 항목 id
   const [deletingAllFeed, setDeletingAllFeed] = useState(false); // 전체삭제 진행 중 여부
@@ -7590,13 +7612,18 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   }
 
   // 정렬 적용 — 정렬 기준(sortBy)과 무관하게 오늘 수업 회원(isTodaySessionMember 공통 기준)을 최상단으로 올리는 안정 정렬을 먼저 적용하고,
-  // 같은 그룹(오늘 수업끼리 / 일반 회원끼리) 안에서는 기존 정렬 기준을 그대로 사용한다.
+  // 오늘 수업 회원 안에서는 기록 중 → 오늘 예정 → 오늘 완료 순으로 우선순위를 두며, 각 그룹 안에서는 기존 정렬 기준을 그대로 사용한다.
+  const TODAY_SORT_RANK = { recording:0, scheduled:1, done:2 };
+  function todaySortRank(m, meta) {
+    const st = getTodaySessionStatus(m, meta, sessionsMap, today);
+    return st ? TODAY_SORT_RANK[st] : 3; // 오늘 수업 아님(일반 회원)은 항상 마지막
+  }
   function sortMembers(list) {
     return [...list].sort((a, b) => {
       const metaA = getMemberMeta(a), metaB = getMemberMeta(b);
-      const aToday = isTodaySessionMember(a, metaA, today) ? 1 : 0;
-      const bToday = isTodaySessionMember(b, metaB, today) ? 1 : 0;
-      if (bToday !== aToday) return bToday - aToday;
+      const aRank = todaySortRank(a, metaA);
+      const bRank = todaySortRank(b, metaB);
+      if (aRank !== bRank) return aRank - bRank;
 
       if (sortBy === "name")      return (a.name||"").localeCompare(b.name||"");
       if (sortBy === "startDate") return (b.startDate||"").localeCompare(a.startDate||"");
@@ -7615,7 +7642,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
 
   // 검색 중이면 모든 상태 포함, 아니면 passFilter 적용
   // 대표(TEO) 개인 운동기록·테스트 계정은 일반 회원 목록에서 공통 제외
-  const filtered = sortMembers(
+  const filteredBase = sortMembers(
     members.filter(m => {
       if (isExcludedAdminMember(m)) return false;
       return matchSearch(m.name, search) && (search.trim() ? true : passFilter(m));
@@ -7624,6 +7651,17 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
     if (search.trim()) return matchSearch(m.name, search) && !isExcludedAdminMember(m);
     return passFilter(m);
   });
+
+  // "오늘 수업" 탭 전용 서브 필터 개수 — isTodaySessionMember 판별은 그대로, getTodaySessionStatus로 표시만 세분화
+  const todayStatusCounts = filter === "today" ? filteredBase.reduce((c, m) => {
+    const st = getTodaySessionStatus(m, getMemberMeta(m), sessionsMap, today);
+    if (st) c[st] = (c[st]||0) + 1;
+    return c;
+  }, { scheduled:0, recording:0, done:0 }) : null;
+
+  const filtered = (filter === "today" && todaySubFilter !== "all")
+    ? filteredBase.filter(m => getTodaySessionStatus(m, getMemberMeta(m), sessionsMap, today) === todaySubFilter)
+    : filteredBase;
 
   const ownerMember = members.find(m => isOwner(m));
 
@@ -7781,6 +7819,31 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
         );
       })()}
 
+      {/* 오늘 수업 탭 전용 서브 필터 — 전체/기록 중/예정/완료, 개수 함께 표시. isTodaySessionMember 판별(오늘 수업 탭 대상)은 그대로, 표시만 세분화 */}
+      {filter === "today" && todayStatusCounts && (
+        <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
+          {[
+            {key:"all",       label:"전체",    count:filteredBase.length,          style:null},
+            {key:"recording", label:"기록 중", count:todayStatusCounts.recording,  style:TODAY_STATUS_STYLE.recording},
+            {key:"scheduled", label:"예정",    count:todayStatusCounts.scheduled,  style:TODAY_STATUS_STYLE.scheduled},
+            {key:"done",      label:"완료",    count:todayStatusCounts.done,       style:TODAY_STATUS_STYLE.done},
+          ].map(f => {
+            const active = todaySubFilter === f.key;
+            const tone = f.style?.soft || DB.mintSoft;
+            const tint = f.style?.tint || DB.mintTint;
+            return (
+              <button key={f.key} onClick={()=>setTodaySubFilter(f.key)}
+                style={{flexShrink:0,height:30,padding:"0 12px",borderRadius:999,border:`1px solid ${active?tone:DB.border}`,cursor:"pointer",
+                  background:active?tint:"#fff",color:active?tone:DB.sub,
+                  fontSize:11.5,fontWeight:active?800:600,fontFamily:DB.font,whiteSpace:"nowrap",
+                  display:"flex",alignItems:"center",gap:5,transition:"background-color .18s ease,border-color .18s ease,color .18s ease"}}>
+                {f.label} <span style={{fontVariantNumeric:"tabular-nums",opacity:.85}}>{f.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* 오늘 생일인 회원 요약 */}
       {(() => {
         const bdays = filtered.filter(m => isTodayBirthday(m));
@@ -7846,6 +7909,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
           {filtered.map(m => {
             const meta = getMemberMeta(m);
             const isToday   = isTodaySessionMember(m, meta, today);
+            // 오늘 수업 세부 상태(예정/기록 중/완료) — 표시 전용, 오늘 수업 회원 판별(isToday) 자체는 변경하지 않는다
+            const todayStatus = isToday ? getTodaySessionStatus(m, meta, sessionsMap, today) : null;
+            const statusStyle = todayStatus ? TODAY_STATUS_STYLE[todayStatus] : null;
             const status    = mStatus(m);
             const isEnded   = status === "ended";
             const isPaused  = status === "paused";
@@ -7864,6 +7930,11 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
             const weightChange = weightChangeText(statusValues.find(f=>f.key==="weight")?.value, m.startWeight);
             const isBirthday = isTodayBirthday(m);
             const next = nextSessionInfoLabel(m, meta, today);
+            // 오늘 수업 상태 문구 — "예정/기록 중/완료 · 운동부위" (부위는 예정이면 다음 수업 예정 부위, 기록 중·완료면 오늘 기록된 운동 부위)
+            const todayPart = todayStatus === "scheduled"
+              ? (getNextWorkoutInfo(m).part && getNextWorkoutInfo(m).part !== "미정" ? getNextWorkoutInfo(m).part : "")
+              : (meta.lastMuscle || "");
+            const nextText = statusStyle ? `${statusStyle.label}${todayPart ? ` · ${todayPart}` : ""}` : next.text;
             const goalChips = [...new Set([m.goal, (m.survey?.priorityGoal||"").replace(" 우선","")].map(g=>String(g||"").trim()).filter(Boolean))].slice(0,2);
             // 기존 attentionById는 실제 AI 생성 결과가 아니라 규칙 기반 확인 필요 사유이므로 "확인 필요"로 표시(AI 코멘트 아님)
             const reasons = attentionById.get(m.id);
@@ -7882,11 +7953,11 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
             return (
               <div key={m.id} style={{position:"relative"}}
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
-              <MemberCardShell dim={isEnded} mode={cardMode} today={next.hot} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
+              <MemberCardShell dim={isEnded} mode={cardMode} accent={statusStyle} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 좌 — 프로필 + 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
                   <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isRowLayout?leftPct:"100%",maxWidth:isRowLayout?leftPct:undefined,flexShrink:0}}>
                     <div style={{position:"relative",flexShrink:0}}>
-                      <MemberAvatar name={m.name} photo={photo} tone={visitTone(meta.daysSince,isToday)}/>
+                      <MemberAvatar name={m.name} photo={photo} tone={statusStyle ? statusStyle.solid : visitTone(meta.daysSince,false)}/>
                       {!isEnded && hasTodayFeedInput(m) && (
                         <span style={{position:"absolute",top:-5,right:-8,background:DB.danger,color:"#fff",
                           fontSize:7.5,fontWeight:800,padding:"2px 5px",borderRadius:7,
@@ -7900,6 +7971,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
                           overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>
                           {m.name}
                         </span>
+                        {!isEnded && statusStyle && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:statusStyle.tint,color:statusStyle.soft,fontWeight:800,fontFamily:DB.font}}>{statusStyle.label}</span>}
                         {m.isTestMember && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(139,92,246,.1)",color:"#7C3AED",fontWeight:800,fontFamily:DB.font}}>TEST</span>}
                         {isPaused && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,fontFamily:DB.font}}>휴식중</span>}
                         {isEnded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(100,116,139,.1)",color:DB.sub,fontWeight:800,fontFamily:DB.font}}>종료</span>}
@@ -7915,8 +7987,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
                       </div>
                       {/* 다음 수업 */}
                       <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,minWidth:0}}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:next.hot?800:600,color:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{next.text}</span>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:next.hot?800:600,color:statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{nextText}</span>
                         {meta.remaining !== null && (
                           <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>
                         )}

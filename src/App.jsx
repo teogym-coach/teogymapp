@@ -1875,7 +1875,6 @@ const HM_PATHS={
   target:["M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20","M12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12","M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4"],
   calendar:["M8 2v4","M16 2v4","M3 9h18","M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"],
   check:["M20 6 9 17l-5-5"],
-  flag:["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z","M4 22v-7"],
   chevronRight:["m9 18 6-6-6-6"],
   dumbbell:["M14.4 14.4 9.6 9.6","M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l1.768-1.768a2 2 0 1 1 2.828 2.829z","m21.5 21.5-1.4-1.4","M3.9 3.9 2.5 2.5","M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"],
   trendingDown:["M16 17h6v-6","m22 17-8.5-8.5-5 5L2 7"],
@@ -1910,11 +1909,10 @@ function HomeGoalCard(p){
   return <section className="hm-card hm-goal">
     <div className="hm-ring" role="img" aria-label={pct!=null?`목표 진행률 ${pct}%`:"목표 진행"}>
       <svg viewBox="0 0 132 132" aria-hidden="true">
-        <circle cx="66" cy="66" r={R} fill="none" stroke="#EEF1F4" strokeWidth="11"/>
+        <circle cx="66" cy="66" r={R} fill="none" stroke="#E8F1F0" strokeWidth="11"/>
         {pct!=null&&pct>0&&<circle cx="66" cy="66" r={R} fill="none" stroke="#39C7B8" strokeWidth="11" strokeLinecap="round" strokeDasharray={`${C*pct/100} ${C}`} transform="rotate(-90 66 66)"/>}
       </svg>
       <div className="hm-ring-txt">
-        <SjIcon paths={HM_PATHS.flag} size={15}/>
         {f.remain>0
           ? <><span>목표까지</span><b>{f.remain.toFixed(1)}<em>kg</em></b><span>남았어요</span></>
           : <b className="reached">목표 도달!</b>}
@@ -2006,7 +2004,7 @@ function HomeMetricsGrid(p){
           <b>{weekly.count}<em>{weekly.target>0?`/${weekly.target}회`:"회"}</em></b>
           {weekPct!=null&&<div className="hm-donut" aria-hidden="true">
             <svg viewBox="0 0 58 58">
-              <circle cx="29" cy="29" r={DR} fill="none" stroke="#EEF1F4" strokeWidth="6"/>
+              <circle cx="29" cy="29" r={DR} fill="none" stroke="#E8F1F0" strokeWidth="6"/>
               {weekPct>0&&<circle cx="29" cy="29" r={DR} fill="none" stroke="#39C7B8" strokeWidth="6" strokeLinecap="round" strokeDasharray={`${DC*weekPct/100} ${DC}`} transform="rotate(-90 29 29)"/>}
             </svg>
             <b>{weekPct}%</b>
@@ -4548,17 +4546,18 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 /* B. 목표 진행 카드 — 좌 원형 링 · 우 예상 도달 + 시작-현재-목표 진행선 */
 .hm-goal{display:flex;align-items:center;gap:15px}
 .hm-ring{position:relative;flex:0 0 auto;width:clamp(108px,35vw,134px)}
-.hm-ring svg{display:block;width:100%;height:auto}
-.hm-ring-txt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;text-align:center;color:#0F9488}
-.hm-ring-txt span{color:#64748B;font-size:11px;font-weight:800}
-.hm-ring-txt b{color:#0F172A;font-size:23px;font-weight:900;letter-spacing:-.8px;line-height:1.15;font-variant-numeric:tabular-nums}
-.hm-ring-txt b em{font-style:normal;font-size:14px;font-weight:800;color:#64748B;margin-left:1px;letter-spacing:-.3px}
-.hm-ring-txt b.reached{font-size:14.5px;letter-spacing:-.3px;color:#0F9488;padding:0 14px;word-break:keep-all}
+.hm-ring>svg{display:block;width:100%;height:auto}
+.hm-ring-txt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px}
+.hm-ring-txt span{color:#64748B;font-size:14px;font-weight:700;line-height:1.3}
+.hm-ring-txt span:last-of-type{font-size:13px;font-weight:600}
+.hm-ring-txt b{color:#0F9488;font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1.1;margin:5px 0 3px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.hm-ring-txt b em{font-style:normal;font-size:18px;font-weight:800;color:#0F9488;margin-left:1px;letter-spacing:-.3px}
+.hm-ring-txt b.reached{font-size:14.5px;letter-spacing:-.3px;margin:0;white-space:normal;word-break:keep-all}
 .hm-goal-side{flex:1;min-width:0}
 .hm-goal-eta{margin:0;color:#64748B;font-size:12.5px;font-weight:800;line-height:1.5}
 .hm-goal-eta b{display:block;color:#0F172A;font-size:16.5px;font-weight:900;letter-spacing:-.4px;margin-top:2px;line-height:1.35;word-break:keep-all}
 .hm-goal-eta b em{font-style:normal;color:#0F9488}
-.hm-goal-track{position:relative;height:6px;border-radius:999px;background:#EEF1F4;margin:15px 7px 10px}
+.hm-goal-track{position:relative;height:6px;border-radius:999px;background:#EDEFF2;margin:15px 7px 10px}
 .hm-goal-track i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:#39C7B8;transition:width .3s ease}
 .hm-goal-track em{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:#0F9488;border:3px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.25);transform:translate(-50%,-50%);transition:left .3s ease}
 .hm-goal-weights{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:12px}
@@ -4579,7 +4578,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-check-btn{display:inline-flex;align-items:center;gap:3px;flex-shrink:0;height:44px;padding:0 15px;border:0;border-radius:999px;background:#fff;color:#0F9488;font-weight:800;font-size:13.5px;cursor:pointer;transition:transform .15s ease,opacity .15s ease;-webkit-tap-highlight-color:transparent}
 .hm-check-btn:active{transform:scale(.97)}
 .hm-check-btn:disabled{opacity:.6}
-.hm-check.done{background:#0B7268}
+.hm-check.done{background:#0F9488}
 .hm-check.done .hm-check-btn{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32)}
 /* D. 핵심 지표 — 큰 카드 2 + 작은 카드 3 */
 .hm-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 10px}
@@ -4590,7 +4589,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-metric b em{font-style:normal;font-size:14px;color:#64748B;font-weight:800;margin-left:1px;letter-spacing:0}
 .hm-metric b.good{color:#0F9488}
 .hm-metric small{display:block;color:#94A3B8;font-size:11px;font-weight:800;margin-top:6px}
-.hm-metric-ico{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9px;background:#F1F7F6;color:#0F9488;margin-bottom:9px}
+.hm-metric-ico{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9px;background:#F1F7F6;color:#64748B;margin-bottom:9px}
 .hm-metrics.sm .hm-metric{padding:12px 10px;border-radius:18px}
 .hm-metrics.sm .hm-metric b{font-size:19px;margin-top:8px}
 .hm-metrics.sm .hm-metric small{margin-top:4px}
@@ -4605,7 +4604,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-donut>b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#0F9488;margin:0;letter-spacing:-.4px}
 .hm-spark{display:block;width:100%;height:32px;margin-top:10px}
 .hm-spark-x{display:flex;justify-content:space-between;margin-top:4px;color:#94A3B8;font-size:10px;font-weight:800}
-.hm-metric-bar{height:6px;border-radius:999px;background:#EEF1F4;margin-top:9px;overflow:hidden}
+.hm-metric-bar{height:6px;border-radius:999px;background:#EDEFF2;margin-top:9px;overflow:hidden}
 .hm-metric-bar i{display:block;height:100%;border-radius:999px;background:#39C7B8;transition:width .3s ease}
 /* E. 다음 PT · 다음 수업 부위 · 오늘 추천 */
 .hm-next-head{display:flex;align-items:flex-start;gap:11px;padding-bottom:14px;border-bottom:1px solid #EDEFF2}

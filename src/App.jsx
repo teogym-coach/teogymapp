@@ -1875,6 +1875,8 @@ const HM_PATHS={
   target:["M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20","M12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12","M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4"],
   calendar:["M8 2v4","M16 2v4","M3 9h18","M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"],
   check:["M20 6 9 17l-5-5"],
+  flag:["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z","M4 22v-7"],
+  chevronRight:["m9 18 6-6-6-6"],
   dumbbell:["M14.4 14.4 9.6 9.6","M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l1.768-1.768a2 2 0 1 1 2.828 2.829z","m21.5 21.5-1.4-1.4","M3.9 3.9 2.5 2.5","M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"],
   trendingDown:["M16 17h6v-6","m22 17-8.5-8.5-5 5L2 7"],
   trendingUp:["M16 7h6v6","m22 7-8.5 8.5-5-5L2 17"],
@@ -1891,37 +1893,45 @@ function MemberHomeHero({profile}){
   return <header className="hm-greet">
     <span>{greet},</span>
     <h1>{profile.name}님</h1>
+    <p>오늘도 멋진 하루를 응원합니다!</p>
   </header>;
 }
-// B. 목표 진행 카드 — getWeightForecast/computeWeeklyWorkoutCard 등 기존 계산만 표시
+// B. 목표 진행 카드 — 좌 원형 진행 링(실제 진행률) · 우 예상 도달 + 시작-현재-목표 진행선. getWeightForecast 기존 계산만 표시.
+// 진행률 = (시작-현재)/(시작-목표) — 감량·증량 모두 같은 식으로 방향이 맞는다(0~100 클램프).
 function HomeGoalCard(p){
   const f=getWeightForecast(p);
-  const weekly=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
-  const done=p.sessions.length;
   const hasTarget=Number.isFinite(f.target)&&f.target>0;
   const hasWeights=Number.isFinite(f.start)&&Number.isFinite(f.cur);
   const pct=hasTarget&&hasWeights&&f.start!==f.target?Math.max(0,Math.min(100,Math.round((f.start-f.cur)/(f.start-f.target)*100))):null;
+  if(!hasTarget) return <section className="hm-card hm-goal">
+    <p className="hm-goal-empty">목표 체중을 설정하면 진행 상황을 확인할 수 있어요.<br/><b>{p.onboarding.goal||"꾸준한 변화"}</b>를 함께 만들어가고 있어요.</p>
+  </section>;
+  const R=56, C=2*Math.PI*R;
   return <section className="hm-card hm-goal">
-    <div className="hm-card-head"><span className="hm-card-ico"><SjIcon paths={HM_PATHS.target} size={15}/></span><b>목표 진행</b></div>
-    {hasTarget?<>
+    <div className="hm-ring" role="img" aria-label={pct!=null?`목표 진행률 ${pct}%`:"목표 진행"}>
+      <svg viewBox="0 0 132 132" aria-hidden="true">
+        <circle cx="66" cy="66" r={R} fill="none" stroke="#EEF1F4" strokeWidth="11"/>
+        {pct!=null&&pct>0&&<circle cx="66" cy="66" r={R} fill="none" stroke="#39C7B8" strokeWidth="11" strokeLinecap="round" strokeDasharray={`${C*pct/100} ${C}`} transform="rotate(-90 66 66)"/>}
+      </svg>
+      <div className="hm-ring-txt">
+        <SjIcon paths={HM_PATHS.flag} size={15}/>
+        {f.remain>0
+          ? <><span>목표까지</span><b>{f.remain.toFixed(1)}<em>kg</em></b><span>남았어요</span></>
+          : <b className="reached">목표 도달!</b>}
+      </div>
+    </div>
+    <div className="hm-goal-side">
       {f.remain>0
-        ? <>
-            <p className="hm-goal-main"><b>{f.remain.toFixed(1)}<em>kg</em></b><span>목표까지 남았어요</span></p>
-            <p className="hm-goal-eta">{f.risk==="high"?"목표 기간이 다소 빠듯해요 — 대표님과 페이스를 조율해보세요":`지금 흐름이면 약 ${f.weeks}주 후 도달이 예상돼요`}</p>
-          </>
-        : <p className="hm-goal-main reached"><b>목표 체중에 도달했어요 🎉</b></p>}
-      {pct!=null&&<div className="hm-goal-bar"><i style={{width:`${pct}%`}}/></div>}
+        ? (f.risk==="high"
+          ? <p className="hm-goal-eta">목표 기간이 다소 빠듯해요<b>대표님과 페이스를 조율해보세요</b></p>
+          : <p className="hm-goal-eta">현재 흐름이면<b>약 <em>{f.weeks}주</em> 후 도달 예상</b></p>)
+        : <p className="hm-goal-eta">목표 체중에 도달했어요<b>지금 페이스를 유지해보세요</b></p>}
+      {pct!=null&&<div className="hm-goal-track" aria-hidden="true"><i style={{width:`${pct}%`}}/><em style={{left:`${pct}%`}}/></div>}
       {hasWeights&&<div className="hm-goal-weights">
         <div><span>시작</span><b>{f.start}kg</b></div>
         <div className="cur"><span>현재</span><b>{f.cur}kg</b></div>
         <div><span>목표</span><b>{f.target}kg</b></div>
       </div>}
-    </>:<p className="hm-goal-empty">목표 체중을 설정하면 진행 상황을 확인할 수 있어요.<br/><b>{p.onboarding.goal||"꾸준한 변화"}</b>를 함께 만들어가고 있어요.</p>}
-    <div className="hm-goal-meta">
-      {weekly.target>0&&<span>이번 주 운동 <b>{weekly.count}/{weekly.target}회</b></span>}
-      {weekly.target===0&&weekly.count>0&&<span>이번 주 운동 <b>{weekly.count}회</b></span>}
-      {p.totalReg>0&&<span>PT <b>{done}/{p.totalReg}회</b></span>}
-      {!p.totalReg&&done>0&&<span>누적 PT <b>{done}회</b></span>}
     </div>
   </section>;
 }
@@ -1931,16 +1941,13 @@ function HomeTodayCheckCard(p){
   const attended=(p.attendance||[]).some(a=>a.date===todayKey);
   return <section className={`hm-check${attended?" done":""}`}>
     <span className="hm-check-ico" aria-hidden="true"><SjIcon paths={attended?HM_PATHS.check:HM_PATHS.dumbbell} size={20}/></span>
-    <span className="hm-check-label">오늘의 체크</span>
-    {attended?<>
-      <b>오늘 개인 운동을 완료했어요</b>
-      <p>기록이 이번 주 진행률에 반영됐어요. 완료 취소는 캘린더에서 할 수 있어요.</p>
-      <button type="button" className="hm-check-btn" onClick={()=>{p.setWorkoutView?.("calendar"); p.setTab("workout");}}>캘린더에서 확인</button>
-    </>:<>
-      <b>개인 운동을 하셨나요?</b>
-      <p>기록하면 이번 주 진행률에 반영됩니다.</p>
-      <button type="button" className="hm-check-btn" disabled={p.attendanceSaving} onClick={p.saveAttendanceToday}>{p.attendanceSaving?"기록 중...":"운동 완료 기록"}</button>
-    </>}
+    <div className="hm-check-txt">
+      <span>오늘의 체크</span>
+      <b>{attended?"개인 운동 완료":"개인 운동을 하셨나요?"}</b>
+    </div>
+    {attended
+      ? <button type="button" className="hm-check-btn" onClick={()=>{p.setWorkoutView?.("calendar"); p.setTab("workout");}}>캘린더 확인 <SjIcon paths={HM_PATHS.chevronRight} size={13}/></button>
+      : <button type="button" className="hm-check-btn" disabled={p.attendanceSaving} onClick={p.saveAttendanceToday}>{p.attendanceSaving?"기록 중...":<>기록하기 <SjIcon paths={HM_PATHS.chevronRight} size={13}/></>}</button>}
   </section>;
 }
 // 대표 코멘트 — 가장 최근 수업의 trainerComment. 실제 코멘트가 없으면 카드 자체를 숨긴다(가짜 문구 금지).
@@ -1965,9 +1972,13 @@ function HomeWeightSpark({body}){
   const min=Math.min(...ws), max=Math.max(...ws), span=max-min||1;
   const W=100,H=32,PAD=3;
   const xy=ws.map((w,i)=>`${(i/(ws.length-1))*W},${PAD+(1-(w-min)/span)*(H-PAD*2)}`);
-  return <svg className="hm-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-    <polyline points={xy.join(" ")} fill="none" stroke="#39C7B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>
-  </svg>;
+  const first=String(pts[0].date);
+  return <>
+    <svg className="hm-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={xy.join(" ")} fill="none" stroke="#39C7B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>
+    </svg>
+    <div className="hm-spark-x" aria-hidden="true"><span>{Number(first.slice(5,7))}/{Number(first.slice(8,10))}</span><span>오늘</span></div>
+  </>;
 }
 function HomeMetricsGrid(p){
   const w=computeWeightCard(p.body);
@@ -1976,6 +1987,7 @@ function HomeMetricsGrid(p){
   const streak=computeEngagementStreak(p.checkins,p.attendance,p.cardioLogs);
   const done=p.sessions.length;
   const weekPct=weekly.target>0?Math.min(100,Math.round(weekly.count/weekly.target*100)):null;
+  const DR=24, DC=2*Math.PI*DR;
   return <>
     <div className="hm-metrics">
       <div className="hm-metric">
@@ -1990,7 +2002,16 @@ function HomeMetricsGrid(p){
       <div className="hm-metric">
         <span className="hm-metric-ico"><SjIcon paths={HM_PATHS.dumbbell} size={14}/></span>
         <span>이번 주 운동</span>
-        <b>{weekly.count}<em>{weekly.target>0?`/${weekly.target}회`:"회"}</em></b>
+        <div className="hm-week-row">
+          <b>{weekly.count}<em>{weekly.target>0?`/${weekly.target}회`:"회"}</em></b>
+          {weekPct!=null&&<div className="hm-donut" aria-hidden="true">
+            <svg viewBox="0 0 58 58">
+              <circle cx="29" cy="29" r={DR} fill="none" stroke="#EEF1F4" strokeWidth="6"/>
+              {weekPct>0&&<circle cx="29" cy="29" r={DR} fill="none" stroke="#39C7B8" strokeWidth="6" strokeLinecap="round" strokeDasharray={`${DC*weekPct/100} ${DC}`} transform="rotate(-90 29 29)"/>}
+            </svg>
+            <b>{weekPct}%</b>
+          </div>}
+        </div>
         {weekPct!=null?<>
           <small>주간 목표의 {weekPct}%</small>
           <div className="hm-metric-bar"><i style={{width:`${weekPct}%`}}/></div>
@@ -1999,19 +2020,18 @@ function HomeMetricsGrid(p){
     </div>
     <div className="hm-metrics sm">
       <div className="hm-metric">
-        <span className="hm-metric-ico"><SjIcon paths={SJ_PATHS.flame} size={14}/></span>
-        <span>연속 기록</span>
+        <div className="hm-mini-head"><span className="hm-metric-ico hot"><SjIcon paths={SJ_PATHS.flame} size={13}/></span><span>연속 기록</span></div>
         <b>{streak}<em>일</em></b>
       </div>
       <div className="hm-metric">
-        <span className="hm-metric-ico"><SjIcon paths={SJ_PATHS.activity} size={14}/></span>
-        <span>주간 유산소</span>
+        <div className="hm-mini-head"><span className="hm-metric-ico"><SjIcon paths={SJ_PATHS.activity} size={13}/></span><span>주간 유산소</span></div>
         <b>{week.totalMinutes}<em>분</em></b>
+        <small>이번 주</small>
       </div>
       <div className="hm-metric">
-        <span className="hm-metric-ico"><SjIcon paths={HM_PATHS.clipboard} size={14}/></span>
-        <span>누적 PT</span>
+        <div className="hm-mini-head"><span className="hm-metric-ico"><SjIcon paths={HM_PATHS.clipboard} size={13}/></span><span>누적 PT</span></div>
         <b>{done}<em>회</em></b>
+        <small>전체 누적</small>
       </div>
     </div>
   </>;
@@ -2028,14 +2048,15 @@ function HomeNextSessionCard(p){
   const nextPart=hasSavedPart?info.part:null;
   const recommended=getRecommendedPart(p.profile,p.sessions,p.onboarding);
   return <section className="hm-card hm-next">
-    <div className="hm-card-head">
+    <div className="hm-next-head">
       <span className="hm-card-ico"><SjIcon paths={HM_PATHS.calendar} size={15}/></span>
-      <b>다음 PT</b>
-      {upcoming&&<em className="hm-next-dday">{info.dDay}</em>}
+      <div>
+        <b>다음 PT</b>
+        {upcoming
+          ? <p className="hm-next-date">{info.dateText} · {info.timeLabel||"시간 미정"}</p>
+          : <p className="hm-next-date empty">예정된 다음 수업이 없습니다</p>}
+      </div>
     </div>
-    {upcoming
-      ? <p className="hm-next-date">{info.dateText} · {info.timeLabel||"시간 미정"}</p>
-      : <p className="hm-next-date empty">예정된 다음 수업이 없습니다</p>}
     <div className="hm-next-parts">
       <div className="hm-next-part">
         <span>다음 수업 운동 부위</span>
@@ -2051,7 +2072,7 @@ function HomeNextSessionCard(p){
       </div>
     </div>
     <p className="hm-next-reason">{isTodayPt?"수업 전 준비 루틴으로 몸을 깨워주세요.":nextPart?`다음 ${nextPart} 수업을 고려한 추천이에요.`:"최근 운동 흐름을 고려한 추천이에요."}</p>
-    <button type="button" className="hm-next-btn" onClick={()=>setOpen(v=>!v)}>{open?"가이드 접기":isTodayPt?"준비 루틴 보기":"추천 루틴 보기"}</button>
+    <button type="button" className="hm-next-btn" onClick={()=>setOpen(v=>!v)}>{open?"가이드 접기":isTodayPt?"준비 루틴 보기":"추천 루틴 보기"}<SjIcon className="hm-next-btn-arr" paths={open?SJ_PATHS.chevronUp:HM_PATHS.chevronRight} size={15}/></button>
     {open&&<div className="hm-next-detail"><ReviewRoutine {...p} initialOpen/></div>}
   </section>;
 }
@@ -4520,41 +4541,45 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-greet{margin:4px 2px 18px}
 .hm-greet span{display:block;color:#64748B;font-size:15px;font-weight:700}
 .hm-greet h1{font-size:30px!important;letter-spacing:-1px;margin:4px 0 0!important;color:#0F172A;line-height:1.15}
+.hm-greet p{margin:7px 0 0;color:#94A3B8;font-size:13px;font-weight:700}
 /* 공용 카드 베이스 */
 .hm-card{background:#fff;border:1px solid #EDEFF2;border-radius:24px;padding:20px;margin:0 0 12px;box-shadow:0 2px 14px rgba(15,23,42,.05);animation:memberCardIn .22s ease}
-.hm-card-head{display:flex;align-items:center;gap:9px;margin-bottom:14px}
-.hm-card-head b{font-size:15px;color:#0F172A;letter-spacing:-.2px}
 .hm-card-ico{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex-shrink:0;border-radius:9px;background:#E9FAF7;color:#0F9488}
-/* B. 목표 진행 카드 */
-.hm-goal-main{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 9px;margin:0}
-.hm-goal-main b{font-size:42px;font-weight:900;color:#0F172A;letter-spacing:-1.5px;line-height:1.05;font-variant-numeric:tabular-nums}
-.hm-goal-main b em{font-style:normal;font-size:21px;font-weight:800;color:#64748B;margin-left:2px;letter-spacing:-.5px}
-.hm-goal-main span{color:#64748B;font-weight:800;font-size:14px}
-.hm-goal-main.reached b{font-size:21px;letter-spacing:-.4px}
-.hm-goal-eta{margin:9px 0 0;color:#0F9488;font-weight:800;font-size:13px;line-height:1.55}
-.hm-goal-bar{height:8px;border-radius:999px;background:#EEF1F4;margin-top:14px;overflow:hidden}
-.hm-goal-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#39C7B8,#0F9488);transition:width .3s ease}
-.hm-goal-weights{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
-.hm-goal-weights>div{background:#F8FAFB;border:1px solid #EDEFF2;border-radius:14px;padding:10px 6px;text-align:center;min-width:0}
+/* B. 목표 진행 카드 — 좌 원형 링 · 우 예상 도달 + 시작-현재-목표 진행선 */
+.hm-goal{display:flex;align-items:center;gap:15px}
+.hm-ring{position:relative;flex:0 0 auto;width:clamp(108px,35vw,134px)}
+.hm-ring svg{display:block;width:100%;height:auto}
+.hm-ring-txt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;text-align:center;color:#0F9488}
+.hm-ring-txt span{color:#64748B;font-size:11px;font-weight:800}
+.hm-ring-txt b{color:#0F172A;font-size:23px;font-weight:900;letter-spacing:-.8px;line-height:1.15;font-variant-numeric:tabular-nums}
+.hm-ring-txt b em{font-style:normal;font-size:14px;font-weight:800;color:#64748B;margin-left:1px;letter-spacing:-.3px}
+.hm-ring-txt b.reached{font-size:14.5px;letter-spacing:-.3px;color:#0F9488;padding:0 14px;word-break:keep-all}
+.hm-goal-side{flex:1;min-width:0}
+.hm-goal-eta{margin:0;color:#64748B;font-size:12.5px;font-weight:800;line-height:1.5}
+.hm-goal-eta b{display:block;color:#0F172A;font-size:16.5px;font-weight:900;letter-spacing:-.4px;margin-top:2px;line-height:1.35;word-break:keep-all}
+.hm-goal-eta b em{font-style:normal;color:#0F9488}
+.hm-goal-track{position:relative;height:6px;border-radius:999px;background:#EEF1F4;margin:15px 7px 10px}
+.hm-goal-track i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:#39C7B8;transition:width .3s ease}
+.hm-goal-track em{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:#0F9488;border:3px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.25);transform:translate(-50%,-50%);transition:left .3s ease}
+.hm-goal-weights{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:12px}
+.hm-goal-weights>div{min-width:0;text-align:center}
+.hm-goal-weights>div:first-child{text-align:left}
+.hm-goal-weights>div:last-child{text-align:right}
 .hm-goal-weights span{display:block;color:#94A3B8;font-size:11px;font-weight:800}
-.hm-goal-weights b{display:block;color:#334155;font-size:15px;font-weight:900;margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.hm-goal-weights .cur{background:#E9FAF7;border-color:#BFE9E2}
+.hm-goal-weights b{display:block;color:#334155;font-size:13.5px;font-weight:900;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .hm-goal-weights .cur b{color:#0F9488}
 .hm-goal-empty{margin:0;color:#64748B;font-weight:700;font-size:14px;line-height:1.7}
 .hm-goal-empty b{color:#0F172A}
-.hm-goal-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
-.hm-goal-meta span{background:#F6F7F9;border:1px solid #EDEFF2;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:800;color:#64748B}
-.hm-goal-meta b{color:#0F172A}
-/* C. 오늘의 체크 — 진한 청록 카드 */
-.hm-check{background:linear-gradient(135deg,#0F9488,#14B8A6);border-radius:24px;padding:22px;margin:0 0 12px;color:#fff;box-shadow:0 10px 24px rgba(15,148,136,.22);animation:memberCardIn .22s ease}
-.hm-check-ico{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.16);margin-bottom:12px}
-.hm-check-label{display:block;font-size:12px;font-weight:800;color:rgba(255,255,255,.72);letter-spacing:.03em}
-.hm-check b{display:block;font-size:19px;letter-spacing:-.3px;margin-top:4px}
-.hm-check p{margin:7px 0 16px;color:rgba(255,255,255,.8);font-weight:700;font-size:13px;line-height:1.55}
-.hm-check-btn{width:100%;height:52px;border:0;border-radius:15px;background:#fff;color:#0F9488;font-weight:800;font-size:15px;cursor:pointer;transition:transform .15s ease,opacity .15s ease;-webkit-tap-highlight-color:transparent}
+/* C. 오늘의 체크 — 낮은 가로형 청록 카드(아이콘 · 문구 · 버튼 한 줄) */
+.hm-check{display:flex;align-items:center;gap:12px;background:#0F9488;border-radius:24px;padding:20px 16px 20px 18px;margin:0 0 12px;color:#fff;box-shadow:0 8px 20px rgba(15,148,136,.2);animation:memberCardIn .22s ease}
+.hm-check-ico{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;border-radius:50%;background:rgba(255,255,255,.16)}
+.hm-check-txt{flex:1;min-width:0}
+.hm-check-txt span{display:block;font-size:11.5px;font-weight:800;color:rgba(255,255,255,.72);letter-spacing:.02em}
+.hm-check-txt b{display:block;font-size:15.5px;font-weight:900;letter-spacing:-.3px;margin-top:3px;line-height:1.3;word-break:keep-all}
+.hm-check-btn{display:inline-flex;align-items:center;gap:3px;flex-shrink:0;height:44px;padding:0 15px;border:0;border-radius:999px;background:#fff;color:#0F9488;font-weight:800;font-size:13.5px;cursor:pointer;transition:transform .15s ease,opacity .15s ease;-webkit-tap-highlight-color:transparent}
 .hm-check-btn:active{transform:scale(.97)}
 .hm-check-btn:disabled{opacity:.6}
-.hm-check.done{background:linear-gradient(135deg,#0B7268,#0F9488)}
+.hm-check.done{background:#0B7268}
 .hm-check.done .hm-check-btn{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32)}
 /* D. 핵심 지표 — 큰 카드 2 + 작은 카드 3 */
 .hm-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 10px}
@@ -4566,15 +4591,27 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-metric b.good{color:#0F9488}
 .hm-metric small{display:block;color:#94A3B8;font-size:11px;font-weight:800;margin-top:6px}
 .hm-metric-ico{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9px;background:#F1F7F6;color:#0F9488;margin-bottom:9px}
-.hm-metrics.sm .hm-metric{padding:13px 11px;border-radius:18px}
-.hm-metrics.sm .hm-metric b{font-size:19px}
-.hm-metrics.sm .hm-metric-ico{margin-bottom:7px}
-.hm-spark{display:block;width:100%;height:36px;margin-top:10px}
+.hm-metrics.sm .hm-metric{padding:12px 10px;border-radius:18px}
+.hm-metrics.sm .hm-metric b{font-size:19px;margin-top:8px}
+.hm-metrics.sm .hm-metric small{margin-top:4px}
+.hm-mini-head{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
+.hm-mini-head .hm-metric-ico{width:24px;height:24px;margin-bottom:0}
+.hm-mini-head>span:last-child{color:#64748B;font-size:11px;font-weight:800;letter-spacing:-.2px;white-space:nowrap}
+.hm-metric-ico.hot{background:#FEE9E7;color:#E25C4A}
+.hm-week-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
+.hm-week-row>b{margin-top:0}
+.hm-donut{position:relative;flex:0 0 auto;width:56px}
+.hm-donut svg{display:block;width:100%;height:auto}
+.hm-donut>b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#0F9488;margin:0;letter-spacing:-.4px}
+.hm-spark{display:block;width:100%;height:32px;margin-top:10px}
+.hm-spark-x{display:flex;justify-content:space-between;margin-top:4px;color:#94A3B8;font-size:10px;font-weight:800}
 .hm-metric-bar{height:6px;border-radius:999px;background:#EEF1F4;margin-top:9px;overflow:hidden}
 .hm-metric-bar i{display:block;height:100%;border-radius:999px;background:#39C7B8;transition:width .3s ease}
 /* E. 다음 PT · 다음 수업 부위 · 오늘 추천 */
-.hm-next-dday{margin-left:auto;font-style:normal;background:#0F172A;color:#fff;border-radius:999px;padding:5px 11px;font-weight:900;font-size:12px;flex-shrink:0}
-.hm-next-date{margin:-2px 0 0;color:#0F172A;font-weight:800;font-size:16.5px;letter-spacing:-.2px}
+.hm-next-head{display:flex;align-items:flex-start;gap:11px;padding-bottom:14px;border-bottom:1px solid #EDEFF2}
+.hm-next-head>div{min-width:0}
+.hm-next-head b{display:block;font-size:14px;color:#0F172A;letter-spacing:-.2px}
+.hm-next-date{margin:3px 0 0;color:#0F172A;font-weight:800;font-size:16px;letter-spacing:-.2px;word-break:keep-all}
 .hm-next-date.empty{color:#94A3B8;font-weight:700;font-size:14px}
 .hm-next-parts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
 .hm-next-part{background:#F8FAFB;border:1px solid #EDEFF2;border-radius:16px;padding:13px 12px;min-width:0}
@@ -4585,7 +4622,8 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-part-tags b{background:#fff;border:1px solid #E2E8F0;color:#0F172A;border-radius:10px;padding:5px 10px;font-size:14px;font-weight:900}
 .hm-next-part.rec .hm-part-tags b{border-color:#9EDFD6;color:#0F9488}
 .hm-next-reason{margin:12px 0 0;color:#64748B;font-weight:700;font-size:12.5px;line-height:1.55}
-.hm-next-btn{width:100%;height:50px;margin-top:14px;border:0;border-radius:15px;background:#0F9488;color:#fff;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 6px 16px rgba(15,148,136,.2);transition:transform .15s ease;-webkit-tap-highlight-color:transparent}
+.hm-next-btn{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:50px;margin-top:14px;border:1px solid #D7EEEA;border-radius:15px;background:#F0FBF9;color:#0F9488;font-weight:800;font-size:15px;cursor:pointer;transition:transform .15s ease;-webkit-tap-highlight-color:transparent}
+.hm-next-btn .hm-next-btn-arr{position:absolute;right:15px}
 .hm-next-btn:active{transform:scale(.97)}
 .hm-next-detail .mcard{margin:12px 0 0;border-radius:20px}
 /* 아이패드 — 홈 본문 폭 제한(스마트폰 1열 구조 유지) */

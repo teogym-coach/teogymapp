@@ -2123,6 +2123,7 @@ const SJ_PATHS={
   alert:["M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z","M12 9v4","M12 17h.01"],
   dumbbell:["M14.4 14.4 9.6 9.6","M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z","m21.5 21.5-1.4-1.4","M3.9 3.9 2.5 2.5","M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"],
   arrowRight:["M5 12h14","m12 5 7 7-7 7"],
+  squarePen:["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7","M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"],
   check:["M22 11.08V12a10 10 0 1 1-5.93-9.14","m22 4-10 10.01-3-3"],
   pencil:["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"],
 };
@@ -2519,6 +2520,7 @@ function MemberFeedbackForm({s,onSave}){
   const [rpe,setRpe]=useState(initialRpe);
   const [memo,setMemo]=useState(existing.memo||"");
   const [open,setOpen]=useState(false);
+  const [rpeDirty,setRpeDirty]=useState(false); // 이번 세션 카드에서 RPE 숫자를 직접 눌렀는지 — 저장값도 없고 누르지도 않았으면 "선택해주세요" 힌트 표시
   // RPE·근육통·메모는 서로 독립된 저장 버튼을 가진다 — 한 항목을 저장해도 다른 두 항목의 기존 저장값은 건드리지 않는다(saveSessionMemberFeedback이 전달된 필드만 merge 저장).
   const [savingSection,setSavingSection]=useState(null); // "rpe" | "soreness" | "memo" | null — 저장 중 중복 클릭 방지
   useEffect(()=>{
@@ -2527,11 +2529,9 @@ function MemberFeedbackForm({s,onSave}){
     setMemo(existing.memo||"");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.sorenessNature,existing.rpe,existing.memo]);
-  useEffect(()=>{ setOpen(false); },[s.id]);
+  useEffect(()=>{ setOpen(false); setRpeDirty(false); },[s.id]);
   const togglePart=part=>setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));
-  const hasSoreness=!!existing.sorenessLevel;
   const hasRpe=existing.rpe!=null;
-  const hasMemo=!!existing.memo;
   const cancel=()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
     setRpe(initialRpe()); setMemo(existing.memo||""); setOpen(false);
@@ -2554,55 +2554,41 @@ function MemberFeedbackForm({s,onSave}){
   const riskSaved=SORENESS_RISK_NATURES.includes(existing.sorenessNature||"")&&existing.sorenessLevel&&existing.sorenessLevel!=="없음";
   return <div className="sj-feedback-card">
     <div className="sj-fb-head">
-      <b>오늘 수업은 어땠나요?</b>
+      <i className="sj-fb-ico"><SjIcon paths={SJ_PATHS.squarePen} size={15}/></i>
+      <b>오늘 수업 기록</b>
       <button type="button" className="sj-fb-toggle" onClick={()=>open?cancel():setOpen(true)} aria-expanded={open}>{open?<>접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></>:<>펼치기 <SjIcon paths={SJ_PATHS.chevronDown} size={13}/></>}</button>
     </div>
-    {!open&&<>
-      {/* 접힌 상태 — RPE/근육통/메모 3분할 요약. 기록된 항목은 값이 민트로 표시되고, 누르면 입력 폼이 펼쳐진다 */}
-      <div className="sj-fb-quick">
-        <button type="button" onClick={()=>setOpen(true)} aria-label={hasRpe?`RPE ${existing.rpe} 기록됨`:"RPE 기록하기"}>
-          <i><SjIcon paths={SJ_PATHS.activity} size={21} strokeWidth={1.9}/></i>
-          <span>RPE</span>
-          {hasRpe&&<b>{existing.rpe}</b>}
-        </button>
-        <button type="button" onClick={()=>setOpen(true)} aria-label={hasSoreness?`근육통 ${existing.sorenessLevel} 기록됨`:"근육통 기록하기"}>
-          <i><SjIcon paths={SJ_PATHS.flame} size={21} strokeWidth={1.9}/></i>
-          <span>근육통</span>
-          {hasSoreness&&<b>{existing.sorenessLevel}</b>}
-        </button>
-        <button type="button" onClick={()=>setOpen(true)} aria-label={hasMemo?"메모 기록됨":"메모 남기기"}>
-          <i><SjIcon paths={SJ_PATHS.message} size={21} strokeWidth={1.9}/></i>
-          <span>메모</span>
-          {hasMemo&&<b>작성함</b>}
-        </button>
-      </div>
-      {riskSaved&&<em className="sj-fb-warning-inline"><SjIcon paths={SJ_PATHS.alert} size={13}/> 다음 수업 전 대표님께 꼭 알려주세요.</em>}
-    </>}
+    {/* 접힌 상태는 헤더 한 줄만 — 단, 위험 신호(과거 기록)는 접혀 있어도 안내 유지 */}
+    {!open&&riskSaved&&<em className="sj-fb-warning-inline"><SjIcon paths={SJ_PATHS.alert} size={13}/> 다음 수업 전 대표님께 꼭 알려주세요.</em>}
     {open&&<div className="sj-fb-edit">
       <div className="sj-fb-section">
-        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>
-        <div className="sj-rpe-display"><b>RPE {rpe}</b><span>{rpeDescription(rpe)}</span></div>
-        <input type="range" className="sj-rpe-slider" min="1" max="10" step="1" value={rpe} onChange={e=>setRpe(Number(e.target.value))} aria-label="운동 강도 RPE 1에서 10"/>
-        <div className="sj-rpe-scale"><span>1~2 매우 가벼움</span><span>5~6 적당함</span><span>10 한계</span></div>
-        <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveRpe}>{savingSection==="rpe"?"저장 중...":"RPE 저장"}</button>
+        <div className="sj-fb-label-row">
+          <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>
+          <span className="sj-fb-hint">{(hasRpe||rpeDirty)?rpeDescription(rpe):"선택해주세요"}</span>
+        </div>
+        <div className="sj-rpe-grid" aria-label="운동 강도 RPE 1에서 10">
+          {Array.from({length:10},(_,i)=>i+1).map(n=><button type="button" key={n} className={rpe===n?"active":""} aria-pressed={rpe===n} onClick={()=>{setRpe(n);setRpeDirty(true);}}>{n}</button>)}
+        </div>
+        <div className="sj-fb-save-row"><button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveRpe}>{savingSection==="rpe"?"저장 중...":"RPE 저장"}</button></div>
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 근육통</label>
-        <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>setSoreness(prev=>({...prev,level:lv}))}>{lv}</button>)}</div>
+        <div className="sj-fb-inline">
+          <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>setSoreness(prev=>({...prev,level:lv}))}>{lv}</button>)}</div>
+          <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveSorenessSection}>{savingSection==="soreness"?"저장 중...":"근육통 저장"}</button>
+        </div>
         {soreness.level!=="없음"&&<>
           <span className="sj-fb-sublabel">근육통 부위 (복수 선택 가능)</span>
           <div className="sj-chip-row">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={soreness.parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>)}</div>
           {riskSelected&&<p className="sj-fb-warning"><SjIcon paths={SJ_PATHS.alert} size={15}/> 다음 수업 전 대표님께 꼭 알려주세요.</p>}
         </>}
-        <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveSorenessSection}>{savingSection==="soreness"?"저장 중...":"근육통 저장"}</button>
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.message} size={14}/> 메모</label>
-        <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."/>
-        <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveMemo}>{savingSection==="memo"?"저장 중...":"메모 저장"}</button>
-      </div>
-      <div className="sj-fb-actions">
-        <button type="button" className="sj-fb-cancel" disabled={!!savingSection} onClick={cancel}>닫기</button>
+        <div className="sj-fb-memo-row">
+          <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="오늘 운동 중 좋았던 점이나 아쉬웠던 점을 남겨주세요."/>
+          <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveMemo}>{savingSection==="memo"?"저장 중...":"메모 저장"}</button>
+        </div>
       </div>
     </div>}
   </div>;
@@ -4790,7 +4776,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .ex-search.sj-search{height:44px;border-radius:14px;padding:0 40px 0 41px;font-size:14px}
 .sj-search-wrap .ex-search-clear{display:flex;align-items:center;color:#A8B0BA}
 .sj-section-label{font-size:13px;font-weight:900;color:#8B949E;margin:20px 2px 8px;letter-spacing:-.2px}
-.sj-prev-list{display:grid;gap:8px}
+.sj-prev-list{display:grid;gap:10px}
 .sj-prev-card{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:14px 16px;margin:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.04);transition:transform .15s ease,background-color .15s ease}
 .sj-prev-card:active{transform:scale(.985);background:#FBFCFE}
 .sj-prev-main{flex:1;min-width:0;display:grid;gap:4px}
@@ -4820,7 +4806,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-ex-row{border-top:1px solid #F1F4F8}
 .sj-ex-row:first-of-type{border-top:0}
 .sj-ex-head{width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;padding:12px 2px;min-height:52px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-ex-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
+.sj-ex-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
 .sj-ex-name{flex:1;min-width:0;font-size:15px;font-weight:700;color:#20242A;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sj-ex-body{padding:0 2px 14px}
 .sj-set-table{border-radius:14px;background:#F8FAFC;border:1px solid #EEF1F4;padding:2px 14px}
@@ -4833,38 +4819,37 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-ex-dose{margin:2px 0 0;color:#66717C;font-weight:800;font-size:13.5px;line-height:1.5}
 .sj-ex-notes{display:grid;gap:6px;margin-top:10px}
 .sj-ex-notes em{background:#E9FAF7;color:#0E7C72;border-radius:12px;padding:9px 11px;font-style:normal;font-weight:800;font-size:12.5px;line-height:1.5}
-.sj-feedback-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:18px 20px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
-.sj-fb-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.sj-fb-head b{font-size:17px;color:#1D2430;letter-spacing:-.3px}
-.sj-fb-toggle{display:inline-flex;align-items:center;gap:4px;border:1px solid #CDEFEA;background:#F0FBF9;color:#0F9488;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
-.sj-fb-quick{display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:12px}
-.sj-fb-quick button{display:grid;gap:7px;justify-items:center;align-content:start;border:0;background:transparent;padding:10px 4px 4px;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-fb-quick button+button{border-left:1px solid #EEF1F4}
-.sj-fb-quick i{display:flex;color:#334155;font-style:normal}
-.sj-fb-quick span{font-size:13px;font-weight:700;color:#475569;letter-spacing:0}
-.sj-fb-quick b{font-size:12.5px;font-weight:800;color:#0F9488;font-variant-numeric:tabular-nums}
-.sj-fb-warning-inline{display:flex;align-items:center;gap:5px;margin-top:10px;color:#C2410C;font-style:normal;font-weight:900;font-size:12px}
-.sj-fb-edit{margin-top:14px;display:grid;gap:12px}
-.sj-fb-section{background:#fff;border:1px solid #EEF1F4;border-radius:16px;padding:14px}
-.sj-fb-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:900;color:#334155}
-.sj-fb-label small{color:#A8B0BA;font-weight:800;font-size:11px;margin-left:2px}
-.sj-rpe-display{display:flex;align-items:baseline;gap:9px;margin:12px 0 2px}
-.sj-rpe-display b{font-size:26px;font-weight:700;color:#0F9488;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
-.sj-rpe-display span{font-size:14px;font-weight:800;color:#20242A}
-.sj-rpe-slider{width:100%;margin:6px 0;accent-color:#0F9488;height:34px;-webkit-tap-highlight-color:transparent}
-.sj-rpe-scale{display:flex;justify-content:space-between;font-size:10.5px;font-weight:800;color:#A8B0BA}
-.sj-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.sj-chip-row button{min-height:40px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:12px;padding:0 13px;font-size:13px;font-weight:900;color:#475569;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,color .15s ease}
-.sj-chip-row button.active{background:#0F9488;border-color:#0F9488;color:#fff}
-.sj-fb-sublabel{display:block;margin-top:14px;font-size:12px;font-weight:900;color:#8B949E}
-.sj-fb-warning{display:flex;align-items:flex-start;gap:7px;margin:12px 0 0;background:#FFF7ED;border:1px solid #FED7AA;color:#C2410C;border-radius:12px;padding:11px 12px;font-weight:900;font-size:12.5px;line-height:1.5}
-.sj-fb-edit textarea{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:12px;background:#F6F7F9;color:#20242A;padding:11px 12px;font-weight:800;font-size:13.5px;line-height:1.55;min-height:54px;resize:none;margin-top:10px;transition:min-height .2s ease,border-color .15s ease,background-color .15s ease;font-family:inherit}
-.sj-fb-edit textarea:focus{outline:none;border-color:#39C7B8;background:#fff;min-height:110px}
-.sj-fb-edit textarea::placeholder{color:#A8B0BA;font-weight:700}
-.sj-fb-actions{display:flex;gap:8px}
-.sj-fb-cancel{flex:1;height:48px;border:1px solid #E8ECF1;background:#fff;border-radius:14px;font-size:14px;font-weight:900;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-fb-section-save{width:100%;box-sizing:border-box;margin-top:12px;height:44px;border:0;border-radius:12px;background:#0F9488;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px rgba(15,148,136,.18);-webkit-tap-highlight-color:transparent}
-.sj-fb-section-save:disabled,.sj-fb-cancel:disabled{opacity:.6;cursor:default}
+.sj-feedback-card{background:#fff;border:1px solid #EDEFF2;border-radius:20px;padding:15px 18px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.sj-fb-head{display:flex;align-items:center;gap:11px}
+.sj-fb-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
+.sj-fb-head b{flex:1;min-width:0;font-size:15.5px;font-weight:700;color:#0F172A;letter-spacing:-.3px}
+.sj-fb-toggle{display:inline-flex;align-items:center;gap:4px;height:38px;border:1px solid #CDEFEA;background:#F0FBF9;color:#0F9488;border-radius:999px;padding:0 14px;font-size:12.5px;font-weight:700;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.sj-fb-warning-inline{display:flex;align-items:center;gap:5px;margin-top:10px;color:#C2410C;font-style:normal;font-weight:800;font-size:12px}
+.sj-fb-edit{margin-top:13px;display:grid;gap:0}
+.sj-fb-section{border-top:1px solid #F1F4F8;padding:13px 0 3px}
+.sj-fb-label-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sj-fb-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#0F172A}
+.sj-fb-label svg{color:#0F9488}
+.sj-fb-hint{font-size:12px;font-weight:600;color:#94A3B8;white-space:nowrap;flex-shrink:0}
+.sj-rpe-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:10px}
+.sj-rpe-grid button{height:36px;min-width:0;padding:0;border:1px solid #E8ECF1;background:#F8F9FB;border-radius:9px;font-family:inherit;font-size:13px;font-weight:600;color:#64748B;font-variant-numeric:tabular-nums;letter-spacing:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
+.sj-rpe-grid button.active{border-color:#39C7B8;background:#fff;color:#0F9488;font-weight:700;box-shadow:0 1px 5px rgba(15,148,136,.14)}
+.sj-fb-save-row{display:flex;justify-content:flex-end;margin-top:10px}
+.sj-fb-inline{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.sj-fb-inline .sj-chip-row{margin-top:0;flex:1 1 auto;min-width:0}
+.sj-fb-inline .sj-fb-section-save{margin-left:auto}
+.sj-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.sj-chip-row button{min-height:36px;border:1px solid #E8ECF1;background:#F4F6F8;border-radius:10px;padding:0 12px;font-size:12.5px;font-weight:700;color:#64748B;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
+.sj-chip-row button.active{background:#E9FAF7;border-color:#7FD8CC;color:#0F7C72}
+.sj-fb-sublabel{display:block;margin-top:12px;font-size:12px;font-weight:700;color:#8B949E}
+.sj-fb-warning{display:flex;align-items:flex-start;gap:7px;margin:12px 0 0;background:#FFF7ED;border:1px solid #FED7AA;color:#C2410C;border-radius:12px;padding:10px 12px;font-weight:800;font-size:12.5px;line-height:1.5}
+.sj-fb-memo-row{display:flex;align-items:flex-end;gap:8px;margin-top:10px}
+.sj-fb-edit textarea{flex:1;min-width:0;width:auto;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:11px;background:#F8F9FB;color:#0F172A;padding:12px;font-weight:600;font-size:13px;line-height:1.5;min-height:48px;resize:none;margin:0;transition:min-height .2s ease,border-color .15s ease,background-color .15s ease;font-family:inherit}
+.sj-fb-edit textarea:focus{outline:none;border-color:#39C7B8;background:#fff;min-height:64px}
+.sj-fb-edit textarea::placeholder{color:#A8B0BA;font-weight:600}
+.sj-fb-section-save{flex-shrink:0;width:auto;box-sizing:border-box;margin:0;height:36px;padding:0 14px;border:1px solid #B9E7E0;border-radius:10px;background:#fff;color:#0F9488;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:none;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.sj-fb-section-save:active{background:#F0FBF9}
+.sj-fb-section-save:disabled{opacity:.6;cursor:default}
 .sj-empty{display:grid;gap:5px;place-items:center;text-align:center;padding:34px 16px;border:1px dashed #D9E1EA;border-radius:20px;background:#FBFCFE;margin:10px 0}
 .sj-empty b{font-size:14.5px;color:#475569}
 .sj-empty span{font-size:12.5px;font-weight:800;color:#A8B0BA}

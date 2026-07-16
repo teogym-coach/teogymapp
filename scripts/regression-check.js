@@ -773,12 +773,12 @@ const checks = [
   ],
 
   // ── 수업 탭 리디자인(sj-*) — 통합 피드백 카드 "오늘 수업은 어땠나요?" ──
-  ['수업 후 상태 메모: 요청 placeholder(불편했던 점/좋았던 점) 적용',
-    app.includes('placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."')
+  ['수업 후 상태 메모: 요청 placeholder(좋았던 점/아쉬웠던 점) 적용',
+    app.includes('placeholder="오늘 운동 중 좋았던 점이나 아쉬웠던 점을 남겨주세요."')
   ],
-  ['수업 후 상태: RPE 슬라이더(1~10)+쉬운 설명, 근육통 정도/부위, 메모가 하나의 피드백 카드로 통합 ("어떤 느낌인가요?" 선택 UI는 회원 요청으로 제거됨, sorenessNature 필드·저장 로직은 과거 기록 호환용으로 유지)',
-    app.includes('오늘 수업은 어땠나요?') &&
-    app.includes('className="sj-rpe-slider" min="1" max="10"') &&
+  ['수업 후 상태: RPE 1~10 숫자 버튼+쉬운 설명 힌트, 근육통 정도/부위, 메모가 하나의 피드백 카드로 통합 ("어떤 느낌인가요?" 선택 UI는 회원 요청으로 제거됨, sorenessNature 필드·저장 로직은 과거 기록 호환용으로 유지)',
+    app.includes('<b>오늘 수업 기록</b>') &&
+    app.includes('className="sj-rpe-grid"') &&
     app.includes('function rpeDescription(') &&
     app.includes('const SORENESS_RISK_NATURES=') &&
     !app.includes('어떤 느낌인가요?')
@@ -794,11 +794,11 @@ const checks = [
     app.includes('if(savingSection)return;') &&
     app.includes('setSavingSection(key)')
   ],
-  ['수업 후 상태: 접힌 상태에서도 기록한 RPE·근육통·메모 값이 보이고(sj-fb-quick) 언제든 펼쳐 수정 가능',
-    app.includes('className="sj-fb-quick"') &&
-    app.includes('{hasRpe&&<b>{existing.rpe}</b>}') &&
-    app.includes('{hasSoreness&&<b>{existing.sorenessLevel}</b>}') &&
-    app.includes('{hasMemo&&<b>작성함</b>}')
+  ['수업 후 상태: 오늘 수업 기록 카드는 기본 접힘(헤더 한 줄만) + 펼치기/접기 토글로 언제든 입력·수정 가능, 접힘 상태 미리보기(sj-fb-quick) 없음',
+    app.includes('const [open,setOpen]=useState(false);') &&
+    app.includes('펼치기 <SjIcon paths={SJ_PATHS.chevronDown}') &&
+    app.includes('접기 <SjIcon paths={SJ_PATHS.chevronUp}') &&
+    !app.includes('sj-fb-quick')
   ],
   ['수업 후 상태: 위험 신호(움직일 때 불편함/날카로운 통증) 선택 시 대표에게 알리라는 안내 표시',
     app.includes('const SORENESS_RISK_NATURES=') &&

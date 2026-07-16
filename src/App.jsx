@@ -7660,16 +7660,23 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
     return true;
   }
 
-  // 정렬 적용 — 오늘 수업 회원(isTodaySessionMember 공통 기준)을 최상단으로 올리되, 상태(예정/기록 중/완료)와 무관하게
-  // 예약 시간 오름차순으로 정렬한다(당일 일정 확인이 우선). 시간 미정 회원은 오늘 수업 그룹 중 가장 아래.
-  // 같은 시간(또는 둘 다 시간 미정)이거나 일반 회원끼리는 기존 정렬 기준(sortBy)을 그대로 사용하는 안정 정렬이다.
+  // 정렬 적용 — 3그룹 순서: ①오늘 예정·기록 중 → ②오늘 완료 → ③일반 회원(getTodaySessionStatus 판별 로직은 변경 없음).
+  // 완료 회원은 일반 회원보다는 위, 예정·기록 중 회원보다는 아래로 별도 그룹으로 뒤에 배치한다.
+  // 그룹 ①·② 각각의 내부에서는 예약 시간 오름차순(시간 미정은 그 그룹의 마지막)을 그대로 적용한다.
+  // 그룹이 다르면(예: ①의 회원 vs ②의 회원) 시간 값과 무관하게 그룹 순서가 우선한다.
   function sortMembers(list) {
+    const todayGroup = (m) => {
+      const st = getTodaySessionStatus(m, sessionsMap, today);
+      if (st === "done") return 1;
+      if (st) return 0; // scheduled | recording
+      return 2; // 오늘 수업 아님(일반 회원)
+    };
     return [...list].sort((a, b) => {
-      const aToday = isTodaySessionMember(a, sessionsMap, today);
-      const bToday = isTodaySessionMember(b, sessionsMap, today);
-      if (aToday !== bToday) return aToday ? -1 : 1;
+      const aGroup = todayGroup(a);
+      const bGroup = todayGroup(b);
+      if (aGroup !== bGroup) return aGroup - bGroup;
 
-      if (aToday && bToday) {
+      if (aGroup !== 2) {
         const aTime = getTodaySortTimeKey(a, today);
         const bTime = getTodaySortTimeKey(b, today);
         if (!!aTime !== !!bTime) return aTime ? -1 : 1;

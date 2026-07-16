@@ -2121,6 +2121,8 @@ const SJ_PATHS={
   flame:["M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"],
   message:["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"],
   alert:["M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z","M12 9v4","M12 17h.01"],
+  dumbbell:["M14.4 14.4 9.6 9.6","M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z","m21.5 21.5-1.4-1.4","M3.9 3.9 2.5 2.5","M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"],
+  arrowRight:["M5 12h14","m12 5 7 7-7 7"],
   check:["M22 11.08V12a10 10 0 1 1-5.93-9.14","m22 4-10 10.01-3-3"],
   pencil:["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"],
 };
@@ -2156,26 +2158,28 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   // 펼친 수업 카드 — 최근 수업이든 이전 수업이든 같은 구성(날짜/부위/요약/운동 아코디언/피드백 카드)
   const renderExpanded=(s,i)=>{
     const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId;
-    return <section key={s.id} className="sj-session-card">
-      <header className="sj-sess-head">
-        <div className="sj-sess-title">
-          {(isLatest||isPr)&&<span className="sj-badges">{isLatest&&<em className="sj-badge latest">최근 수업</em>}{isPr&&<em className="sj-badge pr">★ PR</em>}</span>}
-          <h2>{formatKoreanDateLabel(s.date)}</h2>
-          <p>{typeName}</p>
-        </div>
-        <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
-      </header>
-      <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/>
-    </section>;
+    return <div key={s.id} className="sj-session-group">
+      <section className="sj-session-card">
+        <header className="sj-sess-head">
+          <div className="sj-sess-title">
+            {(isLatest||isPr)&&<span className="sj-badges">{isLatest&&<em className="sj-badge latest">최근 수업</em>}{isPr&&<em className="sj-badge pr">★ PR</em>}</span>}
+            <h2>{formatKoreanDateLabel(s.date)}</h2>
+            <p>{typeName}</p>
+          </div>
+          <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
+        </header>
+        <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>
+      </section>
+      <MemberFeedbackForm s={s} onSave={saveFeedback}/>
+    </div>;
   };
   // 접힌 이전 수업 카드 — 날짜/부위/종목 수/대표 운동/RPE 기록 여부로 내용을 예측할 수 있게
   const renderCollapsed=(s,i)=>{
-    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{}; const firstEx=exs.find(e=>getMemberExerciseSection(e)==="웨이트 트레이닝")?.name||exs[0]?.name||"";
+    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{};
     return <button key={s.id} type="button" className="sj-prev-card" onClick={()=>toggleSess(s,i)}>
       <span className="sj-prev-main">
         <b>{formatKoreanDateLabel(s.date)}</b>
         <span><i className="sj-part">{typeName}</i> · {exs.length}종목</span>
-        {firstEx&&<small>{firstEx}{exs.length>1?` 외 ${exs.length-1}개`:""}</small>}
       </span>
       <span className="sj-prev-side">
         {fb.rpe!=null?<em className="sj-rpe-chip">RPE {fb.rpe}</em>:<em className="sj-rpe-chip empty">기록 전</em>}
@@ -2198,7 +2202,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     </>:(lq
       ?<div className="sj-empty"><b>"{q}" 운동이 포함된 수업이 없어요.</b><span>다른 운동 이름으로 검색해보세요.</span></div>
       :<div className="sj-empty"><b>아직 공개된 수업 기록이 없어요.</b><span>수업이 공개되면 여기에서 확인할 수 있어요.</span></div>)}
-    {!lq&&!showAll&&searched.length>5&&<button type="button" className="sj-show-all" onClick={()=>setShowAll(true)}>전체 수업 기록 보기<small>총 {searched.length}회</small></button>}
+    {!lq&&!showAll&&searched.length>5&&<button type="button" className="sj-show-all" onClick={()=>setShowAll(true)}><span className="sj-show-all-txt">전체 수업 기록 보기<small>총 {searched.length}회</small></span><i className="sj-show-all-arrow"><SjIcon paths={SJ_PATHS.arrowRight} size={19}/></i></button>}
   </>}
 // ════════════════════════════════════════════════════
 // 건강 탭 대시보드 — 동기부여 지표 계산 (기존 데이터만 사용, 신규 저장 없음)
@@ -2528,7 +2532,6 @@ function MemberFeedbackForm({s,onSave}){
   const hasSoreness=!!existing.sorenessLevel;
   const hasRpe=existing.rpe!=null;
   const hasMemo=!!existing.memo;
-  const hasAny=hasSoreness||hasRpe||hasMemo;
   const cancel=()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
     setRpe(initialRpe()); setMemo(existing.memo||""); setOpen(false);
@@ -2547,32 +2550,34 @@ function MemberFeedbackForm({s,onSave}){
     saveSection("soreness",{sorenessLevel:level,sorenessBodyParts:parts,sorenessNature:nature});
   };
   const saveMemo=()=>saveSection("memo",{memo:memo.trim()});
-  // 저장 완료 요약 — "미입력" 대신 기록한 내용을 한 줄로 보여준다
-  const summaryBits=[];
-  if(hasRpe) summaryBits.push(`RPE ${existing.rpe}`);
-  if(hasSoreness) summaryBits.push(existing.sorenessLevel==="없음"?"근육통 없음":`${formatSorenessBodyParts(existing)} 근육통 ${existing.sorenessLevel}`);
-  if(hasMemo) summaryBits.push("메모 남김");
   const riskSelected=SORENESS_RISK_NATURES.includes(soreness.nature)&&soreness.level!=="없음";
   const riskSaved=SORENESS_RISK_NATURES.includes(existing.sorenessNature||"")&&existing.sorenessLevel&&existing.sorenessLevel!=="없음";
   return <div className="sj-feedback-card">
     <div className="sj-fb-head">
-      <div>
-        <b>오늘 수업은 어땠나요?</b>
-        {!hasAny&&!open&&<span>수업 후 상태를 기록하면 다음 수업에 반영됩니다.</span>}
-      </div>
-      {!open&&<button type="button" className="sj-fb-toggle" onClick={()=>setOpen(true)}>{hasAny?<><SjIcon paths={SJ_PATHS.pencil} size={12}/> 수정</>:"기록하기"}</button>}
+      <b>오늘 수업은 어땠나요?</b>
+      <button type="button" className="sj-fb-toggle" onClick={()=>open?cancel():setOpen(true)} aria-expanded={open}>{open?<>접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></>:<>펼치기 <SjIcon paths={SJ_PATHS.chevronDown} size={13}/></>}</button>
     </div>
-    {!open&&(hasAny
-      ?<div className="sj-fb-done">
-        <i className="sj-fb-done-icon"><SjIcon paths={SJ_PATHS.check} size={17}/></i>
-        <div>
-          <b>오늘의 피드백을 기록했어요.</b>
-          {summaryBits.length>0&&<span>{summaryBits.join(" · ")}</span>}
-          {hasMemo&&<small>"{existing.memo}"</small>}
-          {riskSaved&&<em className="sj-fb-warning-inline"><SjIcon paths={SJ_PATHS.alert} size={13}/> 다음 수업 전 대표님께 꼭 알려주세요.</em>}
-        </div>
+    {!open&&<>
+      {/* 접힌 상태 — RPE/근육통/메모 3분할 요약. 기록된 항목은 값이 민트로 표시되고, 누르면 입력 폼이 펼쳐진다 */}
+      <div className="sj-fb-quick">
+        <button type="button" onClick={()=>setOpen(true)} aria-label={hasRpe?`RPE ${existing.rpe} 기록됨`:"RPE 기록하기"}>
+          <i><SjIcon paths={SJ_PATHS.activity} size={21} strokeWidth={1.9}/></i>
+          <span>RPE</span>
+          {hasRpe&&<b>{existing.rpe}</b>}
+        </button>
+        <button type="button" onClick={()=>setOpen(true)} aria-label={hasSoreness?`근육통 ${existing.sorenessLevel} 기록됨`:"근육통 기록하기"}>
+          <i><SjIcon paths={SJ_PATHS.flame} size={21} strokeWidth={1.9}/></i>
+          <span>근육통</span>
+          {hasSoreness&&<b>{existing.sorenessLevel}</b>}
+        </button>
+        <button type="button" onClick={()=>setOpen(true)} aria-label={hasMemo?"메모 기록됨":"메모 남기기"}>
+          <i><SjIcon paths={SJ_PATHS.message} size={21} strokeWidth={1.9}/></i>
+          <span>메모</span>
+          {hasMemo&&<b>작성함</b>}
+        </button>
       </div>
-      :<p className="sj-fb-empty">수업 후 상태를 기록해주세요.</p>)}
+      {riskSaved&&<em className="sj-fb-warning-inline"><SjIcon paths={SJ_PATHS.alert} size={13}/> 다음 수업 전 대표님께 꼭 알려주세요.</em>}
+    </>}
     {open&&<div className="sj-fb-edit">
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>
@@ -2592,7 +2597,7 @@ function MemberFeedbackForm({s,onSave}){
         <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveSorenessSection}>{savingSection==="soreness"?"저장 중...":"근육통 저장"}</button>
       </div>
       <div className="sj-fb-section">
-        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.message} size={14}/> 메모 <small>대표님께 함께 전달됩니다</small></label>
+        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.message} size={14}/> 메모</label>
         <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="오늘 운동 중 불편했던 점이나 좋았던 점을 남겨주세요."/>
         <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveMemo}>{savingSection==="memo"?"저장 중...":"메모 저장"}</button>
       </div>
@@ -4439,6 +4444,7 @@ function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
   ].filter(Boolean);
   return <div className={"sj-ex-row"+(weight?"":" assist")}>
     <button type="button" className="sj-ex-head" onClick={()=>toggleOpen(exKey)} aria-expanded={open}>
+      <i className="sj-ex-ico"><SjIcon paths={SJ_PATHS.dumbbell} size={14} strokeWidth={1.9}/></i>
       <span className="sj-ex-name">{getMemberExerciseName(e)}</span>
       {getExerciseTypeBadge(e)&&<em className="sj-badge move" style={{flexShrink:0}}>{getExerciseTypeBadge(e)}</em>}
       <i className="sj-chev"><SjIcon paths={open?SJ_PATHS.chevronUp:SJ_PATHS.chevronDown} size={14}/></i>
@@ -4773,8 +4779,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   .mv2-evt{font-size:9.5px;padding:4.5px 6px;border-radius:5px}
   .mv2-calx-fab{right:max(16px,calc(50vw - 362px))}
 }
-/* ── 수업 탭 리디자인(sj-*) — 밝은 프리미엄 톤, 정보 위계 우선, 이모지 대신 선형 아이콘 ── */
+/* ── 수업 탭 리디자인(sj-*) — 밝은 프리미엄 톤, TEO GYM 민트(#39C7B8/#0F9488) 포인트, 이모지 대신 선형 아이콘 ── */
 .sj-page-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:4px}
+.sj-page-head~.mv2-segment button.active{color:#0F9488}
 .member-page h1.sj-page-title{font-size:24px;letter-spacing:-.6px;margin:4px 0}
 .sj-page-meta{color:#8B949E;font-size:12.5px;font-weight:800;white-space:nowrap}
 .member-page .sj-page-sub{margin-bottom:14px;font-size:13.5px}
@@ -4786,34 +4793,35 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-prev-list{display:grid;gap:8px}
 .sj-prev-card{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:14px 16px;margin:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.04);transition:transform .15s ease,background-color .15s ease}
 .sj-prev-card:active{transform:scale(.985);background:#FBFCFE}
-.sj-prev-main{flex:1;min-width:0;display:grid;gap:3px}
-.sj-prev-main b{font-size:15px;color:#20242A;letter-spacing:-.2px}
-.sj-prev-main span{font-size:12.5px;font-weight:800;color:#66717C}
-.sj-part{color:#F97316;font-style:normal;font-weight:900}
-.sj-prev-main small{font-size:12px;color:#8B949E;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sj-prev-main{flex:1;min-width:0;display:grid;gap:4px}
+.sj-prev-main b{font-size:15.5px;font-weight:700;color:#1D2430;letter-spacing:-.2px;font-variant-numeric:tabular-nums}
+.sj-prev-main span{font-size:13px;font-weight:700;color:#66717C;letter-spacing:0}
+.sj-part{color:#0F9488;font-style:normal;font-weight:800}
 .sj-prev-side{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.sj-rpe-chip{font-style:normal;font-size:11px;font-weight:900;color:#2F73F6;background:#EEF5FF;border-radius:999px;padding:4px 9px;white-space:nowrap}
-.sj-rpe-chip.empty{color:#A8B0BA;background:#F1F3F6}
+.sj-rpe-chip{font-style:normal;font-size:12px;font-weight:700;color:#0F9488;background:#fff;border:1px solid #B9E7E0;border-radius:999px;padding:5px 11px;white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:.1px}
+.sj-rpe-chip.empty{color:#8B949E;background:#F4F6F8;border-color:#E8ECF1}
 .sj-chev{color:#C0C8D3;display:flex;font-style:normal;flex-shrink:0}
-.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:20px;margin:12px 0;box-shadow:0 2px 14px rgba(15,23,42,.05);animation:memberCardIn .22s ease}
-.sj-prev-list .sj-session-card{margin:0}
+.sj-session-group{display:grid;gap:12px;margin:12px 0;animation:memberCardIn .22s ease}
+.sj-prev-list .sj-session-group{grid-column:1/-1;margin:0}
+.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:20px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .sj-sess-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .sj-sess-title{min-width:0}
-.sj-badges{display:flex;gap:6px;margin-bottom:8px}
-.sj-badge{font-style:normal;font-size:10.5px;font-weight:900;border-radius:999px;padding:3.5px 9px;letter-spacing:0}
-.sj-badge.latest{background:#2F73F6;color:#fff}
+.sj-badges{display:flex;gap:6px;margin-bottom:9px}
+.sj-badge{font-style:normal;font-size:11px;font-weight:800;border-radius:999px;padding:4px 10px;letter-spacing:0}
+.sj-badge.latest{background:#0F9488;color:#fff}
 .sj-badge.pr{background:#FFF7ED;color:#F97316;border:1px solid #FED7AA}
 .sj-badge.move{background:rgba(139,92,246,.12);color:#8B5CF6}
-.sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#20242A}
-.sj-sess-title p{margin:5px 0 0;color:#F97316;font-weight:900;font-size:13.5px}
-.sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:10px;padding:7px 11px;font-size:12px;font-weight:900;color:#8B949E;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#1D2430;font-variant-numeric:tabular-nums}
+.sj-sess-title p{margin:6px 0 0;color:#0F9488;font-weight:800;font-size:14.5px}
+.sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;color:#66717C;cursor:pointer;flex-shrink:0;box-shadow:0 1px 4px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
 .sj-session-mini>div{padding:0;border-top:0}
 .sj-ex-section{padding:14px 0 2px;border-top:1px solid #EEF1F4;margin-top:14px}
 .sj-ex-section h3{font-size:11.5px;font-weight:900;color:#8B949E;letter-spacing:.5px;margin:0}
 .sj-ex-row{border-top:1px solid #F1F4F8}
 .sj-ex-row:first-of-type{border-top:0}
-.sj-ex-head{width:100%;display:flex;align-items:center;gap:10px;border:0;background:transparent;padding:13px 2px;min-height:48px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-ex-name{flex:1;min-width:0;font-size:15.5px;font-weight:900;color:#20242A;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sj-ex-head{width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;padding:12px 2px;min-height:52px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-ex-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
+.sj-ex-name{flex:1;min-width:0;font-size:15px;font-weight:700;color:#20242A;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sj-ex-body{padding:0 2px 14px}
 .sj-set-table{border-radius:14px;background:#F8FAFC;border:1px solid #EEF1F4;padding:2px 14px}
 .sj-set-row{display:grid;grid-template-columns:56px repeat(var(--sj-cols,2),1fr);align-items:center;padding:9px 0;border-top:1px solid #EEF1F4}
@@ -4824,49 +4832,49 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-set-row.head span:not(:first-child){text-align:right}
 .sj-ex-dose{margin:2px 0 0;color:#66717C;font-weight:800;font-size:13.5px;line-height:1.5}
 .sj-ex-notes{display:grid;gap:6px;margin-top:10px}
-.sj-ex-notes em{background:#EEF5FF;color:#2F73F6;border-radius:12px;padding:9px 11px;font-style:normal;font-weight:800;font-size:12.5px;line-height:1.5}
-.sj-feedback-card{background:#F8FAFC;border:1px solid #E8ECF1;border-radius:20px;padding:16px;margin-top:16px}
-.sj-fb-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-.sj-fb-head b{font-size:16px;color:#20242A;letter-spacing:-.3px}
-.sj-fb-head span{display:block;margin-top:4px;font-size:12px;font-weight:800;color:#8B949E;line-height:1.5}
-.sj-fb-toggle{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(47,115,246,.3);background:#fff;color:#2F73F6;border-radius:999px;height:36px;padding:0 15px;font-size:12.5px;font-weight:900;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
-.sj-fb-empty{margin:10px 0 0;color:#8B949E;font-weight:800;font-size:13px}
-.sj-fb-done{display:flex;gap:10px;margin-top:12px;background:#fff;border:1px solid #D9F2E4;border-radius:14px;padding:12px 14px}
-.sj-fb-done-icon{color:#16A34A;display:flex;margin-top:1px;flex-shrink:0;font-style:normal}
-.sj-fb-done b{display:block;font-size:13.5px;color:#15803D}
-.sj-fb-done span{display:block;margin-top:4px;font-size:13px;font-weight:900;color:#20242A}
-.sj-fb-done small{display:block;margin-top:5px;font-size:12px;font-weight:800;color:#66717C;line-height:1.5;word-break:break-word}
-.sj-fb-warning-inline{display:flex;align-items:center;gap:5px;margin-top:7px;color:#C2410C;font-style:normal;font-weight:900;font-size:12px}
+.sj-ex-notes em{background:#E9FAF7;color:#0E7C72;border-radius:12px;padding:9px 11px;font-style:normal;font-weight:800;font-size:12.5px;line-height:1.5}
+.sj-feedback-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:18px 20px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.sj-fb-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sj-fb-head b{font-size:17px;color:#1D2430;letter-spacing:-.3px}
+.sj-fb-toggle{display:inline-flex;align-items:center;gap:4px;border:1px solid #CDEFEA;background:#F0FBF9;color:#0F9488;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.sj-fb-quick{display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:12px}
+.sj-fb-quick button{display:grid;gap:7px;justify-items:center;align-content:start;border:0;background:transparent;padding:10px 4px 4px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-fb-quick button+button{border-left:1px solid #EEF1F4}
+.sj-fb-quick i{display:flex;color:#334155;font-style:normal}
+.sj-fb-quick span{font-size:13px;font-weight:700;color:#475569;letter-spacing:0}
+.sj-fb-quick b{font-size:12.5px;font-weight:800;color:#0F9488;font-variant-numeric:tabular-nums}
+.sj-fb-warning-inline{display:flex;align-items:center;gap:5px;margin-top:10px;color:#C2410C;font-style:normal;font-weight:900;font-size:12px}
 .sj-fb-edit{margin-top:14px;display:grid;gap:12px}
 .sj-fb-section{background:#fff;border:1px solid #EEF1F4;border-radius:16px;padding:14px}
 .sj-fb-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:900;color:#334155}
 .sj-fb-label small{color:#A8B0BA;font-weight:800;font-size:11px;margin-left:2px}
 .sj-rpe-display{display:flex;align-items:baseline;gap:9px;margin:12px 0 2px}
-.sj-rpe-display b{font-size:26px;color:#2F73F6;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
-.sj-rpe-display span{font-size:14px;font-weight:900;color:#20242A}
-.sj-rpe-slider{width:100%;margin:6px 0;accent-color:#2F73F6;height:34px;-webkit-tap-highlight-color:transparent}
+.sj-rpe-display b{font-size:26px;font-weight:700;color:#0F9488;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.sj-rpe-display span{font-size:14px;font-weight:800;color:#20242A}
+.sj-rpe-slider{width:100%;margin:6px 0;accent-color:#0F9488;height:34px;-webkit-tap-highlight-color:transparent}
 .sj-rpe-scale{display:flex;justify-content:space-between;font-size:10.5px;font-weight:800;color:#A8B0BA}
 .sj-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .sj-chip-row button{min-height:40px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:12px;padding:0 13px;font-size:13px;font-weight:900;color:#475569;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,color .15s ease}
-.sj-chip-row button.active{background:#20242A;border-color:#20242A;color:#fff}
+.sj-chip-row button.active{background:#0F9488;border-color:#0F9488;color:#fff}
 .sj-fb-sublabel{display:block;margin-top:14px;font-size:12px;font-weight:900;color:#8B949E}
 .sj-fb-warning{display:flex;align-items:flex-start;gap:7px;margin:12px 0 0;background:#FFF7ED;border:1px solid #FED7AA;color:#C2410C;border-radius:12px;padding:11px 12px;font-weight:900;font-size:12.5px;line-height:1.5}
 .sj-fb-edit textarea{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:12px;background:#F6F7F9;color:#20242A;padding:11px 12px;font-weight:800;font-size:13.5px;line-height:1.55;min-height:54px;resize:none;margin-top:10px;transition:min-height .2s ease,border-color .15s ease,background-color .15s ease;font-family:inherit}
-.sj-fb-edit textarea:focus{outline:none;border-color:#2F73F6;background:#fff;min-height:110px}
+.sj-fb-edit textarea:focus{outline:none;border-color:#39C7B8;background:#fff;min-height:110px}
 .sj-fb-edit textarea::placeholder{color:#A8B0BA;font-weight:700}
 .sj-fb-actions{display:flex;gap:8px}
 .sj-fb-cancel{flex:1;height:48px;border:1px solid #E8ECF1;background:#fff;border-radius:14px;font-size:14px;font-weight:900;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.sj-fb-section-save{width:100%;box-sizing:border-box;margin-top:12px;height:44px;border:0;border-radius:12px;background:#2F73F6;color:#fff;font-size:13.5px;font-weight:900;cursor:pointer;box-shadow:0 6px 16px rgba(47,115,246,.18);-webkit-tap-highlight-color:transparent}
+.sj-fb-section-save{width:100%;box-sizing:border-box;margin-top:12px;height:44px;border:0;border-radius:12px;background:#0F9488;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px rgba(15,148,136,.18);-webkit-tap-highlight-color:transparent}
 .sj-fb-section-save:disabled,.sj-fb-cancel:disabled{opacity:.6;cursor:default}
 .sj-empty{display:grid;gap:5px;place-items:center;text-align:center;padding:34px 16px;border:1px dashed #D9E1EA;border-radius:20px;background:#FBFCFE;margin:10px 0}
 .sj-empty b{font-size:14.5px;color:#475569}
 .sj-empty span{font-size:12.5px;font-weight:800;color:#A8B0BA}
-.sj-show-all{width:100%;display:grid;gap:3px;place-items:center;border:1px solid #E8ECF1;background:#fff;border-radius:18px;padding:14px;margin-top:14px;font-size:14.5px;font-weight:900;color:#20242A;cursor:pointer;box-shadow:0 1px 8px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
-.sj-show-all small{font-size:11.5px;font-weight:800;color:#8B949E}
+.sj-show-all{position:relative;width:100%;display:grid;gap:4px;place-items:center;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:15px 48px;margin-top:14px;font-size:15px;font-weight:800;color:#1D2430;cursor:pointer;box-shadow:0 1px 8px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
+.sj-show-all-txt{display:grid;gap:4px;place-items:center}
+.sj-show-all small{font-size:12px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums}
+.sj-show-all-arrow{position:absolute;right:18px;top:50%;transform:translateY(-50%);display:flex;color:#0F9488;font-style:normal}
 @media(min-width:700px){
   /* 태블릿/PC — 이전 수업 목록 2열, 펼친 카드는 전체 폭. 모바일을 그대로 늘린 느낌이 되지 않게 여백만 키운다 */
   .sj-prev-list{grid-template-columns:1fr 1fr;gap:10px}
-  .sj-prev-list .sj-session-card{grid-column:1/-1}
   .sj-session-card{padding:24px}
   .sj-fb-edit{grid-template-columns:1fr}
 }

@@ -794,10 +794,11 @@ const checks = [
     app.includes('if(savingSection)return;') &&
     app.includes('setSavingSection(key)')
   ],
-  ['수업 후 상태: 저장 후 "미입력" 대신 기록 요약을 보여주고 언제든 수정 가능',
-    app.includes('오늘의 피드백을 기록했어요.') &&
-    app.includes('수업 후 상태를 기록해주세요.') &&
-    app.includes('summaryBits')
+  ['수업 후 상태: 접힌 상태에서도 기록한 RPE·근육통·메모 값이 보이고(sj-fb-quick) 언제든 펼쳐 수정 가능',
+    app.includes('className="sj-fb-quick"') &&
+    app.includes('{hasRpe&&<b>{existing.rpe}</b>}') &&
+    app.includes('{hasSoreness&&<b>{existing.sorenessLevel}</b>}') &&
+    app.includes('{hasMemo&&<b>작성함</b>}')
   ],
   ['수업 후 상태: 위험 신호(움직일 때 불편함/날카로운 통증) 선택 시 대표에게 알리라는 안내 표시',
     app.includes('const SORENESS_RISK_NATURES=') &&
@@ -805,8 +806,9 @@ const checks = [
   ],
   ['수업일지 카드 순서: 운동종목(SessionMini)이 피드백 카드(MemberFeedbackForm)보다 먼저 표시',
     (() => {
-      const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/><MemberFeedbackForm s={s} onSave={saveFeedback}/>');
-      return i !== -1;
+      const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>');
+      const j = app.indexOf('<MemberFeedbackForm s={s} onSave={saveFeedback}/>');
+      return i !== -1 && j !== -1 && i < j;
     })()
   ],
   ['수업일지: 최근 수업 대표 카드 + 이전 수업 프리뷰 카드(날짜·부위·대표 운동·RPE 여부) + 전체 수업 기록 보기',

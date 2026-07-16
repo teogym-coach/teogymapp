@@ -2170,8 +2170,9 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
           <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
         </header>
         <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>
+        {/* 오늘 수업 기록 — 같은 수업 카드 안에서 운동 목록 아래에 이어지는 흐름(별도 카드 아님) */}
+        <MemberFeedbackForm s={s} onSave={saveFeedback}/>
       </section>
-      <MemberFeedbackForm s={s} onSave={saveFeedback}/>
     </div>;
   };
   // 접힌 이전 수업 카드 — 날짜/부위/종목 수/대표 운동/RPE 기록 여부로 내용을 예측할 수 있게
@@ -4766,14 +4767,16 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   .mv2-calx-fab{right:max(16px,calc(50vw - 362px))}
 }
 /* ── 수업 탭 리디자인(sj-*) — 밝은 프리미엄 톤, TEO GYM 민트(#39C7B8/#0F9488) 포인트, 이모지 대신 선형 아이콘 ── */
-.sj-page-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:4px}
+.sj-page-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:-6px}
+.sj-page-head~.mv2-segment{margin:0 0 10px}
+.sj-page-head~.mv2-segment button{height:38px}
 .sj-page-head~.mv2-segment button.active{color:#0F9488}
-.member-page h1.sj-page-title{font-size:24px;letter-spacing:-.6px;margin:4px 0}
+.member-page h1.sj-page-title{font-size:24px;letter-spacing:-.6px;margin:2px 0}
 .sj-page-meta{color:#8B949E;font-size:12.5px;font-weight:800;white-space:nowrap}
-.member-page .sj-page-sub{margin-bottom:14px;font-size:13.5px}
-.sj-search-wrap{padding:6px 0 8px}
+.member-page .sj-page-sub{margin:2px 0 10px;font-size:13.5px}
+.sj-search-wrap{padding:2px 0 6px}
 .sj-search-icon{position:absolute;left:15px;top:50%;transform:translateY(-51%);color:#A8B0BA;display:flex;pointer-events:none;font-style:normal}
-.ex-search.sj-search{height:44px;border-radius:14px;padding:0 40px 0 41px;font-size:14px}
+.ex-search.sj-search{height:40px;border-radius:13px;padding:0 40px 0 41px;font-size:14px}
 .sj-search-wrap .ex-search-clear{display:flex;align-items:center;color:#A8B0BA}
 .sj-section-label{font-size:13px;font-weight:900;color:#8B949E;margin:20px 2px 8px;letter-spacing:-.2px}
 .sj-prev-list{display:grid;gap:10px}
@@ -4787,9 +4790,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-rpe-chip{font-style:normal;font-size:12px;font-weight:700;color:#0F9488;background:#fff;border:1px solid #B9E7E0;border-radius:999px;padding:5px 11px;white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:.1px}
 .sj-rpe-chip.empty{color:#8B949E;background:#F4F6F8;border-color:#E8ECF1}
 .sj-chev{color:#C0C8D3;display:flex;font-style:normal;flex-shrink:0}
-.sj-session-group{display:grid;gap:12px;margin:12px 0;animation:memberCardIn .22s ease}
+.sj-session-group{display:grid;gap:12px;margin:10px 0;animation:memberCardIn .22s ease}
 .sj-prev-list .sj-session-group{grid-column:1/-1;margin:0}
-.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:20px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:16px 18px 14px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .sj-sess-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .sj-sess-title{min-width:0}
 .sj-badges{display:flex;gap:6px;margin-bottom:9px}
@@ -4801,11 +4804,11 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-sess-title p{margin:6px 0 0;color:#0F9488;font-weight:800;font-size:14.5px}
 .sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;color:#66717C;cursor:pointer;flex-shrink:0;box-shadow:0 1px 4px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
 .sj-session-mini>div{padding:0;border-top:0}
-.sj-ex-section{padding:14px 0 2px;border-top:1px solid #EEF1F4;margin-top:14px}
+.sj-ex-section{padding:12px 0 2px;border-top:1px solid #EEF1F4;margin-top:12px}
 .sj-ex-section h3{font-size:11.5px;font-weight:900;color:#8B949E;letter-spacing:.5px;margin:0}
 .sj-ex-row{border-top:1px solid #F1F4F8}
 .sj-ex-row:first-of-type{border-top:0}
-.sj-ex-head{width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;padding:12px 2px;min-height:52px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-ex-head{width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;padding:10px 2px;min-height:48px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .sj-ex-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
 .sj-ex-name{flex:1;min-width:0;font-size:15px;font-weight:700;color:#20242A;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sj-ex-body{padding:0 2px 14px}
@@ -4819,11 +4822,12 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-ex-dose{margin:2px 0 0;color:#66717C;font-weight:800;font-size:13.5px;line-height:1.5}
 .sj-ex-notes{display:grid;gap:6px;margin-top:10px}
 .sj-ex-notes em{background:#E9FAF7;color:#0E7C72;border-radius:12px;padding:9px 11px;font-style:normal;font-weight:800;font-size:12.5px;line-height:1.5}
-.sj-feedback-card{background:#fff;border:1px solid #EDEFF2;border-radius:20px;padding:15px 18px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+/* 오늘 수업 기록 — 수업 카드 내부 섹션(별도 카드 아님): 운동 목록 아래에 구분선으로 이어지는 같은 날짜의 흐름 */
+.sj-feedback-card{background:transparent;border:0;border-top:1px solid #EEF1F4;border-radius:0;padding:12px 0 2px;margin:12px 0 0;box-shadow:none}
 .sj-fb-head{display:flex;align-items:center;gap:11px}
 .sj-fb-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
 .sj-fb-head b{flex:1;min-width:0;font-size:15.5px;font-weight:700;color:#0F172A;letter-spacing:-.3px}
-.sj-fb-toggle{display:inline-flex;align-items:center;gap:4px;height:38px;border:1px solid #CDEFEA;background:#F0FBF9;color:#0F9488;border-radius:999px;padding:0 14px;font-size:12.5px;font-weight:700;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.sj-fb-toggle{display:inline-flex;align-items:center;gap:4px;height:34px;border:1px solid #CDEFEA;background:#F0FBF9;color:#0F9488;border-radius:999px;padding:0 13px;font-size:12.5px;font-weight:700;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
 .sj-fb-warning-inline{display:flex;align-items:center;gap:5px;margin-top:10px;color:#C2410C;font-style:normal;font-weight:800;font-size:12px}
 .sj-fb-edit{margin-top:13px;display:grid;gap:0}
 .sj-fb-section{border-top:1px solid #F1F4F8;padding:13px 0 3px}
@@ -4860,7 +4864,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 @media(min-width:700px){
   /* 태블릿/PC — 이전 수업 목록 2열, 펼친 카드는 전체 폭. 모바일을 그대로 늘린 느낌이 되지 않게 여백만 키운다 */
   .sj-prev-list{grid-template-columns:1fr 1fr;gap:10px}
-  .sj-session-card{padding:24px}
+  .sj-session-card{padding:20px 22px 16px}
   .sj-fb-edit{grid-template-columns:1fr}
 }
 /* ── 부위별 운동 볼륨 변화(pv-multi-*) — 부위 선택 없이 5개 부위를 한 카드에서 동시에 비교 ── */

@@ -2649,7 +2649,6 @@ function getInbodyRecords(body, since) { const list = (body?.inbody || []).filte
 function calcBodyFatMass(r) { if (!r) return null; if (r.bodyFatMass != null && Number.isFinite(Number(r.bodyFatMass))) return parseFloat(Number(r.bodyFatMass).toFixed(1)); const w = Number(r.weight), bf = Number(r.bodyFat); if (w > 0 && bf > 0) return parseFloat((w * bf / 100).toFixed(1)); return null; }
 function CollapsibleSection({ label, defaultOpen = false, children }) { const [open, setOpen] = useState(defaultOpen); return <div style={{margin:"6px 0"}}><button type="button" onClick={()=>setOpen(v=>!v)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1px solid #E8ECF1",borderRadius:22,padding:"14px 20px",cursor:"pointer",boxShadow:"0 6px 18px rgba(32,36,42,.04)",marginBottom:open?6:0,WebkitTapHighlightColor:"transparent",transition:"margin-bottom .2s ease"}}><span style={{fontWeight:900,fontSize:16,color:"#20242A"}}>{label}</span><span style={{color:"#A8B0BA",fontWeight:900,fontSize:13,flexShrink:0}}>{open?"▲ 접기":"▼ 펼치기"}</span></button><div className={`health-collapse${open?" open":""}`}><div className="health-collapse-inner">{children}</div></div></div>; }
 function SummaryTile({title,value,sub,delta,color="#2F73F6"}){return <div className="analysis-kpi" style={{borderColor:color+"33"}}><span style={{color}}>{title}</span><b>{value}</b>{sub&&<small>{sub}</small>}{delta&&<em style={{color}}>{delta}</em>}</div>}
-// "이번 달 BEST" — 성취감을 위한 하이라이트. 항목별로 데이터가 없으면 카드 전체를 숨기지 않고 항목 단위로 안내한다.
 // "가동범위 변화" — 체형교정 목표 전용, 통증 변화 분석(교정 결과/이번 달 변화)과는 완전히 별개 카드.
 // 관리자 체형평가에서 각도/거리/도달위치/시간으로 기록한 항목의 초기 대비 최근 변화를 회원이 이해하기 쉬운 문장으로 보여준다.
 // "진단/치료" 같은 의료 표현 없이 "가동범위/움직임 변화"로만 표현하고, "AI" 단어도 쓰지 않는다.
@@ -2671,44 +2670,8 @@ function RomChangeCard({changes=[]}){
     </div>
   </MCard>;
 }
-function MonthlyBestCard({items=[]}){
-  return <MCard title="이번 달 BEST">
-    <div style={{display:"grid",gap:10}}>
-      {items.map((it,i)=>(
-        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
-          <span style={{color:"#66717C",fontWeight:800,fontSize:12.5}}>{it.label}</span>
-          <b style={{color:it.value!=null?"#2F73F6":"#94A3B8",fontSize:13,fontWeight:800,textAlign:"right"}}>{it.value ?? "기록이 더 쌓이면 표시돼요"}</b>
-        </div>
-      ))}
-    </div>
-  </MCard>;
-}
-// "이번 달 성장 리포트" — 숫자·별점을 늘어놓기보다 "잘한 점/개선점"을 자연스러운 문장으로 먼저 보여준다. 별점은 가벼운 보조 표시.
-function GrowthReportCard({report}){
-  if(!report?.hasEnoughData){
-    return <MCard title="이번 달 성장 리포트"><div className="analysis-empty-state">아직 등급을 매기기엔 기록이 부족해요. 기록이 쌓이면 성장 리포트가 완성돼요.</div></MCard>;
-  }
-  return <MCard title="이번 달 성장 리포트">
-    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-      <div style={{width:48,height:48,borderRadius:14,background:"linear-gradient(135deg,#2F73F6,#7C6FFF)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:900,color:"#fff",flexShrink:0}}>{report.grade}</div>
-      <div><b style={{display:"block",fontSize:15,color:"#20242A"}}>이번 달 등급 {report.grade}</b><span style={{fontSize:11,color:"#8B949E",fontWeight:800}}>기록을 바탕으로 정리한 이번 달 리포트</span></div>
-    </div>
-    <div className="change-feedback-item" style={{marginBottom:8}}>👍 이번 달 가장 잘한 점<br/>{report.bestPoint}</div>
-    <div className="change-feedback-item" style={{marginBottom:14,background:"#FFF7ED",color:"#C2410C"}}>🌱 조금 더 노력하면 좋아질 점<br/>{report.improvePoint}</div>
-    <div style={{display:"grid",gap:6,marginBottom:14}}>
-      {report.stars.map((s,i)=>(
-        <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
-          <span style={{color:"#66717C",fontWeight:800}}>{s.label}</span>
-          <span style={{color:"#F59E0B",letterSpacing:1}}>{"★".repeat(s.score)}{"☆".repeat(5-s.score)}</span>
-        </div>
-      ))}
-    </div>
-    <div className="goal-mini">
-      <span>다음 달 목표 <b>{report.nextGoal}</b></span>
-      <span>예상 달성률 <b>{report.expectedRate}</b></span>
-    </div>
-  </MCard>;
-}
+// "이번 달 BEST"/"이번 달 성장 리포트"(등급·별점·예상 달성률) 카드는 2026-07 분석 탭 리디자인에서 제거됨.
+// 같은 결론을 반복하던 카드들은 "이번 기간 리포트"(buildPeriodReport) 하나로 통합.
 
 // ════════════════════════════════════════════════════
 // 변화분석 탭 — 회원 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를
@@ -2717,10 +2680,15 @@ function GrowthReportCard({report}){
 // "어떤 순서로 보여줄지"와 "그래프 2개를 어떻게 겹쳐 보여줄지"만 추가한다.
 // ════════════════════════════════════════════════════
 function getAnalysisPersona(goal=""){
-  const g=String(goal||"");
+  // 목표가 배열로 저장된 경우 첫 번째 유효 목표만 대표 목표로 사용(신규 필드 생성 없음)
+  const first=Array.isArray(goal)?(goal.find(v=>String(v||"").trim())||""):goal;
+  const g=String(first||"");
   if(g.includes("체형교정")||g.includes("교정")) return "correction";
+  if(g.includes("통증")) return "correction";
   if(g.includes("벌크업")||g.includes("증량")||g.includes("근육 키우기")) return "bulk";
+  if(g.includes("근육")||g.includes("근력")) return "bulk";
   if(g.includes("다이어트")||g.includes("감량")) return "diet";
+  if(g.includes("체력")) return "fitness";
   return "general";
 }
 function average(arr=[]){const v=arr.filter(n=>Number.isFinite(Number(n))).map(Number); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;}
@@ -2731,30 +2699,8 @@ function buildWeightCalorieCombo(weightData=[],kcalRows=[]){
   kcalRows.forEach(k=>map.set(k.date,{...(map.get(k.date)||{}),date:k.date,kcal:k.kcal}));
   return [...map.values()].sort((a,b)=>a.date.localeCompare(b.date));
 }
-function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){
-  if(weights.length<2||!kcalRows.length) return "체중과 칼로리 기록이 더 쌓이면 변화 해석을 제공합니다.";
-  const half=Math.max(1,Math.floor(kcalRows.length/2));
-  const olderAvg=average(kcalRows.slice(0,half).map(r=>r.kcal));
-  const recentAvg=average(kcalRows.slice(-half).map(r=>r.kcal));
-  const kcalPct=olderAvg?Math.round((recentAvg-olderAvg)/olderAvg*100):null;
-  if(wDiff!=null&&wDiff<-0.3&&kcalPct!=null&&kcalPct<0) return `최근 평균 섭취 칼로리가 ${Math.abs(kcalPct)}% 감소하면서 체중도 ${Math.abs(wDiff)}kg 감소했습니다. 현재 식사 패턴이 감량에 긍정적인 영향을 주고 있습니다.`;
-  if(wDiff!=null&&Math.abs(wDiff)<0.3) return "체중이 정체되고 있어요. 섭취 칼로리와 활동량을 함께 점검하면 정체 원인을 더 정확히 파악할 수 있습니다.";
-  if(wDiff!=null&&wDiff>0.3) return "체중이 증가하는 추세입니다. 최근 섭취 칼로리가 늘지 않았는지 함께 확인해보세요.";
-  return "체중과 칼로리 변화 패턴을 계속 지켜보고 있어요.";
-}
-// "이번 달 변화" — 수치를 그대로 읽어주기보다 PT 효과를 체감하게 하는 흐름 문장(최대 3줄). 구체적 수치는 "이번 달 BEST" 카드에서 별도로 보여준다.
-function buildDietGrowthLines({wDiff,kcalRows=[],forecast,periodLabel="최근"}){
-  const lines=[];
-  if(wDiff==null) lines.push("체중 기록이 쌓이면 처음 기록 대비 변화 흐름을 보여드릴게요.");
-  else if(wDiff<-0.3) lines.push(`처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. ${kcalRows.length>=5?"식단 기록과 운동을 함께 이어온 것이 이 흐름으로 연결되고 있어요.":"지금처럼 식단과 운동을 이어가면 이 흐름을 계속 유지할 수 있어요."}`);
-  else if(wDiff>0.3) lines.push("처음 기록 대비 체중이 다소 증가하는 흐름이에요. 식단과 활동량을 함께 점검해보면 좋아요.");
-  else lines.push(`처음 기록 대비 ${periodLabel} 동안 체중이 안정적으로 유지되고 있습니다. 지금 페이스를 유지하며 다음 변화를 지켜봐도 좋아요.`);
-  if(kcalRows.length>=5) lines.push("이전보다 섭취 칼로리 기록이 꾸준히 쌓이면서 변화 흐름이 더 명확해지고 있습니다. 지금처럼 계속 기록해보세요.");
-  else lines.push("섭취 칼로리를 조금 더 자주 기록하면 변화 흐름을 더 정확히 확인할 수 있어요.");
-  if(forecast?.target && forecast?.risk!=="high") lines.push("현재 페이스를 유지하면 목표 체중에 가까워질 가능성이 높습니다.");
-  else if(forecast?.target) lines.push("목표까지는 시간이 조금 더 필요하지만, 꾸준함이 가장 중요합니다.");
-  return lines.slice(0,3);
-}
+// 긴 문단형 해석(buildDietInterpretation)·"이번 달 변화" 흐름 문장(buildDietGrowthLines)은
+// 2026-07 분석 탭 리디자인에서 제거 — 핵심 내용은 buildPeriodReport(이번 기간 리포트)로 통합.
 // 최근 기록에서 가장 자주 수행한 운동(빈도 기준)을 자동 선정 — 대표 운동은 회원마다 다르게 나타남
 function buildTopExercisesByFrequency(sessions=[],limit=5){
   // normalizeExerciseName 기준으로 빈도를 세고, buildPerformanceChanges도 같은 기준으로 조회 — 표기만 다른 동일 운동이 서로 다른 항목으로 갈라지지 않게 한다.
@@ -2780,41 +2726,8 @@ function buildRepEnduranceChanges(sessions=[],exerciseNames=[]){
   }));
   return [...map.entries()].filter(([,v])=>v.length>=2).map(([name,v])=>({name,before:v[0],after:v[v.length-1],delta:v[v.length-1]-v[0]})).sort((a,b)=>b.delta-a.delta);
 }
-// 부위별 운동량 + 대표 운동 중량 변화 + 반복수 변화를 종합해 "확실히 성장하고 있다"를 문장으로 전달
-function buildBulkGrowthSummary({partVolumeData=[],topExercises=[],repEndurance=[],periodLabel="최근"}){
-  const msgs=[];
-  const mostTrainedPart=[...partVolumeData].filter(d=>d.values.length>=2).sort((a,b)=>b.values.length-a.values.length)[0];
-  if(mostTrainedPart){
-    const up=mostTrainedPart.values.at(-1).value>mostTrainedPart.values[0].value;
-    msgs.push(`${periodLabel} 동안 ${mostTrainedPart.part} 운동 볼륨이 ${up?"꾸준히 증가":"비슷하게 유지"}했습니다.`);
-  }
-  const biggestGain=[...topExercises].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0];
-  if(biggestGain) msgs.push(`${biggestGain.name} 중량은 ${biggestGain.before} → ${biggestGain.after}로 ${biggestGain.delta}kg 상승했습니다.`);
-  const biggestEndurance=repEndurance.find(r=>r.delta>=2);
-  if(biggestEndurance) msgs.push(`${biggestEndurance.name} 반복수는 ${biggestEndurance.before}회 → ${biggestEndurance.after}회로 늘어 근지구력도 함께 좋아지고 있습니다.`);
-  if(msgs.length>=2) msgs.push("운동량과 수행능력이 함께 향상되고 있어 현재 매우 좋은 벌크업 흐름을 유지하고 있습니다.");
-  return msgs.length?msgs:["기록이 더 쌓이면 성장 요약을 보여드릴게요."];
-}
-function buildCorrectionInterpretation(pain){
-  if(!pain?.rows?.length) return "통증 기록이 쌓이면 변화 해석을 제공합니다.";
-  if(pain.first!=null&&pain.last!=null){
-    if(pain.last<pain.first) return `통증(VAS)이 ${pain.first}에서 ${pain.last}로 감소했습니다. 몸이 점점 편해지고 있어요.`;
-    if(pain.last>pain.first) return "통증이 다소 증가했습니다. 다음 수업에서 대표님과 상태를 점검해보세요.";
-  }
-  return "통증 변화를 계속 지켜보고 있어요.";
-}
-// "이번 달 변화"(체형교정) — 통증 흐름 + 교정 운동 유지 여부를 격려 톤으로(최대 3줄)
-function buildCorrectionGrowthLines({pain,latestSummary}){
-  const lines=[];
-  if(!pain?.rows?.length) lines.push("통증 기록이 쌓이면 이전 기록과 비교한 변화 흐름을 더 정확히 확인할 수 있습니다.");
-  else if(pain.last<pain.first) lines.push(`이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. ${latestSummary?.homeExercise?.length?"교정 운동을 꾸준히 이어온 것이 이런 변화로 연결되고 있는 것으로 보입니다.":"지금처럼 교정 운동을 이어가면 이 흐름을 계속 유지할 수 있어요."}`);
-  else if(pain.last>pain.first) lines.push("이전 기록보다 통증이 다소 늘었어요. 다음 수업에서 함께 점검해봐요.");
-  else lines.push("이전 기록과 비교해 통증 정도가 안정적으로 유지되고 있습니다. 지금 루틴을 유지하며 다음 평가에서 변화를 확인해봐요.");
-  if(latestSummary?.homeExercise?.length) lines.push("지난 평가 이후로 집에서 할 운동을 꾸준히 이어가고 있어 좋은 흐름입니다. 이대로 계속 이어가 보세요.");
-  else lines.push("집에서 할 운동을 이어가면 다음 평가에서 변화를 확인하기 좋아요.");
-  lines.push("다음 수업에서 오늘까지의 변화를 함께 확인해드리겠습니다.");
-  return lines.slice(0,3);
-}
+// 벌크업 "변화 요약"(buildBulkGrowthSummary)·체형교정 해석/이번 달 변화(buildCorrectionInterpretation/GrowthLines)도
+// 같은 결론을 반복해 제거 — 핵심 내용은 buildPeriodReport(이번 기간 리포트)로 통합.
 // 체형평가(assessments)의 재평가/교정 루틴 결과에서 회원에게 보여줄 "전문용어 없는" 요약만 추출.
 // 테스트 이름(Hip IR, SLR 등)은 절대 포함하지 않고, 부위명(어깨/허리 등)과 통증 수치만 사용한다.
 function buildMemberCorrectionFeedback(rec){
@@ -2853,105 +2766,139 @@ function buildMemberRomSentences(cards=[]) {
 // 분석 탭 전용이었던 "운동 지속 현황"(누적 수업/이번 달 운동)은 홈 화면과 정보가 중복돼 제거됨.
 // 분석 탭은 "변화"를 보여주는 화면으로 유지한다.
 
-// "이번 달 성장 리포트" — 축별 1~5점은 화면에 숫자로 노출하지 않고, 등급/잘한점/개선점/별점을 뽑아내는 내부 계산에만 쓴다.
-// 축 라벨별 문장 템플릿(회원 톤 — 질책 없이 격려 위주)
-const GROWTH_AXIS_COPY = {
-  "체중관리":     { good: "체중 관리가 목표 방향으로 잘 진행되고 있어요.", improve: "체중 변화가 아직 뚜렷하지 않아요. 식단과 운동 강도를 함께 점검해봐요." },
-  "식단기록":     { good: "식단 기록을 꾸준히 남기고 있어 변화 파악에 큰 도움이 되고 있어요.", improve: "식단 기록을 조금 더 자주 남기면 변화를 더 정확히 볼 수 있어요." },
-  "유산소지속":   { good: "유산소 운동을 꾸준히 이어가고 있어요.", improve: "유산소 기록을 조금 더 자주 남기면 좋아요." },
-  "운동지속성":   { good: "이번 달은 운동 지속성이 특히 좋았어요.", improve: "운동 빈도를 조금 더 늘리면 변화가 더 빨라질 수 있어요." },
-  "운동볼륨":     { good: "운동 볼륨이 꾸준히 늘고 있어 성장이 뚜렷해요.", improve: "운동 볼륨을 조금씩 늘려가면 더 좋은 흐름을 만들 수 있어요." },
-  "수행능력":     { good: "여러 운동에서 수행 능력이 골고루 좋아지고 있어요.", improve: "아직 수행 능력 변화가 크지 않아요. 대표 운동 중심으로 꾸준히 기록해봐요." },
-  "중량증가":     { good: "주요 운동 중량이 눈에 띄게 늘었어요.", improve: "중량 증가 폭이 아직 작아요. 점진적으로 늘려가면 좋아요." },
-  "통증관리":     { good: "통증이 잘 줄어들고 있어요.", improve: "통증 변화가 아직 뚜렷하지 않아요. 교정 운동을 꾸준히 이어가봐요." },
-  "교정운동유지": { good: "집에서 할 운동을 꾸준히 이어가고 있어요.", improve: "집에서 할 운동을 조금 더 챙기면 회복이 더 빨라질 수 있어요." },
-  "가동범위개선": { good: "움직임과 가동범위가 좋아지고 있어요.", improve: "아직 평가 데이터가 부족해요. 다음 평가에서 더 정확히 확인해봐요." },
-  "수업참여":     { good: "수업 참여가 꾸준히 이어지고 있어요.", improve: "수업 참여 빈도를 조금 더 늘리면 좋아요." },
-  "체중안정성":   { good: "체중이 안정적인 범위에서 잘 유지되고 있어요.", improve: "체중 변동이 조금 있어요. 식사량을 일정하게 유지해봐요." },
-  "유산소활동":   { good: "유산소 활동을 꾸준히 이어가고 있어요.", improve: "유산소 활동을 조금 더 챙기면 좋아요." },
-  "컨디션안정성": { good: "컨디션이 전반적으로 안정적이에요.", improve: "컨디션 기록을 조금 더 남기면 상태를 더 잘 확인할 수 있어요." },
-};
-function scoreByCount(n, t5, t4, t3, t2) { return n >= t5 ? 5 : n >= t4 ? 4 : n >= t3 ? 3 : n >= t2 ? 2 : n > 0 ? 1 : null; }
-function computeGrowthReport(persona, ctx) {
-  const { wDiff, kcalRowsLen, cardioCount, monthWorkoutCount, periodSessionsLen, partVolumeData, topExercises, pain, latestSummary, forecast, calorieAnalysis } = ctx;
-  let axes = [];
-  let nextGoal = "현재 루틴 유지";
-  let expectedRate = "-";
+// ── 2026-07 분석 탭 리디자인 ──
+// 성장 리포트(등급·별점·예상 달성률)·대표 코멘트·다음 변화 예상 카드는 제거되고,
+// 아래 buildGoalHero(목표별 Hero)·buildPeriodReport(이번 기간 리포트)가 기존 계산값만 연결해 대신한다.
+// (계산 원본: getBodyWeightRecords/buildPerformanceChanges/getPainSummary/getVolumeIncrease 등 — 신규 계산 없음)
+function buildGoalHero(persona, ctx) {
+  const { periodText, wDiff, curW, remainW, workoutCount = 0, cardioMinutes = 0, mmDiff, volumePct, biggestGain, pain, streak = 0, healthLogCount = 0 } = ctx;
+  const hasW = Number.isFinite(Number(curW));
+  const curWText = hasW ? `${Number(curW).toFixed(1).replace(/\.0$/, "")}kg` : "—";
+  const countStat = { label: "운동 횟수", value: `${workoutCount}회` };
   if (persona === "diet") {
-    axes = [
-      { label: "체중관리", score: wDiff == null ? null : wDiff < -1 ? 5 : wDiff < -0.3 ? 4 : Math.abs(wDiff) <= 0.3 ? 3 : 2 },
-      { label: "식단기록", score: scoreByCount(kcalRowsLen, 20, 10, 5, 1) },
-      { label: "유산소지속", score: scoreByCount(cardioCount, 8, 4, 2, 1) },
-      { label: "운동지속성", score: scoreByCount(monthWorkoutCount, 12, 8, 4, 1) },
-    ];
-    nextGoal = forecast?.target && forecast?.recommended ? `체중 -${Math.abs(+(forecast.recommended * 4).toFixed(1))}kg` : "현재 체중 유지";
-    expectedRate = forecast?.target ? (forecast.risk === "high" ? "60%" : forecast.risk === "medium" ? "75%" : "87%") : "-";
-  } else if (persona === "bulk") {
-    const upPart = partVolumeData.filter(d => d.values.length >= 2).some(d => d.values.at(-1).value > d.values[0].value);
-    const posRatio = topExercises.length ? topExercises.filter(r => r.delta > 0).length / topExercises.length : null;
-    const biggestGain = [...topExercises].filter(r => r.delta > 0).sort((a, b) => b.delta - a.delta)[0];
-    axes = [
-      { label: "운동볼륨", score: partVolumeData.some(d => d.values.length) ? (upPart ? 5 : 3) : null },
-      { label: "수행능력", score: posRatio == null ? null : posRatio >= 0.6 ? 5 : posRatio >= 0.3 ? 4 : posRatio > 0 ? 3 : 2 },
-      { label: "중량증가", score: biggestGain ? (biggestGain.delta >= 10 ? 5 : biggestGain.delta >= 5 ? 4 : 3) : null },
-      { label: "운동지속성", score: scoreByCount(periodSessionsLen, 12, 8, 4, 1) },
-    ];
-    nextGoal = "근육량 +0.5~0.6kg";
-    expectedRate = posRatio != null && posRatio >= 0.3 ? "85%" : "70%";
-  } else if (persona === "correction") {
-    axes = [
-      { label: "통증관리", score: pain?.first != null && pain?.last != null ? (pain.last < pain.first ? 5 : pain.last === pain.first ? 3 : 2) : null },
-      { label: "교정운동유지", score: latestSummary?.homeExercise?.length ? 5 : (latestSummary ? 3 : null) },
-      { label: "가동범위개선", score: latestSummary ? (latestSummary.good.length > latestSummary.caution.length ? 5 : latestSummary.caution.length ? 3 : 4) : null },
-      { label: "수업참여", score: scoreByCount(periodSessionsLen, 8, 4, 2, 1) },
-    ];
-    nextGoal = "다음 평가에서 움직임 변화 확인";
-    expectedRate = "다음 평가 시 확인";
-  } else {
-    const wStd = ctx.monthWeightRange;
-    axes = [
-      { label: "체중안정성", score: wStd == null ? null : wStd <= 1 ? 5 : wStd <= 2 ? 4 : 3 },
-      { label: "운동지속성", score: scoreByCount(monthWorkoutCount, 12, 8, 4, 1) },
-      { label: "유산소활동", score: scoreByCount(cardioCount, 8, 4, 2, 1) },
-      { label: "컨디션안정성", score: calorieAnalysis?.bmr ? 4 : null },
-    ];
-    nextGoal = "현재 루틴 유지";
-    expectedRate = "안정 유지 가능성 높음";
-  }
-  const valid = axes.filter(a => a.score != null);
-  if (valid.length < 2) return { hasEnoughData: false };
-  const avg = valid.reduce((s, a) => s + a.score, 0) / valid.length;
-  const grade = avg >= 4.5 ? "A+" : avg >= 4 ? "A" : avg >= 3 ? "B" : avg >= 2 ? "C" : "C-";
-  const sorted = [...valid].sort((a, b) => b.score - a.score);
-  const best = sorted[0];
-  const worst = sorted[sorted.length - 1];
-  return {
-    hasEnoughData: true,
-    grade,
-    bestPoint: GROWTH_AXIS_COPY[best.label]?.good || "꾸준히 잘 관리되고 있어요.",
-    improvePoint: worst.score >= 4 ? "이번 달은 전반적으로 고르게 잘 관리됐어요." : (GROWTH_AXIS_COPY[worst.label]?.improve || "꾸준히 기록해주시면 더 정확한 리포트를 보여드릴게요."),
-    stars: axes.map(a => ({ label: a.label, score: a.score ?? 3 })),
-    nextGoal,
-    expectedRate,
-  };
-}
-// "다음 변화 예상" — 목표 전략 추천과 연결되는 짧은 기대 문구(페르소나별 템플릿, 1~2문장)
-function buildFuturePrediction(persona, { forecast, topExercises = [], latestSummary }) {
-  if (persona === "diet") {
-    if (forecast?.target && forecast?.estimatedDate) return `현재 페이스를 유지하면 ${forecast.estimatedDate} 전후 목표 체중에 가까워질 수 있습니다.`;
-    return "체중과 칼로리 기록을 꾸준히 남기면 다음 변화를 더 정확히 예상할 수 있어요.";
+    if (wDiff == null && workoutCount === 0) return { empty: true };
+    if (wDiff != null) return {
+      icon: HM_PATHS.trendingDown, periodText,
+      value: `${wDiff > 0 ? "+" : ""}${wDiff}kg`, caption: "체중 변화",
+      phrase: wDiff <= -0.3 ? "정말 잘하고 있어요" : wDiff <= 0.3 ? "체중이 안정적으로 유지되고 있어요" : "흐름을 함께 다시 만들어봐요",
+      stats: [{ label: "현재 체중", value: curWText }, remainW != null && remainW > 0 ? { label: "목표까지", value: `${remainW}kg` } : { label: "연속 기록", value: streak > 0 ? `${streak}일` : "—" }, countStat],
+    };
+    return { icon: HM_PATHS.trendingDown, periodText, value: `${workoutCount}회`, caption: "운동 기록", phrase: "꾸준함이 변화를 만들어요", stats: [{ label: "현재 체중", value: curWText }, { label: "연속 기록", value: streak > 0 ? `${streak}일` : "—" }, countStat] };
   }
   if (persona === "bulk") {
-    const hasGain = topExercises.some(r => r.delta > 0);
-    return hasGain ? "현재 운동량을 유지하면 다음 달에도 주요 운동 중량 상승을 기대할 수 있습니다." : "지금처럼 꾸준히 기록하면 다음 달에는 중량 상승을 기대할 수 있어요.";
+    const volStat = { label: "운동 볼륨", value: Number.isFinite(volumePct) && volumePct !== 0 ? `${volumePct > 0 ? "+" : ""}${volumePct}%` : "—" };
+    const gainStat = biggestGain ? { label: "최고 중량", value: `+${biggestGain.delta}kg` } : { label: "현재 체중", value: curWText };
+    const base = { icon: HM_PATHS.dumbbell, periodText, stats: [countStat, volStat, gainStat] };
+    if (mmDiff != null && mmDiff > 0) return { ...base, value: `+${mmDiff}kg`, caption: "골격근량 변화", phrase: "근육이 확실히 성장하고 있어요" };
+    if (Number.isFinite(volumePct) && volumePct > 0) return { ...base, value: `+${volumePct}%`, caption: "운동 볼륨 변화", phrase: "운동량이 꾸준히 늘고 있어요" };
+    if (biggestGain) return { ...base, value: `+${biggestGain.delta}kg`, caption: `${biggestGain.name} 최고 중량`, phrase: "수행 능력이 좋아지고 있어요" };
+    if (wDiff != null && wDiff > 0.3) return { ...base, value: `+${wDiff}kg`, caption: "체중 변화", phrase: "증량 흐름이 이어지고 있어요" };
+    if (workoutCount > 0) return { ...base, value: `${workoutCount}회`, caption: "운동 기록", phrase: "꾸준히 이어가고 있어요" };
+    return { empty: true };
   }
   if (persona === "correction") {
-    return latestSummary ? "통증 기록과 교정 운동을 유지하면 다음 평가에서 움직임 변화를 더 명확히 확인할 수 있습니다." : "통증과 교정 운동 기록을 꾸준히 남기면 다음 평가에서 변화를 더 정확히 확인할 수 있어요.";
+    const lastPain = pain?.last != null ? { label: "최근 통증", value: `VAS ${pain.last}` } : { label: "최근 통증", value: "—" };
+    const painCount = { label: "통증 기록", value: `${pain?.rows?.length || 0}회` };
+    if (pain?.first != null && pain?.last != null) return {
+      icon: HM_PATHS.heartPulse, periodText,
+      value: `${pain.first} → ${pain.last}`, caption: "통증 강도(VAS)",
+      phrase: pain.last < pain.first ? "몸이 점점 편해지고 있어요" : pain.last === pain.first ? "안정적으로 유지되고 있어요" : "최근 불편감이 증가해 기록 확인이 필요해요",
+      stats: [lastPain, painCount, countStat],
+    };
+    if (workoutCount > 0) return { icon: HM_PATHS.heartPulse, periodText, value: `${workoutCount}회`, caption: "운동 지속", phrase: "꾸준히 이어가고 있어요", stats: [lastPain, painCount, countStat] };
+    return { empty: true };
   }
-  return "현재 루틴을 유지하면 체중 유지 범위 안에서 안정적으로 관리될 가능성이 높습니다.";
+  if (persona === "fitness") {
+    const stats = [countStat, { label: "유산소 시간", value: cardioMinutes > 0 ? `${cardioMinutes}분` : "—" }, { label: "연속 기록", value: streak > 0 ? `${streak}일` : "—" }];
+    if (cardioMinutes > 0) return { icon: HM_PATHS.trendingUp, periodText, value: `${cardioMinutes}분`, caption: "유산소 운동", phrase: "체력이 차곡차곡 쌓이고 있어요", stats };
+    if (workoutCount > 0) return { icon: HM_PATHS.trendingUp, periodText, value: `${workoutCount}회`, caption: "운동 완료", phrase: "꾸준함이 체력을 만들어요", stats };
+    if (streak > 0) return { icon: HM_PATHS.trendingUp, periodText, value: `${streak}일`, caption: "연속 기록", phrase: "기록 습관이 잘 이어지고 있어요", stats };
+    return { empty: true };
+  }
+  // general(건강관리·체중 유지·목표 없음/알 수 없음)
+  const stats = [countStat, { label: "건강 기록", value: healthLogCount > 0 ? `${healthLogCount}회` : "—" }, { label: "최근 체중", value: curWText }];
+  if (workoutCount > 0) return { icon: HM_PATHS.clipboard, periodText, value: `${workoutCount}회`, caption: "운동 기록", phrase: "운동 습관을 잘 유지하고 있어요", stats };
+  if (streak > 0) return { icon: HM_PATHS.clipboard, periodText, value: `${streak}일`, caption: "연속 기록", phrase: "기록 습관이 잘 이어지고 있어요", stats };
+  if (healthLogCount > 0) return { icon: HM_PATHS.clipboard, periodText, value: `${healthLogCount}회`, caption: "건강 기록", phrase: "기록이 변화의 시작이에요", stats };
+  return { empty: true };
 }
-function FuturePredictionCard({ text }) {
-  return <MCard title="다음 변화 예상"><p style={{ margin: 0, fontSize: 13, color: "#20242A", fontWeight: 700, lineHeight: 1.6 }}>{text}</p></MCard>;
+function GoalHeroCard({ hero }) {
+  if (!hero) return null;
+  if (hero.empty) return (
+    <div className="anx-hero empty">
+      <b>아직 변화 기록이 충분하지 않아요.</b>
+      <p>체중이나 운동 기록이 2회 이상 쌓이면<br />변화 흐름을 확인할 수 있어요.</p>
+    </div>
+  );
+  return (
+    <div className="anx-hero">
+      <div className="anx-hero-top">
+        <span className="anx-hero-ico"><SjIcon paths={hero.icon} size={20} /></span>
+        <span className="anx-hero-period">{hero.periodText}</span>
+      </div>
+      <strong className="anx-hero-num">{hero.value}</strong>
+      {hero.caption && <span className="anx-hero-cap">{hero.caption}</span>}
+      <p className="anx-hero-msg">{hero.phrase}</p>
+      <div className="anx-hero-stats">
+        {(hero.stats || []).slice(0, 3).map(s => <div key={s.label}><span>{s.label}</span><b>{s.value}</b></div>)}
+      </div>
+    </div>
+  );
+}
+// "이번 기간 리포트" — 잘한 점 최대 2개 + 다음 목표 1개. 내용이 없으면 카드 자체를 숨긴다(빈 카드 금지).
+function buildPeriodReport(persona, ctx) {
+  const { wDiff, workoutCount = 0, kcalCount = 0, cardioCount = 0, cardioMinutes = 0, pain, mmDiff, volumePct, biggestGain, repEndurance = [], streak = 0, healthLogCount = 0 } = ctx;
+  const goods = [];
+  let next = null;
+  const steady = workoutCount > 0 ? { title: "꾸준한 기록", text: `운동을 ${workoutCount}회 진행했어요.` } : null;
+  if (persona === "diet") {
+    if (wDiff != null && wDiff < -0.3) goods.push({ title: "체중 감소", text: `체중이 ${Math.abs(wDiff)}kg 감소했어요.` });
+    else if (wDiff != null && Math.abs(wDiff) <= 0.3 && workoutCount > 0) goods.push({ title: "체중 유지", text: "체중이 안정적인 범위에서 유지되고 있어요." });
+    if (steady) goods.push(steady);
+    if (kcalCount >= 5) goods.push({ title: "식단 기록", text: `섭취 칼로리를 ${kcalCount}회 기록했어요.` });
+    next = cardioCount < 2 ? "유산소 운동을 주 1~2회 추가해보세요." : kcalCount < 5 ? "섭취 칼로리를 조금 더 자주 기록해보세요." : "현재 흐름을 그대로 유지해보세요.";
+  } else if (persona === "bulk") {
+    if (mmDiff != null && mmDiff > 0) goods.push({ title: "골격근량 증가", text: `골격근량이 ${mmDiff}kg 늘었어요.` });
+    if (biggestGain) goods.push({ title: "중량 상승", text: `${biggestGain.name} 중량이 ${biggestGain.delta}kg 늘었어요.` });
+    if (Number.isFinite(volumePct) && volumePct > 0) goods.push({ title: "볼륨 증가", text: `운동 볼륨이 ${volumePct}% 늘었어요.` });
+    const endu = repEndurance.find(r => r.delta >= 2);
+    if (endu) goods.push({ title: "반복수 증가", text: `${endu.name} 반복수가 ${endu.before}회에서 ${endu.after}회로 늘었어요.` });
+    if (steady) goods.push(steady);
+    next = workoutCount > 0 ? "현재 운동 리듬을 유지하며 볼륨을 조금씩 높여보세요." : null;
+  } else if (persona === "correction") {
+    if (pain?.first != null && pain?.last != null && pain.last < pain.first) goods.push({ title: "통증 감소", text: `통증이 ${pain.first}에서 ${pain.last}로 줄었어요.` });
+    if (steady) goods.push(steady);
+    next = pain?.first != null && pain?.last != null && pain.last > pain.first
+      ? "최근 불편감이 늘어 다음 수업에서 함께 점검해봐요."
+      : "교정 운동을 꾸준히 이어가보세요.";
+    if (!goods.length && pain?.rows?.length === 0 && workoutCount === 0) next = null;
+  } else if (persona === "fitness") {
+    if (cardioMinutes > 0) goods.push({ title: "유산소 지속", text: `유산소 운동을 ${cardioMinutes}분 진행했어요.` });
+    if (steady) goods.push(steady);
+    if (streak >= 3 && goods.length < 2) goods.push({ title: "연속 기록", text: `${streak}일 연속으로 기록 중이에요.` });
+    next = goods.length ? "주 1회 유산소 시간을 10분 늘려보세요." : null;
+  } else {
+    if (steady) goods.push({ title: "운동 습관", text: `운동 습관을 꾸준히 유지하고 있어요. (${workoutCount}회)` });
+    if (healthLogCount > 0) goods.push({ title: "건강 기록", text: "건강 기록을 잘 남기고 있어요." });
+    next = goods.length ? "현재 운동 리듬을 이어가세요." : null;
+  }
+  const trimmed = goods.slice(0, 2);
+  if (!trimmed.length && !next) return null;
+  return { goods: trimmed, next };
+}
+function PeriodReportCard({ report }) {
+  if (!report || (!report.goods.length && !report.next)) return null;
+  return (
+    <MCard title="이번 기간 리포트">
+      {report.goods.length > 0 && <p className="anx-report-intro">이번 기간도 잘하고 있어요.</p>}
+      <div className="anx-report-rows">
+        {report.goods.map((g, i) => (
+          <div key={i} className="anx-report-row"><i>✓</i><div><b>{g.title}</b><span>{g.text}</span></div></div>
+        ))}
+        {report.next && <div className="anx-report-row next"><i>◎</i><div><b>다음 목표</b><span>{report.next}</span></div></div>}
+      </div>
+    </MCard>
+  );
 }
 // 다이어트 전용 "다음 수업 전까지" — "목표 전략 추천"(장기 방향)과 겹치지 않도록, 목표 도달일을 반복하지 않고
 // 다음 수업까지의 단기 실행 체크리스트만 보여준다. 최근 7일 기록 상태를 기준으로 우선순위를 정한다(선택한 기간 필터와 무관).
@@ -2988,55 +2935,26 @@ function NextClassChecklistCard({ items = [], closing }) {
     <div className="change-feedback-item">{closing}</div>
   </MCard>;
 }
-// "대표 코멘트" — 대표가 회원 데이터를 보고 직접 남긴 것처럼 짧고 따뜻하게. 화면에 "AI"라는 단어는 쓰지 않는다.
-function CoachCommentCard({ text }) {
-  return <MCard title="대표 코멘트">
-    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-      <span style={{ fontSize: 20, flexShrink: 0 }}>💬</span>
-      <p style={{ margin: 0, fontSize: 13, color: "#20242A", fontWeight: 700, lineHeight: 1.7 }}>{text}</p>
-    </div>
-  </MCard>;
-}
-// "Before → After" — 숫자를 나열하기보다 전후 비교를 수직으로 크게 보여줘 한눈에 변화를 느끼게 한다.
-// goodDirection: "down"(작을수록 좋음, 체중·통증) | "up"(클수록 좋음, 중량) | "stable"(변동이 작을수록 좋음, 체중 유지)
-function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, goodDirection = "down", emptyText }) {
-  if (before == null || after == null || !Number.isFinite(Number(before)) || !Number.isFinite(Number(after))) {
-    return <MCard title="Before → After"><div className="analysis-empty-state">{emptyText || "기록이 조금 더 쌓이면 전후 비교를 보여드릴게요."}</div></MCard>;
-  }
+// "대표 코멘트"(CoachCommentCard)·구 성과 Hero(AnalysisHeroCard)는 리디자인에서 제거 — 목표별 Hero(GoalHeroCard)로 대체.
+// "Before → After" — 시작/현재값 좌우 비교. 명확한 수치가 없으면 카드 전체를 숨긴다(빈 카드 금지).
+// goodDirection: "down"(작을수록 좋음, 체중·통증) | "up"(클수록 좋음, 중량·근육량) | "stable"(변동이 작을수록 좋음, 체중 유지)
+function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, goodDirection = "down" }) {
+  if (before == null || after == null || !Number.isFinite(Number(before)) || !Number.isFinite(Number(after))) return null;
   const delta = +(Number(after) - Number(before)).toFixed(1);
   const isGood = goodDirection === "up" ? delta >= 0 : goodDirection === "stable" ? Math.abs(delta) <= 1 : delta <= 0;
   return (
     <MCard title="Before → After">
-      <div style={{ textAlign: "center" }}>
-        {metricLabel && <div style={{ fontWeight: 800, color: "#66717C", fontSize: 13, marginBottom: 10 }}>{metricLabel}</div>}
-        <div style={{ fontSize: 20, fontWeight: 900, color: "#94A3B8" }}>{before}{unit}</div>
-        <div style={{ fontSize: 18, color: "#C0C8D3", margin: "2px 0", lineHeight: 1 }}>↓</div>
-        <div style={{ fontSize: 27, fontWeight: 900, color: "#2F73F6" }}>{after}{unit}</div>
-        <div style={{ marginTop: 8, fontSize: 15, fontWeight: 800, color: isGood ? "#16A34A" : "#F97316" }}>{delta > 0 ? "+" : ""}{delta}{unit}</div>
-        {periodText && <div style={{ marginTop: 6, fontSize: 11, color: "#8B949E", fontWeight: 800 }}>{periodText}</div>}
+      <div className="anx-ba">
+        <div className="anx-ba-cols">
+          <div><span>시작 {metricLabel}</span><b>{before}{unit}</b></div>
+          <em>→</em>
+          <div><span>현재 {metricLabel}</span><b className="cur">{after}{unit}</b></div>
+        </div>
+        <p className={isGood ? "good" : "warn"}>총 {delta > 0 ? "+" : ""}{delta}{unit} 변화</p>
+        {periodText && <small>{periodText}</small>}
       </div>
     </MCard>
   );
-}
-// 성과 Hero — 보고서보다 성과 먼저. 실제 데이터가 있는 항목만 표시(가짜 수치·문구 없음).
-function AnalysisHeroCard({curW,wDiff,target,monthWorkoutCount,cardioMinutes,periodLabel}){
-  const hasW=Number.isFinite(Number(curW));
-  const remain=hasW&&target?Math.max(0,+(Number(curW)-target).toFixed(1)):null;
-  const items=[
-    hasW&&{label:"현재 체중",value:`${Number(curW).toFixed(1).replace(/\.0$/,"")}kg`},
-    wDiff!=null&&wDiff!==0&&{label:`${periodLabel} 변화`,value:`${wDiff>0?"+":""}${wDiff}kg`,tone:wDiff<0?"good":""},
-    remain!=null&&remain>0&&{label:"목표까지",value:`${remain}kg`},
-    monthWorkoutCount>0&&{label:"이번 달 운동",value:`${monthWorkoutCount}회`},
-    cardioMinutes>0&&{label:`${periodLabel} 유산소`,value:`${cardioMinutes}분`},
-  ].filter(Boolean);
-  if(!items.length) return null;
-  const headline=wDiff!=null&&wDiff<=-1?"축하해요, 변화가 눈에 보여요 🎉":wDiff!=null&&wDiff<0?"좋은 흐름이 이어지고 있어요":"기록이 변화를 만들고 있어요";
-  return <div className="mv2-analysis-hero">
-    <b>{headline}</b>
-    <div className="mv2-analysis-hero-grid">
-      {items.slice(0,5).map(it=><div key={it.label}><span>{it.label}</span><em className={it.tone||""}>{it.value}</em></div>)}
-    </div>
-  </div>;
 }
 function MemberAnalysis(p) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
@@ -3058,7 +2976,6 @@ function MemberAnalysis(p) {
   const inbodyInPeriod = getInbodyRecords(p.body, since);
   const firstInbody = (since && inbodyInPeriod.length > 0 ? inbodyInPeriod[0] : allInbody[0]) || null;
   const lastInbody = allInbody.length > 0 ? allInbody.at(-1) : null;
-  const hasEnoughInbody = allInbody.length >= 2;
   const differentRecords = !!(firstInbody && lastInbody && firstInbody.date !== lastInbody.date);
 
   // 체지방량
@@ -3113,24 +3030,7 @@ function MemberAnalysis(p) {
   const cardioMinutes = cardioInPeriod.reduce((s, l) => s + (Number(l.durationMinutes) || 0), 0);
   const monthWorkoutCount = (p.attendance || []).filter(a => String(a.date || "").startsWith(getKoreaDateString().slice(0, 7))).length;
 
-  // 변화 분석 피드백
-  const feedbackMsgs = (() => {
-    if (!hasEnoughInbody) return null;
-    const msgs = [];
-    if (fatMassDiff !== null && mmDiff !== null) {
-      if (fatMassDiff < -0.3 && mmDiff > 0.3) msgs.push("골격근량이 증가하면서 체지방량도 감소했습니다. 체성분 변화가 매우 긍정적이니 지금 하는 식단과 운동을 그대로 이어가 보세요.");
-      else if (fatMassDiff < -0.3 && mmDiff >= -0.3) msgs.push("체지방량은 꾸준히 감소하고 골격근량은 유지되고 있습니다. 현재 좋은 감량 흐름이니 이 페이스를 유지해보세요.");
-      else if (wDiff !== null && wDiff < -0.5 && mmDiff < -0.5) msgs.push("체중은 줄었지만 골격근량도 함께 감소했습니다. 단백질 섭취와 근력운동 강도를 함께 점검해보세요.");
-      else if (fatMassDiff > 0.5) msgs.push("체지방량이 다소 증가했습니다. 식단과 유산소 운동을 함께 점검해보세요.");
-      else msgs.push("체성분이 전반적으로 안정적으로 유지되고 있습니다. 지금 루틴을 유지하며 다음 변화를 지켜봐도 좋아요.");
-    }
-    if (bodyAgeDiff !== null) {
-      if (bodyAgeDiff < 0) msgs.push(`신체나이가 ${firstBodyAge}세에서 ${lastBodyAge}세로 개선되었습니다. 회복 상태와 세포 건강이 긍정적으로 변화하고 있으니 지금 습관을 계속 이어가 보세요.`);
-      else if (bodyAgeDiff > 0) msgs.push("신체나이 지표가 다소 높아졌습니다. 충분한 수면과 회복, 영양 섭취를 점검해보세요.");
-    }
-    if (!msgs.length) msgs.push("현재 기록을 기반으로 지속적으로 분석하고 있습니다. 기록이 누적될수록 더 정확한 피드백을 제공합니다.");
-    return msgs;
-  })();
+  // "최근 변화 요약"(feedbackMsgs) 카드는 리디자인에서 제거 — 체성분 상세는 건강 전문 분석(접힘)에서 확인.
 
   // 칼로리 피드백
   const calorieFeedback = (() => {
@@ -3146,86 +3046,18 @@ function MemberAnalysis(p) {
   const ttStyle = { background: "#fff", border: "1px solid #E8ECF1", borderRadius: 12, boxShadow: "0 10px 28px rgba(32,36,42,.08)", fontSize: 12, color: "#20242A" };
   const axTick = { fontSize: 11, fill: "#8B949E", fontWeight: 800 };
 
-  // ── 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를 가장 먼저 보여주기 위한 계산 ──
+  // ── 목표(다이어트/벌크업/체형교정/체력향상/건강관리)에 따라 가장 중요한 변화를 가장 먼저 보여주기 위한 계산 ──
   // 기존 계산 로직은 그대로 재사용하고, 여기서는 표시 순서를 정하는 값만 추가로 계산한다.
   const persona = getAnalysisPersona(p.onboarding?.goal || p.profile?.goal);
   const periodSessions = p.sessions.filter(inPeriod);
   const comboData = buildWeightCalorieCombo(weightData, kcalRows);
-  const dietInterpretation = buildDietInterpretation({ weights, kcalRows, wDiff });
-  // 벌크업: 수업일지 데이터(부위별 볼륨/대표 운동 중량·반복수)로 "운동이 얼마나 성장했는지"를 가장 먼저 보여줌
-  const partVolumeData = buildPartVolumeChart(periodSessions);
   const topExercises = buildTopExercisesByFrequency(periodSessions, 5);
   const repEndurance = buildRepEnduranceChanges(periodSessions, topExercises.map(r => r.name));
-  const bulkGrowthSummary = buildBulkGrowthSummary({ partVolumeData, topExercises, repEndurance, periodLabel: opt.label });
-  const correctionInterpretation = buildCorrectionInterpretation(pain);
-  // 성장 리포트/미래 예측용 — WeightGoalStrategyCard와 동일한 함수를 재사용(재계산 없음)
-  const forecast = getWeightForecast(p);
   const latestCorrectionSummary = [...(p.correctionSummaries || [])].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0] || null;
-  const dietGrowthLines = buildDietGrowthLines({ wDiff, kcalRows, forecast, periodLabel: opt.label });
-  const correctionGrowthLines = buildCorrectionGrowthLines({ pain, latestSummary: latestCorrectionSummary });
+  // "이번 달 BEST"·"성장 리포트"·"다음 변화 예상"·"대표 코멘트" 계산은 리디자인에서 제거 —
+  // buildGoalHero(Hero)와 buildPeriodReport(이번 기간 리포트)가 같은 원본 데이터로 대신한다.
 
-  // 이번 달 BEST — 선택한 기간(period)이 아니라 달력상 "이번 달" 고정 기준. 기존 함수를 월 단위 입력으로만 다시 호출해 재사용한다.
-  const monthKey = getKoreaDateString().slice(0, 7);
-  const inMonth = r => String(r?.date || "").startsWith(monthKey);
-  const monthWeights = getBodyWeightRecords(p.body).filter(inMonth);
-  const monthCardio = (p.cardioLogs || []).filter(inMonth);
-  const monthSessions = p.sessions.filter(inMonth);
-  const monthWeightRange = monthWeights.length >= 2 ? +(Math.max(...monthWeights.map(r => r.weight)) - Math.min(...monthWeights.map(r => r.weight))).toFixed(1) : null;
-  const monthlyBestItems = (() => {
-    if (persona === "diet") {
-      const minW = monthWeights.length ? Math.min(...monthWeights.map(r => r.weight)) : null;
-      const monthWDiff = monthWeights.length >= 2 ? +(monthWeights.at(-1).weight - monthWeights[0].weight).toFixed(1) : null;
-      const maxCardioMin = monthCardio.length ? Math.max(...monthCardio.map(l => Number(l.durationMinutes) || 0)) : null;
-      return [
-        { label: "이번 달 최저 체중", value: minW != null ? `${minW}kg` : null },
-        { label: "이번 달 체중 변화", value: monthWDiff != null ? `${monthWDiff > 0 ? "+" : ""}${monthWDiff}kg` : null },
-        { label: "이번 달 유산소 최고 기록", value: maxCardioMin ? `${maxCardioMin}분` : null },
-      ];
-    }
-    if (persona === "bulk") {
-      const monthTop = buildTopExercisesByFrequency(monthSessions, 5);
-      const biggestGain = [...monthTop].filter(r => r.delta > 0).sort((a, b) => b.delta - a.delta)[0];
-      const monthPartVolume = buildPartVolumeChart(monthSessions);
-      const bestVolume = monthPartVolume.flatMap(d => d.values.map(v => ({ part: d.part, ...v }))).sort((a, b) => b.value - a.value)[0];
-      // PR: 이번 달 최고 중량이 해당 종목의 전체 기간 최고 중량과 같거나 그 이상인 경우
-      const allTop = buildTopExercisesByFrequency(p.sessions, 10);
-      const monthPR = monthTop.find(r => {
-        const allRow = allTop.find(a => a.name === r.name);
-        if (!allRow) return false;
-        const rAfter = Number(String(r.after).replace(/[^0-9.]/g, ""));
-        const allAfter = Number(String(allRow.after).replace(/[^0-9.]/g, ""));
-        return rAfter > 0 && rAfter >= allAfter;
-      });
-      return [
-        { label: "이번 달 가장 많이 증가한 운동", value: biggestGain ? `${biggestGain.name} ${biggestGain.before} → ${biggestGain.after}` : null },
-        { label: "이번 달 최고 운동량", value: bestVolume ? `${bestVolume.part} ${bestVolume.value.toLocaleString()}kg` : null },
-        { label: "이번 달 PR", value: monthPR ? `${monthPR.name} 최고 중량 갱신` : null },
-      ];
-    }
-    if (persona === "correction") {
-      const monthPain = getPainSummary(p.checkins.filter(inMonth));
-      const painDrop = monthPain?.first != null && monthPain?.last != null && monthPain.last < monthPain.first ? `VAS ${monthPain.first} → ${monthPain.last}` : null;
-      return [
-        { label: "통증 감소", value: painDrop },
-        { label: "가장 많이 개선된 부분", value: latestCorrectionSummary?.good?.[0] || null },
-        { label: "집에서 할 운동 기록", value: latestCorrectionSummary?.homeExercise?.length ? "꾸준히 유지 중" : null },
-      ];
-    }
-    const maxCardioMin = monthCardio.length ? Math.max(...monthCardio.map(l => Number(l.durationMinutes) || 0)) : null;
-    return [
-      { label: "이번 달 유산소 최고 기록", value: maxCardioMin ? `${maxCardioMin}분` : null },
-      { label: "이번 달 최다 운동", value: monthWorkoutCount > 0 ? `${monthWorkoutCount}회` : null },
-      { label: "체중 안정도", value: monthWeightRange != null ? (monthWeightRange <= 1 ? "안정적으로 유지" : `변동 ${monthWeightRange}kg`) : null },
-    ];
-  })();
-
-  const growthReport = computeGrowthReport(persona, {
-    wDiff, kcalRowsLen: kcalRows.length, cardioCount: cardioInPeriod.length, monthWorkoutCount,
-    periodSessionsLen: periodSessions.length, partVolumeData, topExercises, pain,
-    latestSummary: latestCorrectionSummary, forecast, calorieAnalysis, monthWeightRange,
-  });
-  const futurePrediction = buildFuturePrediction(persona, { forecast, topExercises, latestSummary: latestCorrectionSummary });
-  // 다이어트 전용 "다음 수업 전까지" 체크리스트 계산 — 회원 화면에서는 더 이상 렌더링하지 않는다(회원이 거의 읽지 않아 제거).
+  // 다이어트 전용 "다음 수업 전까지" 체크리스트 계산 — 회원 화면에서는 렌더링하지 않는다.
   // 계산 로직은 관리자앱에서 추후 사용할 예정이라 그대로 유지한다.
   const last7Key = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   const recentKcalCount = getKcalLogs(p.nutrition).filter(r => r.date >= last7Key).length;
@@ -3233,11 +3065,13 @@ function MemberAnalysis(p) {
   // eslint-disable-next-line no-unused-vars
   const nextClassChecklist = buildNextClassChecklist({ recentKcalCount, recentCardioCount });
 
-  // Before → After — 페르소나별 "가장 중요한 변화" 하나만 골라 숫자 나열 대신 전후 비교로 보여준다.
+  // Before → After — 페르소나별 "가장 중요한 변화" 하나만. 명확한 시작/현재값이 없으면 카드 자체가 숨겨진다.
   const periodText = opt.days ? `최근 ${opt.label}` : "전체 기간";
   const biggestGainPeriod = [...topExercises].filter(r => r.delta > 0).sort((a, b) => b.delta - a.delta)[0];
   const beforeAfter = (() => {
     if (persona === "bulk") {
+      // 골격근량(인바디) 기록이 있으면 근육 성장을 우선 비교, 없으면 대표 운동 최고 중량
+      if (mmDiff != null && firstMM && lastMM) return { metricLabel: "골격근량", before: firstMM, after: lastMM, unit: "kg", goodDirection: "up" };
       if (!biggestGainPeriod) return { metricLabel: null, before: null, after: null };
       return {
         metricLabel: biggestGainPeriod.name,
@@ -3247,61 +3081,41 @@ function MemberAnalysis(p) {
       };
     }
     if (persona === "correction") {
-      return { metricLabel: "통증 (VAS)", before: pain?.first ?? null, after: pain?.last ?? null, unit: "", goodDirection: "down" };
+      return { metricLabel: "통증(VAS)", before: pain?.first ?? null, after: pain?.last ?? null, unit: "", goodDirection: "down" };
     }
-    // diet, general 모두 체중 기준 — general은 "변동이 작을수록 좋음"으로 해석
+    if (persona === "fitness") return { metricLabel: null, before: null, after: null }; // 명확한 전후 수치가 없어 숨김
+    // diet, general 모두 체중 기준 — general은 "변동이 작을수록 좋음"으로 해석, 기록 2회 미만이면 숨김
+    if (weights.length < 2) return { metricLabel: null, before: null, after: null };
     return { metricLabel: "체중", before: firstW, after: curW, unit: "kg", goodDirection: persona === "general" ? "stable" : "down" };
   })();
 
-  // 대표 코멘트 — 실제 데이터를 근거로 칭찬 + 다음 제안을 짧고 따뜻한 문장으로. 절대 질책 톤 사용 안 함.
-  const trackedParts = partVolumeData.filter(d => d.values.length > 0);
-  const weakestPart = trackedParts.length ? [...trackedParts].sort((a, b) => a.values.length - b.values.length)[0].part : null;
-  const coachComment = (() => {
-    // 각 페르소나 1문장: 이전 기록과 비교한 변화 → 2문장: 변화가 생긴 이유(=현재 잘되고 있는 점) → 3문장: 다음 행동 제안 + 추천 이유
-    if (persona === "diet") {
-      if (weights.length < 2 && kcalRows.length === 0) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
-      const l1 = wDiff == null ? "체중 기록이 쌓이면 처음 기록 대비 변화를 더 정확히 보여드릴게요." : wDiff < -0.3 ? `처음 기록 대비 체중이 더 안정적으로 감소하고 있습니다.` : "처음 기록 대비 체중이 안정적으로 관리되고 있습니다.";
-      const l2 = kcalRows.length >= 10 && cardioInPeriod.length >= 4 ? "최근 식단 기록과 유산소 운동을 꾸준히 이어온 것이 좋은 흐름으로 연결되고 있습니다." : kcalRows.length >= 10 ? "최근 식단 기록을 꾸준히 이어온 것이 이 흐름으로 연결되고 있습니다." : "식단 기록을 조금 더 남기면 흐름을 더 잘 확인할 수 있습니다.";
-      const l3 = cardioInPeriod.length < 4 ? "최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어, 다음 수업 전까지 유산소를 1~2회만 더 추가하면 현재 감량 흐름을 더 안정적으로 유지하는 데 도움이 됩니다." : "지금처럼 유산소 운동을 이어가면 목표 체중에 더욱 가까워질 수 있습니다.";
-      return `${l1} ${l2} ${l3}`;
-    }
-    if (persona === "bulk") {
-      if (!periodSessions.length) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
-      const l1 = biggestGainPeriod ? `이전 기록 대비 ${biggestGainPeriod.name} 수행능력이 ${biggestGainPeriod.before} → ${biggestGainPeriod.after}로 더 안정적으로 향상되고 있습니다.` : "운동 루틴을 꾸준히 이어가고 있습니다.";
-      const l2 = biggestGainPeriod ? `최근 ${biggestGainPeriod.name} 운동 볼륨이 꾸준히 늘면서 중량도 함께 올라가는 좋은 흐름입니다.` : "최근 수업에서 운동 볼륨이 꾸준히 이어지고 있어 좋은 성장 흐름입니다.";
-      const l3 = weakestPart ? `다음 수업에서는 같은 흐름이 ${weakestPart} 운동에서도 이어지는지 함께 확인해보겠습니다.` : "다음 수업에서 같은 흐름이 다른 부위에서도 이어지는지 함께 확인해보겠습니다.";
-      return `${l1} ${l2} ${l3}`;
-    }
-    if (persona === "correction") {
-      if (!pain?.rows?.length && !latestCorrectionSummary) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
-      const l1 = pain?.first != null && pain?.last != null && pain.last < pain.first ? `지난 기록(VAS ${pain.first}) 대비 통증 강도가 ${pain.last}로 낮아지고 있습니다.` : pain?.rows?.length ? "지난 기록과 비교해 통증 정도가 안정적으로 유지되고 있습니다." : "통증 기록이 쌓이면 이전 기록과 비교한 변화를 더 정확히 보여드릴게요.";
-      const l2 = latestCorrectionSummary?.homeExercise?.length ? "최근 교정 운동을 꾸준히 이어온 것이 움직임 개선으로 이어지고 있는 것으로 보입니다." : "교정 운동을 조금 더 챙기면 움직임 개선에 도움이 됩니다.";
-      const l3 = "다음 평가 전까지 집에서 할 운동을 유지하면 가동범위 변화도 더 명확하게 확인할 수 있습니다.";
-      return `${l1} ${l2} ${l3}`;
-    }
-    if (!periodSessions.length && monthWorkoutCount === 0) return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";
-    const l1 = monthWorkoutCount > 0 ? "최근 운동 빈도가 안정적으로 유지되고 있습니다." : "운동 기록이 쌓이면 지속성 흐름을 더 잘 보여드릴게요.";
-    const l2 = monthWeightRange != null && monthWeightRange <= 1 ? "체중도 크게 흔들리지 않고 있어 현재 생활 습관이 잘 자리 잡고 있는 것으로 보입니다." : "체중 변화를 조금 더 지켜보면서 안정적인 흐름을 만들어가면 좋습니다.";
-    const l3 = monthWorkoutCount > 0 ? "이번 주도 현재 루틴을 유지하면 건강 관리 흐름을 안정적으로 이어갈 수 있습니다." : "이번 주부터 운동 기록을 하나씩 남겨보세요.";
-    return `${l1} ${l2} ${l3}`;
-  })();
+  // ── 목표별 Hero·이번 기간 리포트 — 전부 위에서 계산된 기존 값만 연결 ──
+  const streak = computeEngagementStreak(p.checkins, p.attendance, p.cardioLogs);
+  const volumePct = getVolumeIncrease(periodSessions);
+  const targetW = getTargetWeight(p.profile, p.onboarding);
+  const remainW = Number.isFinite(Number(curW)) && targetW ? Math.max(0, +(Number(curW) - targetW).toFixed(1)) : null;
+  const healthLogCount = weights.length + kcalRows.length + p.checkins.filter(inPeriod).length + cardioInPeriod.length;
+  const heroPeriodText = opt.days ? `최근 ${opt.label} 동안` : "전체 기간 동안";
+  const heroCtx = { periodText: heroPeriodText, wDiff, curW, remainW, workoutCount: periodSessions.length, cardioMinutes, mmDiff, volumePct, biggestGain: biggestGainPeriod, pain, streak, healthLogCount };
+  const hero = buildGoalHero(persona, heroCtx);
+  const periodReport = buildPeriodReport(persona, { wDiff, workoutCount: periodSessions.length, kcalCount: kcalRows.length, cardioCount: cardioInPeriod.length, cardioMinutes, pain, mmDiff, volumePct, biggestGain: biggestGainPeriod, repEndurance, streak, healthLogCount });
 
-  // ── 재사용 가능한 그래프/카드 조각(기존 마크업 그대로) — 목표별로 순서만 다르게 배치한다 ──
-  // "체중 변화 추이"(선 그래프 단독)와 "체중과 섭취 칼로리"(선+막대) 그래프가 거의 같은 정보를 중복 표시하던 것을
-  // 하나로 통합. 체중은 항상 선 그래프, 섭취 칼로리는 기록된 날에만 막대로 표시(comboData가 날짜 union이라 미기록일은 0kcal이 아니라 값 없음으로 처리됨).
+  // ── 재사용 가능한 그래프/카드 조각(기존 계산 그대로) — 목표별로 제목·순서만 다르게 배치한다 ──
+  // 체중은 선 그래프, 섭취 칼로리는 기록이 있을 때만 막대·우측 축·범례를 함께 표시(없으면 노출 안 함).
+  const hasKcalData = kcalRows.length > 0;
   const weightChart = (
-    <MCard title="체중과 섭취 칼로리">
+    <MCard title={persona === "general" ? "건강 기록 변화" : "체중 변화 추이"}>
       {comboData.length > 0 ? (
         <ResponsiveContainer width="100%" height={220}>
           <ComposedChart data={comboData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F4" />
             <XAxis dataKey="date" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} />
             <YAxis yAxisId="weight" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" domain={["dataMin-2", "dataMax+2"]} />
-            <YAxis yAxisId="kcal" orientation="right" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kcal" />
+            {hasKcalData && <YAxis yAxisId="kcal" orientation="right" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kcal" />}
             <Tooltip contentStyle={ttStyle} />
-            <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />
-            <Bar yAxisId="kcal" dataKey="kcal" name="섭취 칼로리" fill="#93C5FD" opacity={0.55} radius={[4, 4, 0, 0]} />
-            <Line yAxisId="weight" dataKey="weight" name="체중" stroke="#2F73F6" strokeWidth={3} dot={{ r: 4, fill: "#2F73F6", strokeWidth: 0 }} connectNulls />
+            {hasKcalData && <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />}
+            {hasKcalData && <Bar yAxisId="kcal" dataKey="kcal" name="섭취 칼로리" fill="#99E2D8" opacity={0.6} radius={[4, 4, 0, 0]} />}
+            <Line yAxisId="weight" dataKey="weight" name="체중" stroke="#0F9488" strokeWidth={3} dot={{ r: 4, fill: "#0F9488", strokeWidth: 0 }} connectNulls />
           </ComposedChart>
         </ResponsiveContainer>
       ) : (
@@ -3387,7 +3201,7 @@ function MemberAnalysis(p) {
     </MCard>
   );
   const painVasCard = (
-    <MCard title="통증 변화 (VAS)">
+    <MCard title="통증 변화 추이">
       {pain.rows.length > 0 ? (
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={pain.rows.map(r => ({ date: String(r.date).slice(5), vas: r.vas }))}>
@@ -3395,7 +3209,7 @@ function MemberAnalysis(p) {
             <XAxis dataKey="date" tick={axTick} tickLine={false} />
             <YAxis domain={[0, 10]} tick={axTick} tickLine={false} />
             <Tooltip contentStyle={ttStyle} />
-            <Line dataKey="vas" name="VAS" stroke="#7C3AED" strokeWidth={3} dot={{ r: 4, fill: "#7C3AED", strokeWidth: 0 }} />
+            <Line dataKey="vas" name="VAS" stroke="#0F9488" strokeWidth={3} dot={{ r: 4, fill: "#0F9488", strokeWidth: 0 }} />
           </LineChart>
         </ResponsiveContainer>
       ) : (
@@ -3404,7 +3218,7 @@ function MemberAnalysis(p) {
     </MCard>
   );
   const cardioActivityCard = (
-    <MCard title="유산소·활동량 변화">
+    <MCard title={persona === "fitness" ? "운동 지속 변화" : "유산소·활동량 변화"}>
       {cardioInPeriod.length > 0 || monthWorkoutCount > 0 ? (
         <div className="grid2">
           <Metric t="유산소 시간" v={`${cardioMinutes}분`} />
@@ -3416,170 +3230,87 @@ function MemberAnalysis(p) {
       )}
     </MCard>
   );
-  // 목표별로 이미 primary 영역에서 보여준 항목은 "추가 데이터"에서 중복 표시하지 않는다
-  const primaryUses = {
-    diet: new Set(["weightChart", "kcalWeightCard"]),
-    bulk: new Set(["partVolume", "weightChart"]),
-    correction: new Set(["painVAS", "strength"]),
-    general: new Set(["weightChart", "strength", "cardio"]),
-  }[persona] || new Set();
+  // 교정 결과(체형평가 요약) — 체형교정 회원은 "추가 데이터"(접힘)에서 기존 그대로 확인 가능
+  const correctionResultCard = (
+    <MCard title="교정 결과">
+      {latestCorrectionSummary ? (
+        <>
+          <div style={{ display: "grid", gap: 8 }}>
+            {(latestCorrectionSummary.good || []).map((g, i) => <div key={i} className="change-feedback-item">{g}</div>)}
+          </div>
+          {(latestCorrectionSummary.caution || []).length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <p style={{ fontWeight: 800, color: "#F97316", margin: "0 0 6px" }}>주의할 점</p>
+              {latestCorrectionSummary.caution.map((c, i) => <div key={i} className="change-feedback-item" style={{ background: "#FFF7ED", color: "#C2410C" }}>{c}</div>)}
+            </div>
+          )}
+          {(latestCorrectionSummary.homeExercise || []).length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <p style={{ fontWeight: 800, margin: "0 0 6px" }}>집에서 할 운동</p>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>{latestCorrectionSummary.homeExercise.map((e, i) => <li key={i}>{e}</li>)}</ul>
+            </div>
+          )}
+          {latestCorrectionSummary.nextGoal && <p style={{ marginTop: 10, fontWeight: 700, color: "#0F9488" }}>다음 목표: {latestCorrectionSummary.nextGoal}</p>}
+          <p style={{ marginTop: 8, fontSize: 12, color: "#8B949E" }}>{latestCorrectionSummary.date} 평가 기준</p>
+        </>
+      ) : (
+        <div className="analysis-empty-state">아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
+      )}
+    </MCard>
+  );
 
   return (
     <>
-      {/* 헤더 + 기간 필터 */}
+      {/* ① 헤더 + 기간 필터(기존 로직 그대로) */}
       <div className="analysis-head">
-        <div><h1>변화분석</h1><p className="sub">운동 시작 이후, 당신의 변화를 한눈에 확인해요.</p></div>
+        <div><h1>변화 분석</h1><p className="sub">운동 시작 이후, 나의 변화를 한눈에 확인해요.</p></div>
         <div className="period-tabs">
           {ANALYSIS_PERIODS.map(x => <button key={x.key} className={period === x.key ? "active" : ""} onClick={() => handleSetPeriod(x.key)}>{x.label}</button>)}
         </div>
       </div>
 
-      {/* 성과 Hero — 그래프·보고서보다 성과 요약을 가장 먼저 (실제 데이터만) */}
-      <AnalysisHeroCard curW={curW} wDiff={wDiff} target={getTargetWeight(p.profile, p.onboarding)} monthWorkoutCount={monthWorkoutCount} cardioMinutes={cardioMinutes} periodLabel={opt.label}/>
+      {/* ② 목표별 핵심 변화 Hero — 대표 목표 기준 가장 중요한 수치 1개 + 핵심 지표 3개 */}
+      <GoalHeroCard hero={hero} />
 
-      {/* 목표(다이어트/벌크업/체형교정)에 따라 가장 중요한 변화를 가장 먼저 표시 */}
-      {persona === "diet" && (
-        <>
-          {weightChart}
-          <BeforeAfterCard {...beforeAfter} periodText={periodText} />
-          <div className="change-feedback-item">{dietInterpretation}</div>
-          <MCard title="이번 달 변화">
-            <div style={{ display: "grid", gap: 8 }}>
-              {dietGrowthLines.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
-            </div>
-          </MCard>
-          <MonthlyBestCard items={monthlyBestItems} />
-        </>
-      )}
-
+      {/* ③ 목표별 주요 변화 그래프 — 기존 차트·계산 재사용, 목표별로 노출만 다름 */}
+      {persona === "diet" && weightChart}
       {persona === "bulk" && (
         <>
-          {/* ① 부위별 운동 볼륨 변화 — 5개 부위를 한 카드에서 동시에 비교(카드 자체 기간 버튼 사용, 전체 기간 필터와 무관하게 항상 전체 기록 기준) */}
           <PartVolumeMultiCard sessions={p.sessions} />
-
-          {/* ② 운동 수행능력 변화 — 가장 자주 수행한 대표 운동 5개(회원마다 자동 선정)의 중량 전/후 비교 */}
-          <MCard title="운동 수행능력 변화">
-            {topExercises.length > 0 ? (
-              <div className="strength-list">
-                {topExercises.map((r, i) => {
-                  const beforeNum = Number(String(r.before).replace(/[^0-9.]/g, ""));
-                  const afterNum = Number(String(r.after).replace(/[^0-9.]/g, ""));
-                  const delta = Math.round(afterNum - beforeNum);
-                  return (
-                    <div key={i} className="strength-row">
-                      <b>{r.name}</b>
-                      <span>{r.before} → {r.after}</span>
-                      {Number.isFinite(delta) && delta !== 0 && <em>{delta > 0 ? "▲ +" : "▼ "}{Math.abs(delta)}kg</em>}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="analysis-empty-state">기록이 쌓이면 가장 많이 수행한 운동의 성장을 보여드려요.</div>
-            )}
-          </MCard>
-
-          <BeforeAfterCard {...beforeAfter} periodText={periodText} />
-
-          {/* ③ 변화 요약 — 부위별 볼륨/대표 운동 중량·반복수 변화를 근거로 "확실히 성장하고 있다"를 문장으로 전달 */}
-          <MCard title="변화 요약">
-            <div style={{ display: "grid", gap: 8 }}>
-              {bulkGrowthSummary.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
-            </div>
-          </MCard>
-
-          {/* ④ 체중 변화 — 운동 수행능력보다 뒤에 보조 지표로 배치. 골격근량/체지방 변화는 "건강 전문 분석"(하단 접힘)에서 확인 */}
-          {weightChart}
-          <MonthlyBestCard items={monthlyBestItems} />
+          <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
         </>
       )}
-
-      {persona === "correction" && (() => {
-        const latestSummary = [...(p.correctionSummaries||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))[0];
-        return (
-          <>
-            {painVasCard}
-            <BeforeAfterCard {...beforeAfter} periodText={periodText} />
-            <MCard title="교정 결과">
-              {latestSummary ? (
-                <>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {(latestSummary.good||[]).map((g,i) => <div key={i} className="change-feedback-item">{g}</div>)}
-                  </div>
-                  {(latestSummary.caution||[]).length>0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <p style={{ fontWeight: 800, color: "#F97316", margin: "0 0 6px" }}>주의할 점</p>
-                      {latestSummary.caution.map((c,i) => <div key={i} className="change-feedback-item" style={{ background: "#FFF7ED", color: "#C2410C" }}>{c}</div>)}
-                    </div>
-                  )}
-                  {(latestSummary.homeExercise||[]).length>0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <p style={{ fontWeight: 800, margin: "0 0 6px" }}>집에서 할 운동</p>
-                      <ul style={{ margin: 0, paddingLeft: 18 }}>{latestSummary.homeExercise.map((e,i) => <li key={i}>{e}</li>)}</ul>
-                    </div>
-                  )}
-                  {latestSummary.nextGoal && <p style={{ marginTop: 10, fontWeight: 700, color: "#2F73F6" }}>다음 목표: {latestSummary.nextGoal}</p>}
-                  <p style={{ marginTop: 8, fontSize: 12, color: "#8B949E" }}>{latestSummary.date} 평가 기준</p>
-                </>
-              ) : (
-                <div className="analysis-empty-state">아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.</div>
-              )}
-            </MCard>
-            <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
-            <div className="change-feedback-item">{correctionInterpretation}</div>
-            <MCard title="이번 달 변화">
-              <div style={{ display: "grid", gap: 8 }}>
-                {correctionGrowthLines.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)}
-              </div>
-            </MCard>
-            <RomChangeCard changes={latestSummary?.romChanges} />
-            <MonthlyBestCard items={monthlyBestItems} />
-          </>
-        );
-      })()}
-
+      {persona === "correction" && painVasCard}
+      {persona === "fitness" && cardioActivityCard}
       {persona === "general" && (
         <>
-          {/* 건강유지/체중유지: ①체중 유지 범위 ②운동 수행능력 변화 ③유산소·활동량 변화 — 안정적 유지와 지속성이 핵심 */}
           {weightChart}
-          <BeforeAfterCard {...beforeAfter} periodText={periodText} />
-          <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />
           {cardioActivityCard}
-          <MonthlyBestCard items={monthlyBestItems} />
         </>
       )}
 
-      {/* 공통: ⑤성장 리포트 → ⑥대표 코멘트 → ⑦목표 전략 추천(장기)·다음 변화 예상(단기) → (최근 변화 요약) */}
-      <GrowthReportCard report={growthReport} />
-      <CoachCommentCard text={coachComment} />
-      <WeightGoalStrategyCard {...p} />
-      <FuturePredictionCard text={futurePrediction} />
-      {(persona === "diet" || persona === "general") && (
-        <MCard title="최근 변화 요약">
-          <div style={{ display: "grid", gap: 8 }}>
-            {hasEnoughInbody
-              ? feedbackMsgs.map((msg, i) => <div key={i} className="change-feedback-item">{msg}</div>)
-              : <p style={{ color: "#8B949E", fontWeight: 800, margin: 0, lineHeight: 1.7 }}>인바디 기록이 2회 이상 쌓이면 체성분 변화 분석이 제공됩니다.</p>}
-            {persona === "general" && (
-              <div className="change-feedback-item">
-                {monthWorkoutCount > 0 ? "운동 루틴을 꾸준히 유지하고 있습니다. 지금 페이스를 유지하면 안정적인 컨디션을 계속 이어갈 수 있어요." : "이번 달 운동 기록이 쌓이면 지속성 흐름도 함께 보여드릴게요. 이번 주부터 하나씩 기록해보세요."}
-              </div>
-            )}
-          </div>
-        </MCard>
-      )}
+      {/* ④ Before → After — 명확한 시작/현재 수치가 있을 때만 표시(없으면 카드 숨김) */}
+      <BeforeAfterCard {...beforeAfter} periodText={periodText} />
 
-      {/* 목표별로 이미 위에서 보여준 항목은 제외하고 나머지는 여기서 확인 가능 */}
-      {(!primaryUses.has("kcalWeightCard") || !primaryUses.has("partVolume") || !primaryUses.has("painVAS") || !primaryUses.has("strength")) && (
-        <CollapsibleSection label="추가 데이터" defaultOpen={false}>
-          <div style={{ display: "grid", gap: 16 }}>
-            {!primaryUses.has("kcalWeightCard") && kcalWeightCard}
-            {!primaryUses.has("partVolume") && <PartVolumeMultiCard sessions={p.sessions} />}
-            {!primaryUses.has("painVAS") && painVasCard}
-            {!primaryUses.has("strength") && <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />}
-          </div>
-        </CollapsibleSection>
-      )}
+      {/* ⑤ 이번 기간 리포트 — 잘한 점 최대 2개 + 다음 목표 1개(내용 없으면 카드 숨김) */}
+      <PeriodReportCard report={periodReport} />
+
+      {/* ⑥ 목표 전략 — 핵심 수치 2개 + 한 줄 방향 */}
+      <WeightGoalStrategyCard {...p} persona={persona} painLast={pain?.last} periodCardioMinutes={cardioMinutes} periodWorkoutCount={periodSessions.length} />
+
+      {/* 추가 데이터 — 위에서 보여주지 않은 기존 카드(기본 접힘, 기능 유지) */}
+      <CollapsibleSection label="추가 데이터" defaultOpen={false}>
+        <div style={{ display: "grid", gap: 16 }}>
+          {persona !== "diet" && persona !== "general" && weightChart}
+          {kcalWeightCard}
+          {persona !== "bulk" && <PartVolumeMultiCard sessions={p.sessions} />}
+          {persona !== "correction" && painVasCard}
+          {persona !== "bulk" && <StrengthChangeCard sessions={periodSessions} allSessions={p.sessions} />}
+          {persona !== "fitness" && persona !== "general" && cardioActivityCard}
+          {persona === "correction" && correctionResultCard}
+          {persona === "correction" && <RomChangeCard changes={latestCorrectionSummary?.romChanges} />}
+        </div>
+      </CollapsibleSection>
 
       {/* 전문 데이터(위상각/신체나이 등)는 하단에 접어두고, 관심 있는 회원만 펼쳐보게 함 */}
       <CollapsibleSection label="건강 전문 분석" defaultOpen={false}>
@@ -3634,7 +3365,50 @@ function MemberAnalysis(p) {
   );
 }
 function StrengthChangeCard({sessions=[],allSessions}){const [showAll,setShowAll]=useState(false);const [query,setQuery]=useState('');const allRows=buildPerformanceChanges(sessions);const searchRows=buildPerformanceChanges(allSessions&&allSessions.length?allSessions:sessions);const hasRealData=allRows.length>0&&allRows[0].name!=='대표님과 함께한 수행 기록';const hasSearchData=searchRows.length>0&&searchRows[0].name!=='대표님과 함께한 수행 기록';const filtered=(hasRealData||hasSearchData)&&query?searchRows.filter(r=>matchSearch(r.name,query)):null;const visibleRows=filtered??(hasRealData&&!showAll?allRows.slice(0,3):allRows);const hasMore=hasRealData&&!query&&allRows.length>3;const positive=hasRealData?allRows.filter(r=>r.delta>0):[]; const comment=!hasRealData?"운동 기록이 더 쌓이면 변화 코멘트를 제공할 수 있습니다.":positive.length>=2?`${positive[0].name}, ${positive[1].name} 중량이 꾸준히 증가하고 있습니다.`:positive.length===1?`${positive[0].name} 중량이 향상되고 있습니다.`:"현재 기록을 유지하며 안정적으로 진행 중입니다."; return <MCard title="운동 수행 능력 변화"><p className="strength-comment">{comment}</p>{(hasRealData||hasSearchData)&&<div style={{position:'relative',marginBottom:8}}><input className="ex-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="운동 검색..."/>{query&&<button type="button" className="ex-search-clear" onClick={()=>setQuery('')}>✕</button>}</div>}<div className="strength-list">{visibleRows.length===0?<p style={{color:'#8B949E',fontWeight:800,padding:'8px 0'}}>검색 결과가 없습니다.</p>:visibleRows.map((r,i)=>{const b=Number(String(r.before).replace(/[^0-9.]/g,""));const a=Number(String(r.after).replace(/[^0-9.]/g,""));const pct=b&&a?Math.round((a-b)/b*100):null;return <div key={i} className="strength-row"><b>{r.name}</b><span>{r.before} → {r.after}</span>{pct!==null&&<em>{pct>=0?"▲":"▼"} {Math.abs(pct)}%</em>}</div>;})}</div>{hasMore&&<button type="button" className="linkbtn" onClick={()=>setShowAll(v=>!v)}>{showAll?"▲ 접기":"더보기 ▼"}</button>}</MCard>}
-function WeightGoalStrategyCard(p){const f=getWeightForecast(p); const goal=p.onboarding?.goal||p.profile?.goal||p.nutrition?.goal; const goalType=getCalorieGoalType(goal); const analysis=estimateMaintenance(p.profile,p.onboarding,p.body,p.nutrition,p.checkins,p.sessions); const diff=Number.isFinite(f.cur)&&Number.isFinite(f.target)?f.target-f.cur:0; const gain=Math.max(0,diff); const maintainRange=Number.isFinite(f.target)?`${(f.target-1).toFixed(1)}~${(f.target+1).toFixed(1)}kg`:"목표 체중 ±1kg"; if(goalType==="maintain")return <MCard title="목표 전략 추천"><div className="goal-mini"><span>유지 칼로리 <b>{formatKcal(analysis.maintain)}</b></span><span>현재 체중 <b>{kgText(f.cur)}</b></span><span>유지 범위 <b>{maintainRange}</b></span></div><div className="strategy-box"><b>1순위 추천 전략</b><strong>유지 칼로리</strong><span>체중 유지 범위 · 현재 페이스 유지 가능성 높음</span><p>주간 평균 체중만 확인하며 현재 루틴을 유지하세요.</p></div></MCard>; if(goalType==="bulk")return <MCard title="목표 전략 추천"><div className="goal-mini"><span>목표 체중 <b>{kgText(f.target)}</b></span><span>현재 체중 <b>{kgText(f.cur)}</b></span><span>남은 증량 <b>+{gain.toFixed(1)}kg</b></span></div><div className="strategy-box"><b>1순위 추천 전략</b><strong>주당 0.25~0.50kg</strong><span>예상 기간 약 {gain?Math.ceil(gain/.35):0}주 · 근육 증가 페이스 안정적</span><p>권장 칼로리를 채우고 주요 운동 중량을 천천히 올리세요.</p></div></MCard>; return <MCard title="목표 전략 추천"><div className="goal-mini"><span>목표 체중 <b>{kgText(f.target)}</b></span><span>현재 체중 <b>{kgText(f.cur)}</b></span><span>남은 감량 <b>-{f.remain.toFixed(1)}kg</b></span></div>{f.risk==="high"&&<p className="danger">⚠️ 현재 목표는 매우 공격적인 감량 계획입니다. 권장 기간은 약 {Math.ceil(f.remain/.8)}~{Math.ceil(f.remain/.5)}주입니다.</p>}<div className="strategy-box"><b>1순위 추천 전략</b><strong>주당 {f.recommended.toFixed(2)}kg</strong><span>예상 기간 약 {f.weeks}주 · 목표 달성 가능성 {f.possibility}</span><p>{f.estimatedDate} 전후 도달 예상입니다. 무리하지 말고 현재 페이스를 우선 유지하세요.</p></div></MCard>}
+// 목표 전략 — 2026-07 리디자인: 핵심 수치 2개 + 한 줄 방향만. "주당 0.xxkg"·"예상 달성률" 같은
+// 근거가 약한 정밀 수치는 노출하지 않고, 예상 기간은 기존 getWeightForecast 계산이 가능한 경우에만 표시한다.
+function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinutes=0,periodWorkoutCount=0,...p}){
+  const f=getWeightForecast(p);
+  const analysis=estimateMaintenance(p.profile,p.onboarding,p.body,p.nutrition,p.checkins,p.sessions);
+  const gain=Number.isFinite(f.cur)&&Number.isFinite(f.target)?Math.max(0,f.target-f.cur):0;
+  const maintainRange=Number.isFinite(f.target)?`${(f.target-1).toFixed(1)}~${(f.target+1).toFixed(1)}kg`:null;
+  const emptyNote=<p className="anx-strategy-note">기록이 조금 더 쌓이면 목표 흐름을 확인할 수 있어요.</p>;
+  const Grid=({items})=>(
+    <div className="anx-strategy-grid">
+      {items.map(it=><div key={it.label}><span>{it.label}</span><b>{it.value}</b></div>)}
+    </div>
+  );
+  if(persona==="correction") return <MCard title="다음 관리 목표">
+    <Grid items={[{label:"최근 통증",value:painLast!=null?`VAS ${painLast}`:"기록 없음"},{label:"목표",value:"안정적인 움직임 유지"}]}/>
+    <p className="anx-strategy-note">교정 운동을 꾸준히 이어가면 다음 평가에서 변화를 확인할 수 있어요.</p>
+  </MCard>;
+  if(persona==="fitness") return <MCard title="다음 체력 목표">
+    <Grid items={[{label:"이번 기간 유산소",value:periodCardioMinutes>0?`${periodCardioMinutes}분`:"기록 없음"},{label:"이번 기간 운동",value:`${periodWorkoutCount}회`}]}/>
+    <p className="anx-strategy-note">{periodCardioMinutes>0||periodWorkoutCount>0?"지금 리듬을 유지하면서 유산소 시간을 조금씩 늘려보세요.":"운동과 유산소 기록이 쌓이면 목표 흐름을 확인할 수 있어요."}</p>
+  </MCard>;
+  if(persona==="bulk"){
+    if(!Number.isFinite(f.cur)) return <MCard title="다음 성장 목표">{emptyNote}</MCard>;
+    return <MCard title="다음 성장 목표">
+      <Grid items={[{label:"현재 체중",value:kgText(f.cur)},Number.isFinite(f.target)&&gain>0?{label:"남은 증량",value:`+${gain.toFixed(1)}kg`}:{label:"이번 기간 운동",value:`${periodWorkoutCount}회`}]}/>
+      <p className="anx-strategy-note">현재 운동 리듬을 유지하며 볼륨을 천천히 올려보세요.</p>
+    </MCard>;
+  }
+  if(persona==="general"){
+    if(!Number.isFinite(f.cur)&&!analysis.maintain) return <MCard title="목표 전략">{emptyNote}</MCard>;
+    return <MCard title="목표 전략">
+      <Grid items={[{label:"현재 체중",value:kgText(f.cur)},maintainRange?{label:"유지 범위",value:maintainRange}:{label:"유지 칼로리",value:formatKcal(analysis.maintain)}]}/>
+      <p className="anx-strategy-note">주간 평균 체중만 가볍게 확인하며 현재 루틴을 유지하세요.</p>
+    </MCard>;
+  }
+  // diet
+  if(!Number.isFinite(f.target)||!Number.isFinite(f.cur)) return <MCard title="목표 전략">
+    <p className="anx-strategy-note">{Number.isFinite(f.cur)?"목표 체중을 설정하면 남은 변화량과 예상 기간을 확인할 수 있어요.":"기록이 조금 더 쌓이면 목표 흐름을 확인할 수 있어요."}</p>
+  </MCard>;
+  return <MCard title="목표 전략">
+    <Grid items={[{label:"목표까지",value:f.remain>0?`${f.remain.toFixed(1)}kg`:"달성"},{label:"예상 기간",value:f.remain>0&&f.weeks>0?`약 ${f.weeks}주`:"유지 단계"}]}/>
+    <p className="anx-strategy-note">{f.remain>0?"현재 흐름을 유지하면 목표에 가까워질 수 있어요.":"목표 체중에 도달했어요. 지금 범위를 유지해보세요."}</p>
+  </MCard>;
+}
 // 구 "부위별 운동량" 카드(부위 선택 탭 + 단일 그래프)는 PartVolumeMultiCard(5개 부위 동시 비교)로 대체되었다.
 // 프로필 Hero — 개인정보 표가 아니라 회원의 성과와 운동 정체성을 먼저 보여준다 (전부 기존 데이터 계산)
 function ProfileHeroCard({p,base}){
@@ -4504,7 +4278,7 @@ const MEMBER_CSS=`
   --mb-h-btn:56px; --mb-h-input:52px; --mb-h-tab:60px;
   --mb-brand:#2F73F6; --mb-ink:#20242A; --mb-sub:#8B949E; --mb-line:#E8ECF1;
 }
-body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A;overflow-y:auto!important;overscroll-behavior:auto!important;height:auto!important}html:has(.member-shell),html:has(.member-login){height:auto!important;overflow-y:auto!important}@keyframes memberFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}@keyframes memberCardIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}.member-shell{min-height:100vh;min-height:100dvh;height:auto;background:#F6F7F9;color:#20242A;display:grid;place-items:start center}.member-page{width:100%;max-width:430px;padding:28px 18px calc(128px + env(safe-area-inset-bottom,0px));animation:memberFadeIn .22s ease}.member-page h1{font-size:32px;letter-spacing:-1px;margin:8px 0}.sub{color:#8B949E;margin-bottom:18px}.mcard,.metric,.hero-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:22px;margin:16px 0;box-shadow:0 2px 14px rgba(15,23,42,.05);transition:transform .18s ease,box-shadow .18s ease;animation:memberCardIn .22s ease}.mcard h2{font-size:20px;margin-bottom:12px}.hero-card{background:linear-gradient(135deg,#20242A,#3B4654);color:#fff}.hero-card b{display:block;font-size:22px}.hero-card strong{display:block;font-size:42px;margin-top:8px}.hero-card span{color:#DDE3EA}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.metric{margin:0;min-height:116px;display:flex;flex-direction:column}.metric span{display:block;color:#8B949E;font-size:13px}.metric b{display:block;font-size:23px;margin-top:10px;line-height:1.18}.change-report{background:linear-gradient(135deg,#fff,#EEF5FF);border-color:#D9E7FF}.change-report b{font-size:clamp(24px,6.2vw,27px);color:#2F73F6;white-space:nowrap;letter-spacing:-.8px}.change-report b .change-unit{font-size:.86em;margin-left:3px;white-space:nowrap}.change-report small,.next-workout-metric small{display:block;color:#66717C;font-weight:900;margin-top:7px}.goal-metric{display:flex;flex-direction:column;justify-content:flex-start;text-align:left}.goal-metric span{align-self:stretch;margin-bottom:6px}.goal-metric b{align-self:stretch;text-align:left;font-size:clamp(18px,5vw,24px);word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;margin-top:12px}.next-workout-metric b{font-size:25px}.recommended-calorie{background:linear-gradient(135deg,#F0FDF4,#FFFFFF);border-color:#BBF7D0}.recommended-calorie b{color:#16A34A}.recommended-calorie small{display:block;color:#66717C;font-weight:900;margin-top:7px}.next-workout-metric em{display:inline-block;margin-top:8px;padding:4px 9px;border-radius:999px;background:#20242A;color:#fff;font-style:normal;font-weight:900}.workout-guide{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:14px;margin-bottom:12px}.workout-guide p{margin:5px 0;color:#66717C;font-weight:800}.workout-guide b{color:#20242A}.coach-routine-card,.conditioning-card{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border:1px solid #D9E7FF;border-radius:20px;padding:16px;margin:14px 0}.coach-routine-card h3{margin:0 0 6px;color:#2F73F6}.coach-routine-card p,.conditioning-card p{color:#475569;font-weight:800}.routine-row.coach{background:#fff;border:1px solid #E8ECF1;border-radius:16px;padding:12px;margin-top:10px}.coach-comment{background:#fff;border-radius:14px;padding:12px}.conditioning-card b{font-size:18px}.conditioning-card em{display:block;color:#66717C;font-style:normal;font-weight:800}.part-pills .recommended{border-color:#2F73F6;color:#2F73F6;background:#EEF5FF}.routine-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F6F7F9;border:1px solid #EEF1F4;border-radius:18px;padding:14px;margin-top:14px}.routine-summary h3{margin:0 0 5px;font-size:18px}.routine-summary p{margin:0;color:#66717C;font-weight:900}.routine-summary .ghost{width:auto;min-width:92px;height:42px;margin:0;border-radius:999px;padding:0 14px}.rec-group.compact{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:16px;padding:12px;margin-top:12px}.rec-group.compact b{display:block;margin-bottom:6px}.rec-group.compact p{margin:3px 0;color:#66717C;font-weight:800}.home-health-status{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #E8ECF1;border-radius:22px;padding:16px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.05)}.home-health-status.done{border-color:#BBF7D0;background:linear-gradient(135deg,#F0FDF4,#fff)}.home-health-status span{display:block;color:#8B949E;font-size:13px;font-weight:900}.home-health-status b{display:block;margin-top:5px;font-size:17px}.home-health-status button{border:0;border-radius:999px;background:#20242A;color:#fff;font-weight:900;padding:10px 14px;white-space:nowrap}.primary,.ghost{width:100%;height:56px;border-radius:16px;border:0;background:#2F73F6;color:#fff;font-weight:800;font-size:16px;margin-top:10px;box-shadow:0 6px 16px rgba(47,115,246,.22);transition:transform .15s ease,opacity .15s ease,box-shadow .15s ease;-webkit-tap-highlight-color:transparent}.primary:active,.ghost:active{transform:scale(.97);opacity:.9}.ghost{background:#fff;color:#20242A;border:1px solid #E8ECF1;box-shadow:none}.member-nav{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom,0px));left:14px;right:14px;background:rgba(255,255,255,.92);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border:1px solid rgba(15,23,42,.04);border-radius:26px;box-shadow:0 10px 30px rgba(15,23,42,.10);display:flex;align-items:stretch;gap:2px;max-width:430px;margin:0 auto;padding:7px 8px;transition:transform .2s ease;z-index:50}.member-nav.nav-hidden{transform:translateY(calc(100% + 14px + env(safe-area-inset-bottom,0px)))}.member-nav button{flex:1 1 0;min-width:0;max-width:20%;border:0;background:transparent;color:#AAB2BD;font-weight:700;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:54px;padding:7px 2px;border-radius:18px;transition:background-color .2s ease,color .2s ease,box-shadow .2s ease,transform .15s ease;-webkit-tap-highlight-color:transparent}.member-nav button:active{transform:scale(.94)}.member-nav-icon{display:block;font-size:22px;line-height:1;transition:transform .2s ease}.member-nav-label{display:block;width:100%;white-space:nowrap;word-break:keep-all;overflow-wrap:normal;font-size:11px;line-height:1;letter-spacing:-.03em;text-align:center;overflow:hidden;text-overflow:ellipsis}.member-nav .active{background:rgba(57,199,184,.15);color:#0F9488;box-shadow:none}.member-nav .active .member-nav-icon{transform:scale(1.05)}.member-tab-fade{animation:memberFadeIn .2s ease}.nav-badge{position:absolute;top:-2px;right:-7px;background:#EF4444;color:#fff;border-radius:999px;font-size:9px;font-weight:900;padding:0 3px;min-width:14px;height:14px;line-height:14px;text-align:center;font-style:normal;pointer-events:none}.exercise-report-section{padding:14px 0;border-top:1px solid #EEF1F4}.exercise-report-section h3{font-size:15px;margin:0 0 10px;color:#334155}.exercise-report-section.assist{background:#FBFCFE;border:1px solid #EEF1F4;border-radius:18px;padding:13px;margin:10px 0}.exercise-report-section.assist h3{color:#2F73F6}.exercise-report-section.weight h3{color:#F59E0B}.assist-exercise-report{padding:9px 0;border-top:1px solid #EEF1F4}.assist-exercise-report:first-of-type{border-top:0}.assist-exercise-report p{margin:6px 0 0;color:#66717C;font-weight:900}.exercise-report-section.weight .exercise-report{padding:12px 0;border-top:1px solid #EEF1F4}.exercise-report-section.weight .exercise-report:first-of-type{border-top:0}.session-mini>div{padding:14px 0;border-top:1px solid #EEF1F4}.session-mini b,.session-mini em{display:block}.session-mini em,.trainer-comment{background:#EEF5FF;color:#2F73F6;border-radius:14px;padding:10px;font-style:normal;margin-top:10px;font-weight:800}.set-table{display:grid;gap:6px;margin-top:10px}.set-table span{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;background:#F6F7F9;border-radius:12px;padding:9px 10px;color:#20242A}.set-table strong{font-size:13px}.set-table i{font-style:normal;text-align:right;color:#66717C}.soreness-summary{background:#FFF7ED;color:#f97316;border-radius:14px;padding:10px;font-weight:800}.soreness-form{display:grid;gap:8px;background:#F6F7F9;border-radius:18px;padding:12px;margin-top:12px}.soreness-form input,.soreness-form select,.soreness-form textarea{border:1px solid #E8ECF1;border-radius:12px;padding:11px;background:#fff;color:#20242A}.compact{height:44px;font-size:14px}.volume-card{display:grid;gap:4px;padding:12px 0;border-bottom:1px solid #EEF1F4}.volume-card span{color:#66717C}.secondary-metrics{opacity:.82}.notice{background:#EEF5FF;color:#2F73F6;border-radius:16px;padding:12px;font-weight:800}.danger{color:#FF5A5F;font-weight:800;margin-top:12px}.routine-list{display:grid;gap:10px}.routine-row{display:grid;gap:12px;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:15px}.routine-row b{font-size:17px}.routine-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.routine-meta span{background:#fff;border:1px solid #EEF1F4;border-radius:12px;padding:9px 6px;text-align:center;color:#20242A;font-weight:900}.routine-safe{color:#8B949E;font-size:12px;font-weight:800;margin:12px 2px 0}.pt-progress em{display:block;margin-top:8px;color:#8B949E;font-style:normal;font-size:13px}.pt-progress i{display:block;height:7px;border-radius:999px;background:#EEF1F4;margin-top:12px;overflow:hidden}.pt-progress small{display:block;height:100%;background:#2F73F6}.part-pills{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.part-pills button{border:1px solid #E8ECF1;background:#F6F7F9;color:#20242A;border-radius:999px;padding:9px 13px;font-weight:900}.part-pills .active{background:#20242A;color:white}.next-part{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:20px;padding:14px;margin-bottom:12px}.next-part span,.next-part em{display:block;color:#66717C;font-style:normal}.next-part b{display:block;font-size:30px;margin:4px 0}.form-line{display:grid;gap:6px;margin:12px 0}.form-line label{font-weight:900;color:#66717C}.form-line input,.form-line select,.form-line textarea{min-height:52px;border:1px solid #E8ECF1;border-radius:14px;background:#F6F7F9;color:#20242A;padding:12px;font-weight:800;transition:border-color .15s ease,background-color .15s ease}.form-line input:focus,.form-line select:focus,.form-line textarea:focus{outline:none;border-color:#2F73F6;background:#fff}.form-line textarea{resize:vertical;line-height:1.5}.part-trend{border-top:1px solid #EEF1F4;padding-top:12px;margin-top:12px}.part-trend>b{display:block;margin-bottom:6px}.part-pills .active{background:#20242A;color:white}.linkbtn{border:0;background:transparent;color:#2F73F6;font-weight:900;margin:2px 0 12px}.notice.soft{background:#F6F7F9;color:#66717C}.rec-group{border-top:1px solid #EEF1F4;padding-top:10px}.rec-group p{display:grid;gap:3px}.rec-group span{color:#66717C;font-size:13px}.profile-head{display:flex;align-items:center;gap:16px;margin:20px 0}.profile-weight-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 4px}.profile-weight-block{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:13px}.profile-weight-block span{display:block;color:#8B949E;font-size:12px;font-weight:900}.profile-weight-block b{display:block;color:#20242A;font-size:24px;line-height:1.1;margin-top:7px}.profile-weight-block small{display:block;color:#8B949E;font-size:11px;font-weight:800;margin-top:6px}.profile-head{display:flex;align-items:center;gap:16px;margin:20px 0}.avatar{width:76px;height:76px;border-radius:26px;background:linear-gradient(135deg,#2F73F6,#8B5CF6);color:#fff;display:grid;place-items:center;font-size:34px;font-weight:900}.info{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid #EEF1F4}.info span{color:#8B949E}.info b{text-align:right;overflow-wrap:anywhere}.editable-info{display:grid;grid-template-columns:92px 1fr;align-items:center}.editable-info .form-line{margin:0}.editable-info .form-line label{display:none}.editable-info .form-line input,.editable-info .form-line select{min-height:44px}.profile-actions{display:flex;gap:8px;margin-top:12px}.profile-actions .primary,.profile-actions .ghost{margin-top:0}.quick-card{display:grid;gap:4px;text-decoration:none;color:#20242A;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:15px;margin:10px 0;transition:transform .15s ease;-webkit-tap-highlight-color:transparent}.quick-card:active{transform:scale(.98)}.quick-card span{color:#66717C;font-weight:800}.quick-card b{font-size:18px}.notice-card{display:grid;gap:8px;background:linear-gradient(135deg,#FFF7ED,#FFFFFF);border:1px solid #FED7AA;border-radius:22px;padding:16px;margin:14px 0;box-shadow:0 2px 12px rgba(15,23,42,.04)}.notice-card.important{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border-color:#BFDBFE}.notice-card span{color:#2F73F6;font-weight:900}.notice-card b{font-size:18px;color:#20242A}.notice-card button{justify-self:start;border:0;background:transparent;color:#2F73F6;font-weight:900;padding:0}.member-notice-row{width:100%;display:grid;grid-template-columns:1fr auto;gap:4px;text-align:left;border:0;border-bottom:1px solid #EEF1F4;background:#fff;padding:13px 0;color:#20242A}.member-notice-row span,.member-notice-row em,.member-notice-row i{font-style:normal;color:#8B949E;font-weight:900;font-size:12px}.member-notice-row b{grid-column:1/-1;font-size:16px}.member-notice-row.unread b{color:#2F73F6}.quick-card b{font-size:18px}.member-login{min-height:100vh;min-height:100dvh;background:linear-gradient(180deg,#FFFFFF 0%,#F7F8FB 48%,#FFFFFF 100%);display:flex;padding:40px 16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative}.login-watermark{position:absolute;top:50%;left:0;right:0;transform:translateY(-50%);text-align:center;font-family:Syne,sans-serif;font-weight:800;font-size:clamp(60px,15vw,140px);line-height:1;color:rgba(32,36,42,.035);letter-spacing:.02em;white-space:nowrap;pointer-events:none;user-select:none;z-index:0}.login-wrap{width:100%;max-width:440px;margin:auto;position:relative;z-index:1}.login-phone{width:100%;border-radius:30px;background:#fff;padding:40px 32px;box-sizing:border-box;box-shadow:0 22px 50px rgba(15,23,42,.08)}.login-legal-footer{text-align:center;margin-top:18px;font-size:12px;color:#A8B0BA}.login-legal-footer button{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}.login-legal-footer button:hover,.login-legal-footer button:focus-visible{color:#2F73F6}.legal-card{position:relative;padding-top:54px;text-align:center}.legal-back{position:absolute;top:28px;left:28px;border:0;background:transparent;color:#8A94A6;font-size:13px;font-weight:700;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}.legal-back:hover{color:#2F73F6}.legal-title{text-align:center;font-size:20px;font-weight:800;color:#20242A;margin-top:16px;margin-bottom:22px}.legal-body{display:grid;gap:18px;max-height:56vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-right:2px;text-align:left}.legal-section b{display:block;font-size:14px;color:#20242A;margin-bottom:5px}.legal-section p{font-size:13px;color:#66717C;line-height:1.6}.login-brand{text-align:center;margin-bottom:26px}.login-logo{font:800 29px Syne;color:#20242A;letter-spacing:.07em}.login-tagline{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:#A8B0BA;letter-spacing:.32em;margin-top:9px;margin-left:.32em}.login-brand h1{font-size:24px;line-height:1.35;margin-top:20px;color:#20242A;font-weight:800;letter-spacing:-.3px}.login-brand p{color:#8B949E;margin-top:8px;font-size:13.5px}.login-form{display:grid;gap:14px}.login-input-group{position:relative}.login-input-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:#B0B8C1;display:flex;pointer-events:none;transition:color .15s ease}.login-input-group:focus-within .login-input-icon{color:#2F73F6}.login-form input:not([type="checkbox"]){width:100%;background:#fff;color:#20242A;border:1.5px solid #E8ECF1;border-radius:14px;height:52px;padding:0 16px 0 46px;font-size:15px;box-sizing:border-box;transition:border-color .15s ease,box-shadow .15s ease}.login-form input:not([type="checkbox"]):focus{outline:none;border-color:#2F73F6;box-shadow:0 0 0 4px rgba(47,115,246,.10)}.login-keep-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;margin:2px 0}.login-checkbox{position:relative;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#6B7280;font-weight:500;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;flex-shrink:0}.login-checkbox input[type="checkbox"]{position:absolute;left:0;top:50%;transform:translateY(-50%);width:22px;height:22px;margin:0;opacity:0;cursor:pointer}.login-checkbox-box{width:18px;height:18px;flex-shrink:0;border-radius:5px;border:1.5px solid #D8DEE6;background:#fff;display:inline-flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s}.login-checkbox-box::after{content:"";width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s}.login-checkbox input[type="checkbox"]:checked~.login-checkbox-box{background:#2F73F6;border-color:#2F73F6}.login-checkbox input[type="checkbox"]:checked~.login-checkbox-box::after{transform:rotate(45deg) scale(1)}.login-checkbox input[type="checkbox"]:focus-visible~.login-checkbox-box{outline:2px solid #2F73F6;outline-offset:2px}.login-forgot-link{border:0;background:transparent;border-radius:0;color:#9CA3AF;font-size:11.5px;font-weight:500;padding:2px 0;cursor:pointer;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent;transition:color .15s}.login-forgot-link:hover,.login-forgot-link:focus-visible{color:#2F73F6}.login-forgot-link:disabled{opacity:.6;cursor:default}.login-hint{font-size:12px;color:#A8B0BA;line-height:1.55;margin-top:-2px}.login-reset-msg{font-size:12px;color:#2F73F6;background:#EEF5FF;border-radius:10px;padding:9px 11px;line-height:1.5}.login-submit{height:56px;border:0;border-radius:17px;background:linear-gradient(135deg,#3B82F6,#2760DE);color:#fff;font-weight:800;font-size:16px;letter-spacing:-.1px;margin-top:8px;cursor:pointer;box-shadow:0 12px 28px rgba(39,96,222,.28);transition:transform .15s ease,opacity .15s ease,box-shadow .15s ease;-webkit-tap-highlight-color:transparent}.login-submit:active{transform:scale(.97)}.login-submit:disabled{opacity:.55;cursor:default;box-shadow:none}.member-error{color:#FF5A5F;text-align:center}.onerror{margin-top:18px;text-align:left}.onboard{background:#fff}.onbar{position:fixed;top:0;left:0;right:0;height:5px;background:#EEF1F4}.onbar i{display:block;height:100%;background:#20242A}.onbody{width:100%;max-width:430px;padding:90px 22px calc(110px + env(safe-area-inset-bottom,0px))}.onbody p{color:#8B949E;font-weight:800}.onbody h1{font-size:36px;line-height:1.15;margin:18px 0 34px}.choices{display:grid;gap:12px}.choices button,.choice2 button{min-height:58px;border:1px solid #E8ECF1;border-radius:18px;background:#F6F7F9;font-size:17px;font-weight:800;color:#20242A;transition:transform .15s ease,background-color .15s ease,color .15s ease;-webkit-tap-highlight-color:transparent}.choices button:active,.choice2 button:active{transform:scale(.97)}.choices .sel,.choice2 .sel{background:#2F73F6;color:#fff}.choice2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.bigselect,.bignum{height:68px;background:#F6F7F9!important;color:#20242A!important;border:1px solid #E8ECF1!important;border-radius:20px!important;text-align:center;font-size:28px!important;font-weight:900}.onnav{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(100% - 44px);max-width:386px;display:flex;gap:10px}.onnext{flex:1;min-width:0;height:56px;border:0;border-radius:16px;background:#2F73F6;color:#fff;font-size:17px;font-weight:800;touch-action:manipulation;-webkit-tap-highlight-color:transparent;box-shadow:0 6px 16px rgba(47,115,246,.25);transition:transform .15s ease,opacity .15s ease}.onnext:active{transform:scale(.97)}.onnext:disabled{opacity:.65;cursor:not-allowed;box-shadow:none}.onprev{flex:0 0 104px;height:56px;border:1px solid #E8ECF1;border-radius:16px;background:#fff;color:#20242A;font-size:15px;font-weight:700;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:transform .15s ease,opacity .15s ease}.onprev:active{transform:scale(.97)}.onprev:disabled{opacity:.65;cursor:not-allowed}.numunit{position:relative;width:100%}.numunit .bignum{width:100%;box-sizing:border-box;text-align:right;padding:0 50px 0 16px}.numunit-suffix{position:absolute;right:20px;top:0;bottom:0;display:flex;align-items:center;font-size:22px;font-weight:900;color:#8B949E;pointer-events:none}.agree-block{display:grid;gap:16px;margin-top:6px}.agree-row{position:relative;display:flex;align-items:flex-start;gap:10px;font-size:14px;color:#374151;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;text-align:left;line-height:1.5}.agree-row input[type="checkbox"]{position:absolute;left:0;top:0;width:22px;height:22px;margin:0;opacity:0;cursor:pointer}.agree-box{width:20px;height:20px;flex-shrink:0;margin-top:1px;border-radius:6px;border:1.5px solid #D8DEE6;background:#fff;display:inline-flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s}.agree-box::after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s}.agree-row input[type="checkbox"]:checked~.agree-box{background:#2F73F6;border-color:#2F73F6}.agree-row input[type="checkbox"]:checked~.agree-box::after{transform:rotate(45deg) scale(1)}.agree-link{border:0;background:transparent;color:#2F73F6;font-weight:800;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;-webkit-tap-highlight-color:transparent}.top-metrics{grid-template-columns:repeat(2,1fr)}.routine-sets{display:grid;gap:7px}.routine-sets span{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;background:#fff;border:1px solid #EEF1F4;border-radius:12px;padding:9px 10px}.routine-sets strong{font-size:13px}.routine-sets i{font-style:normal;text-align:right;color:#66717C}.choice-buttons,.vas-buttons{display:flex;gap:7px;flex-wrap:wrap}.choice-buttons button,.vas-buttons button{min-height:44px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:14px;padding:0 12px;font-weight:900;color:#20242A}.choice-buttons .active,.vas-buttons .active{background:#20242A;color:#fff}.vas-buttons button{min-width:44px}.form-line small{display:block;color:#8B949E;margin-top:2px}.health-record-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-top:1px solid #EEF1F4;padding:13px 0}.health-record-row:first-child{border-top:0}.health-record-row b,.health-record-row span{display:block}.health-record-row b{font-size:15px;margin-bottom:6px}.health-record-row span{color:#66717C;font-weight:800;margin-top:3px}.health-record-row button{border:1px solid #FFE0E0;background:#FFF5F5;color:#EF4444;border-radius:12px;padding:8px 10px;font-weight:900;flex-shrink:0}.pain-trend{border-top:1px solid #EEF1F4;padding:12px 0}.pain-trend p{font-size:22px;font-weight:900;margin:6px 0}.pain-trend em{display:block;background:#EEF5FF;color:#2F73F6;border-radius:14px;padding:10px;font-style:normal;font-weight:800}.pain-trend small{display:block;color:#66717C;margin-top:7px}.member-feedback-form{display:grid;gap:2px;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:20px;padding:12px;margin:4px 0 12px}.compact-feedback{padding:10px 12px}.feedback-summary{display:flex;align-items:center;justify-content:space-between;gap:10px}.feedback-summary b,.feedback-summary span{display:block}.feedback-summary b{line-height:1.35}.feedback-summary span{color:#66717C;font-size:12px;font-weight:800;margin-top:3px}.feedback-summary .feedback-compact-line{color:#20242A;font-size:13px}.feedback-summary .ghost{width:auto;min-width:74px;margin:0}.feedback-duo{padding:8px 12px}.feedback-duo-row{display:flex;align-items:stretch;gap:8px}.feedback-duo-col{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:6px}.feedback-duo-divider{width:1px;background:#EEF1F4;flex-shrink:0}.feedback-duo-summary{min-width:0}.feedback-duo-summary b{display:block;font-size:12px;line-height:1.3}.feedback-duo-summary span{display:block;color:#66717C;font-size:11px;font-weight:800;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.feedback-duo-btn{width:auto!important;min-width:0!important;height:30px!important;padding:0 9px!important;margin:0!important;font-size:11px!important;flex-shrink:0}.feedback-edit{border-top:1px solid #E8ECF1;margin-top:9px;padding-top:8px}.feedback-edit .form-line{margin:8px 0}.feedback-edit details{display:inline-block;margin-left:6px}.feedback-edit summary{cursor:pointer;color:#2F73F6;font-size:12px}.member-feedback-form h3{margin:0 0 4px}.part-volume-card{background:#fff;color:#20242A;border:1px solid #E8ECF1;border-radius:28px;padding:20px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.05)}.part-volume-card h2{font-size:20px;line-height:1.35;text-align:left;margin:0 0 12px}.part-volume-card p{color:#8B949E;font-weight:800;font-size:13px;margin:4px 0}.part-volume-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 6px}.part-volume-tabs button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:9px 14px;font-weight:900;font-size:13px}.part-volume-tabs button.active{background:#20242A;color:#fff;border-color:#20242A}.part-volume-tabs button:disabled{opacity:.4}.part-volume-count{color:#334155;font-weight:900;font-size:14px;margin:4px 0 14px}.part-volume-bigchart{display:flex;align-items:end;justify-content:space-between;gap:8px;height:200px;border-bottom:1px solid #D9E7FF;padding:0 2px 8px}.part-volume-bigbar-group{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:end;gap:6px;height:100%}.part-volume-bigbar-value{font-size:11px;font-weight:900;color:#2F73F6;white-space:nowrap}.part-volume-bigbar{width:100%;max-width:34px;border-radius:8px 8px 0 0;background:linear-gradient(180deg,#60A5FA,#2F73F6)}.part-volume-bigbar-label{font-size:11px;font-weight:800;color:#8B949E}.analysis-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.period-tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.period-tabs button{border:1px solid #D9E7FF;background:#fff;color:#334155;border-radius:12px;padding:9px 12px;font-weight:900}.period-tabs .active{background:#2F73F6;color:#fff}.analysis-kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:8px 0 14px}.analysis-kpi{background:#fff;border:1px solid #E8ECF1;border-radius:20px;padding:14px;min-height:128px;box-shadow:0 2px 12px rgba(15,23,42,.04)}.analysis-kpi span,.analysis-kpi small,.analysis-kpi em{display:block;font-weight:900}.analysis-kpi span{font-size:13px}.analysis-kpi b{display:block;font-size:24px;line-height:1.15;margin:12px 0 7px}.analysis-kpi small{color:#334155}.analysis-kpi em{margin-top:8px;font-style:normal}.analysis-bottom{display:grid;grid-template-columns:1fr;gap:12px}.analysis-column{display:flex;flex-direction:column;gap:12px}.analysis-column>.mcard{margin:0}.strength-list{display:grid;gap:0}.strength-row{display:grid;grid-template-columns:1fr auto;gap:5px 8px;align-items:center;padding:11px 0;border-top:1px solid #EEF1F4}.strength-row:first-child{border-top:0}.strength-row span{color:#64748B;font-weight:900;font-size:13px}.strength-row em{grid-row:1 / span 2;grid-column:2;color:#16A34A;font-style:normal;font-weight:900}.goal-forecast{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border-color:#D9E7FF}.goal-forecast b{font-size:20px;color:#2F73F6;line-height:1.15;word-break:keep-all}.goal-forecast .goal-forecast-value{font-size:18px;margin-top:2px}.goal-forecast small,.goal-forecast em{display:block;color:#66717C;font-weight:900;margin-top:6px;line-height:1.35;word-break:keep-all}.goal-forecast em{color:#16A34A;font-style:normal}.goal-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}.goal-mini span{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:14px;padding:9px;color:#66717C;font-weight:900;font-size:12px}.goal-mini b{display:block;color:#2F73F6;font-size:16px;margin-top:4px}.strategy-box{background:linear-gradient(135deg,#F0FDF4,#FFFFFF);border:1px solid #BBF7D0;border-radius:18px;padding:13px}.strategy-box b,.strategy-box span{display:block;color:#15803D;font-weight:900}.strategy-box strong{display:block;font-size:24px;margin:6px 0;color:#0F172A}.strategy-box p{color:#334155;font-weight:800;line-height:1.55}@media(min-width:700px){.analysis-bottom{grid-template-columns:1fr 1fr}.analysis-kpi-grid{grid-template-columns:repeat(4,1fr)}}@media(max-width:430px){.top-metrics{grid-template-columns:1fr}.metric{min-height:auto}.goal-metric{min-height:104px}}@media(min-width:700px){.member-page{max-width:760px}.member-nav{max-width:760px}.grid2{grid-template-columns:repeat(4,1fr)}.top-metrics{grid-template-columns:repeat(4,1fr)}}.ex-search-wrap{position:sticky;top:0;z-index:10;background:#F6F7F9;padding:8px 0 10px;margin-bottom:4px}.ex-search{width:100%;height:50px;border:1px solid #E8ECF1;border-radius:18px;background:#fff;padding:0 44px 0 16px;font-size:15px;font-weight:800;color:#20242A;box-sizing:border-box;-webkit-appearance:none}.ex-search::placeholder{color:#A8B0BA;font-weight:800}.ex-search-clear{position:absolute;right:14px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:#A8B0BA;font-size:18px;line-height:1;cursor:pointer;padding:4px}.ex-accordion-header{width:100%;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border:0;background:transparent;padding:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}.ex-accordion-header b{display:block;flex:1;word-break:break-word;font-size:15px;color:#20242A;text-align:left}.ex-accordion-chevron{flex-shrink:0;color:#A8B0BA;font-size:11px;margin-top:3px}.ex-accordion-body{margin-top:8px}.health-optional-toggle{width:100%;border:1px dashed #D9E7FF;background:#EEF5FF;border-radius:14px;height:48px;font-size:14px;font-weight:900;color:#2F73F6;margin:10px 0 4px;cursor:pointer;-webkit-tap-highlight-color:transparent}.health-optional-section{border-top:1px solid #EEF1F4;margin-top:8px;padding-top:4px}.strength-comment{background:#EEF5FF;color:#2F73F6;border-radius:12px;padding:10px 12px;font-weight:900;font-size:14px;margin:0 0 10px}.analysis-empty-state{min-height:96px;display:grid;place-items:center;text-align:center;padding:18px;border:1px dashed #D9E7FF;border-radius:18px;background:#F6F7F9;color:#8B949E;font-weight:800;margin:0}.change-feedback-item{background:#EEF5FF;color:#1E40AF;border-radius:14px;padding:11px 13px;font-weight:800;font-size:14px;line-height:1.65}.session-collapsed-card{width:100%;display:flex;align-items:center;gap:10px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:13px 16px;margin:6px 0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.05)}.session-collapsed-card:active{background:#F6F7F9}.sess-col-left{flex:1;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}.sess-col-date{font-size:14px;font-weight:900;color:#20242A;letter-spacing:0;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}.sess-col-dot{color:#C0C8D3;font-size:12px;flex-shrink:0}.sess-col-type{font-size:13px;font-weight:800;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sess-col-meta{font-size:11px;color:#8B949E;font-weight:800;flex-shrink:0;margin-left:2px}.sess-col-arrow{color:#C0C8D3;font-size:11px;flex-shrink:0}.warmup-list{display:grid;gap:8px;margin:10px 0}.warmup-item{display:flex;align-items:center;gap:12px;background:#EEF5FF;border-radius:14px;padding:12px 14px}.warmup-item span{width:24px;height:24px;border-radius:8px;background:#2F73F6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;flex-shrink:0}.warmup-item b{font-size:14px;color:#20242A;font-weight:900}.link-brand-grid{display:grid;gap:8px;margin:-4px 0}.link-brand-card{display:flex;align-items:center;gap:14px;text-decoration:none;color:#20242A;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:16px;padding:13px 14px}.link-brand-card:active{background:#eef0f3}.link-brand-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}.link-brand-info{flex:1;min-width:0}.link-brand-info b{display:block;font-size:15px;font-weight:900;color:#20242A}.link-brand-info span{display:block;font-size:12px;color:#8B949E;font-weight:800;margin-top:2px}.inbody-last-date{text-align:center;color:#A8B0BA;font-size:12px;font-weight:800;margin:-8px 0 10px}.calorie-metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.calorie-metric-block{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:14px;padding:10px 8px;text-align:center}.calorie-metric-block span{display:block;color:#8B949E;font-size:11px;font-weight:900;margin-bottom:5px}.calorie-metric-block b{display:block;font-size:15px;font-weight:900;color:#20242A;word-break:break-all}.body-age-summary{background:#F6F7F9;border-radius:18px;padding:14px;margin-top:12px}.body-age-compare{display:flex;align-items:center;justify-content:center;gap:16px}.body-age-block{text-align:center}.body-age-block span{display:block;color:#8B949E;font-size:12px;font-weight:900;margin-bottom:4px}.body-age-block b{display:block;font-size:26px;font-weight:900;color:#20242A}.body-age-block.current b{color:#22C55E}.body-age-arrow{font-size:22px;color:#A8B0BA;font-weight:900}.body-age-result{text-align:center;margin:10px 0 0;font-weight:900;font-size:15px}.body-age-result.good{color:#16A34A}.body-age-result.warn{color:#F97316}.body-age-pa{text-align:right;color:#A8B0BA;font-size:12px;font-weight:800;margin:6px 0 0}.cardio-tab-bar{display:flex;gap:6px;margin-bottom:6px}.cardio-tab-bar button{flex:1;min-width:0;height:42px;border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:14px;font-weight:800;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}.cardio-tab-bar button.active{background:#20242A;color:#fff;border-color:#20242A}.cardio-estimate{background:linear-gradient(135deg,#FFF7ED,#FFFFFF);border:1px solid #FED7AA;border-radius:16px;padding:13px 14px;margin-top:10px}.cardio-estimate b{display:block;font-size:15px;color:#20242A}.cardio-estimate span{display:block;margin-top:5px;color:#EA580C;font-weight:900;font-size:16px}.zone2-range{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border:1px solid #D9E7FF;border-radius:18px;padding:16px;text-align:center}.zone2-range b{display:block;font-size:28px;color:#2F73F6;letter-spacing:-.5px}.zone2-range span{display:block;margin-top:6px;color:#66717C;font-weight:800;font-size:12.5px}.cardio-guide-row{border-top:1px solid #EEF1F4;padding:11px 0}.cardio-guide-row:first-child{border-top:0}.cardio-guide-row b{display:block;font-size:14px;color:#20242A}.cardio-guide-row span{display:block;margin-top:3px;color:#66717C;font-weight:800;font-size:12.5px}.attendance-check-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex-shrink:0;white-space:nowrap;height:46px;padding:0 20px;border-radius:999px;border:1.5px solid rgba(47,115,246,.28);background:#fff;color:#2F73F6;font-family:inherit;font-size:14px;font-weight:800;box-shadow:0 2px 10px rgba(47,115,246,.10);transition:transform .22s cubic-bezier(.34,1.56,.64,1),background-color .22s ease,box-shadow .22s ease,opacity .22s ease;-webkit-tap-highlight-color:transparent;cursor:pointer}.attendance-check-btn:active{transform:scale(.95);background:rgba(47,115,246,.06);box-shadow:0 1px 4px rgba(47,115,246,.08)}.attendance-check-btn:disabled{opacity:.6;cursor:not-allowed}.attendance-check-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;border-radius:50%;background:#2F73F6;color:#fff;font-size:11px;font-weight:900;line-height:1}
+body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A;overflow-y:auto!important;overscroll-behavior:auto!important;height:auto!important}html:has(.member-shell),html:has(.member-login){height:auto!important;overflow-y:auto!important}@keyframes memberFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}@keyframes memberCardIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}.member-shell{min-height:100vh;min-height:100dvh;height:auto;background:#F6F7F9;color:#20242A;display:grid;place-items:start center}.member-page{width:100%;max-width:430px;padding:28px 18px calc(128px + env(safe-area-inset-bottom,0px));animation:memberFadeIn .22s ease}.member-page h1{font-size:32px;letter-spacing:-1px;margin:8px 0}.sub{color:#8B949E;margin-bottom:18px}.mcard,.metric,.hero-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:22px;margin:16px 0;box-shadow:0 2px 14px rgba(15,23,42,.05);transition:transform .18s ease,box-shadow .18s ease;animation:memberCardIn .22s ease}.mcard h2{font-size:20px;margin-bottom:12px}.hero-card{background:linear-gradient(135deg,#20242A,#3B4654);color:#fff}.hero-card b{display:block;font-size:22px}.hero-card strong{display:block;font-size:42px;margin-top:8px}.hero-card span{color:#DDE3EA}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.metric{margin:0;min-height:116px;display:flex;flex-direction:column}.metric span{display:block;color:#8B949E;font-size:13px}.metric b{display:block;font-size:23px;margin-top:10px;line-height:1.18}.change-report{background:linear-gradient(135deg,#fff,#EEF5FF);border-color:#D9E7FF}.change-report b{font-size:clamp(24px,6.2vw,27px);color:#2F73F6;white-space:nowrap;letter-spacing:-.8px}.change-report b .change-unit{font-size:.86em;margin-left:3px;white-space:nowrap}.change-report small,.next-workout-metric small{display:block;color:#66717C;font-weight:900;margin-top:7px}.goal-metric{display:flex;flex-direction:column;justify-content:flex-start;text-align:left}.goal-metric span{align-self:stretch;margin-bottom:6px}.goal-metric b{align-self:stretch;text-align:left;font-size:clamp(18px,5vw,24px);word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;margin-top:12px}.next-workout-metric b{font-size:25px}.recommended-calorie{background:linear-gradient(135deg,#F0FDF4,#FFFFFF);border-color:#BBF7D0}.recommended-calorie b{color:#16A34A}.recommended-calorie small{display:block;color:#66717C;font-weight:900;margin-top:7px}.next-workout-metric em{display:inline-block;margin-top:8px;padding:4px 9px;border-radius:999px;background:#20242A;color:#fff;font-style:normal;font-weight:900}.workout-guide{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:14px;margin-bottom:12px}.workout-guide p{margin:5px 0;color:#66717C;font-weight:800}.workout-guide b{color:#20242A}.coach-routine-card,.conditioning-card{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border:1px solid #D9E7FF;border-radius:20px;padding:16px;margin:14px 0}.coach-routine-card h3{margin:0 0 6px;color:#2F73F6}.coach-routine-card p,.conditioning-card p{color:#475569;font-weight:800}.routine-row.coach{background:#fff;border:1px solid #E8ECF1;border-radius:16px;padding:12px;margin-top:10px}.coach-comment{background:#fff;border-radius:14px;padding:12px}.conditioning-card b{font-size:18px}.conditioning-card em{display:block;color:#66717C;font-style:normal;font-weight:800}.part-pills .recommended{border-color:#2F73F6;color:#2F73F6;background:#EEF5FF}.routine-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F6F7F9;border:1px solid #EEF1F4;border-radius:18px;padding:14px;margin-top:14px}.routine-summary h3{margin:0 0 5px;font-size:18px}.routine-summary p{margin:0;color:#66717C;font-weight:900}.routine-summary .ghost{width:auto;min-width:92px;height:42px;margin:0;border-radius:999px;padding:0 14px}.rec-group.compact{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:16px;padding:12px;margin-top:12px}.rec-group.compact b{display:block;margin-bottom:6px}.rec-group.compact p{margin:3px 0;color:#66717C;font-weight:800}.home-health-status{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #E8ECF1;border-radius:22px;padding:16px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.05)}.home-health-status.done{border-color:#BBF7D0;background:linear-gradient(135deg,#F0FDF4,#fff)}.home-health-status span{display:block;color:#8B949E;font-size:13px;font-weight:900}.home-health-status b{display:block;margin-top:5px;font-size:17px}.home-health-status button{border:0;border-radius:999px;background:#20242A;color:#fff;font-weight:900;padding:10px 14px;white-space:nowrap}.primary,.ghost{width:100%;height:56px;border-radius:16px;border:0;background:#2F73F6;color:#fff;font-weight:800;font-size:16px;margin-top:10px;box-shadow:0 6px 16px rgba(47,115,246,.22);transition:transform .15s ease,opacity .15s ease,box-shadow .15s ease;-webkit-tap-highlight-color:transparent}.primary:active,.ghost:active{transform:scale(.97);opacity:.9}.ghost{background:#fff;color:#20242A;border:1px solid #E8ECF1;box-shadow:none}.member-nav{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom,0px));left:14px;right:14px;background:rgba(255,255,255,.92);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border:1px solid rgba(15,23,42,.04);border-radius:26px;box-shadow:0 10px 30px rgba(15,23,42,.10);display:flex;align-items:stretch;gap:2px;max-width:430px;margin:0 auto;padding:7px 8px;transition:transform .2s ease;z-index:50}.member-nav.nav-hidden{transform:translateY(calc(100% + 14px + env(safe-area-inset-bottom,0px)))}.member-nav button{flex:1 1 0;min-width:0;max-width:20%;border:0;background:transparent;color:#AAB2BD;font-weight:700;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:54px;padding:7px 2px;border-radius:18px;transition:background-color .2s ease,color .2s ease,box-shadow .2s ease,transform .15s ease;-webkit-tap-highlight-color:transparent}.member-nav button:active{transform:scale(.94)}.member-nav-icon{display:block;font-size:22px;line-height:1;transition:transform .2s ease}.member-nav-label{display:block;width:100%;white-space:nowrap;word-break:keep-all;overflow-wrap:normal;font-size:11px;line-height:1;letter-spacing:-.03em;text-align:center;overflow:hidden;text-overflow:ellipsis}.member-nav .active{background:rgba(57,199,184,.15);color:#0F9488;box-shadow:none}.member-nav .active .member-nav-icon{transform:scale(1.05)}.member-tab-fade{animation:memberFadeIn .2s ease}.nav-badge{position:absolute;top:-2px;right:-7px;background:#EF4444;color:#fff;border-radius:999px;font-size:9px;font-weight:900;padding:0 3px;min-width:14px;height:14px;line-height:14px;text-align:center;font-style:normal;pointer-events:none}.exercise-report-section{padding:14px 0;border-top:1px solid #EEF1F4}.exercise-report-section h3{font-size:15px;margin:0 0 10px;color:#334155}.exercise-report-section.assist{background:#FBFCFE;border:1px solid #EEF1F4;border-radius:18px;padding:13px;margin:10px 0}.exercise-report-section.assist h3{color:#2F73F6}.exercise-report-section.weight h3{color:#F59E0B}.assist-exercise-report{padding:9px 0;border-top:1px solid #EEF1F4}.assist-exercise-report:first-of-type{border-top:0}.assist-exercise-report p{margin:6px 0 0;color:#66717C;font-weight:900}.exercise-report-section.weight .exercise-report{padding:12px 0;border-top:1px solid #EEF1F4}.exercise-report-section.weight .exercise-report:first-of-type{border-top:0}.session-mini>div{padding:14px 0;border-top:1px solid #EEF1F4}.session-mini b,.session-mini em{display:block}.session-mini em,.trainer-comment{background:#EEF5FF;color:#2F73F6;border-radius:14px;padding:10px;font-style:normal;margin-top:10px;font-weight:800}.set-table{display:grid;gap:6px;margin-top:10px}.set-table span{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;background:#F6F7F9;border-radius:12px;padding:9px 10px;color:#20242A}.set-table strong{font-size:13px}.set-table i{font-style:normal;text-align:right;color:#66717C}.soreness-summary{background:#FFF7ED;color:#f97316;border-radius:14px;padding:10px;font-weight:800}.soreness-form{display:grid;gap:8px;background:#F6F7F9;border-radius:18px;padding:12px;margin-top:12px}.soreness-form input,.soreness-form select,.soreness-form textarea{border:1px solid #E8ECF1;border-radius:12px;padding:11px;background:#fff;color:#20242A}.compact{height:44px;font-size:14px}.volume-card{display:grid;gap:4px;padding:12px 0;border-bottom:1px solid #EEF1F4}.volume-card span{color:#66717C}.secondary-metrics{opacity:.82}.notice{background:#EEF5FF;color:#2F73F6;border-radius:16px;padding:12px;font-weight:800}.danger{color:#FF5A5F;font-weight:800;margin-top:12px}.routine-list{display:grid;gap:10px}.routine-row{display:grid;gap:12px;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:15px}.routine-row b{font-size:17px}.routine-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.routine-meta span{background:#fff;border:1px solid #EEF1F4;border-radius:12px;padding:9px 6px;text-align:center;color:#20242A;font-weight:900}.routine-safe{color:#8B949E;font-size:12px;font-weight:800;margin:12px 2px 0}.pt-progress em{display:block;margin-top:8px;color:#8B949E;font-style:normal;font-size:13px}.pt-progress i{display:block;height:7px;border-radius:999px;background:#EEF1F4;margin-top:12px;overflow:hidden}.pt-progress small{display:block;height:100%;background:#2F73F6}.part-pills{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.part-pills button{border:1px solid #E8ECF1;background:#F6F7F9;color:#20242A;border-radius:999px;padding:9px 13px;font-weight:900}.part-pills .active{background:#20242A;color:white}.next-part{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:20px;padding:14px;margin-bottom:12px}.next-part span,.next-part em{display:block;color:#66717C;font-style:normal}.next-part b{display:block;font-size:30px;margin:4px 0}.form-line{display:grid;gap:6px;margin:12px 0}.form-line label{font-weight:900;color:#66717C}.form-line input,.form-line select,.form-line textarea{min-height:52px;border:1px solid #E8ECF1;border-radius:14px;background:#F6F7F9;color:#20242A;padding:12px;font-weight:800;transition:border-color .15s ease,background-color .15s ease}.form-line input:focus,.form-line select:focus,.form-line textarea:focus{outline:none;border-color:#2F73F6;background:#fff}.form-line textarea{resize:vertical;line-height:1.5}.part-trend{border-top:1px solid #EEF1F4;padding-top:12px;margin-top:12px}.part-trend>b{display:block;margin-bottom:6px}.part-pills .active{background:#20242A;color:white}.linkbtn{border:0;background:transparent;color:#2F73F6;font-weight:900;margin:2px 0 12px}.notice.soft{background:#F6F7F9;color:#66717C}.rec-group{border-top:1px solid #EEF1F4;padding-top:10px}.rec-group p{display:grid;gap:3px}.rec-group span{color:#66717C;font-size:13px}.profile-head{display:flex;align-items:center;gap:16px;margin:20px 0}.profile-weight-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 4px}.profile-weight-block{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:13px}.profile-weight-block span{display:block;color:#8B949E;font-size:12px;font-weight:900}.profile-weight-block b{display:block;color:#20242A;font-size:24px;line-height:1.1;margin-top:7px}.profile-weight-block small{display:block;color:#8B949E;font-size:11px;font-weight:800;margin-top:6px}.profile-head{display:flex;align-items:center;gap:16px;margin:20px 0}.avatar{width:76px;height:76px;border-radius:26px;background:linear-gradient(135deg,#2F73F6,#8B5CF6);color:#fff;display:grid;place-items:center;font-size:34px;font-weight:900}.info{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid #EEF1F4}.info span{color:#8B949E}.info b{text-align:right;overflow-wrap:anywhere}.editable-info{display:grid;grid-template-columns:92px 1fr;align-items:center}.editable-info .form-line{margin:0}.editable-info .form-line label{display:none}.editable-info .form-line input,.editable-info .form-line select{min-height:44px}.profile-actions{display:flex;gap:8px;margin-top:12px}.profile-actions .primary,.profile-actions .ghost{margin-top:0}.quick-card{display:grid;gap:4px;text-decoration:none;color:#20242A;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:18px;padding:15px;margin:10px 0;transition:transform .15s ease;-webkit-tap-highlight-color:transparent}.quick-card:active{transform:scale(.98)}.quick-card span{color:#66717C;font-weight:800}.quick-card b{font-size:18px}.notice-card{display:grid;gap:8px;background:linear-gradient(135deg,#FFF7ED,#FFFFFF);border:1px solid #FED7AA;border-radius:22px;padding:16px;margin:14px 0;box-shadow:0 2px 12px rgba(15,23,42,.04)}.notice-card.important{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border-color:#BFDBFE}.notice-card span{color:#2F73F6;font-weight:900}.notice-card b{font-size:18px;color:#20242A}.notice-card button{justify-self:start;border:0;background:transparent;color:#2F73F6;font-weight:900;padding:0}.member-notice-row{width:100%;display:grid;grid-template-columns:1fr auto;gap:4px;text-align:left;border:0;border-bottom:1px solid #EEF1F4;background:#fff;padding:13px 0;color:#20242A}.member-notice-row span,.member-notice-row em,.member-notice-row i{font-style:normal;color:#8B949E;font-weight:900;font-size:12px}.member-notice-row b{grid-column:1/-1;font-size:16px}.member-notice-row.unread b{color:#2F73F6}.quick-card b{font-size:18px}.member-login{min-height:100vh;min-height:100dvh;background:linear-gradient(180deg,#FFFFFF 0%,#F7F8FB 48%,#FFFFFF 100%);display:flex;padding:40px 16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative}.login-watermark{position:absolute;top:50%;left:0;right:0;transform:translateY(-50%);text-align:center;font-family:Syne,sans-serif;font-weight:800;font-size:clamp(60px,15vw,140px);line-height:1;color:rgba(32,36,42,.035);letter-spacing:.02em;white-space:nowrap;pointer-events:none;user-select:none;z-index:0}.login-wrap{width:100%;max-width:440px;margin:auto;position:relative;z-index:1}.login-phone{width:100%;border-radius:30px;background:#fff;padding:40px 32px;box-sizing:border-box;box-shadow:0 22px 50px rgba(15,23,42,.08)}.login-legal-footer{text-align:center;margin-top:18px;font-size:12px;color:#A8B0BA}.login-legal-footer button{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}.login-legal-footer button:hover,.login-legal-footer button:focus-visible{color:#2F73F6}.legal-card{position:relative;padding-top:54px;text-align:center}.legal-back{position:absolute;top:28px;left:28px;border:0;background:transparent;color:#8A94A6;font-size:13px;font-weight:700;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}.legal-back:hover{color:#2F73F6}.legal-title{text-align:center;font-size:20px;font-weight:800;color:#20242A;margin-top:16px;margin-bottom:22px}.legal-body{display:grid;gap:18px;max-height:56vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-right:2px;text-align:left}.legal-section b{display:block;font-size:14px;color:#20242A;margin-bottom:5px}.legal-section p{font-size:13px;color:#66717C;line-height:1.6}.login-brand{text-align:center;margin-bottom:26px}.login-logo{font:800 29px Syne;color:#20242A;letter-spacing:.07em}.login-tagline{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:#A8B0BA;letter-spacing:.32em;margin-top:9px;margin-left:.32em}.login-brand h1{font-size:24px;line-height:1.35;margin-top:20px;color:#20242A;font-weight:800;letter-spacing:-.3px}.login-brand p{color:#8B949E;margin-top:8px;font-size:13.5px}.login-form{display:grid;gap:14px}.login-input-group{position:relative}.login-input-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:#B0B8C1;display:flex;pointer-events:none;transition:color .15s ease}.login-input-group:focus-within .login-input-icon{color:#2F73F6}.login-form input:not([type="checkbox"]){width:100%;background:#fff;color:#20242A;border:1.5px solid #E8ECF1;border-radius:14px;height:52px;padding:0 16px 0 46px;font-size:15px;box-sizing:border-box;transition:border-color .15s ease,box-shadow .15s ease}.login-form input:not([type="checkbox"]):focus{outline:none;border-color:#2F73F6;box-shadow:0 0 0 4px rgba(47,115,246,.10)}.login-keep-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;margin:2px 0}.login-checkbox{position:relative;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#6B7280;font-weight:500;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;flex-shrink:0}.login-checkbox input[type="checkbox"]{position:absolute;left:0;top:50%;transform:translateY(-50%);width:22px;height:22px;margin:0;opacity:0;cursor:pointer}.login-checkbox-box{width:18px;height:18px;flex-shrink:0;border-radius:5px;border:1.5px solid #D8DEE6;background:#fff;display:inline-flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s}.login-checkbox-box::after{content:"";width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s}.login-checkbox input[type="checkbox"]:checked~.login-checkbox-box{background:#2F73F6;border-color:#2F73F6}.login-checkbox input[type="checkbox"]:checked~.login-checkbox-box::after{transform:rotate(45deg) scale(1)}.login-checkbox input[type="checkbox"]:focus-visible~.login-checkbox-box{outline:2px solid #2F73F6;outline-offset:2px}.login-forgot-link{border:0;background:transparent;border-radius:0;color:#9CA3AF;font-size:11.5px;font-weight:500;padding:2px 0;cursor:pointer;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent;transition:color .15s}.login-forgot-link:hover,.login-forgot-link:focus-visible{color:#2F73F6}.login-forgot-link:disabled{opacity:.6;cursor:default}.login-hint{font-size:12px;color:#A8B0BA;line-height:1.55;margin-top:-2px}.login-reset-msg{font-size:12px;color:#2F73F6;background:#EEF5FF;border-radius:10px;padding:9px 11px;line-height:1.5}.login-submit{height:56px;border:0;border-radius:17px;background:linear-gradient(135deg,#3B82F6,#2760DE);color:#fff;font-weight:800;font-size:16px;letter-spacing:-.1px;margin-top:8px;cursor:pointer;box-shadow:0 12px 28px rgba(39,96,222,.28);transition:transform .15s ease,opacity .15s ease,box-shadow .15s ease;-webkit-tap-highlight-color:transparent}.login-submit:active{transform:scale(.97)}.login-submit:disabled{opacity:.55;cursor:default;box-shadow:none}.member-error{color:#FF5A5F;text-align:center}.onerror{margin-top:18px;text-align:left}.onboard{background:#fff}.onbar{position:fixed;top:0;left:0;right:0;height:5px;background:#EEF1F4}.onbar i{display:block;height:100%;background:#20242A}.onbody{width:100%;max-width:430px;padding:90px 22px calc(110px + env(safe-area-inset-bottom,0px))}.onbody p{color:#8B949E;font-weight:800}.onbody h1{font-size:36px;line-height:1.15;margin:18px 0 34px}.choices{display:grid;gap:12px}.choices button,.choice2 button{min-height:58px;border:1px solid #E8ECF1;border-radius:18px;background:#F6F7F9;font-size:17px;font-weight:800;color:#20242A;transition:transform .15s ease,background-color .15s ease,color .15s ease;-webkit-tap-highlight-color:transparent}.choices button:active,.choice2 button:active{transform:scale(.97)}.choices .sel,.choice2 .sel{background:#2F73F6;color:#fff}.choice2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.bigselect,.bignum{height:68px;background:#F6F7F9!important;color:#20242A!important;border:1px solid #E8ECF1!important;border-radius:20px!important;text-align:center;font-size:28px!important;font-weight:900}.onnav{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(100% - 44px);max-width:386px;display:flex;gap:10px}.onnext{flex:1;min-width:0;height:56px;border:0;border-radius:16px;background:#2F73F6;color:#fff;font-size:17px;font-weight:800;touch-action:manipulation;-webkit-tap-highlight-color:transparent;box-shadow:0 6px 16px rgba(47,115,246,.25);transition:transform .15s ease,opacity .15s ease}.onnext:active{transform:scale(.97)}.onnext:disabled{opacity:.65;cursor:not-allowed;box-shadow:none}.onprev{flex:0 0 104px;height:56px;border:1px solid #E8ECF1;border-radius:16px;background:#fff;color:#20242A;font-size:15px;font-weight:700;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:transform .15s ease,opacity .15s ease}.onprev:active{transform:scale(.97)}.onprev:disabled{opacity:.65;cursor:not-allowed}.numunit{position:relative;width:100%}.numunit .bignum{width:100%;box-sizing:border-box;text-align:right;padding:0 50px 0 16px}.numunit-suffix{position:absolute;right:20px;top:0;bottom:0;display:flex;align-items:center;font-size:22px;font-weight:900;color:#8B949E;pointer-events:none}.agree-block{display:grid;gap:16px;margin-top:6px}.agree-row{position:relative;display:flex;align-items:flex-start;gap:10px;font-size:14px;color:#374151;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;text-align:left;line-height:1.5}.agree-row input[type="checkbox"]{position:absolute;left:0;top:0;width:22px;height:22px;margin:0;opacity:0;cursor:pointer}.agree-box{width:20px;height:20px;flex-shrink:0;margin-top:1px;border-radius:6px;border:1.5px solid #D8DEE6;background:#fff;display:inline-flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s}.agree-box::after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s}.agree-row input[type="checkbox"]:checked~.agree-box{background:#2F73F6;border-color:#2F73F6}.agree-row input[type="checkbox"]:checked~.agree-box::after{transform:rotate(45deg) scale(1)}.agree-link{border:0;background:transparent;color:#2F73F6;font-weight:800;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;-webkit-tap-highlight-color:transparent}.top-metrics{grid-template-columns:repeat(2,1fr)}.routine-sets{display:grid;gap:7px}.routine-sets span{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;background:#fff;border:1px solid #EEF1F4;border-radius:12px;padding:9px 10px}.routine-sets strong{font-size:13px}.routine-sets i{font-style:normal;text-align:right;color:#66717C}.choice-buttons,.vas-buttons{display:flex;gap:7px;flex-wrap:wrap}.choice-buttons button,.vas-buttons button{min-height:44px;border:1px solid #E8ECF1;background:#F6F7F9;border-radius:14px;padding:0 12px;font-weight:900;color:#20242A}.choice-buttons .active,.vas-buttons .active{background:#20242A;color:#fff}.vas-buttons button{min-width:44px}.form-line small{display:block;color:#8B949E;margin-top:2px}.health-record-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-top:1px solid #EEF1F4;padding:13px 0}.health-record-row:first-child{border-top:0}.health-record-row b,.health-record-row span{display:block}.health-record-row b{font-size:15px;margin-bottom:6px}.health-record-row span{color:#66717C;font-weight:800;margin-top:3px}.health-record-row button{border:1px solid #FFE0E0;background:#FFF5F5;color:#EF4444;border-radius:12px;padding:8px 10px;font-weight:900;flex-shrink:0}.pain-trend{border-top:1px solid #EEF1F4;padding:12px 0}.pain-trend p{font-size:22px;font-weight:900;margin:6px 0}.pain-trend em{display:block;background:#EEF5FF;color:#2F73F6;border-radius:14px;padding:10px;font-style:normal;font-weight:800}.pain-trend small{display:block;color:#66717C;margin-top:7px}.member-feedback-form{display:grid;gap:2px;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:20px;padding:12px;margin:4px 0 12px}.compact-feedback{padding:10px 12px}.feedback-summary{display:flex;align-items:center;justify-content:space-between;gap:10px}.feedback-summary b,.feedback-summary span{display:block}.feedback-summary b{line-height:1.35}.feedback-summary span{color:#66717C;font-size:12px;font-weight:800;margin-top:3px}.feedback-summary .feedback-compact-line{color:#20242A;font-size:13px}.feedback-summary .ghost{width:auto;min-width:74px;margin:0}.feedback-duo{padding:8px 12px}.feedback-duo-row{display:flex;align-items:stretch;gap:8px}.feedback-duo-col{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:6px}.feedback-duo-divider{width:1px;background:#EEF1F4;flex-shrink:0}.feedback-duo-summary{min-width:0}.feedback-duo-summary b{display:block;font-size:12px;line-height:1.3}.feedback-duo-summary span{display:block;color:#66717C;font-size:11px;font-weight:800;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.feedback-duo-btn{width:auto!important;min-width:0!important;height:30px!important;padding:0 9px!important;margin:0!important;font-size:11px!important;flex-shrink:0}.feedback-edit{border-top:1px solid #E8ECF1;margin-top:9px;padding-top:8px}.feedback-edit .form-line{margin:8px 0}.feedback-edit details{display:inline-block;margin-left:6px}.feedback-edit summary{cursor:pointer;color:#2F73F6;font-size:12px}.member-feedback-form h3{margin:0 0 4px}.part-volume-card{background:#fff;color:#20242A;border:1px solid #E8ECF1;border-radius:28px;padding:20px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.05)}.part-volume-card h2{font-size:20px;line-height:1.35;text-align:left;margin:0 0 12px}.part-volume-card p{color:#8B949E;font-weight:800;font-size:13px;margin:4px 0}.part-volume-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 6px}.part-volume-tabs button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:9px 14px;font-weight:900;font-size:13px}.part-volume-tabs button.active{background:#20242A;color:#fff;border-color:#20242A}.part-volume-tabs button:disabled{opacity:.4}.part-volume-count{color:#334155;font-weight:900;font-size:14px;margin:4px 0 14px}.part-volume-bigchart{display:flex;align-items:end;justify-content:space-between;gap:8px;height:200px;border-bottom:1px solid #D9E7FF;padding:0 2px 8px}.part-volume-bigbar-group{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:end;gap:6px;height:100%}.part-volume-bigbar-value{font-size:11px;font-weight:900;color:#2F73F6;white-space:nowrap}.part-volume-bigbar{width:100%;max-width:34px;border-radius:8px 8px 0 0;background:linear-gradient(180deg,#60A5FA,#2F73F6)}.part-volume-bigbar-label{font-size:11px;font-weight:800;color:#8B949E}.analysis-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.period-tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.period-tabs button{border:1px solid #DCF1EC;background:#fff;color:#66717C;border-radius:12px;padding:9px 12px;font-weight:900}.period-tabs .active{background:#0F9488;color:#fff;border-color:#0F9488}.analysis-kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:8px 0 14px}.analysis-kpi{background:#fff;border:1px solid #E8ECF1;border-radius:20px;padding:14px;min-height:128px;box-shadow:0 2px 12px rgba(15,23,42,.04)}.analysis-kpi span,.analysis-kpi small,.analysis-kpi em{display:block;font-weight:900}.analysis-kpi span{font-size:13px}.analysis-kpi b{display:block;font-size:24px;line-height:1.15;margin:12px 0 7px}.analysis-kpi small{color:#334155}.analysis-kpi em{margin-top:8px;font-style:normal}.analysis-bottom{display:grid;grid-template-columns:1fr;gap:12px}.analysis-column{display:flex;flex-direction:column;gap:12px}.analysis-column>.mcard{margin:0}.strength-list{display:grid;gap:0}.strength-row{display:grid;grid-template-columns:1fr auto;gap:5px 8px;align-items:center;padding:11px 0;border-top:1px solid #EEF1F4}.strength-row:first-child{border-top:0}.strength-row span{color:#64748B;font-weight:900;font-size:13px}.strength-row em{grid-row:1 / span 2;grid-column:2;color:#16A34A;font-style:normal;font-weight:900}.goal-forecast{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border-color:#D9E7FF}.goal-forecast b{font-size:20px;color:#2F73F6;line-height:1.15;word-break:keep-all}.goal-forecast .goal-forecast-value{font-size:18px;margin-top:2px}.goal-forecast small,.goal-forecast em{display:block;color:#66717C;font-weight:900;margin-top:6px;line-height:1.35;word-break:keep-all}.goal-forecast em{color:#16A34A;font-style:normal}.goal-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}.goal-mini span{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:14px;padding:9px;color:#66717C;font-weight:900;font-size:12px}.goal-mini b{display:block;color:#2F73F6;font-size:16px;margin-top:4px}.strategy-box{background:linear-gradient(135deg,#F0FDF4,#FFFFFF);border:1px solid #BBF7D0;border-radius:18px;padding:13px}.strategy-box b,.strategy-box span{display:block;color:#15803D;font-weight:900}.strategy-box strong{display:block;font-size:24px;margin:6px 0;color:#0F172A}.strategy-box p{color:#334155;font-weight:800;line-height:1.55}@media(min-width:700px){.analysis-bottom{grid-template-columns:1fr 1fr}.analysis-kpi-grid{grid-template-columns:repeat(4,1fr)}}@media(max-width:430px){.top-metrics{grid-template-columns:1fr}.metric{min-height:auto}.goal-metric{min-height:104px}}@media(min-width:700px){.member-page{max-width:760px}.member-nav{max-width:760px}.grid2{grid-template-columns:repeat(4,1fr)}.top-metrics{grid-template-columns:repeat(4,1fr)}}.ex-search-wrap{position:sticky;top:0;z-index:10;background:#F6F7F9;padding:8px 0 10px;margin-bottom:4px}.ex-search{width:100%;height:50px;border:1px solid #E8ECF1;border-radius:18px;background:#fff;padding:0 44px 0 16px;font-size:15px;font-weight:800;color:#20242A;box-sizing:border-box;-webkit-appearance:none}.ex-search::placeholder{color:#A8B0BA;font-weight:800}.ex-search-clear{position:absolute;right:14px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:#A8B0BA;font-size:18px;line-height:1;cursor:pointer;padding:4px}.ex-accordion-header{width:100%;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border:0;background:transparent;padding:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}.ex-accordion-header b{display:block;flex:1;word-break:break-word;font-size:15px;color:#20242A;text-align:left}.ex-accordion-chevron{flex-shrink:0;color:#A8B0BA;font-size:11px;margin-top:3px}.ex-accordion-body{margin-top:8px}.health-optional-toggle{width:100%;border:1px dashed #D9E7FF;background:#EEF5FF;border-radius:14px;height:48px;font-size:14px;font-weight:900;color:#2F73F6;margin:10px 0 4px;cursor:pointer;-webkit-tap-highlight-color:transparent}.health-optional-section{border-top:1px solid #EEF1F4;margin-top:8px;padding-top:4px}.strength-comment{background:#EEF5FF;color:#2F73F6;border-radius:12px;padding:10px 12px;font-weight:900;font-size:14px;margin:0 0 10px}.analysis-empty-state{min-height:96px;display:grid;place-items:center;text-align:center;padding:18px;border:1px dashed #D9E7FF;border-radius:18px;background:#F6F7F9;color:#8B949E;font-weight:800;margin:0}.change-feedback-item{background:#EEF5FF;color:#1E40AF;border-radius:14px;padding:11px 13px;font-weight:800;font-size:14px;line-height:1.65}.session-collapsed-card{width:100%;display:flex;align-items:center;gap:10px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:13px 16px;margin:6px 0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.05)}.session-collapsed-card:active{background:#F6F7F9}.sess-col-left{flex:1;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}.sess-col-date{font-size:14px;font-weight:900;color:#20242A;letter-spacing:0;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}.sess-col-dot{color:#C0C8D3;font-size:12px;flex-shrink:0}.sess-col-type{font-size:13px;font-weight:800;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sess-col-meta{font-size:11px;color:#8B949E;font-weight:800;flex-shrink:0;margin-left:2px}.sess-col-arrow{color:#C0C8D3;font-size:11px;flex-shrink:0}.warmup-list{display:grid;gap:8px;margin:10px 0}.warmup-item{display:flex;align-items:center;gap:12px;background:#EEF5FF;border-radius:14px;padding:12px 14px}.warmup-item span{width:24px;height:24px;border-radius:8px;background:#2F73F6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;flex-shrink:0}.warmup-item b{font-size:14px;color:#20242A;font-weight:900}.link-brand-grid{display:grid;gap:8px;margin:-4px 0}.link-brand-card{display:flex;align-items:center;gap:14px;text-decoration:none;color:#20242A;background:#F6F7F9;border:1px solid #E8ECF1;border-radius:16px;padding:13px 14px}.link-brand-card:active{background:#eef0f3}.link-brand-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}.link-brand-info{flex:1;min-width:0}.link-brand-info b{display:block;font-size:15px;font-weight:900;color:#20242A}.link-brand-info span{display:block;font-size:12px;color:#8B949E;font-weight:800;margin-top:2px}.inbody-last-date{text-align:center;color:#A8B0BA;font-size:12px;font-weight:800;margin:-8px 0 10px}.calorie-metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.calorie-metric-block{background:#F6F7F9;border:1px solid #E8ECF1;border-radius:14px;padding:10px 8px;text-align:center}.calorie-metric-block span{display:block;color:#8B949E;font-size:11px;font-weight:900;margin-bottom:5px}.calorie-metric-block b{display:block;font-size:15px;font-weight:900;color:#20242A;word-break:break-all}.body-age-summary{background:#F6F7F9;border-radius:18px;padding:14px;margin-top:12px}.body-age-compare{display:flex;align-items:center;justify-content:center;gap:16px}.body-age-block{text-align:center}.body-age-block span{display:block;color:#8B949E;font-size:12px;font-weight:900;margin-bottom:4px}.body-age-block b{display:block;font-size:26px;font-weight:900;color:#20242A}.body-age-block.current b{color:#22C55E}.body-age-arrow{font-size:22px;color:#A8B0BA;font-weight:900}.body-age-result{text-align:center;margin:10px 0 0;font-weight:900;font-size:15px}.body-age-result.good{color:#16A34A}.body-age-result.warn{color:#F97316}.body-age-pa{text-align:right;color:#A8B0BA;font-size:12px;font-weight:800;margin:6px 0 0}.cardio-tab-bar{display:flex;gap:6px;margin-bottom:6px}.cardio-tab-bar button{flex:1;min-width:0;height:42px;border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:14px;font-weight:800;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}.cardio-tab-bar button.active{background:#20242A;color:#fff;border-color:#20242A}.cardio-estimate{background:linear-gradient(135deg,#FFF7ED,#FFFFFF);border:1px solid #FED7AA;border-radius:16px;padding:13px 14px;margin-top:10px}.cardio-estimate b{display:block;font-size:15px;color:#20242A}.cardio-estimate span{display:block;margin-top:5px;color:#EA580C;font-weight:900;font-size:16px}.zone2-range{background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border:1px solid #D9E7FF;border-radius:18px;padding:16px;text-align:center}.zone2-range b{display:block;font-size:28px;color:#2F73F6;letter-spacing:-.5px}.zone2-range span{display:block;margin-top:6px;color:#66717C;font-weight:800;font-size:12.5px}.cardio-guide-row{border-top:1px solid #EEF1F4;padding:11px 0}.cardio-guide-row:first-child{border-top:0}.cardio-guide-row b{display:block;font-size:14px;color:#20242A}.cardio-guide-row span{display:block;margin-top:3px;color:#66717C;font-weight:800;font-size:12.5px}.attendance-check-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex-shrink:0;white-space:nowrap;height:46px;padding:0 20px;border-radius:999px;border:1.5px solid rgba(47,115,246,.28);background:#fff;color:#2F73F6;font-family:inherit;font-size:14px;font-weight:800;box-shadow:0 2px 10px rgba(47,115,246,.10);transition:transform .22s cubic-bezier(.34,1.56,.64,1),background-color .22s ease,box-shadow .22s ease,opacity .22s ease;-webkit-tap-highlight-color:transparent;cursor:pointer}.attendance-check-btn:active{transform:scale(.95);background:rgba(47,115,246,.06);box-shadow:0 1px 4px rgba(47,115,246,.08)}.attendance-check-btn:disabled{opacity:.6;cursor:not-allowed}.attendance-check-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex-shrink:0;border-radius:50%;background:#2F73F6;color:#fff;font-size:11px;font-weight:900;line-height:1}
 @keyframes healthFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .health-summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:18px 0}
 .health-summary-tile{background:#fff;border:1px solid #EEF1F4;border-radius:20px;padding:16px;box-shadow:0 2px 12px rgba(15,23,42,.04);animation:healthFadeIn .25s ease}
@@ -4789,14 +4563,46 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-today-tile.done em{color:#0F9488;margin-top:6px}
 .mv2-today-tile.warn{border-color:#FCD9A8;background:#FFFBF3}
 .mv2-today-tile.warn em{color:#B45309}
-/* 변화분석 성과 Hero */
-.mv2-analysis-hero{background:linear-gradient(135deg,#20242A,#37414E);border-radius:26px;padding:22px;margin:4px 0 16px;color:#fff;box-shadow:0 10px 26px rgba(32,36,42,.16)}
-.mv2-analysis-hero>b{display:block;font-size:18px;letter-spacing:-.3px;margin-bottom:14px}
-.mv2-analysis-hero-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-.mv2-analysis-hero-grid>div{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:11px 13px}
-.mv2-analysis-hero-grid span{display:block;color:rgba(255,255,255,.6);font-size:11px;font-weight:800}
-.mv2-analysis-hero-grid em{display:block;font-style:normal;font-size:18px;font-weight:900;margin-top:5px;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
-.mv2-analysis-hero-grid em.good{color:#5EEAD4}
+/* 변화분석 목표별 Hero — 밝은 화이트·옅은 민트 그라데이션(구 차콜 Hero 대체) */
+.anx-hero{background:linear-gradient(160deg,#FFFFFF 0%,#F0FBF9 100%);border:1px solid #DCF1EC;border-radius:24px;padding:22px;margin:4px 0 16px;box-shadow:0 2px 14px rgba(15,148,136,.06);animation:memberCardIn .22s ease}
+.anx-hero.empty{text-align:center;padding:30px 22px}
+.anx-hero.empty>b{display:block;font-size:16px;color:#20242B;letter-spacing:-.3px}
+.anx-hero.empty>p{margin:9px 0 0;color:#8D96A3;font-weight:800;font-size:13px;line-height:1.6}
+.anx-hero-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.anx-hero-ico{width:38px;height:38px;border-radius:12px;background:#E6F7F4;color:#0F9488;display:grid;place-items:center;flex-shrink:0}
+.anx-hero-period{color:#8D96A3;font-size:12px;font-weight:800}
+.anx-hero-num{display:block;font-size:38px;font-weight:900;color:#0F9488;letter-spacing:-1.2px;margin-top:14px;line-height:1.05;font-variant-numeric:tabular-nums;word-break:keep-all}
+.anx-hero-cap{display:block;margin-top:5px;color:#66717C;font-size:12.5px;font-weight:800}
+.anx-hero-msg{margin:9px 0 0;color:#20242B;font-weight:800;font-size:14px}
+.anx-hero-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px}
+.anx-hero-stats>div{background:rgba(255,255,255,.75);border:1px solid #E4F2EF;border-radius:14px;padding:10px 8px;text-align:center}
+.anx-hero-stats span{display:block;color:#8D96A3;font-size:10.5px;font-weight:800}
+.anx-hero-stats b{display:block;margin-top:5px;font-size:15px;color:#20242B;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+/* Before → After — 텍스트·숫자 좌우 비교 */
+.anx-ba{text-align:center}
+.anx-ba-cols{display:flex;align-items:center;justify-content:center;gap:18px}
+.anx-ba-cols>div span{display:block;color:#8D96A3;font-size:12px;font-weight:800;margin-bottom:5px}
+.anx-ba-cols>div b{display:block;font-size:23px;font-weight:900;color:#94A3B8;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.anx-ba-cols>div b.cur{color:#0F9488;font-size:26px}
+.anx-ba-cols>em{font-style:normal;color:#C0C8D3;font-size:19px;font-weight:900}
+.anx-ba>p{margin:12px 0 0;font-size:15px;font-weight:900}
+.anx-ba>p.good{color:#0F9488}
+.anx-ba>p.warn{color:#F59E0B}
+.anx-ba>small{display:block;margin-top:5px;color:#8D96A3;font-size:11px;font-weight:800}
+/* 이번 기간 리포트 */
+.anx-report-intro{margin:0 0 12px;color:#20242B;font-weight:900;font-size:15px}
+.anx-report-rows{display:grid;gap:10px}
+.anx-report-row{display:flex;gap:10px;align-items:flex-start}
+.anx-report-row i{width:22px;height:22px;border-radius:50%;background:#E6F7F4;color:#0F9488;display:grid;place-items:center;font-style:normal;font-weight:900;font-size:12px;flex-shrink:0;margin-top:1px}
+.anx-report-row.next i{background:#FFF4E8;color:#D97706}
+.anx-report-row b{display:block;font-size:13px;color:#20242B}
+.anx-report-row span{display:block;margin-top:2px;color:#66717C;font-weight:800;font-size:12.5px;line-height:1.55}
+/* 목표 전략 — 핵심 수치 2개 + 한 줄 */
+.anx-strategy-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.anx-strategy-grid>div{background:#F6F7F9;border:1px solid #EDEFF2;border-radius:14px;padding:11px 10px;text-align:center}
+.anx-strategy-grid span{display:block;color:#8D96A3;font-size:11px;font-weight:800}
+.anx-strategy-grid b{display:block;margin-top:5px;font-size:17px;color:#0F9488;letter-spacing:-.3px;word-break:keep-all}
+.anx-strategy-note{margin:11px 0 0;color:#66717C;font-weight:800;font-size:13px;line-height:1.6}
 /* 프로필 Hero */
 .mv2-profile-hero{background:#fff;border:1px solid #EEF1F4;border-radius:26px;padding:22px;margin:6px 0 14px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .mv2-profile-hero-top{display:flex;align-items:center;gap:16px}

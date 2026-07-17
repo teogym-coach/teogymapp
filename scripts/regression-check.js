@@ -900,34 +900,37 @@ const checks = [
     app.includes('await p.saveCardioEntry({...d,id:initialLog?.id});')
   ],
 
-  // ── 변화분석 탭: 회원 목표(다이어트/벌크업/체형교정)에 따른 자동 재구성 ──
-  ['변화분석: 목표(다이어트/벌크업/체형교정/일반) 4종 페르소나 판별 함수 존재',
+  // ── 변화분석 탭: 2026-07 리디자인(목표별 Hero + 이번 기간 리포트) ──
+  ['변화분석: 목표 5종 페르소나 판별 함수 존재(다이어트/벌크업/체형교정/체력향상/건강관리), 배열 목표는 첫 유효값 사용',
     app.includes('function getAnalysisPersona(goal=""){') &&
+    app.includes('const first=Array.isArray(goal)?(goal.find(v=>String(v||"").trim())||""):goal;') &&
     app.includes('if(g.includes("체형교정")||g.includes("교정")) return "correction";') &&
     app.includes('if(g.includes("벌크업")||g.includes("증량")||g.includes("근육 키우기")) return "bulk";') &&
-    app.includes('if(g.includes("다이어트")||g.includes("감량")) return "diet";')
+    app.includes('if(g.includes("다이어트")||g.includes("감량")) return "diet";') &&
+    app.includes('if(g.includes("체력")) return "fitness";') &&
+    app.includes('return "general";')
   ],
-  ['변화분석: 다이어트 회원 - 체중과 섭취 칼로리 결합 그래프(중복 제거 후 단일 카드) + 변화 해석이 최상단',
-    app.includes('{persona === "diet" && (') &&
-    app.includes('<MCard title="체중과 섭취 칼로리">') &&
-    (app.match(/<MCard title="체중과 섭취 칼로리">/g) || []).length === 1 &&
-    !app.includes('<MCard title="체중 변화 추이">') &&
-    app.includes('function buildDietInterpretation({weights=[],kcalRows=[],wDiff}){')
+  ['변화분석: 목표별 Hero — 밝은 카드, 핵심 수치 1개+지표 3개, 데이터 부족 시 빈 상태 안내(억지 수치 없음)',
+    app.includes('function buildGoalHero(persona, ctx) {') &&
+    app.includes('function GoalHeroCard({ hero }) {') &&
+    app.includes('<GoalHeroCard hero={hero} />') &&
+    app.includes('아직 변화 기록이 충분하지 않아요.') &&
+    app.includes('변화 흐름을 확인할 수 있어요.')
   ],
-  ['변화분석: 벌크업 회원 - 부위별 운동 볼륨 카드가 최상단, 그다음 대표 운동(빈도 기준 자동 선정) 수행능력 변화, 그다음 변화 요약',
-    (() => {
-      const i = app.indexOf('{persona === "bulk" && (');
-      if (i === -1) return false;
-      const partVolumeIdx = app.indexOf('<PartVolumeMultiCard sessions={p.sessions} />', i);
-      const strengthIdx = app.indexOf('운동 수행능력 변화', i);
-      const summaryIdx = app.indexOf('변화 요약', i);
-      const weightIdx = app.indexOf('{weightChart}', i);
-      return partVolumeIdx !== -1 && strengthIdx !== -1 && summaryIdx !== -1 && weightIdx !== -1 &&
-        partVolumeIdx < strengthIdx && strengthIdx < summaryIdx && summaryIdx < weightIdx;
-    })() &&
-    app.includes('function buildTopExercisesByFrequency(sessions=[],limit=5){') &&
-    app.includes('function buildRepEnduranceChanges(sessions=[],exerciseNames=[]){') &&
-    app.includes('function buildBulkGrowthSummary({partVolumeData=[],topExercises=[],repEndurance=[],periodLabel="최근"}){')
+  ['변화분석: 이번 기간 리포트 — 잘한 점 최대 2개+다음 목표 1개, 내용 없으면 카드 숨김, 별점·등급·예상 달성률 제거',
+    app.includes('function buildPeriodReport(persona, ctx) {') &&
+    app.includes('const trimmed = goods.slice(0, 2);') &&
+    app.includes('<PeriodReportCard report={periodReport} />') &&
+    app.includes('<MCard title="이번 기간 리포트">') &&
+    !app.includes('function GrowthReportCard') &&
+    !app.includes('title="이번 달 성장 리포트"') &&
+    !app.includes('예상 달성률 <b>')
+  ],
+  ['변화분석: 대표 코멘트·다음 변화 예상·이번 달 BEST 카드는 렌더링 제거(회원 분석 탭)',
+    !app.includes('<MCard title="대표 코멘트">') &&
+    !app.includes('function FuturePredictionCard') &&
+    !app.includes('function MonthlyBestCard') &&
+    !app.includes('<MCard title="다음 변화 예상">')
   ],
   ['변화분석: 부위별 운동 볼륨 카드 - 부위 선택 없이 5개 부위(등/가슴/하체/어깨/팔)를 동시에 비교, 카드 자체의 기간 버튼(최근/1개월/3개월/6개월/1년)으로 대표 3개 시점을 선택, 데이터 부족 시 "기록 부족" 안내',
     app.includes('function buildPartVolumeHistory(sessions=[]){') &&
@@ -937,45 +940,21 @@ const checks = [
     !app.includes('<div className="part-volume-tabs">') &&
     app.includes('기록 부족')
   ],
-  ['변화분석: 벌크업 회원 - 체중 변화는 운동 수행능력·변화 요약보다 뒤(보조 지표)에 배치, 골격근량/체지방은 건강 전문 분석에서만 확인(카드 중복 제거)',
+  ['변화분석: 목표별 주요 그래프 분기 — 다이어트=체중, 벌크업=볼륨·수행능력, 체형교정=통증, 체력향상=운동지속, 건강관리=체중+활동',
+    app.includes('{persona === "diet" && weightChart}') &&
+    app.includes('{persona === "correction" && painVasCard}') &&
+    app.includes('{persona === "fitness" && cardioActivityCard}') &&
     (() => {
       const i = app.indexOf('{persona === "bulk" && (');
-      const partVolIdx = app.indexOf('<PartVolumeMultiCard', i);
-      const perfIdx = app.indexOf('title="운동 수행능력 변화"', i);
-      const summaryIdx = app.indexOf('title="변화 요약"', i);
-      const weightIdx = app.indexOf('{weightChart}', i);
-      const bulkBlockEnd = app.indexOf('{persona === "correction"', i);
-      const mmIdxInBulk = app.slice(i, bulkBlockEnd).indexOf('title="골격근량 변화"');
-      return partVolIdx !== -1 && perfIdx !== -1 && summaryIdx !== -1 && weightIdx !== -1 &&
-        partVolIdx < perfIdx && perfIdx < summaryIdx && summaryIdx < weightIdx &&
-        mmIdxInBulk === -1; // 벌크업 primary 영역에는 더 이상 골격근량/체지방 카드가 없음(건강 전문 분석으로 일원화)
+      if (i === -1) return false;
+      return app.slice(i, i + 300).includes('<PartVolumeMultiCard sessions={p.sessions} />') &&
+        app.slice(i, i + 300).includes('<StrengthChangeCard');
     })()
   ],
-  ['변화분석: 체형교정 회원 - 통증(VAS)이 최상단, 교정 결과는 correctionSummaries 실데이터로 표시(없으면 정직한 안내)',
-    app.includes('{persona === "correction" && (() => {') &&
-    app.includes('const latestSummary = [...(p.correctionSummaries||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))[0];') &&
-    app.includes('아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.')
-  ],
-  ['변화분석: 공통 섹션(목표까지 남은 변화)은 모든 페르소나에 동일하게 표시, "운동 지속 현황"(홈과 중복)은 제거됨',
-    app.includes('<WeightGoalStrategyCard {...p} />') &&
-    !app.includes('function WorkoutConsistencyCard(') &&
-    !app.includes('<WorkoutConsistencyCard')
-  ],
-  ['변화분석: 건강유지/체중유지(general) 회원 - 체중 유지 범위→운동 수행능력→유산소·활동량 순으로 배치, 유산소·활동량 변화 카드 신규',
-    (() => {
-      const i = app.indexOf('{persona === "general" && (');
-      const weightIdx = app.indexOf('{weightChart}', i);
-      const strengthIdx = app.indexOf('<StrengthChangeCard', i);
-      const cardioIdx = app.indexOf('{cardioActivityCard}', i);
-      return weightIdx !== -1 && strengthIdx !== -1 && cardioIdx !== -1 &&
-        weightIdx < strengthIdx && strengthIdx < cardioIdx &&
-        app.includes('const cardioActivityCard = (') &&
-        app.includes('<MCard title="유산소·활동량 변화">');
-    })()
-  ],
-  ['변화분석: "최근 변화 요약"(체성분 기반)은 다이어트/건강유지에만 표시 — 벌크업(자체 변화요약)·체형교정(자체 교정결과)은 중복 노출 안 함',
-    app.includes('{(persona === "diet" || persona === "general") && (') &&
-    app.includes('<MCard title="최근 변화 요약">')
+  ['변화분석: 체형교정 교정 결과는 correctionSummaries 실데이터로 표시(없으면 정직한 안내), 추가 데이터(접힘)에서 확인',
+    app.includes('const correctionResultCard = (') &&
+    app.includes('아직 등록된 교정 평가 결과가 없습니다. 다음 방문 시 대표님께 평가를 요청해보세요.') &&
+    app.includes('{persona === "correction" && correctionResultCard}')
   ],
   ['변화분석: 체성분 변화 추이(compositionChart)는 건강 전문 분석에서 페르소나 구분 없이 항상 표시',
     (() => {
@@ -984,88 +963,55 @@ const checks = [
         !app.slice(i, i + 2500).includes('persona !== "general" && compositionChart');
     })()
   ],
-
-  // ── 성장 리포트 기능 추가 ──
-  ['성장 리포트: 화면 어디에도 "AI" 문자열이 없음(변화요약/BEST/성장리포트/미래예측 영역)',
+  ['변화분석: 회원 분석 화면 어디에도 "AI" 문자열이 없음(Hero/리포트/전략 영역)',
     (() => {
-      const start = app.indexOf('function computeGrowthReport');
-      const end = app.indexOf('function buildNextClassChecklist');
+      const start = app.indexOf('function buildGoalHero');
+      const end = app.indexOf('function ProfileHeroCard');
       return start !== -1 && end !== -1 && !app.slice(start, end).includes('AI');
     })()
   ],
-  ['성장 리포트: 건강 전문 분석에 BMI/BMR/인바디 히스토리만 추가(내장지방·체수분·부위별 근육량은 언급하지 않음 — 미입력 항목 노출 금지)',
+  ['변화분석: 건강 전문 분석에 BMI/BMR/인바디 히스토리만 추가(내장지방·체수분·부위별 근육량은 언급하지 않음 — 미입력 항목 노출 금지)',
     app.includes('title="BMI"') &&
     app.includes('title="BMR(기초대사량)"') &&
     app.includes('인바디 히스토리') &&
     !app.includes('내장지방') && !app.includes('체수분') && !app.includes('부위별 근육량')
   ],
-  ['성장 리포트: BMI는 체중+키로 계산(신규 입력 없이 재사용), BMR은 estimateMaintenance 결과 재사용',
+  ['변화분석: BMI는 체중+키로 계산(신규 입력 없이 재사용), BMR은 estimateMaintenance 결과 재사용',
     app.includes('const bmiOf = r => {') &&
     app.includes('calorieAnalysis.bmr ? `${Math.round(calorieAnalysis.bmr)}kcal`')
   ],
-  ['성장 리포트: "이번 달 변화" 카드(다이어트/체형교정 신규, PT 효과 체감 톤)와 건강유지 지속성 문장 추가',
-    app.includes('function buildDietGrowthLines({wDiff,kcalRows=[],forecast,periodLabel="최근"})') &&
-    app.includes('function buildCorrectionGrowthLines({pain,latestSummary})') &&
-    app.includes('운동 루틴을 꾸준히 유지하고 있습니다.')
-  ],
-  ['성장 리포트: "이번 달 BEST" 카드 — 페르소나별 3개 통계, 달력상 이번 달 기준(선택 기간과 무관), 데이터 부족 시 항목별 안내',
-    app.includes('function MonthlyBestCard({items=[]})') &&
-    app.includes('const monthKey = getKoreaDateString().slice(0, 7);') &&
-    app.includes('기록이 더 쌓이면 표시돼요')
-  ],
-  ['성장 리포트: "성장 리포트" 카드 — 등급 + 잘한점/개선점 자연어 문장 우선, 별점은 보조 표시, 데이터 부족 시 등급 대신 안내',
-    app.includes('function GrowthReportCard({report})') &&
-    app.includes('아직 등급을 매기기엔 기록이 부족해요') &&
-    app.includes('이번 달 가장 잘한 점') &&
-    app.includes('조금 더 노력하면 좋아질 점')
-  ],
-  ['성장 리포트: "다음 변화 예상" 카드 — 목표 전략 추천 바로 아래 배치, 페르소나별 템플릿(회원이 거의 읽지 않던 "다음 수업 전까지" 체크리스트는 렌더링 제거, 계산은 유지)',
-    (() => {
-      const i = app.indexOf('<WeightGoalStrategyCard {...p} />');
-      return app.slice(i, i + 200).includes('<FuturePredictionCard') &&
-        app.includes('function buildFuturePrediction(persona, { forecast, topExercises = [], latestSummary })');
-    })()
-  ],
-  ['V3: "다음 수업 전까지" 체크리스트는 회원 화면에서 더 이상 렌더링하지 않음(계산 로직은 관리자앱 사용 대비 유지), 모든 목표가 "다음 변화 예상" 카드로 통일',
+  ['변화분석: "다음 수업 전까지" 체크리스트는 회원 화면에서 렌더링하지 않음(계산 로직은 관리자앱 사용 대비 유지)',
     app.includes('function buildNextClassChecklist({ recentKcalCount, recentCardioCount })') &&
     app.includes('function NextClassChecklistCard({ items = [], closing })') &&
-    !app.includes('<NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />') &&
-    app.includes('<FuturePredictionCard text={futurePrediction} />')
+    !app.includes('<NextClassChecklistCard items={nextClassChecklist.items} closing={nextClassChecklist.closing} />')
   ],
   ['변화분석: 위상각/신체나이 등 전문 데이터는 "건강 전문 분석"로 통합, 기본 접힘',
     app.includes('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>') &&
     !app.includes('<CollapsibleSection label="신체나이 변화" defaultOpen={false}>')
   ],
-
-  // ── 성장 리포트 V2: Before→After + 대표 코멘트 + 카드 순서 ──
-  ['V2: Before → After 카드 — 숫자 나열 대신 전후 비교(다이어트/건강유지=체중, 벌크업=대표 운동 중량, 체형교정=통증 VAS), 데이터 부족 시 안내',
-    app.includes('function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, goodDirection = "down", emptyText })') &&
+  ['변화분석: Before → After — 시작/현재 텍스트·숫자 비교(다이어트/건강유지=체중, 벌크업=골격근량 우선·없으면 대표 중량, 체형교정=통증), 값 없으면 카드 숨김',
+    app.includes('function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, goodDirection = "down" })') &&
+    app.includes('if (before == null || after == null || !Number.isFinite(Number(before)) || !Number.isFinite(Number(after))) return null;') &&
     app.includes('const beforeAfter = (() => {') &&
-    (app.match(/<BeforeAfterCard \{\.\.\.beforeAfter\} periodText=\{periodText\} \/>/g) || []).length >= 4
+    app.includes('<BeforeAfterCard {...beforeAfter} periodText={periodText} />')
   ],
-  ['V2: 대표 코멘트 카드 — 실제 데이터 기반, 질책 표현 없이 칭찬+제안 톤, "AI" 단어 없음',
+  ['변화분석: 카드 순서 — Hero → 그래프 → Before→After → 이번 기간 리포트 → 목표 전략 → 추가 데이터(접힘) → 건강 전문 분석(접힘)',
     (() => {
-      const i = app.indexOf('const coachComment = (() => {');
-      const commentBlock = i !== -1 ? app.slice(i, i + 3000) : '';
-      return app.includes('function CoachCommentCard({ text })') &&
-        i !== -1 &&
-        !commentBlock.includes('부족합니다') && !commentBlock.includes('좋지 않습니다') && !commentBlock.includes('문제가 있습니다') &&
-        !commentBlock.includes('AI');
+      const iHero = app.indexOf('<GoalHeroCard hero={hero} />');
+      const iBA = app.indexOf('<BeforeAfterCard {...beforeAfter} periodText={periodText} />');
+      const iReport = app.indexOf('<PeriodReportCard report={periodReport} />');
+      const iStrategy = app.indexOf('<WeightGoalStrategyCard {...p}');
+      const iExtra = app.indexOf('<CollapsibleSection label="추가 데이터" defaultOpen={false}>');
+      const iPro = app.indexOf('<CollapsibleSection label="건강 전문 분석" defaultOpen={false}>');
+      return [iHero, iBA, iReport, iStrategy, iExtra, iPro].every(i => i !== -1) &&
+        iHero < iBA && iBA < iReport && iReport < iStrategy && iStrategy < iExtra && iExtra < iPro;
     })()
   ],
-  ['V2: 카드 순서 — 성장 리포트 → 대표 코멘트 → 목표 전략 추천 → 다음 변화 예상',
-    (() => {
-      const iGrowth = app.indexOf('<GrowthReportCard report={growthReport} />');
-      const iCoach = app.indexOf('<CoachCommentCard text={coachComment} />');
-      const iStrategy = app.indexOf('<WeightGoalStrategyCard {...p} />');
-      const iFuture = app.indexOf('<FuturePredictionCard text={futurePrediction} />');
-      return [iGrowth, iCoach, iStrategy, iFuture].every(i => i !== -1) &&
-        iGrowth < iCoach && iCoach < iStrategy && iStrategy < iFuture;
-    })()
-  ],
-  ['변화분석: 목표별 우선 표시 항목은 "추가 데이터"에서 중복 노출하지 않음(primaryUses로 제외)',
-    app.includes('const primaryUses = {') &&
-    app.includes('<CollapsibleSection label="추가 데이터" defaultOpen={false}>')
+  ['변화분석: 목표 전략 — 핵심 수치 2개+한 줄 방향, "주당 0.xxkg"·달성 확률 미노출, 데이터 부족 시 안내 문구',
+    app.includes('function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinutes=0,periodWorkoutCount=0,...p}){') &&
+    app.includes('기록이 조금 더 쌓이면 목표 흐름을 확인할 수 있어요.') &&
+    !app.includes('주당 {f.recommended.toFixed(2)}kg') &&
+    !app.includes('목표 달성 가능성 {f.possibility}')
   ],
 
   // ── 체형평가 리뉴얼 Phase 1: 빠른 평가 / 유형별 평가 / 교차 평가 ──
@@ -1682,13 +1628,11 @@ const checks = [
     app.includes('const recentBiggestGain=[...recentTopEx].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0]; const praiseLine=recentBiggestGain?`이전 기록보다') &&
     app.includes('{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은')
   ],
-  ['PT코치형: 다이어트 "이번 달 변화"/체형교정 "이번 달 변화" 문장이 처음/이전 기록과 비교한 뒤 변화 이유(식단·운동/교정 운동 유지)까지 짧게 설명',
-    app.includes('처음 기록 대비 ${periodLabel} 동안 체중이 꾸준히 감소하고 있습니다. ${kcalRows.length>=5?"식단 기록과 운동을 함께 이어온 것이 이 흐름으로 연결되고 있어요.":') &&
-    app.includes('이전 기록(VAS ${pain.first}) 대비 통증이 ${pain.last}로 줄어들고 있습니다. ${latestSummary?.homeExercise?.length?"교정 운동을 꾸준히 이어온 것이 이런 변화로 연결되고 있는 것으로 보입니다.":')
-  ],
-  ['PT코치형: 건강유지 대표 코멘트/최근 변화 요약이 상태 서술로 끝나지 않고 다음 행동 제안으로 마무리',
-    app.includes('이번 주도 현재 루틴을 유지하면 건강 관리 흐름을 안정적으로 이어갈 수 있습니다.') &&
-    app.includes('지금 페이스를 유지하면 안정적인 컨디션을 계속 이어갈 수 있어요.')
+  ['PT코치형: 구 "이번 달 변화"/대표 코멘트 문장은 2026-07 리디자인에서 "이번 기간 리포트"로 통합(중복 문장 제거), 리포트는 기록값 기반 잘한 점+다음 목표로 마무리',
+    !app.includes('function buildDietGrowthLines') &&
+    !app.includes('function buildCorrectionGrowthLines') &&
+    app.includes('goods.push({ title: "체중 감소", text: `체중이 ${Math.abs(wDiff)}kg 감소했어요.` });') &&
+    app.includes('next = pain?.first != null && pain?.last != null && pain.last > pain.first')
   ],
 
   // ── 변화를 기억하는 PT 코치형(이전 기록 대비 비교 → 잘하고 있는 점 → 다음 행동) ──
@@ -1704,11 +1648,9 @@ const checks = [
     app.includes('const lastMonthSameDayCount=attendance.filter(a=>{const d=String(a.date||""); return d.startsWith(prevYm)&&Number(d.slice(8,10))<=dayOfMonth;}).length;') &&
     app.includes('지난달 같은 기간보다 운동 횟수가 늘었어요. ')
   ],
-  ['비교형: 대표 코멘트(diet/bulk/correction)가 "처음 기록 대비/이전 기록 대비/지난 기록" 비교로 시작해 잘하고 있는 점 → 다음 행동으로 이어짐, 데이터 부족 시 억지 비교 없이 안내',
-    app.includes('return "기록이 조금 더 쌓이면 이전 기록과 비교한 변화까지 확인할 수 있습니다.";') &&
-    app.includes('처음 기록 대비 체중이 더 안정적으로 감소하고 있습니다.') &&
-    app.includes('이전 기록 대비 ${biggestGainPeriod.name} 수행능력이 ${biggestGainPeriod.before} → ${biggestGainPeriod.after}로 더 안정적으로 향상되고 있습니다.') &&
-    app.includes('지난 기록(VAS ${pain.first}) 대비 통증 강도가 ${pain.last}로 낮아지고 있습니다.')
+  ['비교형: 분석 탭 대표 코멘트 계산(coachComment)은 2026-07 리디자인에서 제거, 비교 문장은 홈 탭(HomeCoachCommentCard=실제 trainerComment)과 이번 기간 리포트가 대신함',
+    !app.includes('const coachComment = (() => {') &&
+    app.includes('function HomeCoachCommentCard({sessions=[],onMore}){')
   ],
 
   // ── 원인과 추천 이유까지 설명하는 PT 코치형(비교 → 변화 이유 → 잘하는 점 → 다음 행동 → 추천 이유) ──
@@ -1726,10 +1668,9 @@ const checks = [
     app.includes('최근 식단 기록이 뜸해 체중 변화의 원인을 정확히 짚기 어려웠어요.') &&
     app.includes('최근 체중 변화는 좋지만 유산소 기록이 줄어들고 있어, 감량 흐름을 안정적으로 유지하기 위해 추천드려요.')
   ],
-  ['원인설명형: 대표 코멘트가 변화의 이유(식단+유산소 병행/운동 볼륨 증가/교정 운동 유지)를 잘하는 점과 함께 설명',
-    app.includes('최근 식단 기록과 유산소 운동을 꾸준히 이어온 것이 좋은 흐름으로 연결되고 있습니다.') &&
-    app.includes('최근 ${biggestGainPeriod.name} 운동 볼륨이 꾸준히 늘면서 중량도 함께 올라가는 좋은 흐름입니다.') &&
-    app.includes('최근 교정 운동을 꾸준히 이어온 것이 움직임 개선으로 이어지고 있는 것으로 보입니다.')
+  ['원인설명형: 분석 탭 긴 원인 설명 문장은 리디자인에서 제거, 이번 기간 리포트가 기록값 기반 짧은 문장(잘한 점/다음 목표)으로 대체',
+    !app.includes('최근 식단 기록과 유산소 운동을 꾸준히 이어온 것이 좋은 흐름으로 연결되고 있습니다.') &&
+    app.includes('function PeriodReportCard({ report }) {')
   ],
   // ── 회원앱 "목표 관리" (온보딩 부분 수정 + 변경 이력 + 관리자 피드 연동) ──
   ['목표 관리: 프로필 화면에 "목표 관리" 메뉴 추가',

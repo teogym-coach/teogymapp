@@ -4769,6 +4769,13 @@ function formatCompactDate(value){
   if(Number.isNaN(d.getTime())) return String(value).slice(0,10).replaceAll("-",".");
   return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
 }
+// "다음 예약이 필요한 회원" 카드 등에서 쓰는 "7월 18일" 표기 — YYYY-MM-DD 문자열 전용(회원 문서/세션 date 필드 형식)
+function formatMonthDayKo(dateStr){
+  const s = String(dateStr||"").slice(0,10);
+  const mm = Number(s.slice(5,7)), dd = Number(s.slice(8,10));
+  if(!mm || !dd) return "-";
+  return `${mm}월 ${dd}일`;
+}
 // 회원 상세 "오늘 브리핑" — 회원앱 입력 시점을 "오늘 오전 9:42 입력 / 어제 오후 8:15 입력 / N일 전" 형태로 표시.
 // 정확한 시각(Firestore Timestamp/ISO)이 있으면 시:분까지, 날짜(YYYY-MM-DD)만 있으면 날짜 단위로 표시한다.
 function formatWhenLabel(at){
@@ -4955,6 +4962,7 @@ export default function App() {
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
   const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
   const [healthHubInitialTab, setHealthHubInitialTab] = useState("대시보드"); // 오늘 입력 피드에서 특정 항목을 눌러 건강관리 허브로 이동할 때 시작 탭
+  const [hubScrollTarget, setHubScrollTarget] = useState(null); // 홈 "다음 예약이 필요한 회원" 등에서 회원 상세(hub) 진입 시 특정 섹션으로 스크롤할 DOM id
   const [loading,  setLoading]  = useState(false);
   // 회원 목록 전용 로딩/에러 — 다른 화면들이 공유하는 전역 loading과 분리한다.
   // (전역 loading은 회원 목록 조회와 무관한 다른 비동기 작업에서도 true/false로 계속 토글되므로,
@@ -5200,6 +5208,7 @@ export default function App() {
     setMemberPrivateData(null);
     setCardioLogs([]);
     setHealthHubInitialTab(opts.healthHubTab || "대시보드");
+    setHubScrollTarget(opts.scrollTarget || null);
     setScreen(opts.targetScreen || "hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
@@ -5788,7 +5797,7 @@ export default function App() {
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -6570,6 +6579,11 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     () => buildTodaySummary(homeMembers, liveMembersById, todayKST),
     [homeMembers, liveMembersById, todayKST]
   );
+  // "다음 예약이 필요한 회원" — sessionsMap(회원별 최근 세션)이 아직 로딩 전이면 빈 배열로 대체해 오탐을 만들지 않는다.
+  const nextBookingList = useMemo(
+    () => buildNextBookingList(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
+    [homeMembers, liveMembersById, sessionsMap, todayKST]
+  );
 
   // 대표(TEO) 개인 운동기록·테스트 계정은 홈 KPI·검색 등 "일반 회원" 집계에서 공통 제외
   const regularHomeMembers = useMemo(() => homeMembers.filter(isRegularAdminMember), [homeMembers]);
@@ -6903,7 +6917,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
           <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:isWide?10:6}}>
-            <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={todayUnpubCount} unit="건" title="오늘 미기록 수업" desc="기록이 필요해요" doneDesc="오늘 수업 기록이 모두 정리됐어요" cta="기록 작성하기" onClick={()=>{loadMembers();setScreen("members");}} />
+            <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={()=>{document.getElementById("home-next-booking")?.scrollIntoView({behavior:"smooth",block:"start"});}} />
             <TodayActionCard isWide={isWide} icon={sc4} tone="mint" count={feedItems.length} unit="건" title="회원 입력 확인" desc="새로 입력했어요" doneDesc="새 입력이 모두 확인됐어요" cta="확인하기" onClick={()=>setDrawerOpen(true)} />
             <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
           </div>
@@ -7052,6 +7066,46 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
               </div>
             </div>
           </div>
+        </div>
+
+        {/* ═══ 다음 예약이 필요한 회원 — 수업은 끝났지만 다음 일정이 없는 회원을 즉시 발견 + 예약까지 연결 ═══ */}
+        <div id="home-next-booking" style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,padding:isWide?"24px 28px":"20px 18px",boxShadow:DB.shadow,marginBottom:GAP}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:4}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+              <div style={{fontFamily:DB.font,fontWeight:800,fontSize:isWide?17:15.5,color:DB.text,letterSpacing:"-.4px"}}>다음 예약이 필요한 회원</div>
+              {nextBookingList.length>0 && <span style={{fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:"#B45309"}}>{nextBookingList.length}명</span>}
+            </div>
+          </div>
+          <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginBottom:4}}>수업은 끝났지만 다음 일정이 없습니다.</div>
+          {nextBookingList.length===0 ? (
+            <div style={{padding:"30px 0 22px",textAlign:"center"}}>
+              <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(34,197,94,.12)",color:DB.success,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.1V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,marginTop:12,letterSpacing:"-.2px"}}>모든 회원의 다음 예약이 등록돼 있습니다</div>
+            </div>
+          ) : (
+            <div>
+              {nextBookingList.slice(0,5).map((row,i)=>{
+                const badge = row.daysSince<=1 ? "오늘" : row.daysSince<7 ? `${row.daysSince}일째` : "7일 이상";
+                const statusText = row.isPublished ? "수업일지 전송 완료" : "수업일지 미전송";
+                return (
+                  <div key={row.member.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 2px",borderTop:i===0?"none":DB.hairline,flexWrap:"wrap"}}>
+                    <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+                    <div style={{flex:1,minWidth:140}}>
+                      <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+                      <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.lastDate)} 수업 · {statusText} · 다음 예약 없음</div>
+                    </div>
+                    <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.10)",color:"#B45309"}}>{badge}</span>
+                    <button onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-next-session"})} style={{flexShrink:0,border:"none",borderRadius:10,padding:"9px 15px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,cursor:"pointer"}}>다음 일정 등록</button>
+                  </div>
+                );
+              })}
+              {nextBookingList.length>5 && (
+                <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,paddingTop:12,borderTop:DB.hairline,textAlign:"center"}}>외 {nextBookingList.length-5}명</div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ═══ 오늘 회원 상태 — Apple Health식 링으로 오늘 입력 흐름을 한눈에 (계산만, 저장 없음) ═══ */}
@@ -7281,6 +7335,46 @@ function buildTodaySummary(members, liveMembersById, todayKST) {
     kcalCount: kcalIds.size,
     attention: [...attention.values()],
   };
+}
+
+// 홈 "다음 예약이 필요한 회원" — 회원별 마지막 "실제" 수업 기록(발행 여부 무관, 실제 종목 존재 또는 isPublished) 중
+// 가장 최근 것을 찾고, 그 날짜보다 뒤에 등록된 nextWorkoutDate가 없으면 대상으로 분류한다.
+// nextWorkoutDate는 회원 문서에 "다음 1건"만 저장되는 단일 필드(getMemberNextSessionInfo)라 별도 목록 조회가 필요 없다.
+// sessionsMap은 회원별 최근 5세션(getRecentSessions)만 담고 있어 그 범위 안에서 판별한다.
+// 임시저장(실제 종목 없는 빈 세션)은 hasRealExercise 조건으로 자연히 제외되고, 취소 플래그는 데이터 구조상 없어
+// nextWorkoutDate가 비어 있으면 그대로 "다음 예약 없음"으로 처리된다.
+function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
+  const rows = [];
+  (members || []).forEach(m => {
+    if (isExcludedAdminMember(m)) return;
+    const live = liveMembersById[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    const ss = sessionsMap?.[lm.id] || [];
+    const realPast = ss
+      .filter(s => {
+        const d = normalizeSessionDateKey(s.date || s.sessionDate || s.createdAt);
+        if (!d || d > todayKST) return false;
+        const hasRealExercise = (s.exercises || []).some(e => e?.name || isFuncEx(e));
+        return hasRealExercise || s.isPublished === true;
+      })
+      .sort((a, b) => {
+        const da = normalizeSessionDateKey(a.date || a.sessionDate || a.createdAt);
+        const dbb = normalizeSessionDateKey(b.date || b.sessionDate || b.createdAt);
+        if (da !== dbb) return da < dbb ? 1 : -1;
+        return (b.sessionNo || 0) - (a.sessionNo || 0);
+      });
+    const last = realPast[0];
+    if (!last) return;
+    const lastDate = normalizeSessionDateKey(last.date || last.sessionDate || last.createdAt);
+    const nextDate = getMemberNextSessionInfo(lm).date;
+    if (nextDate && nextDate > lastDate) return; // 마지막 수업 이후 유효한 다음 예약이 이미 있음 → 제외
+    const daysSince = Math.max(0, Math.floor((new Date(`${todayKST}T00:00:00`) - new Date(`${lastDate}T00:00:00`)) / 86400000));
+    rows.push({ member: lm, lastDate, isPublished: last.isPublished === true, daysSince });
+  });
+  return rows.sort((a, b) => {
+    if (a.lastDate !== b.lastDate) return a.lastDate < b.lastDate ? -1 : 1;
+    return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
+  });
 }
 
 // 홈 "오늘의 AI 코칭" — 실제 체크 필요 회원(todaySummary.attention) 1순위를 코칭 문장으로 변환. 새로운 분석/API 없이 기존 집계만 재사용.
@@ -9622,7 +9716,7 @@ function DailyConditioningAdminScreen({member,onBack,showToast}){const today=get
 // ════════════════════════════════════════════
 // HUB
 // ════════════════════════════════════════════
-function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair }) {
+function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -9643,6 +9737,14 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
     return ()=>window.removeEventListener("resize",h);
   },[]);
   const isWide = winW >= 1024;
+  // 홈 "다음 예약이 필요한 회원" 등에서 특정 섹션(예: 다음 수업 준비)으로 바로 이동할 때 사용 — id로 스크롤 후 1회 소모
+  useEffect(() => {
+    if (!scrollTarget) return;
+    const el = document.getElementById(scrollTarget);
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ behavior: "smooth", block: "start" }));
+    onScrollTargetDone?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollTarget, member?.id]);
   const [ptSaving, setPtSaving] = useState(false);
   const [ob, setOb] = useState(null);
   const [hubAttendance, setHubAttendance] = useState([]);
@@ -10304,7 +10406,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
 
   // ④ 다음 수업 준비
   const secPrep = (
-          <section className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
+          <section id="hub-next-session" className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12,flexWrap:"wrap"}}>
               <span style={cardTitle}>다음 수업 준비</span>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>

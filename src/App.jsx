@@ -6393,6 +6393,9 @@ function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="
 // 홈 "오늘 해야 할 일" 인라인 리스트 카드 — 다음 예약 필요/수업일지 미전송/후기 미작성이 공유하는 카드 껍데기
 // (제목·카운트 뱃지·캡션·빈 상태·최대 5건+"외 N건" 접기). 행 내부 마크업만 renderRow로 상황별로 다르게 받는다.
 function TodayListCard({ id, isWide, title, count, unit="명", accentColor="#B45309", captionText, emptyText, rows, renderRow, marginBottom }) {
+  const [expanded, setExpanded] = useState(false);
+  const hiddenCount = Math.max(rows.length - 5, 0);
+  const visibleRows = expanded ? rows : rows.slice(0, 5);
   return (
     <div id={id} style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,padding:isWide?"24px 28px":"20px 18px",boxShadow:DB.shadow,marginBottom:marginBottom ?? (isWide?38:28)}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:4}}>
@@ -6411,9 +6414,11 @@ function TodayListCard({ id, isWide, title, count, unit="명", accentColor="#B45
         </div>
       ) : (
         <div>
-          {rows.slice(0,5).map((row,i)=>renderRow(row,i))}
-          {rows.length>5 && (
-            <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,paddingTop:12,borderTop:DB.hairline,textAlign:"center"}}>외 {rows.length-5}{unit}</div>
+          {visibleRows.map((row,i)=>renderRow(row,i))}
+          {hiddenCount>0 && (
+            <button type="button" onClick={()=>setExpanded(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",fontFamily:DB.font,fontWeight:700,fontSize:12,color:DB.mintSoft,paddingTop:12,borderTop:DB.hairline,textAlign:"center"}}>
+              {expanded ? "접기" : `외 ${hiddenCount}${unit} 더 보기`}
+            </button>
           )}
         </div>
       )}
@@ -7233,7 +7238,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
-              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 수업일지 미전송</div>
+              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 수업일지 미전송{row.count>1?` · 미전송 ${row.count}건`:""}</div>
             </div>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
           </button>
@@ -7523,10 +7528,30 @@ function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
   });
 }
 
+// 홈 "수업일지 미전송" 적용 시작일 — 이 날짜 이전에 저장된 미전송 기록은 과거 데이터 정리 이전 것이라 대상에서 제외한다.
+const UNSENT_SESSION_START_DATE = "2026-07-18";
+// 수업일지 미전송 판정 전용 날짜 정규화 — 세션 문서 date/sessionDate/createdAt는 "YYYY-MM-DD" 문자열뿐 아니라
+// Firebase Timestamp·시간 포함 ISO 문자열·숫자 timestamp로도 저장될 수 있다. 다른 화면(오늘 수업 정렬 등)이
+// 공유하는 normalizeSessionDateKey는 그대로 두고, 이 판정에서만 기존 KST 유틸(getKoreaDateString)로 시간 포함 값을
+// "그 시각의 한국 날짜"로 정확히 변환해 자정 근처 하루 오차를 방지한다(순수 날짜 문자열은 시간대 변환 없이 그대로 사용).
+function toUnsentCheckDateKey(raw) {
+  if (!raw) return "";
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const parsed = new Date(s);
+    return isNaN(parsed) ? s.slice(0, 10) : getKoreaDateString(parsed);
+  }
+  if (typeof raw.toDate === "function") return getKoreaDateString(raw.toDate()); // Firebase Timestamp
+  if (raw instanceof Date) return getKoreaDateString(raw);
+  if (typeof raw === "number") return getKoreaDateString(new Date(raw)); // 숫자 timestamp(ms)
+  return String(raw).slice(0, 10);
+}
 // 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
 // 저장돼 있는데 아직 회원에게 전송(isPublished)만 안 된 회원"만 대상 — 오늘 수업 기록이 저장됐지만 미전송,
-// 또는 과거 수업 기록이 저장됐지만 미전송인 경우만 포함(hasRealExercise 판별은 buildNextBookingList와 동일).
-// 미래 날짜 데이터가 섞여도 d<=todayKST로 방어. 회원당 미전송 기록이 여러 건이면 가장 최근 날짜 1건만 대표로 노출한다.
+// 또는 UNSENT_SESSION_START_DATE 이후 과거 수업 기록이 저장됐지만 미전송인 경우만 포함
+// (hasRealExercise 판별은 buildNextBookingList와 동일). 미래 날짜 데이터가 섞여도 d<=todayKST로 방어.
+// 회원당 한 행만 노출(가장 최근 미전송 날짜 대표 표시) — 추가 미전송 건수는 count로 함께 반환해 목록에서 보조 표시한다.
 function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayKST) {
   const rows = [];
   (members || []).forEach(m => {
@@ -7536,13 +7561,16 @@ function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayK
     if ((lm.status || "active") !== "active") return;
     const ss = sessionsMap?.[lm.id] || [];
     let latestDate = "";
+    let unsentCount = 0;
     ss.forEach(s => {
-      const d = normalizeSessionDateKey(s.date || s.sessionDate || s.createdAt);
-      if (!d || d > todayKST) return; // 미래 예약/미진행 수업은 제외
+      const d = toUnsentCheckDateKey(s.date || s.sessionDate || s.createdAt);
+      if (!d || d < UNSENT_SESSION_START_DATE || d > todayKST) return; // 기준일 이전·미래 예약은 제외
       const hasRealExercise = (s.exercises || []).some(e => e?.name || isFuncEx(e));
-      if (hasRealExercise && s.isPublished !== true && d > latestDate) latestDate = d;
+      if (!hasRealExercise || s.isPublished === true) return;
+      unsentCount += 1;
+      if (d > latestDate) latestDate = d;
     });
-    if (latestDate) rows.push({ member: lm, date: latestDate });
+    if (unsentCount > 0) rows.push({ member: lm, date: latestDate, count: unsentCount });
   });
   return rows.sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;

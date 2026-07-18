@@ -5842,7 +5842,7 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenUnrecorded={()=>{ loadMembers(); setMembersInitialFilter("unrecorded"); setScreen("members"); }} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
@@ -6390,6 +6390,37 @@ function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="
   );
 }
 
+// 홈 "오늘 해야 할 일" 인라인 리스트 카드 — 다음 예약 필요/수업일지 미전송/후기 미작성이 공유하는 카드 껍데기
+// (제목·카운트 뱃지·캡션·빈 상태·최대 5건+"외 N건" 접기). 행 내부 마크업만 renderRow로 상황별로 다르게 받는다.
+function TodayListCard({ id, isWide, title, count, unit="명", accentColor="#B45309", captionText, emptyText, rows, renderRow, marginBottom }) {
+  return (
+    <div id={id} style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,padding:isWide?"24px 28px":"20px 18px",boxShadow:DB.shadow,marginBottom:marginBottom ?? (isWide?38:28)}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:4}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+          <div style={{fontFamily:DB.font,fontWeight:800,fontSize:isWide?17:15.5,color:DB.text,letterSpacing:"-.4px"}}>{title}</div>
+          {count>0 && <span style={{fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:accentColor}}>{count}{unit}</span>}
+        </div>
+      </div>
+      {captionText && <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginBottom:4}}>{captionText}</div>}
+      {count===0 ? (
+        <div style={{padding:"30px 0 22px",textAlign:"center"}}>
+          <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(34,197,94,.12)",color:DB.success,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.1V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,marginTop:12,letterSpacing:"-.2px"}}>{emptyText}</div>
+        </div>
+      ) : (
+        <div>
+          {rows.slice(0,5).map((row,i)=>renderRow(row,i))}
+          {rows.length>5 && (
+            <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,paddingTop:12,borderTop:DB.hairline,textAlign:"center"}}>외 {rows.length-5}{unit}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Apple Health식 진행 링 — 표시 전용 SVG (데이터 계산 없음). ratio 0~1, 중앙에 값 표시.
 function StatRing({ ratio, color, value, valueSub, size=52 }) {
   const stroke = 4.5;
@@ -6601,7 +6632,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenUnrecorded }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
@@ -6647,10 +6678,15 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     () => buildNextBookingList(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
     [homeMembers, liveMembersById, sessionsMap, todayKST]
   );
-  // "수업일지 미전송" — 실제 종목이 저장됐지만 아직 회원에게 공개(isPublished)되지 않은 기록이 있는 회원
-  const unsentSessionMembers = useMemo(
-    () => buildUnsentSessionMembers(homeMembers, liveMembersById, sessionsMap || {}),
-    [homeMembers, liveMembersById, sessionsMap]
+  // "수업일지 미전송" — 실제 종목이 저장됐지만 아직 회원에게 공개(isPublished)되지 않은 기록이 있는 회원(예약만 있는 회원은 제외)
+  const unsentSessionRows = useMemo(
+    () => buildUnsentSessionMembers(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
+    [homeMembers, liveMembersById, sessionsMap, todayKST]
+  );
+  // "후기 미작성" — reviewStatus 목표가 설정돼 있으나 아직 완료 횟수를 채우지 못한 회원(HubScreen 후기 관리 카드와 동일 필드 재사용)
+  const reviewPendingList = useMemo(
+    () => buildReviewPendingList(homeMembers, liveMembersById),
+    [homeMembers, liveMembersById]
   );
 
   // 대표(TEO) 개인 운동기록·테스트 계정은 홈 KPI·검색 등 "일반 회원" 집계에서 공통 제외
@@ -6685,12 +6721,8 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const todayCount = todaySess.length;
 
   const goCs = ()=>{ if(showToast) showToast("아직 준비 중인 기능입니다."); else setComingSoon(true); };
-  // "수업일지 미전송" 카드 클릭 — 1명이면 바로 해당 회원 상세로, 여러 명이면 기존 회원목록 "미기록" 필터 화면 재사용
-  const openUnsentSessions = () => {
-    if (unsentSessionMembers.length === 0) return;
-    if (unsentSessionMembers.length === 1) { onSelectMember?.(unsentSessionMembers[0]); return; }
-    onOpenUnrecorded?.();
-  };
+  // 오늘 해야 할 일 상단 카드 3개 — 모두 다음 예약 필요와 동일한 방식(같은 페이지 하단의 인라인 리스트로 스크롤 이동)으로 통일
+  const scrollToSection = (id) => () => { document.getElementById(id)?.scrollIntoView({behavior:"smooth",block:"start"}); };
   // 알림 클릭 — 읽음 처리 후 type별 목적 화면으로 이동 (회원 목록 피드와 동일 동작)
   const openFeedItem = (item)=>{
     const target = homeMembers.find(x=>x.id===item.memberId);
@@ -6808,6 +6840,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const sc3=si(<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></>);
   const sc4=si(<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>);
   const sc5=si(<><circle cx="8" cy="7" r="3"/><circle cx="16" cy="7" r="3"/><path d="M2 21c0-3 2.5-5.5 6-5.5"/><path d="M22 21c0-3-2.5-5.5-6-5.5"/></>);
+  const sc6=si(<polygon points="12 2 15.09 8.63 22 9.24 16.5 13.97 18.18 21 12 17.27 5.82 21 7.5 13.97 2 9.24 8.91 8.63 12 2"/>);
 
   // Quick menu icons — 빠른 실행 필 버튼용 소형 아이콘
   const qi = (paths) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths}</svg>;
@@ -6988,13 +7021,16 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
         {/* ═══ 오늘 해야 할 일 — 홈의 주인공. 3초 안에 오늘 할 행동이 보인다.
              Hero/오늘의 한 줄 카드는 업무 효율 우선 개편으로 삭제(하루 1회성 정보 + AI 코치와 중복) — 첫 화면 최상단으로 승격.
              "회원 입력 확인"은 벨 아이콘·알림 Drawer·"체크가 필요한 회원" 카드와 역할이 중복돼 제거하고 자리를
-             "수업일지 미전송"으로 교체(기존 isPublished 필드 재사용, 새 필드 없음). "2:1 수업 정리"는 미정리 건이
-             있을 때만 표시 — 카드 수(2 또는 3)에 맞춰 열 수를 그대로 맞춰 빈 칸을 남기지 않는다. ═══ */}
+             "수업일지 미전송"으로 교체(기존 isPublished 필드 재사용, 새 필드 없음), "후기 미작성"을 3번째로 추가
+             (reviewStatus 필드 재사용). "2:1 수업 정리"는 미정리 건이 있을 때만 표시 — 카드 수에 맞춰 열 수를
+             그대로 맞춰 빈 칸을 남기지 않는다. 3개(카드 수 가변) 카드는 실제 가로모드(isWide && !isPortrait)에서만
+             한 줄 균등 배치하고, 태블릿 세로처럼 폭은 넓지만 세로로 긴 화면(isWide && isPortrait)은 2열로 줄인다. ═══ */}
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:isWide?`repeat(${2+(draftPair>0?1:0)},1fr)`:"1fr",gap:isWide?10:6}}>
-            <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={()=>{document.getElementById("home-next-booking")?.scrollIntoView({behavior:"smooth",block:"start"});}} />
-            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionMembers.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={openUnsentSessions} />
+          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${3+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
+            <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={scrollToSection("home-next-booking")} />
+            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionRows.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={scrollToSection("home-unsent-sessions")} />
+            <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
             {draftPair > 0 && (
               <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
             )}
@@ -7175,44 +7211,45 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
         </div>
 
         {/* ═══ 다음 예약이 필요한 회원 — 수업은 끝났지만 다음 일정이 없는 회원을 즉시 발견 + 예약까지 연결 ═══ */}
-        <div id="home-next-booking" style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,padding:isWide?"24px 28px":"20px 18px",boxShadow:DB.shadow,marginBottom:GAP}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:4}}>
-            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-              <div style={{fontFamily:DB.font,fontWeight:800,fontSize:isWide?17:15.5,color:DB.text,letterSpacing:"-.4px"}}>다음 예약이 필요한 회원</div>
-              {nextBookingList.length>0 && <span style={{fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:"#B45309"}}>{nextBookingList.length}명</span>}
-            </div>
-          </div>
-          <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginBottom:4}}>수업은 끝났지만 다음 일정이 없습니다.</div>
-          {nextBookingList.length===0 ? (
-            <div style={{padding:"30px 0 22px",textAlign:"center"}}>
-              <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(34,197,94,.12)",color:DB.success,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.1V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <TodayListCard id="home-next-booking" isWide={isWide} title="다음 예약이 필요한 회원" count={nextBookingList.length} unit="명" captionText="수업은 끝났지만 다음 일정이 없습니다." emptyText="모든 회원의 다음 예약이 등록돼 있습니다" rows={nextBookingList} renderRow={(row,i)=>{
+          const badge = row.daysSince<=1 ? "오늘" : row.daysSince<7 ? `${row.daysSince}일째` : "7일 이상";
+          const statusText = row.isPublished ? "수업일지 전송 완료" : "수업일지 미전송";
+          return (
+            <div key={row.member.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 2px",borderTop:i===0?"none":DB.hairline,flexWrap:"wrap"}}>
+              <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+              <div style={{flex:1,minWidth:140}}>
+                <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+                <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.lastDate)} 수업 · {statusText} · 다음 예약 없음</div>
               </div>
-              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,marginTop:12,letterSpacing:"-.2px"}}>모든 회원의 다음 예약이 등록돼 있습니다</div>
+              <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.10)",color:"#B45309"}}>{badge}</span>
+              <button onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-next-session"})} style={{flexShrink:0,border:"none",borderRadius:10,padding:"9px 15px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,cursor:"pointer"}}>다음 일정 등록</button>
             </div>
-          ) : (
-            <div>
-              {nextBookingList.slice(0,5).map((row,i)=>{
-                const badge = row.daysSince<=1 ? "오늘" : row.daysSince<7 ? `${row.daysSince}일째` : "7일 이상";
-                const statusText = row.isPublished ? "수업일지 전송 완료" : "수업일지 미전송";
-                return (
-                  <div key={row.member.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 2px",borderTop:i===0?"none":DB.hairline,flexWrap:"wrap"}}>
-                    <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
-                    <div style={{flex:1,minWidth:140}}>
-                      <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
-                      <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.lastDate)} 수업 · {statusText} · 다음 예약 없음</div>
-                    </div>
-                    <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.10)",color:"#B45309"}}>{badge}</span>
-                    <button onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-next-session"})} style={{flexShrink:0,border:"none",borderRadius:10,padding:"9px 15px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,cursor:"pointer"}}>다음 일정 등록</button>
-                  </div>
-                );
-              })}
-              {nextBookingList.length>5 && (
-                <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,paddingTop:12,borderTop:DB.hairline,textAlign:"center"}}>외 {nextBookingList.length-5}명</div>
-              )}
+          );
+        }} />
+
+        {/* ═══ 수업일지 미전송 — 실제 수업 기록은 저장됐지만 아직 회원에게 전송하지 않은 회원 (예약만 있는 회원은 제외) ═══ */}
+        <TodayListCard id="home-unsent-sessions" isWide={isWide} title="수업일지 미전송" count={unsentSessionRows.length} unit="건" captionText="수업 기록은 저장됐지만 아직 회원에게 전송하지 않았습니다." emptyText="모든 수업일지가 전송됐습니다" rows={unsentSessionRows} renderRow={(row,i)=>(
+          <button key={row.member.id} onClick={()=>onSelectMember?.(row.member)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 수업일지 미전송</div>
             </div>
-          )}
-        </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        )} />
+
+        {/* ═══ 후기 미작성 — 후기 목표(reviewStatus)는 설정돼 있으나 아직 완료 횟수를 채우지 못한 회원 ═══ */}
+        <TodayListCard id="home-review-pending" isWide={isWide} title="후기 미작성" count={reviewPendingList.length} unit="명" captionText="후기 목표가 설정됐지만 아직 완료되지 않았습니다." emptyText="모든 회원의 후기가 완료됐습니다" rows={reviewPendingList} renderRow={(row,i)=>(
+          <button key={row.member.id} onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-sec-review"})} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>후기 {row.completed} / {row.required}</div>
+            </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        )} />
 
         {/* ═══ 오늘 회원 상태 — Apple Health식 링으로 오늘 입력 흐름을 한눈에 (계산만, 저장 없음) ═══ */}
         <div style={{marginBottom:GAP}}>
@@ -7486,11 +7523,11 @@ function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
   });
 }
 
-// 홈 "수업일지 미전송" — 회원별 최근 저장 세션(sessionsMap) 중 실제 종목이 있는데도 아직 회원에게
-// 공개되지 않은(isPublished!==true) 기록이 있는 회원을 찾는다. MembersScreen의 기존 "미기록" 필터와
-// 동일한 isPublished 기준을 재사용하되, 빈 임시저장 세션(mkEx 기본 빈 카드)은 getTodaySessionStatus·
-// buildNextBookingList와 동일한 hasRealExercise 판별로 제외한다. 새 필드·새 상태값을 만들지 않는다.
-function buildUnsentSessionMembers(members, liveMembersById, sessionsMap) {
+// 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
+// 저장돼 있는데 아직 회원에게 전송(isPublished)만 안 된 회원"만 대상 — 오늘 수업 기록이 저장됐지만 미전송,
+// 또는 과거 수업 기록이 저장됐지만 미전송인 경우만 포함(hasRealExercise 판별은 buildNextBookingList와 동일).
+// 미래 날짜 데이터가 섞여도 d<=todayKST로 방어. 회원당 미전송 기록이 여러 건이면 가장 최근 날짜 1건만 대표로 노출한다.
+function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayKST) {
   const rows = [];
   (members || []).forEach(m => {
     if (isExcludedAdminMember(m)) return;
@@ -7498,13 +7535,37 @@ function buildUnsentSessionMembers(members, liveMembersById, sessionsMap) {
     const lm = live ? { ...m, ...live } : m;
     if ((lm.status || "active") !== "active") return;
     const ss = sessionsMap?.[lm.id] || [];
-    const hasUnsent = ss.some(s => {
+    let latestDate = "";
+    ss.forEach(s => {
+      const d = normalizeSessionDateKey(s.date || s.sessionDate || s.createdAt);
+      if (!d || d > todayKST) return; // 미래 예약/미진행 수업은 제외
       const hasRealExercise = (s.exercises || []).some(e => e?.name || isFuncEx(e));
-      return hasRealExercise && s.isPublished !== true;
+      if (hasRealExercise && s.isPublished !== true && d > latestDate) latestDate = d;
     });
-    if (hasUnsent) rows.push(lm);
+    if (latestDate) rows.push({ member: lm, date: latestDate });
   });
-  return rows.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+  return rows.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
+  });
+}
+
+// 홈 "후기 미작성" — HubScreen 후기 관리 카드와 동일한 reviewStatus 필드·클램프 기준(목표 1·2회, 완료 0~목표)만 재사용.
+// 목표가 설정되지 않은 회원, 완료 횟수가 목표에 도달한 회원은 제외한다.
+function buildReviewPendingList(members, liveMembersById) {
+  const rows = [];
+  (members || []).forEach(m => {
+    if (isExcludedAdminMember(m)) return;
+    const live = liveMembersById[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return;
+    const required = Number(lm.reviewStatus?.requiredCount);
+    if (required !== 1 && required !== 2) return;
+    const completed = Math.min(Math.max(Number(lm.reviewStatus?.completedCount) || 0, 0), required);
+    if (completed >= required) return;
+    rows.push({ member: lm, required, completed });
+  });
+  return rows.sort((a, b) => String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko"));
 }
 
 // 홈 "오늘의 AI 코칭" — 실제 체크 필요 회원(todaySummary.attention) 1순위를 코칭 문장으로 변환. 새로운 분석/API 없이 기존 집계만 재사용.
@@ -10832,7 +10893,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
     }}>{label}</button>
   );
   const secReview = (
-          <section className="hub-sec-review" style={{...card, padding:"14px 16px 16px"}}>
+          <section id="hub-sec-review" className="hub-sec-review" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
               <span style={cardTitle}>{reviewDone ? "후기 완료" : "후기 관리"}</span>
               {reviewDone && (

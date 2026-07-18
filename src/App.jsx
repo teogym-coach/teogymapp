@@ -9763,6 +9763,129 @@ function DailyConditioningAdminScreen({member,onBack,showToast}){const today=get
 // ════════════════════════════════════════════
 // HUB
 // ════════════════════════════════════════════
+// ── 회원 상세 "오늘 브리핑" 최근 체중 흐름 ─────────────────────────
+// 표시 대상 목표는 이 배열 한 곳에서만 관리한다 (값은 온보딩/프로필 goal 저장 문자열 원본과 비교)
+const WEIGHT_TREND_GOALS = ["다이어트", "벌크업", "체중 유지"];
+const shouldShowWeightTrend = (goal) => WEIGHT_TREND_GOALS.includes(String(goal || "").trim());
+
+function HubWeightTrendTooltip({ active, payload }) {
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div style={{background:DB.text,color:"#fff",borderRadius:8,padding:"5px 9px",fontSize:11,fontFamily:DB.font,lineHeight:1.5,boxShadow:DB.shadowLg}}>
+      <div style={{fontWeight:700,fontSize:10,opacity:.85}}>{String(p.date).split("-").join(".")}</div>
+      <div style={{fontWeight:800,fontVariantNumeric:"tabular-nums"}}>{p.weight}kg</div>
+    </div>
+  );
+}
+
+// records: getBodyWeightRecords 결과([{date,weight}] — 유효값만, 날짜순). 조회 전용 — 저장 로직 없음.
+// 기간 선택(mode)은 로컬 UI 상태로만 관리하고, 회원 이동 시 key={member.id}로 초기화된다.
+function HubWeightTrendSection({ records, chartHeight = 150 }) {
+  const [mode, setMode] = useState("recent"); // "recent" 최근 7회 | "all" 전체 변화
+  // 같은 날짜 중복 기록은 마지막 기록만 사용 (기존 화면들이 최신값을 대표값으로 쓰는 방식과 동일)
+  const all = useMemo(() => {
+    const byDate = new Map();
+    (records || []).forEach(r => {
+      const x = Math.round(Date.parse(String(r.date)) / 86400000); // "YYYY-MM-DD"는 UTC 자정 — 실제 날짜 간격 비례 배치용
+      if (Number.isFinite(x)) byDate.set(String(r.date), { date: String(r.date), weight: r.weight, x });
+    });
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }, [records]);
+
+  const view = mode === "recent" ? all.slice(-7) : all;
+  const latest = all.length ? all[all.length - 1] : null;
+  const round1 = v => Math.round(v * 10) / 10;
+  const periodDiff = view.length >= 2 ? round1(latest.weight - view[0].weight) : null;
+  const totalDiff = all.length >= 2 ? round1(latest.weight - all[0].weight) : null;
+  const fmtDiff = v => `${v > 0 ? "+" : ""}${v}kg`;
+
+  const secWrap = { marginBottom:9, paddingBottom:9, borderBottom:DB.hairline };
+  const secLabel = { fontSize:10.5, fontWeight:800, color:DB.sub, fontFamily:DB.font };
+  const diffChip = (label, v) => (
+    <span style={{fontSize:10.5,fontWeight:700,fontFamily:DB.font,padding:"2.5px 9px",borderRadius:999,background:DB.bg,border:`1px solid ${DB.border}`,color:DB.sub,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+      {label} {fmtDiff(v)}
+    </span>
+  );
+
+  if (!all.length) {
+    return (
+      <div style={secWrap}>
+        <span style={secLabel}>최근 체중 흐름</span>
+        <div style={{fontSize:11.5,color:DB.faint,fontFamily:DB.font,marginTop:5}}>아직 입력된 체중 기록이 없습니다.</div>
+      </div>
+    );
+  }
+
+  // Y축 과장 방지 — 최소 2kg 표시 범위 + 상하 여백으로 소수점 변화가 급등락처럼 보이지 않게 한다
+  const ws = view.map(d => d.weight);
+  let yLo = Math.min(...ws), yHi = Math.max(...ws);
+  if (yHi - yLo < 2) { const mid = (yHi + yLo) / 2; yLo = mid - 1; yHi = mid + 1; }
+  const yPad = (yHi - yLo) * 0.18;
+  const yDomain = [yLo - yPad, yHi + yPad];
+
+  // X축 라벨 — 겹침 방지를 위해 첫·중간·마지막 위주로만 표시 (전체 모드는 기간을 3등분)
+  const x0 = view[0].x, x1 = view[view.length - 1].x;
+  const spanDays = x1 - x0;
+  const xTicks = view.length <= 7
+    ? [...new Set([x0, view[Math.floor((view.length - 1) / 2)].x, x1])]
+    : [...new Set([x0, x0 + Math.round(spanDays / 3), x0 + Math.round(spanDays * 2 / 3), x1])];
+  const fmtTick = (n) => {
+    const d = new Date(n * 86400000);
+    return spanDays > 330 ? `${String(d.getUTCFullYear()).slice(2)}.${d.getUTCMonth() + 1}` : `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  };
+  const renderDot = (props) => {
+    const { cx, cy, index } = props;
+    if (cx == null || cy == null) return null;
+    const isLast = index === view.length - 1; // 최신 기록 강조
+    return <circle key={`wt-${index}`} cx={cx} cy={cy} r={isLast ? 4.5 : 2.8} fill={isLast ? DB.mint : "#fff"} stroke={DB.mint} strokeWidth={isLast ? 2 : 1.5} />;
+  };
+
+  return (
+    <div style={secWrap}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+        <span style={secLabel}>최근 체중 흐름</span>
+        {all.length >= 2 && (
+          <div style={{display:"flex",gap:4}}>
+            {[["recent","최근 7회"],["all","전체 변화"]].map(([k,label]) => (
+              <button key={k} type="button" onClick={()=>setMode(k)} style={{
+                border:`1px solid ${mode===k?"transparent":DB.border}`, background:mode===k?DB.mintTintStrong:DB.card,
+                color:mode===k?DB.mintSoft:DB.faint, borderRadius:999, padding:"3px 10px",
+                fontSize:10, fontWeight:700, fontFamily:DB.font, cursor:"pointer",
+              }}>{label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginTop:4}}>
+        <span style={{fontSize:17,fontWeight:800,color:DB.text,fontFamily:DB.font,fontVariantNumeric:"tabular-nums"}}>
+          {latest.weight}<small style={{fontSize:10.5,fontWeight:600,color:DB.faint,marginLeft:1}}>kg</small>
+        </span>
+        {mode === "recent" && periodDiff !== null && diffChip(`최근 ${view.length}회`, periodDiff)}
+        {totalDiff !== null && diffChip("시작 대비", totalDiff)}
+      </div>
+      {all.length === 1 ? (
+        <div style={{fontSize:11,color:DB.faint,fontFamily:DB.font,marginTop:4}}>
+          기록 1회 · {String(latest.date).split("-").join(".")} 입력 — 기록이 2회 이상이면 흐름 그래프가 표시됩니다.
+        </div>
+      ) : (
+        <div style={{marginTop:4}}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <LineChart data={view} margin={{top:10,right:10,bottom:0,left:10}}>
+              <XAxis dataKey="x" type="number" domain={[x0, x1]} ticks={xTicks} interval={0} tickFormatter={fmtTick}
+                tick={{fontSize:9.5,fill:DB.faint,fontFamily:DB.font}} axisLine={{stroke:DB.border}} tickLine={false} tickMargin={5} />
+              <YAxis domain={yDomain} hide />
+              <Tooltip content={<HubWeightTrendTooltip/>} cursor={{stroke:DB.border,strokeWidth:1}} />
+              <Line type="monotone" dataKey="weight" stroke={DB.mint} strokeWidth={2} dot={renderDot}
+                activeDot={{r:5,fill:DB.mint,stroke:"#fff",strokeWidth:2}} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone }) {
   const isCorr = false;
   const isMyself = isOwner(member);
@@ -10208,6 +10331,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 <button onClick={()=>setScreen("soreness")} style={{border:"none",background:"rgba(249,115,22,.08)",color:"#c2410c",borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>근육통 기록 →</button>
               </div>
             </div>
+            {/* 최근 체중 흐름 — 목표(다이어트·벌크업·체중 유지)에만 표시, 조회 전용. key로 회원 이동 시 기간 선택 초기화 */}
+            {!loading && shouldShowWeightTrend(ob?.goal || member.goal) && (
+              <HubWeightTrendSection key={member.id} records={wEntries} chartHeight={isWide ? 156 : 148} />
+            )}
             {/* 통증 — "없음(확인됨)"과 "오늘 미입력(기록 자체가 없음)"은 안전상 반드시 구분해서 표시한다 */}
             {ciPainRec && ciPainRec.part!=="없음" ? (
               <div style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",borderRadius:DB.radiusSm,background:"rgba(239,68,68,.07)",color:"#B02A2A",fontSize:12.5,fontWeight:700,marginBottom:7,flexWrap:"wrap"}}>

@@ -7001,24 +7001,37 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                   // 오늘 완료 회원은 오늘 수업 시간이 더 이상 중요하지 않으므로 시간 대신 다음 수업 준비 요약을 보여준다(상태 판별·정렬은 그대로).
                   const isDone = item.status === "done";
                   const nextSummary = isDone ? getNextWorkoutSummary(item.m) : "";
+                  // 세로모드(!isWide) 전용 짧은 상태 문구 — 상태 판별(item.status)은 그대로, "오늘 예정"만 "기록 전"으로 더 짧게(가로모드 라벨은 그대로 유지)
+                  const narrowStatusLabel = item.status === "scheduled" ? "기록 전" : st.label;
                   return (
                     <div key={item.m.id} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
                       <div style={{width:3,height:36,borderRadius:2,background:st.solid,flexShrink:0}}/>
-                      <div style={{width:40,height:40,borderRadius:"50%",background:DB.mintTint,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(item.m.name||"?").slice(0,1)}</div>
+                      {/* 원형 성 아바타 — 세로모드는 폭이 좁아 이름이 잘리므로 숨기고, 그 공간을 이름에 넘긴다(가로모드는 기존 그대로 유지) */}
+                      {isWide && (
+                        <div style={{width:40,height:40,borderRadius:"50%",background:DB.mintTint,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(item.m.name||"?").slice(0,1)}</div>
+                      )}
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14.5,color:DB.text,letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        <div style={{fontFamily:DB.font,fontWeight:700,fontSize:isWide?14.5:15.5,color:DB.text,letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                           {!isDone && <span style={{color:item.time?DB.sub:DB.faint,fontWeight:800,marginRight:6}}>{item.time||"시간 미정"}</span>}
-                          {item.m.name} 회원
+                          {item.m.name}{isWide?" 회원":""}
                         </div>
-                        <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginTop:2}}>{item.part}{cond?` · 컨디션 ${item.todayDoc.condition}`:""}</div>
+                        <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {item.part}{(isWide&&cond)?` · 컨디션 ${item.todayDoc.condition}`:""}
+                        </div>
                         {isDone && (
                           <div style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:nextSummary?DB.mintSoft:DB.faint,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                             {nextSummary ? `다음 수업 · ${nextSummary}` : "다음 수업 미정"}
                           </div>
                         )}
+                        {/* 세로모드는 상태 배지를 오른쪽 대신 이름 아래에 — 가로모드 폭 제약을 받지 않고 항상 선명하게 보이도록 */}
+                        {!isWide && (
+                          <div style={{display:"inline-block",fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:20,background:st.tint,color:st.soft,marginTop:4}}>{narrowStatusLabel}</div>
+                        )}
                       </div>
-                      {cond && <div title={`컨디션 ${item.todayDoc.condition}`} style={{fontSize:17,flexShrink:0}}>{cond.emoji}</div>}
-                      <div style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:20,background:st.tint,color:st.soft,flexShrink:0}}>{st.label}</div>
+                      {isWide && cond && <div title={`컨디션 ${item.todayDoc.condition}`} style={{fontSize:17,flexShrink:0}}>{cond.emoji}</div>}
+                      {isWide && (
+                        <div style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:20,background:st.tint,color:st.soft,flexShrink:0}}>{st.label}</div>
+                      )}
                     </div>
                   );
                 })}
@@ -8177,8 +8190,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
               ? (getNextWorkoutInfo(m).part && getNextWorkoutInfo(m).part !== "미정" ? getNextWorkoutInfo(m).part : "")
               : (meta.lastMuscle || "");
             const todayStatusText = statusStyle ? `${statusStyle.label}${todayPart ? ` · ${todayPart}` : ""}` : "";
-            // 오늘 완료 회원은 시간 대신 다음 수업 준비 요약(날짜·부위 중심, 메모 제외 — 목록 카드는 공간이 좁음)을 보여준다.
-            const nextPrepText = todayStatus === "done" ? getNextWorkoutSummary(m, { includeMemo:false, maxLen:16 }) : "";
+            // 오늘 완료 회원은 오늘 정보(todayStatusText)와 시각적으로 분리된 별도 줄로 다음 수업 준비(날짜·부위, 메모 제외)를 보여준다.
+            const nextListLine = todayStatus === "done" ? getNextWorkoutListLine(m) : "";
             const goalChips = [...new Set([m.goal, (m.survey?.priorityGoal||"").replace(" 우선","")].map(g=>String(g||"").trim()).filter(Boolean))].slice(0,2);
             // 기존 attentionById는 실제 AI 생성 결과가 아니라 규칙 기반 확인 필요 사유이므로 "확인 필요"로 표시(AI 코멘트 아님)
             const reasons = attentionById.get(m.id);
@@ -8229,18 +8242,12 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
                           </button>
                         )}
                       </div>
-                      {/* 다음 수업 */}
+                      {/* 다음 수업 — 오늘 완료 회원은 오늘 정보만(다음 수업 준비는 아래 별도 줄) */}
                       <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,minWidth:0}}>
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                         <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:(statusStyle||next.hot)?800:600,color:statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                           {statusStyle ? (
-                            todayStatus === "done" ? (
-                              <>
-                                {todayStatusText}
-                                <span style={{color:DB.faint}}> · </span>
-                                <span style={{color:nextPrepText?statusStyle.soft:DB.faint}}>{nextPrepText ? `다음 수업 ${nextPrepText}` : "다음 수업 미정"}</span>
-                              </>
-                            ) : (
+                            todayStatus === "done" ? todayStatusText : (
                               <>
                                 <span style={{color:todayTimeKey?statusStyle.soft:DB.faint}}>{todayTimeText}</span>
                                 <span style={{color:DB.faint}}> · </span>
@@ -8253,6 +8260,12 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
                           <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>
                         )}
                       </div>
+                      {/* 다음 수업 준비 — 오늘 완료 회원만, 오늘 정보와 분리된 별도 줄(민트 톤)로 날짜·부위만 간결하게(메모 제외) */}
+                      {todayStatus === "done" && (
+                        <div style={{fontFamily:DB.font,fontSize:11,fontWeight:700,color:DB.mintSoft,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                          {nextListLine}
+                        </div>
+                      )}
                       {/* 목표 칩 — Apple Wallet 느낌 라운드 칩 */}
                       {!isEnded && goalChips.length>0 && (
                         <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
@@ -8371,6 +8384,19 @@ function getNextWorkoutSummary(member, opts) {
 
   if (!core) return "";
   return core.length > maxLen ? `${core.slice(0, maxLen)}…` : core;
+}
+// 회원 목록 카드(오늘 완료 전용) — "다음 {날짜} · {부위}" 압축 한 줄 표기. 날짜가 있으면 항상 날짜부터 보여주고
+// (목록 카드는 공간이 좁아 요일까지는 표시 안 함), 메모는 표시하지 않는다(getNextWorkoutSummary와 우선순위만 다름).
+function getNextWorkoutListLine(member) {
+  const parts = parseNextParts(member?.nextWorkoutPart || member?.nextPtPart);
+  const partText = parts.join("·");
+  const date = String(member?.nextWorkoutDate || member?.nextPtDate || "").slice(0, 10);
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const dateLabel = dm ? `${Number(dm[2])}/${Number(dm[3])}` : "";
+  if (dateLabel && partText) return `다음 ${dateLabel} · ${partText}`;
+  if (dateLabel) return `다음 ${dateLabel}`;
+  if (partText) return `다음 수업 · ${partText}`;
+  return "다음 수업 미정";
 }
 const upNavBtnStyle = { width: 28, height: 28, borderRadius: 8, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DB.font };
 

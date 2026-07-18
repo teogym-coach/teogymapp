@@ -6194,7 +6194,17 @@ function SideNavItem({ icon, label, active, onClick }) {
 
 // 좌측 고정 사이드바(iPad 가로 이상 와이드 화면 전용) — 홈 화면에서 쓰던 사이드바를 그대로 분리한 공용 컴포넌트.
 // 홈·회원 목록 등 와이드 레이아웃을 쓰는 모든 관리자 화면이 이 하나를 공유한다.
+// 세로모드(아이패드 세로 등 폭<높이)에서는 폭을 스스로 줄여 콘텐츠 영역을 더 확보한다 — 호출부 변경 없이 이 컴포넌트 하나만 반응형.
 function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }) {
+  const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
+  const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
+  useEffect(()=>{
+    const h=()=>{ setWinW(window.innerWidth); setWinH(window.innerHeight); };
+    window.addEventListener("resize",h);
+    return ()=>window.removeEventListener("resize",h);
+  },[]);
+  const isPortrait = winH > winW;
+  const sideWidth = isPortrait ? 190 : 236; // 190 = "공지사항 관리" 등 가장 긴 메뉴 글자가 잘리지 않는 최소치로 확인된 값
   const ni = (paths) => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths}</svg>
   );
@@ -6222,7 +6232,7 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
 
   return (
     <aside className="admin-sidebar" style={{
-      width:236,minWidth:236,background:DB.side,
+      width:sideWidth,minWidth:sideWidth,background:DB.side,
       borderRight:`1px solid ${DB.border}`,
       display:"flex",flexDirection:"column",
       height:"var(--admin-layout-height, 100dvh)",minHeight:0,overflow:"hidden",flexShrink:0,
@@ -6588,6 +6598,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
 
 function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
+  const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -6596,7 +6607,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const searchWrapRef = useRef(null);
   const searchInputRef = useRef(null);
   useEffect(()=>{
-    const h=()=>setWinW(window.innerWidth);
+    const h=()=>{ setWinW(window.innerWidth); setWinH(window.innerHeight); };
     window.addEventListener("resize",h);
     return ()=>window.removeEventListener("resize",h);
   },[]);
@@ -6607,6 +6618,9 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   },[]);
 
   const isWide = winW >= 768;
+  // 아이패드 세로처럼 winW만으로는 isWide=true(사이드바 폭 236px 차지)라 오늘 수업 카드가 여전히 좁게 눌리는 경우를 잡기 위한 실제 세로 방향 판별.
+  // "오늘 수업" 카드 레이아웃에서만 사용 — isWide 자체(그리드 컬럼 수 등 다른 레이아웃)는 건드리지 않는다.
+  const isPortrait = winH > winW;
   const todayKST = getKoreaDateString();
 
   // members(1회성 로드)가 비어있는 동안엔 실시간 구독(liveMembersById)으로 폴백 — 알림/KPI가 홈 진입 즉시 보이도록
@@ -7001,35 +7015,42 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                   // 오늘 완료 회원은 오늘 수업 시간이 더 이상 중요하지 않으므로 시간 대신 다음 수업 준비 요약을 보여준다(상태 판별·정렬은 그대로).
                   const isDone = item.status === "done";
                   const nextSummary = isDone ? getNextWorkoutSummary(item.m) : "";
-                  // 세로모드(!isWide) 전용 짧은 상태 문구 — 상태 판별(item.status)은 그대로, "오늘 예정"만 "기록 전"으로 더 짧게(가로모드 라벨은 그대로 유지)
-                  const narrowStatusLabel = item.status === "scheduled" ? "기록 전" : st.label;
+                  // 카드 내부 레이아웃 전용 플래그 — winW만으로는 아이패드 세로(예: 810px)도 isWide=true(사이드바 236px 차지)라
+                  // 여전히 좁게 눌리므로, 실제 세로 방향(isPortrait)이면 폭이 넓어도 폰과 같은 압축 레이아웃을 쓴다.
+                  // isWide 자체(그리드 컬럼 수·사이드바 노출 여부 등 다른 레이아웃)는 건드리지 않는다.
+                  const cardWide = isWide && !isPortrait;
+                  // 압축 레이아웃 전용 짧은 상태 문구 — 상태 판별(item.status)은 그대로, "오늘 예정"만 "기록 전"으로 더 짧게(와이드 라벨은 그대로 유지)
+                  const compactStatusLabel = item.status === "scheduled" ? "기록 전" : st.label;
                   return (
                     <div key={item.m.id} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
                       <div style={{width:3,height:36,borderRadius:2,background:st.solid,flexShrink:0}}/>
-                      {/* 원형 성 아바타 — 세로모드는 폭이 좁아 이름이 잘리므로 숨기고, 그 공간을 이름에 넘긴다(가로모드는 기존 그대로 유지) */}
-                      {isWide && (
+                      {/* 원형 성 아바타 — 압축 레이아웃은 폭이 좁아 이름이 잘리므로 숨기고, 그 공간을 이름에 넘긴다(와이드는 기존 그대로 유지) */}
+                      {cardWide && (
                         <div style={{width:40,height:40,borderRadius:"50%",background:DB.mintTint,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(item.m.name||"?").slice(0,1)}</div>
                       )}
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontFamily:DB.font,fontWeight:700,fontSize:isWide?14.5:15.5,color:DB.text,letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {/* 1순위: 회원 이름 — 아바타가 없는 만큼 폭을 거의 다 쓰므로 "회원"까지 대부분 그대로 보이고, 정말 길 때만 말줄임 */}
+                        <div style={{fontFamily:DB.font,fontWeight:700,fontSize:cardWide?14.5:15.5,color:DB.text,letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                           {!isDone && <span style={{color:item.time?DB.sub:DB.faint,fontWeight:800,marginRight:6}}>{item.time||"시간 미정"}</span>}
-                          {item.m.name}{isWide?" 회원":""}
+                          {item.m.name} 회원
                         </div>
+                        {/* 2순위: 오늘 운동 부위 */}
                         <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {item.part}{(isWide&&cond)?` · 컨디션 ${item.todayDoc.condition}`:""}
+                          {item.part}{(cardWide&&cond)?` · 컨디션 ${item.todayDoc.condition}`:""}
                         </div>
+                        {/* 3순위: 다음 수업 메모(오늘 완료 회원만 해당) */}
                         {isDone && (
                           <div style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:nextSummary?DB.mintSoft:DB.faint,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                             {nextSummary ? `다음 수업 · ${nextSummary}` : "다음 수업 미정"}
                           </div>
                         )}
-                        {/* 세로모드는 상태 배지를 오른쪽 대신 이름 아래에 — 가로모드 폭 제약을 받지 않고 항상 선명하게 보이도록 */}
-                        {!isWide && (
-                          <div style={{display:"inline-block",fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:20,background:st.tint,color:st.soft,marginTop:4}}>{narrowStatusLabel}</div>
+                        {/* 4순위: 오늘 완료 등 상태 배지 — 압축 레이아웃은 오른쪽 대신 이름 아래로(와이드는 카드 오른쪽 배지 유지) */}
+                        {!cardWide && (
+                          <div style={{display:"inline-block",fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:20,background:st.tint,color:st.soft,marginTop:4}}>{compactStatusLabel}</div>
                         )}
                       </div>
-                      {isWide && cond && <div title={`컨디션 ${item.todayDoc.condition}`} style={{fontSize:17,flexShrink:0}}>{cond.emoji}</div>}
-                      {isWide && (
+                      {cardWide && cond && <div title={`컨디션 ${item.todayDoc.condition}`} style={{fontSize:17,flexShrink:0}}>{cond.emoji}</div>}
+                      {cardWide && (
                         <div style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:20,background:st.tint,color:st.soft,flexShrink:0}}>{st.label}</div>
                       )}
                     </div>

@@ -5782,7 +5782,7 @@ export default function App() {
   );
 
   return (
-    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:screen==="session"?"#F6F7F9":"#0B1120"}}>
+    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub")?"#F6F7F9":"#0B1120"}}>
       <style>{CSS}</style>
 
       {toast && (
@@ -5846,7 +5846,7 @@ export default function App() {
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -10020,7 +10020,7 @@ function HubWeightTrendSection({ records, chartHeight = 150 }) {
   );
 }
 
-function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone }) {
+function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -10385,7 +10385,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         /* 세로(<1024px) 1열 배치는 CSS가 아니라 isWide JS 분기로 렌더링 — Safari display:contents 편차 회피.
            모든 섹션 카드는 부모 폭 100%를 사용하고 가로 overflow를 만들지 않는다 */
         .hub-light section{width:100%;min-width:0;box-sizing:border-box;}
-        @media(max-width:640px){.hub-vitals{grid-template-columns:1fr 1fr;}.hub-toolgrid{grid-template-columns:1fr 1fr;}.hub-prep-grid{grid-template-columns:1fr !important;}}
+        @media(max-width:640px){.hub-vitals{grid-template-columns:1fr 1fr;}.hub-toolgrid{grid-template-columns:1fr 1fr;}}
         /* 태블릿 가로모드 밀도 최적화 — 아이패드 등 width 900px+/height 650~950px/landscape에서
            스크롤을 줄이도록 카드 내부 여백·카드 간격·버튼 높이만 압축한다. 레이아웃 구조·정보·기능은 그대로. */
         @media (min-width:900px) and (min-height:650px) and (max-height:950px) and (orientation:landscape){
@@ -10397,7 +10397,6 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           .hub-sec-today{padding:11px 14px !important;}
           .hub-sec-prep{padding:10px 13px 12px !important;}
           .hub-vitals>div{padding:5px 9px !important;}
-          .hub-sec-prep textarea{min-height:38px !important;}
           .hub-sec-analysis>button,.hub-sec-manage>button{padding:9px 14px !important;}
           /* 액션 버튼(min-height 인라인 스타일이 있는 CTA류)만 선택적으로 압축 — 칩·토글류는 그대로 둔다 */
           .hub-sec-today button[style*="min-height"],.hub-sec-prep button.hub-cta-compact{min-height:38px !important;padding:9px 18px !important;font-size:13px !important;}
@@ -10713,6 +10712,33 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
   );
 
   // ④ 다음 수업 준비
+  // 운동 부위 선택 팝업 — 버튼 클릭 시 열리고, 바깥 클릭 또는 완료 클릭 시 닫힘
+  const partsPopupRef = useRef(null);
+  const [showPartsPopup, setShowPartsPopup] = useState(false);
+  useEffect(() => {
+    if (!showPartsPopup) return;
+    const onDocClick = (e) => { if (partsPopupRef.current && !partsPopupRef.current.contains(e.target)) setShowPartsPopup(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [showPartsPopup]);
+  // 저장 버튼 — 기존 handleSaveNextDate/Time/Part와 동일한 patch+updateMember+onMemberPatch 패턴을 재사용해
+  // 현재 표시된 값을 한 번에 재확인 저장하고, 성공 시에만 토스트를 띄운다
+  const handleSavePrep = async () => {
+    if (ptSaving) return;
+    setPtSaving(true);
+    try {
+      const part = member.nextWorkoutPart || member.nextPtPart || "미정";
+      const patch = {
+        nextWorkoutDate: member.nextWorkoutDate || "",
+        nextWorkoutTime: member.nextWorkoutTime || "",
+        nextWorkoutPart: part, nextPtPart: part,
+        nextWorkoutDateUpdatedAt: new Date().toISOString(),
+      };
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      showToast?.("다음 수업 준비가 저장되었습니다.");
+    } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setPtSaving(false); }
+  };
   const secPrep = (
           <section id="hub-next-session" className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12,flexWrap:"wrap"}}>
@@ -10722,43 +10748,56 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 <button onClick={()=>setScreen("routine_recommend")} style={{border:"none",background:DB.mintTint,color:DB.mintSoft,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>루틴 추천 전송 →</button>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"190px 1fr",gap:14}} className="hub-prep-grid">
-              <div>
-                <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:7}}>다음 수업 날짜</span>
-                <label style={{display:"block",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"12px 15px",position:"relative",cursor:ptSaving?"default":"pointer"}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"flex-start"}} className="hub-prep-row">
+              <div style={{flex:"0 1 148px",minWidth:128}}>
+                <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:6}}>다음 수업 날짜</span>
+                <label style={{display:"block",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"9px 12px",position:"relative",cursor:ptSaving?"default":"pointer"}}>
                   <input type="date" value={member.nextWorkoutDate||""} onChange={e=>handleSaveNextDate(e.target.value)} disabled={ptSaving} style={{position:"absolute",inset:0,opacity:0,width:"100%",height:"100%",cursor:ptSaving?"default":"pointer"}}/>
-                  <b style={{fontSize:15,fontWeight:800,letterSpacing:"-.2px",display:"block",fontVariantNumeric:"tabular-nums"}}>{member.nextWorkoutDate?formatCompactDate(member.nextWorkoutDate):"날짜 미정"}</b>
-                  <small style={{fontSize:11,fontWeight:700,color:DB.mintSoft}}>{nextPtInfo.dDay!=="D-?"?nextPtInfo.dDay+" · ":""}탭하여 변경</small>
+                  <b style={{fontSize:13.5,fontWeight:800,letterSpacing:"-.2px",display:"block",fontVariantNumeric:"tabular-nums"}}>{member.nextWorkoutDate?formatCompactDate(member.nextWorkoutDate):"날짜 미정"}</b>
+                  <small style={{fontSize:10.5,fontWeight:700,color:DB.mintSoft}}>{nextPtInfo.dDay!=="D-?"?nextPtInfo.dDay+" · ":""}탭하여 변경</small>
                 </label>
-                <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",margin:"10px 0 7px"}}>다음 수업 시간</span>
-                <select value={member.nextWorkoutTime||""} onChange={e=>handleSaveNextTime(e.target.value)} disabled={ptSaving} style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"12px 15px",fontSize:14,fontWeight:800,color:DB.text,fontFamily:DB.font,cursor:ptSaving?"default":"pointer"}}>
+              </div>
+              <div style={{flex:"0 1 128px",minWidth:110}}>
+                <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:6}}>다음 수업 시간</span>
+                <select value={member.nextWorkoutTime||""} onChange={e=>handleSaveNextTime(e.target.value)} disabled={ptSaving} style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"9px 10px",fontSize:13,fontWeight:800,color:DB.text,fontFamily:DB.font,cursor:ptSaving?"default":"pointer"}}>
                   <option value="">시간 미정</option>
                   {NEXT_SESSION_TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              <div>
-                <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:7}}>다음 운동 부위 (복수 선택)</span>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {NEXT_PT_PART_OPTIONS.map(x=>{
-                    const active = x==="미정" ? currentNextParts.length===0 : currentNextParts.includes(x);
-                    return (
-                      <button key={x} type="button" disabled={ptSaving} onClick={()=>toggleNextPart(x)} style={{
-                        borderRadius:999,padding:"8px 14px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,cursor:ptSaving?"default":"pointer",
-                        border:`1px solid ${active?DB.mint:DB.border}`, background:active?DB.mintTintStrong:DB.card, color:active?DB.mintSoft:DB.sub,
-                      }}>{x}</button>
-                    );
-                  })}
+              <div style={{flex:"1 1 220px",minWidth:200}}>
+                <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:6}}>운동 부위</span>
+                <div ref={partsPopupRef} style={{position:"relative"}}>
+                  <button type="button" disabled={ptSaving} onClick={()=>setShowPartsPopup(v=>!v)} style={{width:"100%",boxSizing:"border-box",display:"flex",alignItems:"center",flexWrap:"wrap",gap:5,textAlign:"left",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"7px 10px",minHeight:38,cursor:ptSaving?"default":"pointer",fontFamily:DB.font}}>
+                    {currentNextParts.length===0 ? (
+                      <span style={{fontSize:13,fontWeight:700,color:DB.faint}}>운동 부위 선택</span>
+                    ) : currentNextParts.map(p=>(
+                      <span key={p} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11.5,fontWeight:700,color:DB.mintSoft,background:DB.mintTintStrong,borderRadius:999,padding:"4px 6px 4px 10px"}}>
+                        {p}
+                        <span role="button" aria-label={`${p} 선택 해제`} onClick={(e)=>{e.stopPropagation(); toggleNextPart(p);}} style={{cursor:"pointer",fontSize:12,lineHeight:1,color:DB.mintSoft}}>×</span>
+                      </span>
+                    ))}
+                  </button>
+                  {showPartsPopup && (
+                    <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,right:0,zIndex:30,background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,boxShadow:DB.shadowLg,padding:10,maxWidth:"min(340px,calc(100vw - 32px))",boxSizing:"border-box"}}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                        {NEXT_PT_PART_OPTIONS.map(x=>{
+                          const active = x==="미정" ? currentNextParts.length===0 : currentNextParts.includes(x);
+                          return (
+                            <button key={x} type="button" disabled={ptSaving} onClick={()=>toggleNextPart(x)} style={{
+                              borderRadius:999,padding:"6px 12px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:ptSaving?"default":"pointer",
+                              border:`1px solid ${active?DB.mint:DB.border}`, background:active?DB.mintTintStrong:DB.card, color:active?DB.mintSoft:DB.sub,
+                            }}>{x}</button>
+                          );
+                        })}
+                      </div>
+                      <button type="button" onClick={()=>setShowPartsPopup(false)} style={{width:"100%",border:"none",borderRadius:9,padding:"8px",fontSize:12,fontWeight:800,fontFamily:DB.font,color:"#fff",background:DB.mintSoft,cursor:"pointer"}}>완료</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
             <div style={{marginTop:14}}>
-              <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:7}}>준비 메모</span>
-              <textarea value={nextMemoDraft} onChange={e=>onNextMemoChange(e.target.value)} placeholder="다음 수업에서 진행할 내용을 메모하세요"
-                style={{width:"100%",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"11px 14px",fontFamily:DB.font,fontSize:13,color:DB.text,resize:"none",minHeight:60,lineHeight:1.6}}/>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
-              <button className="hub-cta-compact" onClick={()=>handleSaveNextMemo(nextMemoDraft)} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
-              <span style={{fontSize:11.5,fontWeight:700,color:"#15803D",display:"flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:DB.success}}/>{nextMemoSavedAt?`저장됨 · ${formatWhenLabel(nextMemoSavedAt)||"-"}`:"아직 저장되지 않음"}</span>
+              <button className="hub-cta-compact" onClick={handleSavePrep} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
             </div>
           </section>
   );

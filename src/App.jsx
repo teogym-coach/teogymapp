@@ -6998,16 +6998,24 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                 {todaySess.slice(0,6).map((item,i)=>{
                   const st = TODAY_STATUS_STYLE[item.status];
                   const cond = item.todayDoc ? (CC[item.todayDoc.condition] || null) : null;
+                  // 오늘 완료 회원은 오늘 수업 시간이 더 이상 중요하지 않으므로 시간 대신 다음 수업 준비 요약을 보여준다(상태 판별·정렬은 그대로).
+                  const isDone = item.status === "done";
+                  const nextSummary = isDone ? getNextWorkoutSummary(item.m) : "";
                   return (
                     <div key={item.m.id} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
                       <div style={{width:3,height:36,borderRadius:2,background:st.solid,flexShrink:0}}/>
                       <div style={{width:40,height:40,borderRadius:"50%",background:DB.mintTint,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(item.m.name||"?").slice(0,1)}</div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14.5,color:DB.text,letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          <span style={{color:item.time?DB.sub:DB.faint,fontWeight:800,marginRight:6}}>{item.time||"시간 미정"}</span>
+                          {!isDone && <span style={{color:item.time?DB.sub:DB.faint,fontWeight:800,marginRight:6}}>{item.time||"시간 미정"}</span>}
                           {item.m.name} 회원
                         </div>
                         <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginTop:2}}>{item.part}{cond?` · 컨디션 ${item.todayDoc.condition}`:""}</div>
+                        {isDone && (
+                          <div style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:nextSummary?DB.mintSoft:DB.faint,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {nextSummary ? `다음 수업 · ${nextSummary}` : "다음 수업 미정"}
+                          </div>
+                        )}
                       </div>
                       {cond && <div title={`컨디션 ${item.todayDoc.condition}`} style={{fontSize:17,flexShrink:0}}>{cond.emoji}</div>}
                       <div style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:20,background:st.tint,color:st.soft,flexShrink:0}}>{st.label}</div>
@@ -8169,6 +8177,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
               ? (getNextWorkoutInfo(m).part && getNextWorkoutInfo(m).part !== "미정" ? getNextWorkoutInfo(m).part : "")
               : (meta.lastMuscle || "");
             const todayStatusText = statusStyle ? `${statusStyle.label}${todayPart ? ` · ${todayPart}` : ""}` : "";
+            // 오늘 완료 회원은 시간 대신 다음 수업 준비 요약(날짜·부위 중심, 메모 제외 — 목록 카드는 공간이 좁음)을 보여준다.
+            const nextPrepText = todayStatus === "done" ? getNextWorkoutSummary(m, { includeMemo:false, maxLen:16 }) : "";
             const goalChips = [...new Set([m.goal, (m.survey?.priorityGoal||"").replace(" 우선","")].map(g=>String(g||"").trim()).filter(Boolean))].slice(0,2);
             // 기존 attentionById는 실제 AI 생성 결과가 아니라 규칙 기반 확인 필요 사유이므로 "확인 필요"로 표시(AI 코멘트 아님)
             const reasons = attentionById.get(m.id);
@@ -8224,11 +8234,19 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                         <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:(statusStyle||next.hot)?800:600,color:statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                           {statusStyle ? (
-                            <>
-                              <span style={{color:todayTimeKey?statusStyle.soft:DB.faint}}>{todayTimeText}</span>
-                              <span style={{color:DB.faint}}> · </span>
-                              {todayStatusText}
-                            </>
+                            todayStatus === "done" ? (
+                              <>
+                                {todayStatusText}
+                                <span style={{color:DB.faint}}> · </span>
+                                <span style={{color:nextPrepText?statusStyle.soft:DB.faint}}>{nextPrepText ? `다음 수업 ${nextPrepText}` : "다음 수업 미정"}</span>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{color:todayTimeKey?statusStyle.soft:DB.faint}}>{todayTimeText}</span>
+                                <span style={{color:DB.faint}}> · </span>
+                                {todayStatusText}
+                              </>
+                            )
                           ) : next.text}
                         </span>
                         {meta.remaining !== null && (
@@ -8328,6 +8346,31 @@ function getMemberNextSessionInfo(m) {
   // nextWorkoutTime — "HH:00" 정각 문자열 또는 미저장(빈 문자열)="시간 미정". 별도 boolean 필드 없이 값 유무만으로 판별한다.
   const time = String(m?.nextWorkoutTime || "").trim();
   return { date, part, time };
+}
+// 오늘 완료 회원 카드에서 "시간 미정" 대신 보여줄 다음 수업 준비 요약 — HubScreen이 이미 저장해 둔 필드만 읽어
+// 표시용 문자열 하나만 만든다(Firebase 쓰기·데이터 변경 없음). 홈 화면·회원 목록이 공통으로 사용한다.
+// 우선순위: 부위+메모 > 부위만 > 메모만 > 날짜/시간만 > 없음("") — 빈 문자열이면 호출부에서 "다음 수업 미정"으로 표시한다.
+// includeMemo:false면 메모를 뺀다(회원 목록처럼 공간이 좁아 날짜·부위만 보여줄 때 사용).
+function getNextWorkoutSummary(member, opts) {
+  const includeMemo = opts?.includeMemo !== false;
+  const maxLen = opts?.maxLen || 22;
+  const parts = parseNextParts(member?.nextWorkoutPart || member?.nextPtPart);
+  const partText = parts.join(" · ");
+  const memo = String(member?.nextWorkoutMemo || "").trim();
+  const date = String(member?.nextWorkoutDate || member?.nextPtDate || "").slice(0, 10);
+  const time = String(member?.nextWorkoutTime || "").trim();
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const dateLabel = dm ? `${Number(dm[2])}/${Number(dm[3])}` : "";
+  const dateTimeText = [dateLabel, time].filter(Boolean).join(" ");
+
+  let core = "";
+  if (partText && memo && includeMemo) core = `${partText} · ${memo}`;
+  else if (partText) core = partText;
+  else if (memo && includeMemo) core = memo;
+  else if (dateTimeText) core = dateTimeText;
+
+  if (!core) return "";
+  return core.length > maxLen ? `${core.slice(0, maxLen)}…` : core;
 }
 const upNavBtnStyle = { width: 28, height: 28, borderRadius: 8, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DB.font };
 

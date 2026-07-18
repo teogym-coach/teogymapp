@@ -7343,12 +7343,15 @@ function buildTodaySummary(members, liveMembersById, todayKST) {
 // sessionsMap은 회원별 최근 5세션(getRecentSessions)만 담고 있어 그 범위 안에서 판별한다.
 // 임시저장(실제 종목 없는 빈 세션)은 hasRealExercise 조건으로 자연히 제외되고, 취소 플래그는 데이터 구조상 없어
 // nextWorkoutDate가 비어 있으면 그대로 "다음 예약 없음"으로 처리된다.
+// 회원 상태 필터 — 기존 member.status 필드(값 없으면 "active" 기본, MembersScreen의 mStatus(m)와 동일 판정)를 그대로 재사용해
+// "active"가 아닌 회원(휴식중=paused/종료=ended 등)은 다음 예약 판별 이전에 제외한다. 새 상태값·새 필드는 만들지 않는다.
 function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
   const rows = [];
   (members || []).forEach(m => {
     if (isExcludedAdminMember(m)) return;
     const live = liveMembersById[m.id];
     const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return; // 휴식중/종료 등 비유효 회원 제외
     const ss = sessionsMap?.[lm.id] || [];
     const realPast = ss
       .filter(s => {

@@ -2559,13 +2559,16 @@ function MemberFeedbackForm({s,onSave}){
   const [rpeDirty,setRpeDirty]=useState(false); // 이번 세션 카드에서 RPE 숫자를 직접 눌렀는지 — 저장값도 없고 누르지도 않았으면 "선택해주세요" 힌트 표시
   // RPE·근육통·메모는 서로 독립된 저장 버튼을 가진다 — 한 항목을 저장해도 다른 두 항목의 기존 저장값은 건드리지 않는다(saveSessionMemberFeedback이 전달된 필드만 merge 저장).
   const [savingSection,setSavingSection]=useState(null); // "rpe" | "soreness" | "memo" | null — 저장 중 중복 클릭 방지
+  const cardRef=useRef(null);
+  const editRef=useRef(null);
+  const wantScrollRef=useRef(false); // "펼치기" 버튼을 직접 눌렀을 때만 true — 자동 스크롤 1회 실행 플래그
   useEffect(()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
     setRpe(initialRpe());
     setMemo(existing.memo||"");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[existing.sorenessLevel,existing.sorenessBodyPart,sorenessBodyPartsKey,existing.sorenessNature,existing.rpe,existing.memo]);
-  useEffect(()=>{ setOpen(false); setRpeDirty(false); },[s.id]);
+  useEffect(()=>{ setOpen(false); setRpeDirty(false); wantScrollRef.current=false; },[s.id]);
   const togglePart=part=>setSoreness(prev=>({...prev,parts:prev.parts.includes(part)?prev.parts.filter(x=>x!==part):[...prev.parts,part]}));
   const hasRpe=existing.rpe!=null;
   const cancel=()=>{
@@ -2588,15 +2591,36 @@ function MemberFeedbackForm({s,onSave}){
   const saveMemo=()=>saveSection("memo",{memo:memo.trim()});
   const riskSelected=SORENESS_RISK_NATURES.includes(soreness.nature)&&soreness.level!=="없음";
   const riskSaved=SORENESS_RISK_NATURES.includes(existing.sorenessNature||"")&&existing.sorenessLevel&&existing.sorenessLevel!=="없음";
-  return <div className="sj-feedback-card">
+  // 펼치기 직후 자동 스크롤 — 사용자가 "펼치기" 버튼을 직접 눌렀을 때만 1회 실행(wantScrollRef).
+  // RPE/근육통/메모 입력·저장 등으로 인한 리렌더에서는 open이 그대로라 이 effect가 다시 돌지 않고,
+  // 돌더라도 wantScrollRef가 false라 스크롤하지 않는다.
+  const openWithScroll=()=>{ wantScrollRef.current=true; setOpen(true); };
+  useEffect(()=>{
+    if(!open||!wantScrollRef.current)return;
+    wantScrollRef.current=false;
+    // 펼침 DOM이 그려진 뒤 위치를 재도록 rAF 2회 대기 (App.jsx 기존 rAF+scroll 패턴 참고)
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      const edit=editRef.current; if(!edit)return;
+      const nav=document.querySelector(".member-nav");
+      const navH=nav?nav.getBoundingClientRect().height:66; // safe-area 포함 실측 높이
+      const editBottom=window.scrollY+edit.getBoundingClientRect().bottom;
+      // 메모 저장 버튼(edit 맨 아래)이 하단 내비 위 12px에 오도록 스크롤
+      let target=editBottom-(window.innerHeight-navH-12);
+      // 카드가 화면보다 길어도 헤더·RPE가 완전히 사라지지 않도록 카드 상단을 넘겨 스크롤하지 않음
+      const card=cardRef.current;
+      if(card)target=Math.min(target,window.scrollY+card.getBoundingClientRect().top-8);
+      if(target>window.scrollY)window.scrollTo({top:target,behavior:"smooth"});
+    }));
+  },[open]);
+  return <div className="sj-feedback-card" ref={cardRef}>
     <div className="sj-fb-head">
       <i className="sj-fb-ico"><SjIcon paths={SJ_PATHS.squarePen} size={15}/></i>
-      <b>오늘 수업 기록</b>
-      <button type="button" className="sj-fb-toggle" onClick={()=>open?cancel():setOpen(true)} aria-expanded={open}>{open?<>접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></>:<>펼치기 <SjIcon paths={SJ_PATHS.chevronDown} size={13}/></>}</button>
+      <b>오늘 어땠나요?</b>
+      <button type="button" className="sj-fb-toggle" onClick={()=>open?cancel():openWithScroll()} aria-expanded={open}>{open?<>접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></>:<>펼치기 <SjIcon paths={SJ_PATHS.chevronDown} size={13}/></>}</button>
     </div>
     {/* 접힌 상태는 헤더 한 줄만 — 단, 위험 신호(과거 기록)는 접혀 있어도 안내 유지 */}
     {!open&&riskSaved&&<em className="sj-fb-warning-inline"><SjIcon paths={SJ_PATHS.alert} size={13}/> 다음 수업 전 대표님께 꼭 알려주세요.</em>}
-    {open&&<div className="sj-fb-edit">
+    {open&&<div className="sj-fb-edit" ref={editRef}>
       <div className="sj-fb-section">
         <div className="sj-fb-label-row">
           <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>

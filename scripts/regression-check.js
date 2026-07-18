@@ -777,7 +777,7 @@ const checks = [
     app.includes('placeholder="오늘 운동 중 좋았던 점이나 아쉬웠던 점을 남겨주세요."')
   ],
   ['수업 후 상태: RPE 1~10 숫자 버튼+쉬운 설명 힌트, 근육통 정도/부위, 메모가 하나의 피드백 카드로 통합 ("어떤 느낌인가요?" 선택 UI는 회원 요청으로 제거됨, sorenessNature 필드·저장 로직은 과거 기록 호환용으로 유지)',
-    app.includes('<b>오늘 수업 기록</b>') &&
+    app.includes('<b>오늘 어땠나요?</b>') &&
     app.includes('className="sj-rpe-grid"') &&
     app.includes('function rpeDescription(') &&
     app.includes('const SORENESS_RISK_NATURES=') &&
@@ -794,7 +794,7 @@ const checks = [
     app.includes('if(savingSection)return;') &&
     app.includes('setSavingSection(key)')
   ],
-  ['수업 후 상태: 오늘 수업 기록 카드는 기본 접힘(헤더 한 줄만) + 펼치기/접기 토글로 언제든 입력·수정 가능, 접힘 상태 미리보기(sj-fb-quick) 없음',
+  ['수업 후 상태: "오늘 어땠나요?" 카드는 기본 접힘(헤더 한 줄만) + 펼치기/접기 토글로 언제든 입력·수정 가능, 접힘 상태 미리보기(sj-fb-quick) 없음',
     app.includes('const [open,setOpen]=useState(false);') &&
     app.includes('펼치기 <SjIcon paths={SJ_PATHS.chevronDown}') &&
     app.includes('접기 <SjIcon paths={SJ_PATHS.chevronUp}') &&

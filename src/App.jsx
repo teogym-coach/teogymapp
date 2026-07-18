@@ -1013,6 +1013,10 @@ body:not(:has(.member-shell)):not(:has(.member-login)) .session-light label{colo
 .session-light input:focus,.session-light textarea:focus,.session-light select:focus{border-color:#39C7B8;box-shadow:0 0 0 3px rgba(57,199,184,.12);}
 .session-light select option{background:#FFFFFF;color:#0F172A;}
 button{cursor:pointer;font-family:'Syne',sans-serif;-webkit-tap-highlight-color:transparent;}
+/* 홈 "오늘 수업" 회원 행 — 클릭 가능 표시 전용(새 강조색 없이 기존 hover 톤만 재사용). 마우스: 약한 hover, 터치: 짧은 눌림. */
+.today-row-click{cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:10px;transition:background-color .12s ease;}
+@media(hover:hover){.today-row-click:hover{background-color:#F3F7F6;}}
+.today-row-click:active{background-color:#EAF0EF;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#0B1120;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.10);border-radius:4px;}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fi{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
@@ -5007,6 +5011,7 @@ export default function App() {
   const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
   const [healthHubInitialTab, setHealthHubInitialTab] = useState("대시보드"); // 오늘 입력 피드에서 특정 항목을 눌러 건강관리 허브로 이동할 때 시작 탭
   const [hubScrollTarget, setHubScrollTarget] = useState(null); // 홈 "다음 예약이 필요한 회원" 등에서 회원 상세(hub) 진입 시 특정 섹션으로 스크롤할 DOM id
+  const [membersInitialFilter, setMembersInitialFilter] = useState(null); // 홈 "수업일지 미전송" 카드에서 회원목록 진입 시 적용할 기존 필터 키(예: "unrecorded") — MembersScreen이 마운트 시 1회 소비 후 자동으로 null로 되돌림
   const [loading,  setLoading]  = useState(false);
   // 회원 목록 전용 로딩/에러 — 다른 화면들이 공유하는 전역 loading과 분리한다.
   // (전역 loading은 회원 목록 조회와 무관한 다른 비동기 작업에서도 true/false로 계속 토글되므로,
@@ -5837,8 +5842,8 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
-        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenUnrecorded={()=>{ loadMembers(); setMembersInitialFilter("unrecorded"); setScreen("members"); }} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>setMember(prev=>({...prev,...patch}))} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} />}
@@ -6596,7 +6601,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenUnrecorded }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
@@ -6642,6 +6647,11 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     () => buildNextBookingList(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
     [homeMembers, liveMembersById, sessionsMap, todayKST]
   );
+  // "수업일지 미전송" — 실제 종목이 저장됐지만 아직 회원에게 공개(isPublished)되지 않은 기록이 있는 회원
+  const unsentSessionMembers = useMemo(
+    () => buildUnsentSessionMembers(homeMembers, liveMembersById, sessionsMap || {}),
+    [homeMembers, liveMembersById, sessionsMap]
+  );
 
   // 대표(TEO) 개인 운동기록·테스트 계정은 홈 KPI·검색 등 "일반 회원" 집계에서 공통 제외
   const regularHomeMembers = useMemo(() => homeMembers.filter(isRegularAdminMember), [homeMembers]);
@@ -6675,6 +6685,12 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const todayCount = todaySess.length;
 
   const goCs = ()=>{ if(showToast) showToast("아직 준비 중인 기능입니다."); else setComingSoon(true); };
+  // "수업일지 미전송" 카드 클릭 — 1명이면 바로 해당 회원 상세로, 여러 명이면 기존 회원목록 "미기록" 필터 화면 재사용
+  const openUnsentSessions = () => {
+    if (unsentSessionMembers.length === 0) return;
+    if (unsentSessionMembers.length === 1) { onSelectMember?.(unsentSessionMembers[0]); return; }
+    onOpenUnrecorded?.();
+  };
   // 알림 클릭 — 읽음 처리 후 type별 목적 화면으로 이동 (회원 목록 피드와 동일 동작)
   const openFeedItem = (item)=>{
     const target = homeMembers.find(x=>x.id===item.memberId);
@@ -6971,13 +6987,17 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
 
         {/* ═══ 오늘 해야 할 일 — 홈의 주인공. 3초 안에 오늘 할 행동이 보인다.
              Hero/오늘의 한 줄 카드는 업무 효율 우선 개편으로 삭제(하루 1회성 정보 + AI 코치와 중복) — 첫 화면 최상단으로 승격.
-             4→3장으로 정리: "체크 필요 회원"은 아래 전용 카드 + AI 코칭이 담당해 중복 제거 ═══ */}
+             "회원 입력 확인"은 벨 아이콘·알림 Drawer·"체크가 필요한 회원" 카드와 역할이 중복돼 제거하고 자리를
+             "수업일지 미전송"으로 교체(기존 isPublished 필드 재사용, 새 필드 없음). "2:1 수업 정리"는 미정리 건이
+             있을 때만 표시 — 카드 수(2 또는 3)에 맞춰 열 수를 그대로 맞춰 빈 칸을 남기지 않는다. ═══ */}
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(3,1fr)":"1fr",gap:isWide?10:6}}>
+          <div style={{display:"grid",gridTemplateColumns:isWide?`repeat(${2+(draftPair>0?1:0)},1fr)`:"1fr",gap:isWide?10:6}}>
             <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={()=>{document.getElementById("home-next-booking")?.scrollIntoView({behavior:"smooth",block:"start"});}} />
-            <TodayActionCard isWide={isWide} icon={sc4} tone="mint" count={feedItems.length} unit="건" title="회원 입력 확인" desc="새로 입력했어요" doneDesc="새 입력이 모두 확인됐어요" cta="확인하기" onClick={()=>setDrawerOpen(true)} />
-            <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
+            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionMembers.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={openUnsentSessions} />
+            {draftPair > 0 && (
+              <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
+            )}
           </div>
         </div>
 
@@ -7022,7 +7042,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                   // 압축 레이아웃 전용 짧은 상태 문구 — 상태 판별(item.status)은 그대로, "오늘 예정"만 "기록 전"으로 더 짧게(와이드 라벨은 그대로 유지)
                   const compactStatusLabel = item.status === "scheduled" ? "기록 전" : st.label;
                   return (
-                    <div key={item.m.id} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
+                    <div key={item.m.id} className="today-row-click" onClick={()=>onSelectMember?.(item.m)} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
                       <div style={{width:3,height:36,borderRadius:2,background:st.solid,flexShrink:0}}/>
                       {/* 원형 성 아바타 — 압축 레이아웃은 폭이 좁아 이름이 잘리므로 숨기고, 그 공간을 이름에 넘긴다(와이드는 기존 그대로 유지) */}
                       {cardWide && (
@@ -7466,6 +7486,27 @@ function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
   });
 }
 
+// 홈 "수업일지 미전송" — 회원별 최근 저장 세션(sessionsMap) 중 실제 종목이 있는데도 아직 회원에게
+// 공개되지 않은(isPublished!==true) 기록이 있는 회원을 찾는다. MembersScreen의 기존 "미기록" 필터와
+// 동일한 isPublished 기준을 재사용하되, 빈 임시저장 세션(mkEx 기본 빈 카드)은 getTodaySessionStatus·
+// buildNextBookingList와 동일한 hasRealExercise 판별로 제외한다. 새 필드·새 상태값을 만들지 않는다.
+function buildUnsentSessionMembers(members, liveMembersById, sessionsMap) {
+  const rows = [];
+  (members || []).forEach(m => {
+    if (isExcludedAdminMember(m)) return;
+    const live = liveMembersById[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return;
+    const ss = sessionsMap?.[lm.id] || [];
+    const hasUnsent = ss.some(s => {
+      const hasRealExercise = (s.exercises || []).some(e => e?.name || isFuncEx(e));
+      return hasRealExercise && s.isPublished !== true;
+    });
+    if (hasUnsent) rows.push(lm);
+  });
+  return rows.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+}
+
 // 홈 "오늘의 AI 코칭" — 실제 체크 필요 회원(todaySummary.attention) 1순위를 코칭 문장으로 변환. 새로운 분석/API 없이 기존 집계만 재사용.
 function buildAiCoachingTip(summary) {
   const top = summary.attention?.[0];
@@ -7705,7 +7746,7 @@ function StatusBlock({icon,label,value,tone,muted,sub,subTone}){
   );
 }
 
-function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast }) {
+function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast, initialFilter=null, onInitialFilterConsumed }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   useEffect(()=>{
     const h=()=>setWinW(window.innerWidth);
@@ -7721,7 +7762,10 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
   const todayKST = today; // 오늘 입력 피드/배지 전용 — today와 동일한 KST 기준(getKoreaDateString)이라 값이 같다
   const [search,     setSearch]     = useState("");
   const [sortBy,     setSortBy]     = useState("recent");
-  const [filter,     setFilter]     = useState("active");
+  const [filter,     setFilter]     = useState(initialFilter || "active");
+  // 홈 "수업일지 미전송" 카드 등 외부에서 initialFilter로 진입한 경우 마운트 시 1회만 반영하고, 부모 상태는 즉시 되돌려
+  // 이후(사이드바·다른 카드 등) 별도 지정 없이 회원목록으로 이동할 때 이 필터가 남아있지 않게 한다.
+  useEffect(() => { if (initialFilter) onInitialFilterConsumed?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [todaySubFilter, setTodaySubFilter] = useState("all"); // "오늘 수업" 탭 전용 서브 필터(전체/기록 중/예정/완료) — isTodaySessionMember 판별과 무관한 표시 전용
   useEffect(() => { setTodaySubFilter("all"); }, [filter]);
   const [showTodayFeed, setShowTodayFeed] = useState(false); // 오늘 회원 입력 피드 펼침 상태

@@ -10763,7 +10763,72 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
   );
 
-  // ⑥ 분석 도구 (기본 접힘)
+  // ⑥ 후기 관리 — 1단계: 목표/완료 횟수만 관리. members/{id}.reviewStatus={requiredCount,completedCount,updatedAt} 단일 필드만 사용(히스토리·요청여부 없음)
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewRestarting, setReviewRestarting] = useState(false);
+  useEffect(() => { setReviewRestarting(false); }, [member.id]);
+  const reviewRequired = Number(member.reviewStatus?.requiredCount);
+  const hasReviewGoal = reviewRequired === 1 || reviewRequired === 2;
+  const reviewCompleted = hasReviewGoal ? Math.min(Math.max(Number(member.reviewStatus.completedCount) || 0, 0), reviewRequired) : 0;
+  const reviewRemaining = hasReviewGoal ? Math.max(reviewRequired - reviewCompleted, 0) : 0;
+  const reviewDone = hasReviewGoal && reviewCompleted >= reviewRequired;
+  const saveReviewStatus = async (requiredCount, completedCount) => {
+    if (reviewSaving) return;
+    setReviewSaving(true);
+    try {
+      const patch = { reviewStatus: { requiredCount, completedCount, updatedAt: new Date().toISOString() } };
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      setReviewRestarting(false);
+    } catch(e) { console.error(e); } finally { setReviewSaving(false); }
+  };
+  const reviewBtn = (label, onClick, { primary=false, disabled=false } = {}) => (
+    <button key={label} type="button" disabled={disabled||reviewSaving} onClick={onClick} style={{
+      borderRadius:999,padding:"8px 14px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,
+      cursor:(disabled||reviewSaving)?"default":"pointer",
+      border:`1px solid ${primary?DB.mint:DB.border}`,
+      background:primary?DB.mintTintStrong:DB.card,
+      color:primary?DB.mintSoft:DB.sub,
+      opacity:disabled?0.5:1,
+    }}>{label}</button>
+  );
+  const secReview = (
+          <section className="hub-sec-review" style={{...card, padding:"14px 16px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+              <span style={cardTitle}>{reviewDone ? "후기 완료" : "후기 관리"}</span>
+              {reviewDone && (
+                <span style={{fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:DB.mintTintStrong,color:DB.mintSoft}}>완료</span>
+              )}
+            </div>
+            {!hasReviewGoal ? (
+              <>
+                <div style={{fontSize:12.5,color:DB.faint,marginBottom:10}}>아직 후기 목표가 설정되지 않았습니다.</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {reviewBtn("후기 1회 설정", ()=>saveReviewStatus(1,0), {primary:true})}
+                  {reviewBtn("후기 2회 설정", ()=>saveReviewStatus(2,0), {primary:true})}
+                </div>
+              </>
+            ) : reviewRestarting ? (
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {reviewBtn("1회로 다시 시작", ()=>saveReviewStatus(1,0), {primary:true})}
+                {reviewBtn("2회로 다시 시작", ()=>saveReviewStatus(2,0), {primary:true})}
+                {reviewBtn("취소", ()=>setReviewRestarting(false))}
+              </div>
+            ) : (
+              <>
+                <div style={{fontSize:13,fontWeight:800,color:DB.text,marginBottom:reviewDone?10:2}}>{reviewCompleted} / {reviewRequired}회 완료</div>
+                {!reviewDone && <div style={{fontSize:11.5,color:DB.faint,marginBottom:10}}>{reviewRemaining}회 남음</div>}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {!reviewDone && reviewBtn("1회 완료 추가", ()=>saveReviewStatus(reviewRequired, Math.min(reviewCompleted+1, reviewRequired)), {primary:true})}
+                  {reviewBtn("완료 1회 되돌리기", ()=>saveReviewStatus(reviewRequired, Math.max(reviewCompleted-1, 0)), {disabled:reviewCompleted<=0})}
+                  {reviewBtn("다시 시작", ()=>setReviewRestarting(true))}
+                </div>
+              </>
+            )}
+          </section>
+  );
+
+  // ⑦ 분석 도구 (기본 접힘)
   const secAnalysis = (
           <section className="hub-sec-analysis" style={{...card, padding:0}}>
             <button onClick={()=>setShowAnalysis(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"15px 18px",display:"flex",alignItems:"center",gap:12,textAlign:"left",fontFamily:DB.font}}>
@@ -10892,14 +10957,14 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <div className="hub-2panel">
           <div className="hub-side">{secBrief}{secRecent}</div>
           <div className="hub-main">
-            {secToday}{secPrep}
+            {secToday}{secPrep}{secReview}
             <div className="hub-toolrow">{secAnalysis}{secManage}</div>
           </div>
         </div>
       ) : (
-        /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 분석 → 회원관리 */
+        /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 분석 → 회원관리 */
         <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",minWidth:0}}>
-          {secToday}{secBrief}{secRecent}{secPrep}{secAnalysis}{secManage}
+          {secToday}{secBrief}{secRecent}{secPrep}{secReview}{secAnalysis}{secManage}
         </div>
       )}
 

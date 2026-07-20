@@ -2787,7 +2787,7 @@ function MemberFeedbackForm({s,onSave}){
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 근육통</label>
-        <span className="sj-fb-instruction">2일 안에 가장 심했던 정도를 선택해주세요.</span>
+        <span className="sj-fb-instruction">수업 후 2일 안에 가장 심했던 정도를 선택해주세요.</span>
         <div className="sj-fb-inline">
           <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>setSoreness(prev=>({...prev,level:lv}))}>{lv}</button>)}</div>
           <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveSorenessSection}>{savingSection==="soreness"?"저장 중...":"근육통 저장"}</button>

@@ -790,8 +790,8 @@ const checks = [
     app.includes('"RPE 저장"') && app.includes('"근육통 저장"') && app.includes('"메모 저장"') &&
     !app.includes('"기록 저장"')
   ],
-  ['수업 후 상태: 근육통 안내 문구("2일 안에 가장 심했던 정도를 선택해주세요.")가 제목과 선택 버튼 사이에 표시',
-    app.includes('<span className="sj-fb-instruction">2일 안에 가장 심했던 정도를 선택해주세요.</span>') &&
+  ['수업 후 상태: 근육통 안내 문구("수업 후 2일 안에 가장 심했던 정도를 선택해주세요.")가 제목과 선택 버튼 사이에 표시',
+    app.includes('<span className="sj-fb-instruction">수업 후 2일 안에 가장 심했던 정도를 선택해주세요.</span>') &&
     app.includes('.sj-fb-instruction{')
   ],
   ['수업 후 상태: 저장 중 중복 클릭 방지 (savingSection)',

@@ -2284,8 +2284,8 @@ const SJ_PATHS={
   pencil:["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"],
 };
 const KOREAN_DAY_NAMES=["일","월","화","수","목","금","토"];
-// "2026-07-04" → "7월 4일 토요일" — 회원이 읽기 쉬운 날짜 표기(시스템 날짜 형식 대체)
-function formatKoreanDateLabel(dateStr){const s=String(dateStr||"").slice(0,10); const d=new Date(`${s}T12:00:00`); if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||isNaN(d)) return String(dateStr||""); return `${d.getMonth()+1}월 ${d.getDate()}일 ${KOREAN_DAY_NAMES[d.getDay()]}요일`;}
+// "2026-07-04" → "7월 4일 (토)" — 회원이 읽기 쉬운 날짜 표기(시스템 날짜 형식 대체) · 좁은 화면에서도 한 줄에 들어가도록 요일은 괄호 약칭으로 표기
+function formatKoreanDateLabel(dateStr){const s=String(dateStr||"").slice(0,10); const d=new Date(`${s}T12:00:00`); if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||isNaN(d)) return String(dateStr||""); return `${d.getMonth()+1}월 ${d.getDate()}일 (${KOREAN_DAY_NAMES[d.getDay()]})`;}
 // RPE 숫자를 몰라도 고를 수 있게 하는 쉬운 설명(1~2 매우 가벼움 … 10 한계)
 function rpeDescription(v){const n=Number(v); if(!Number.isFinite(n))return ""; if(n<=2)return "매우 가벼웠어요"; if(n<=4)return "가벼웠어요"; if(n<=6)return "적당했어요"; if(n<=8)return "힘들었어요"; if(n<=9)return "매우 힘들었어요"; return "한계였어요";}
 function MemberWorkout(p){
@@ -2357,7 +2357,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
         <header className="sj-sess-head">
           <div className="sj-sess-title">
             {(isLatest||isPr)&&<span className="sj-badges">{isLatest&&<em className="sj-badge latest">최근 수업</em>}{isPr&&<em className="sj-badge pr">★ PR</em>}</span>}
-            <h2 className="sj-date-line">{formatKoreanDateLabel(s.date)}{growth&&<em className="sj-growth-badge">{growth.label}</em>}</h2>
+            <h2 className="sj-date-line"><span className="sj-date-text">{formatKoreanDateLabel(s.date)}</span>{growth&&<em className="sj-growth-badge">{growth.label}</em>}</h2>
             <p>{typeName}</p>
           </div>
           <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
@@ -4908,7 +4908,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-prev-card:active{transform:scale(.985);background:#FBFCFE}
 .sj-prev-main{flex:1;min-width:0;display:grid;gap:4px}
 .sj-prev-date-row{display:flex;align-items:center;gap:7px}
-.sj-prev-main b{font-size:15.5px;font-weight:700;color:#1D2430;letter-spacing:-.2px;font-variant-numeric:tabular-nums}
+.sj-prev-main b{font-size:15.5px;font-weight:700;color:#1D2430;letter-spacing:-.2px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sj-prev-main span{font-size:13px;font-weight:700;color:#66717C;letter-spacing:0}
 .sj-part{color:#0F9488;font-style:normal;font-weight:800}
 .sj-prev-side{display:flex;align-items:center;gap:8px;flex-shrink:0}
@@ -4917,26 +4917,27 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-chev{color:#C0C8D3;display:flex;font-style:normal;flex-shrink:0}
 .sj-session-group{display:grid;gap:12px;margin:10px 0;animation:memberCardIn .22s ease}
 .sj-prev-list .sj-session-group{grid-column:1/-1;margin:0}
-.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:16px 18px 14px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.sj-session-card{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:14px 16px 12px;margin:0;box-shadow:0 2px 14px rgba(15,23,42,.05)}
 .sj-sess-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .sj-sess-title{min-width:0}
-.sj-badges{display:flex;gap:6px;margin-bottom:9px}
-.sj-badge{font-style:normal;font-size:11px;font-weight:800;border-radius:999px;padding:4px 10px;letter-spacing:0}
+.sj-badges{display:flex;gap:6px;margin-bottom:6px}
+.sj-badge{font-style:normal;font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px;letter-spacing:0}
 .sj-badge.latest{background:#0F9488;color:#fff}
 .sj-badge.pr{background:#FFF7ED;color:#F97316;border:1px solid #FED7AA}
 .sj-badge.move{background:rgba(139,92,246,.12);color:#8B5CF6}
-.sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#1D2430;font-variant-numeric:tabular-nums}
-.sj-sess-title p{margin:6px 0 0;color:#0F9488;font-weight:800;font-size:14.5px}
-.sj-date-line{display:flex;align-items:center;gap:8px}
-.sj-growth-badge{font-style:normal;font-family:'Noto Sans KR',sans-serif;font-size:11.5px;font-weight:800;line-height:1;color:#0F9488;background:#E3F8F4;border:1px solid #BFEEE4;border-radius:999px;padding:4px 10px;white-space:nowrap;letter-spacing:0;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1,"palt" 0}
+.sj-sess-title h2{font-size:18px;margin:0;letter-spacing:-.4px;color:#1D2430;font-variant-numeric:tabular-nums}
+.sj-sess-title p{margin:4px 0 0;color:#0F9488;font-weight:800;font-size:14.5px}
+.sj-date-line{display:flex;align-items:center;gap:8px;min-width:0}
+.sj-date-text{white-space:nowrap;flex-shrink:0}
+.sj-growth-badge{font-style:normal;font-family:'Noto Sans KR',sans-serif;font-size:11.5px;font-weight:800;line-height:1;color:#0F9488;background:#E3F8F4;border:1px solid #BFEEE4;border-radius:999px;padding:4px 10px;white-space:nowrap;letter-spacing:0;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1,"palt" 0;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .sj-growth-badge.sm{font-size:11px;padding:3px 9px}
 .sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;color:#66717C;cursor:pointer;flex-shrink:0;box-shadow:0 1px 4px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
 .sj-session-mini>div{padding:0;border-top:0}
-.sj-ex-section{padding:12px 0 2px;border-top:1px solid #EEF1F4;margin-top:12px}
+.sj-ex-section{padding:8px 0 2px;border-top:1px solid #EEF1F4;margin-top:8px}
 .sj-ex-section h3{font-size:11.5px;font-weight:900;color:#8B949E;letter-spacing:.5px;margin:0}
 .sj-ex-row{border-top:1px solid #F1F4F8}
 .sj-ex-row:first-of-type{border-top:0}
-.sj-ex-head{width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;padding:10px 2px;min-height:48px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sj-ex-head{width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;padding:8px 2px;min-height:44px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .sj-ex-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
 .sj-ex-name{flex:1;min-width:0;font-size:15px;font-weight:700;color:#20242A;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sj-ex-body{padding:0 2px 14px}
@@ -4994,7 +4995,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 @media(min-width:700px){
   /* 태블릿/PC — 이전 수업 목록 2열, 펼친 카드는 전체 폭. 모바일을 그대로 늘린 느낌이 되지 않게 여백만 키운다 */
   .sj-prev-list{grid-template-columns:1fr 1fr;gap:10px}
-  .sj-session-card{padding:20px 22px 16px}
+  .sj-session-card{padding:18px 20px 14px}
   .sj-fb-edit{grid-template-columns:1fr}
 }
 /* ── 부위별 운동 볼륨 변화(pv-multi-*) — 부위 선택 없이 5개 부위를 한 카드에서 동시에 비교 ── */

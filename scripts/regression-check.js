@@ -806,10 +806,31 @@ const checks = [
     !app.includes('alert("수업 후 상태가 저장되었습니다.")')
   ],
   ['수업 후 상태: "수업 후 몸 상태" 카드는 기본 접힘(헤더 한 줄만) + 펼치기/접기 토글로 언제든 입력·수정 가능, 접힘 상태 미리보기(sj-fb-quick) 없음',
-    app.includes('const [open,setOpen]=useState(false);') &&
+    app.includes('function MemberFeedbackForm({s,onSave,open,onToggle}){') &&
     app.includes('펼치기 <SjIcon paths={SJ_PATHS.chevronDown}') &&
     app.includes('접기 <SjIcon paths={SJ_PATHS.chevronUp}') &&
     !app.includes('sj-fb-quick')
+  ],
+  ['수업 후 상태: 피드백 카드 펼침 상태(expandedFeedbackIds)는 MemberJournal(부모)이 세션 id별 Set으로 관리 — MemberFeedbackForm 내부 로컬 state가 아니므로 저장→load() 재조회로 세션 목록이 다시 그려져도 펼침 상태가 초기화되지 않음',
+    app.includes('const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>new Set());') &&
+    app.includes('const setFeedbackOpen=useCallback((id,nextOpen)=>{') &&
+    app.includes('function MemberFeedbackForm({s,onSave,open,onToggle}){') &&
+    (() => {
+      const start = app.indexOf('function MemberFeedbackForm({s,onSave,open,onToggle}){');
+      const end = app.indexOf('\nconst ANALYSIS_PERIODS=');
+      const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
+      return !!body && !body.includes('const [open,');
+    })()
+  ],
+  ['수업 후 상태: RPE·근육통·메모 저장(saveSection)은 펼침 상태를 건드리지 않고(onToggle 미호출) 저장 완료 처리만 수행 — 사용자가 접기 버튼(cancel)을 누르거나 펼치기 버튼(openWithScroll)을 누를 때만 onToggle 호출',
+    (() => {
+      const start = app.indexOf('const saveSection=async(key,payload)=>{');
+      const end = app.indexOf('const saveRpe=');
+      const body = start!==-1 && end!==-1 ? app.slice(start,end) : '';
+      return body && !body.includes('onToggle') &&
+        app.includes('onToggle(false);') && // cancel()
+        app.includes('onToggle(true); };'); // openWithScroll()
+    })()
   ],
   ['수업 후 상태: 위험 신호(움직일 때 불편함/날카로운 통증) 선택 시 대표에게 알리라는 안내 표시',
     app.includes('const SORENESS_RISK_NATURES=') &&
@@ -818,7 +839,7 @@ const checks = [
   ['수업일지 카드 순서: 운동종목(SessionMini)이 피드백 카드(MemberFeedbackForm)보다 먼저 표시',
     (() => {
       const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>');
-      const j = app.indexOf('<MemberFeedbackForm s={s} onSave={saveFeedback}/>');
+      const j = app.indexOf('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>setFeedbackOpen(s.id,next)}/>');
       return i !== -1 && j !== -1 && i < j;
     })()
   ],

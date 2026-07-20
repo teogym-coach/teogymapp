@@ -811,9 +811,8 @@ const checks = [
     app.includes('접기 <SjIcon paths={SJ_PATHS.chevronUp}') &&
     !app.includes('sj-fb-quick')
   ],
-  ['수업 후 상태: 피드백 카드 펼침 상태(expandedFeedbackIds)는 MemberJournal(부모)이 세션 id별 Set으로 관리 — MemberFeedbackForm 내부 로컬 state가 아니므로 저장→load() 재조회로 세션 목록이 다시 그려져도 펼침 상태가 초기화되지 않음',
-    app.includes('const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>{') &&
-    app.includes('raw?new Set(JSON.parse(raw)):new Set();') &&
+  ['수업 후 상태: 피드백 카드 펼침 상태(expandedFeedbackIds)는 MemberJournal이 아니라 MemberApp이 세션 id별 Set으로 관리(최초값 항상 빈 new Set()=전체 접힘) — MemberFeedbackForm/MemberJournal 내부 로컬 state가 아니므로 저장→load()로 하위 트리가 통째로 재마운트돼도 펼침 상태가 초기화되지 않음',
+    app.includes('const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>new Set());') &&
     app.includes('const setFeedbackOpen=useCallback((id,nextOpen)=>{') &&
     app.includes('function MemberFeedbackForm({s,onSave,open,onToggle}){') &&
     (() => {
@@ -821,30 +820,50 @@ const checks = [
       const end = app.indexOf('\nconst ANALYSIS_PERIODS=');
       const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
       return !!body && !body.includes('const [open,');
+    })() &&
+    (() => {
+      const start = app.indexOf('function MemberJournal({');
+      const end = app.indexOf('function MemberJournal({') !== -1 ? app.indexOf('\nfunction ', app.indexOf('function MemberJournal({')+1) : -1;
+      const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
+      // MemberJournal 자체에는 expandedFeedbackIds/setFeedbackOpen을 선언(useState/useCallback)하지 않고 props로만 받아써야 함
+      return !!body && body.includes('expandedFeedbackIds,setFeedbackOpen') &&
+        !body.includes('const [expandedFeedbackIds,setExpandedFeedbackIds]') &&
+        !body.includes('const setFeedbackOpen=useCallback');
     })()
+  ],
+  ['수업 후 상태: expandedFeedbackIds는 sessionStorage로 이전 방문 값을 복원하지 않음(기본은 항상 접힘) — JOURNAL_EXPANDED_FEEDBACK_KEY 같은 sessionStorage 키 자체가 코드에 존재하지 않아야 함',
+    !app.includes('JOURNAL_EXPANDED_FEEDBACK_KEY') &&
+    !app.includes('teogym_journal_expandedFeedbackIds')
+  ],
+  ['수업 후 상태: MemberFeedbackForm의 open prop이 "최신 수업이라서/openId가 null이라서/피드백 미입력이라서" 등 자동 펼침 조건 없이 오직 expandedFeedbackIds(사용자가 직접 연 id 집합) 포함 여부로만 결정됨',
+    app.includes('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>setFeedbackOpen(s.id,next)}/>')
   ],
   ['수업일지: 상위 "수업 카드"(MemberJournal) 펼침 판정(isExp)이 배열 인덱스가 아니라 실제 session.id(latestId) 비교로만 이루어짐 — 저장 후 재조회로 목록이 다시 그려져 인덱스가 흔들려도 펼침 카드가 바뀌지 않음',
     app.includes('const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;')
   ],
-  ['수업일지: 사용자가 "접기"를 눌렀을 때만 openId가 "__none__"(자동 재펼침 금지)으로 바뀌고, saveFeedback/load() 흐름에는 setOpenId 호출이 전혀 없어 저장으로 인한 재조회가 펼침 상태를 건드리지 않음',
+  ['수업일지: 사용자가 "접기"를 눌렀을 때만 openId가 "__none__"(자동 재펼침 금지)으로 바뀌고, saveFeedback/load() 흐름에는 setOpenId/setExpandedFeedbackIds/setFeedbackOpen 호출이 전혀 없어 저장으로 인한 재조회가 두 펼침 상태 모두 건드리지 않음',
     app.includes('const toggleSess=(s)=>{setOpenId(prev=>(isExp(s)&&!lq)?"__none__":s.id);') &&
     (() => {
       const start = app.indexOf('const saveFeedback=async(sessionId,feedback)=>{');
       const end = app.indexOf('const saveProfileInfo=async(data)=>{', start);
       const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
-      return !!body && !body.includes('setOpenId');
+      return !!body && !body.includes('setOpenId') && !body.includes('setExpandedFeedbackIds') && !body.includes('setFeedbackOpen');
+    })() &&
+    (() => {
+      const start = app.indexOf('const load=useCallback(async()=>{');
+      const end = app.indexOf('if(loading) return', start);
+      const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
+      return !!body && !body.includes('setExpandedFeedbackIds') && !body.includes('setFeedbackOpen');
     })()
   ],
   ['수업일지: 사용자가 펼쳤던 session.id가 재조회 후 실제로 더 이상 존재하지 않을 때만 openId를 초기화(null) — sessions가 아직 빈 배열(로딩 전)일 때는 오탐으로 초기화하지 않도록 가드',
     app.includes('if(openId==null||openId==="__none__"||!sessions.length)return;') &&
     app.includes('if(!sessions.some(s=>s.id===openId))setOpenId(null);')
   ],
-  ['수업일지: openId/expandedFeedbackIds가 sessionStorage에도 저장되어 모바일 브라우저가 탭을 백그라운드에서 재로드(메모리 절약)해도 펼침 상태가 복원됨 — try/catch로 감싸 프라이빗 브라우징 등에서도 앱이 깨지지 않음',
+  ['수업일지: openId(상위 수업 카드 펼침, "수업 후 몸 상태"와는 별개)는 여전히 sessionStorage에도 저장되어 모바일 브라우저가 탭을 백그라운드에서 재로드(메모리 절약)해도 펼침 상태가 복원됨 — try/catch로 감싸 프라이빗 브라우징 등에서도 앱이 깨지지 않음',
     app.includes('const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";') &&
-    app.includes('const JOURNAL_EXPANDED_FEEDBACK_KEY="teogym_journal_expandedFeedbackIds";') &&
     app.includes('try{return sessionStorage.getItem(JOURNAL_OPEN_ID_KEY);}catch{return null;}') &&
-    app.includes('sessionStorage.setItem(JOURNAL_OPEN_ID_KEY,next)') &&
-    app.includes('sessionStorage.setItem(JOURNAL_EXPANDED_FEEDBACK_KEY,JSON.stringify([...next]))')
+    app.includes('sessionStorage.setItem(JOURNAL_OPEN_ID_KEY,next)')
   ],
   ['수업 후 상태: RPE·근육통·메모 저장(saveSection)은 펼침 상태를 건드리지 않고(onToggle 미호출) 저장 완료 처리만 수행 — 사용자가 접기 버튼(cancel)을 누르거나 펼치기 버튼(openWithScroll)을 누를 때만 onToggle 호출',
     (() => {

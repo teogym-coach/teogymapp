@@ -1276,6 +1276,20 @@ function MemberApp({ onLogout }) {
   // ── V2 네비게이션 상태 ──
   const [workoutView,setWorkoutView]=useState("journal");      // 수업 탭 세그먼트: journal(수업일지) | calendar(운동 캘린더)
   const [journalFocusId,setJournalFocusId]=useState(null);     // 캘린더 날짜 상세 → 해당 수업일지 바로 열기
+  // 수업일지 "수업 후 몸 상태" 피드백 카드 펼침 상태 — 세션 id 기준 Set, 항상 new Set()(전체 접힘)에서 시작.
+  // MemberJournal이 아니라 여기(MemberApp)에 두는 이유: RPE/근육통/메모 저장(saveFeedback)은 항상 load()를 거치고,
+  // load()는 setLoading(true)로 화면 전체를 잠깐 Spin으로 바꿨다 되돌리므로 그 사이 하위 트리(MemberJournal 포함)가
+  // 통째로 언마운트→재마운트된다. MemberApp 자신은 이 동안 언마운트되지 않으므로, 여기 둔 state만 저장 후에도
+  // 펼침 상태를 그대로 유지한다 — sessionStorage로 이전 방문 값을 복원하지 않는 것도 이 state의 정책이다(기본은 항상 접힘).
+  const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>new Set());
+  const setFeedbackOpen=useCallback((id,nextOpen)=>{
+    setExpandedFeedbackIds(prev=>{
+      if(prev.has(id)===nextOpen) return prev;
+      const next=new Set(prev);
+      if(nextOpen) next.add(id); else next.delete(id);
+      return next;
+    });
+  },[]);
   const [healthIntent,setHealthIntent]=useState(null);         // 홈 → 건강 탭 진입 시 자동으로 열 카드 시트 {type:"weight"|"kcal"|"steps"|"condition"|"pain"|"cardio", date}
   // 키보드/한글 입력 후보창이 하단 탭바를 가리지 않도록, 텍스트 입력 포커스 중엔 탭바를 잠시 숨긴다
   const [navHidden,setNavHidden]=useState(false);
@@ -1398,7 +1412,7 @@ function MemberApp({ onLogout }) {
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load();
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,cardioSaving,correctionSummaries};
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"수업"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -2301,14 +2315,15 @@ function MemberWorkout(p){
     {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
   </>;
 }
-// 수업일지 상위 세션 카드 펼침 상태(openId)/피드백 카드 펼침 상태(expandedFeedbackIds)를 sessionStorage에도 저장한다 —
+// 수업일지 상위 세션 카드 펼침 상태(openId)는 sessionStorage에도 저장한다 —
 // 모바일 Safari는 브라우저를 백그라운드로 전환(예: 카카오톡으로 스크린샷 전송)했다가 돌아오면 메모리 절약을 위해
 // 탭을 자체적으로 다시 로드하는 경우가 흔한데, 이때는 저장/재조회와 무관하게 순수 React state(메모리)가 전부
 // 초기화된다. sessionStorage는 탭이 실제로 닫히기 전까지는 이런 재로드에도 유지되므로, 재로드 후에도 펼침
 // 상태를 그대로 복원할 수 있다.
+// 주의: "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds)는 여기(sessionStorage/openId)와는 정책이 다르다 —
+// 기본은 항상 접힘이어야 하므로 sessionStorage로 이전 방문 상태를 복원하지 않는다. MemberApp의 state로 옮겨졌다.
 const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";
-const JOURNAL_EXPANDED_FEEDBACK_KEY="teogym_journal_expandedFeedbackIds";
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
   // openId: null=사용자가 아직 선택하지 않음(항상 "현재 최신 세션"을 실제 id로 비교해 자동으로 펼침) · "__none__"=사용자가 펼쳐진 카드를 직접 접음(자동 재펼침 금지) · 그 외=해당 session.id가 펼쳐짐.
   // 과거에는 배열 인덱스(openId==="__first__"&&i===0)로 "최근 수업"을 판정해 저장 후 재조회로 목록이 다시 그려지며 인덱스가 흔들리면 카드가 접히는 문제가 있었다 — 이제 latestId(실제 session.id) 비교로만 판정한다.
   const [openId,setOpenIdState]=useState(()=>{ if(journalFocusId)return journalFocusId; try{return sessionStorage.getItem(JOURNAL_OPEN_ID_KEY);}catch{return null;} });
@@ -2320,21 +2335,11 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     });
   },[]);
   const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
-  // "수업 후 몸 상태" 피드백 카드 펼침 상태 — 세션 id별로 여기(부모)에서 관리한다.
-  // MemberFeedbackForm 내부 state로 두면 저장 후 saveFeedback→load()로 세션 목록이 다시 그려질 때
-  // 카드가 재마운트될 가능성에 펼침 상태가 노출되므로, 재조회와 무관한 부모 상태로 옮겨 안전하게 유지한다.
-  const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>{
-    try{ const raw=sessionStorage.getItem(JOURNAL_EXPANDED_FEEDBACK_KEY); return raw?new Set(JSON.parse(raw)):new Set(); }catch{ return new Set(); }
-  });
-  const setFeedbackOpen=useCallback((id,nextOpen)=>{
-    setExpandedFeedbackIds(prev=>{
-      if(prev.has(id)===nextOpen) return prev;
-      const next=new Set(prev);
-      if(nextOpen) next.add(id); else next.delete(id);
-      try{ sessionStorage.setItem(JOURNAL_EXPANDED_FEEDBACK_KEY,JSON.stringify([...next])); }catch{}
-      return next;
-    });
-  },[]);
+  // "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds/setFeedbackOpen)는 MemberApp에서 props로 내려받는다 —
+  // 저장(saveFeedback)은 항상 MemberApp의 load()를 거치는데, load()는 setLoading(true)로 전체 화면을 Spin으로
+  // 잠깐 교체했다가 되돌리므로 MemberJournal을 포함한 모든 하위 컴포넌트가 그 사이 통째로 언마운트→재마운트된다.
+  // MemberJournal 안(또는 MemberFeedbackForm 내부)에 두면 그 언마운트 때 펼침 state가 사라져 저장 직후 접혀 보이므로,
+  // load() 동안에도 인스턴스가 유지되는 MemberApp 쪽 state를 그대로 참조해야 저장 후 펼침이 유지된다.
   // 캘린더 날짜 상세에서 "수업일지 보기"로 진입한 경우 — 해당 수업을 펼치고 읽음 처리
   useEffect(()=>{ if(journalFocusId){ setOpenId(journalFocusId); setShowAll(true); markSessionsAsRead?.([journalFocusId]); setJournalFocusId?.(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2755,9 +2760,10 @@ function MemberFeedbackForm({s,onSave,open,onToggle}){
   const [soreness,setSoreness]=useState({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
   const [rpe,setRpe]=useState(initialRpe);
   const [memo,setMemo]=useState(existing.memo||"");
-  // 펼침 상태(open)는 부모(MemberJournal)의 expandedFeedbackIds가 세션 id 기준으로 관리한다 —
-  // 저장 후 saveFeedback→load()로 세션 목록이 다시 그려져도 이 컴포넌트의 로컬 state가 아니라
-  // 부모 state를 그대로 참조하므로 펼침 상태가 저장 시점의 재렌더링에 영향받지 않는다.
+  // 펼침 상태(open)는 MemberApp의 expandedFeedbackIds가 세션 id 기준으로 관리해 props로 내려온다 —
+  // 저장 후 saveFeedback→load()가 이 컴포넌트를 포함한 하위 트리를 통째로 언마운트→재마운트해도,
+  // 이 컴포넌트의 로컬 state가 아니라 언마운트되지 않는 MemberApp의 state를 그대로 참조하므로
+  // 펼침 상태가 저장 시점의 재렌더링/재마운트에 영향받지 않는다. 기본값은 항상 접힘(new Set())이다.
   const [rpeDirty,setRpeDirty]=useState(false); // 이번 세션 카드에서 RPE 숫자를 직접 눌렀는지 — 저장값도 없고 누르지도 않았으면 "선택해주세요" 힌트 표시
   // RPE·근육통·메모는 서로 독립된 저장 버튼을 가진다 — 한 항목을 저장해도 다른 두 항목의 기존 저장값은 건드리지 않는다(saveSessionMemberFeedback이 전달된 필드만 merge 저장).
   const [savingSection,setSavingSection]=useState(null); // "rpe" | "soreness" | "memo" | null — 저장 중 중복 클릭 방지

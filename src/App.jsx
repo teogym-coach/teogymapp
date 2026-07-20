@@ -4866,7 +4866,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#1D2430;font-variant-numeric:tabular-nums}
 .sj-sess-title p{margin:6px 0 0;color:#0F9488;font-weight:800;font-size:14.5px}
 .sj-date-line{display:flex;align-items:center;gap:8px}
-.sj-growth-badge{font-style:normal;font-size:11.5px;font-weight:800;color:#0F9488;background:#E3F8F4;border:1px solid #BFEEE4;border-radius:999px;padding:4px 10px;white-space:nowrap;letter-spacing:0;font-variant-numeric:tabular-nums}
+.sj-growth-badge{font-style:normal;font-family:'Noto Sans KR',sans-serif;font-size:11.5px;font-weight:800;line-height:1;color:#0F9488;background:#E3F8F4;border:1px solid #BFEEE4;border-radius:999px;padding:4px 10px;white-space:nowrap;letter-spacing:0;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1,"palt" 0}
 .sj-growth-badge.sm{font-size:11px;padding:3px 9px}
 .sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;color:#66717C;cursor:pointer;flex-shrink:0;box-shadow:0 1px 4px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
 .sj-session-mini>div{padding:0;border-top:0}

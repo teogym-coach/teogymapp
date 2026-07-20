@@ -10389,14 +10389,22 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
       setOtherDrafts(found);
     } catch { setOtherDrafts([]); }
   }, [todayDraftKey, member.id, draftType]);
-  const todaySession = (() => {
-    const matches = sessions.filter(s => s.date === todayStr);
-    if (!matches.length) return null;
-    return [...matches].sort((a,b)=>(Number(b.sessionNo)||0)-(Number(a.sessionNo)||0))[0];
-  })();
+  // 같은 날짜에 여러 기록(전송 완료 + 작성 중)이 동시에 존재할 수 있으므로, "오늘 기록"을 하나로 단정하지 않고
+  // 전송 완료/작성 중을 별도 목록으로 나눠 관리한다. 대표 표시(todaySession)는 전송 완료 기록을 우선해
+  // 새로 추가된 작성 중 기록(다음 수업 준비용 등) 때문에 기존 "완료" 상태가 취소되지 않게 한다.
+  const todaySessionsForDay = sessions.filter(s => s.date === todayStr);
+  const todaySentSessions = [...todaySessionsForDay.filter(s => s.isPublished)]
+    .sort((a,b)=>(Number(b.sessionNo)||0)-(Number(a.sessionNo)||0));
+  const todayUnsentSessions = [...todaySessionsForDay.filter(s => !s.isPublished)]
+    .sort((a,b)=>(Number(b.sessionNo)||0)-(Number(a.sessionNo)||0));
+  const todaySession = todaySentSessions[0] || todayUnsentSessions[0] || null;
   const todayCardState = todaySession
     ? (todaySession.isPublished ? "sent" : "review")
     : (todayDraft ? "draft" : "idle");
+  // 현재 대표로 표시 중인 기록(todaySession) 외에 추가로 존재하는 작성 중(미전송) 기록 — "이어 기록" 목록용.
+  // review 상태면 대표 자체가 작성 중 기록이므로 자동으로 목록에서 제외되고, sent 상태면 전부 포함된다.
+  const otherUnsentTodaySessions = todayUnsentSessions.filter(s => s.id !== todaySession?.id);
+  const [showOtherUnsent, setShowOtherUnsent] = useState(false);
   const [sendingToday, setSendingToday] = useState(false);
   const handleSendToday = async() => {
     if (!todaySession || sendingToday) return;
@@ -10425,6 +10433,9 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
   };
   const handleContinueDraft = () => onEditSession(null);
   const handleEditToday = () => onEditSession(todaySession);
+  // 기존 오늘 기록(전송 완료·작성 중) 상태와 무관하게 항상 완전히 별개의 새 Firestore 문서를 시작한다.
+  // editData=null → SessionScreen이 addDoc으로 신규 저장하므로 기존 기록은 절대 건드리지 않는다.
+  const handleNewRecord = () => onEditSession(null);
   const handleLoadTemplate = (sourceSession) => {
     if (!sourceSession) return;
     const template = {
@@ -10776,6 +10787,32 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
   );
 
+  // 오늘 기록이 이미 있는(작성 중 또는 전송 완료) 상태에서도 항상 노출되는 "새 기록" 진입부.
+  // 기존 기록은 그대로 두고 완전히 별개의 addDoc 신규 문서를 시작하며, 동시에 존재하는 다른 작성 중(미전송)
+  // 기록이 있으면 목록으로 펼쳐 각각의 sessionId로 "이어 기록"할 수 있게 한다.
+  const newRecordBlock = (
+    <div style={{marginTop:12,paddingTop:12,borderTop:DB.hairline}}>
+      <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+        <button onClick={handleNewRecord} style={{minHeight:44,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"11px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>+ 새 기록 시작</button>
+      </div>
+      <div style={{fontSize:11,color:DB.sub,marginTop:8}}>기존 기록은 그대로 유지되며, 완전히 별개의 새 기록을 추가로 작성합니다.</div>
+      {otherUnsentTodaySessions.length>0 && (
+        <div style={{marginTop:10}}>
+          <button onClick={()=>setShowOtherUnsent(v=>!v)} style={{border:"none",background:"none",fontSize:11.5,fontWeight:700,color:DB.sub,textDecoration:"underline",textUnderlineOffset:"3px",cursor:"pointer",padding:0,fontFamily:DB.font}}>작성 중인 다른 기록 {otherUnsentTodaySessions.length}건 보기 {showOtherUnsent?"▲":"▾"}</button>
+          {showOtherUnsent && otherUnsentTodaySessions.map(s=>(
+            <div key={s.id} style={{marginTop:8,padding:"11px 14px",borderRadius:DB.radiusSm,background:DB.bg,border:`1px solid ${DB.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:8,background:DB.card,color:DB.text,border:`1px solid ${DB.border}`}}>{s.sessionNo}{t("회차","회차")}</span>
+                <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:8,background:DB.card,color:DB.text,border:`1px solid ${DB.border}`}}>운동 <b>{(s.exercises||[]).filter(e=>e?.name).length}개</b></span>
+              </div>
+              <button onClick={()=>onEditSession(s)} style={{border:`1px solid rgba(57,199,184,.4)`,background:DB.card,color:DB.mintSoft,borderRadius:11,padding:"8px 14px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>이어 기록</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   // ③ 오늘 수업 — 옅은 민트 강조 카드, 4가지 상태.
   // DB.mintTint는 반투명이라 어두운 앱 셸 위에서 어둡게 합성됨 → 흰 카드 위에 민트 틴트를 얹은 "불투명" 배경으로 밝기 보장
   const secToday = (
@@ -10862,9 +10899,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                   ) : (
                     <button onClick={handleSendToday} disabled={sendingToday} style={{flex:"1 1 auto",minHeight:48,border:"none",borderRadius:14,padding:"13px 24px",fontSize:14,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:sendingToday?"default":"pointer",opacity:sendingToday?.7:1}}>{sendingToday?"전송 중...":"회원에게 보내기"}</button>
                   )}
-                  <button onClick={handleEditToday} style={{minHeight:48,border:`1px solid ${DB.border}`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>수정하기</button>
+                  <button onClick={handleEditToday} style={{minHeight:48,border:`1px solid ${DB.border}`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>이어 기록</button>
                 </div>
                 <div style={{fontSize:11,color:DB.sub,marginTop:9}}>보내기 전까지 회원앱에는 표시되지 않습니다. 내부 메모 · 통증 기록 · 세트 RPE는 전송되지 않습니다.</div>
+                {newRecordBlock}
               </>
             )}
 
@@ -10887,6 +10925,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                     공개 후 수정된 기록입니다. <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(239,68,68,.08)",color:"#B02A2A"}}>수정됨 · 재전송 필요</span> 회원앱에는 현재 수정된 최신 내용이 바로 반영됩니다.
                   </div>
                 )}
+                {newRecordBlock}
               </>
             )}
           </section>

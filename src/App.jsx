@@ -2098,28 +2098,36 @@ function HomeCalendarSummaryCard(p){
   </div>;
 }
 
-// 후기 안내 공지 정책 시작일 — 2026-07-20부터 새로 시작하는 운영 정책이므로 이 날짜 이후에 "첫 등록/재등록 실제 날짜"가 있거나
-// "관리자가 새로 후기 필수로 지정(requiredSetAt)"한 회원에게만 적용한다. 그 이전부터 있던 등록일·재등록일·후기 필수 지정에는 소급 적용하지 않는다
-// (UNSENT_SESSION_START_DATE와 동일한 패턴 — 날짜 문자열 그대로 사전식 비교).
+// 후기 안내 공지 정책 시작일 — 2026-07-20부터 새로 시작하는 운영 정책이므로, 이 날짜 이후에 "실제로 신규 등록/재등록한" 회원에게만 적용한다.
+// 정책 적용 대상 판정은 오직 firstRegistrationDate/latestRenewalDate(등록·재등록 "날짜") 기준이며, 후기 필수 지정 시점(requiredSetAt)은 사용하지 않는다
+// — 정책 이전부터 있던 기존 회원에게 정책 이후 후기 필수만 새로 지정해도(등록일 갱신 없이는) 공지를 띄우지 않기 위함(UNSENT_SESSION_START_DATE와 동일한 날짜 문자열 사전식 비교 패턴).
 const REGISTRATION_NOTICE_POLICY_START_DATE = "2026-07-20";
 // 회원앱 홈 "후기 안내" 공지 — 관리자앱 등록 관리(registrationType/firstRegistrationDate/latestRenewalDate/registrationNoticeDone)와
-// 후기 관리(reviewStatus.requiredCount/completedCount/requiredSetAt, HubScreen 후기 관리 카드와 동일 필드) 데이터만으로 판정한다.
-// 우선순위: 필수 후기(남은 횟수 있음) > 재등록 안내(5일 이내) > 첫 등록 안내(5일 이내). 신규 필드가 없는 기존 회원은 항상 null(공지 없음).
+// 후기 관리(reviewStatus.requiredCount/completedCount, HubScreen 후기 관리 카드와 동일 필드) 데이터만으로 판정한다.
+// 판정 순서: ① 정책 적용 대상(2026-07-20 이후 신규 등록 또는 재등록) 여부 확인 → ② 대상일 때만 필수 후기 남은 횟수 확인(기간 제한 없음) → ③ 필수 후기가 없으면 등록·재등록일 기준 5일 안내.
 // TEO·test member도 회원앱 기능 판정 대상이므로 관리자용 isExcludedAdminMember 필터를 여기서는 사용하지 않는다.
 function buildRegistrationReviewNotice(profile) {
   if (!profile) return null;
+  const todayKST = getKoreaDateString();
+  const isPolicyDate = (d) => { const s = String(d || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayKST && s >= REGISTRATION_NOTICE_POLICY_START_DATE; };
+  // ① 정책 적용 대상 — 2026-07-20 이후 날짜의 첫 등록(first) 또는 재등록(renewal)이 있어야만 아래 어떤 공지도 대상이 된다.
+  const isPolicyEligible =
+    (profile.registrationType === "first" && isPolicyDate(profile.firstRegistrationDate)) ||
+    (profile.registrationType === "renewal" && isPolicyDate(profile.latestRenewalDate));
+  if (!isPolicyEligible) return null;
+
+  // ② 필수 후기 — 정책 적용 대상일 때만 확인하며, 남아있으면 기간 제한 없이 최우선 표시.
   const required = Number(profile.reviewStatus?.requiredCount);
   const hasReviewGoal = required === 1 || required === 2;
   if (hasReviewGoal) {
-    const requiredSetAt = String(profile.reviewStatus?.requiredSetAt || "").slice(0, 10);
-    if (!requiredSetAt || requiredSetAt < REGISTRATION_NOTICE_POLICY_START_DATE) return null; // 정책 이전부터 있던 필수 지정은 소급 적용하지 않음
     const completed = Math.min(Math.max(Number(profile.reviewStatus?.completedCount) || 0, 0), required);
     const remaining = Math.max(required - completed, 0);
     return remaining > 0 ? { type: "required", remaining } : null;
   }
-  const todayKST = getKoreaDateString();
+
+  // ③ 필수 후기가 없으면 등록·재등록일 기준 5일(당일 포함) 안내.
   const windowStart = dateStrDaysAgo(4);
-  const inWindow = (d) => { const s = String(d || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayKST && s >= windowStart && s >= REGISTRATION_NOTICE_POLICY_START_DATE; };
+  const inWindow = (d) => { const s = String(d || "").slice(0, 10); return s <= todayKST && s >= windowStart; };
   if (profile.registrationType === "renewal" && !profile.registrationNoticeDone && inWindow(profile.latestRenewalDate)) return { type: "renewal" };
   if (profile.registrationType === "first" && !profile.registrationNoticeDone && inWindow(profile.firstRegistrationDate)) return { type: "first" };
   return null;

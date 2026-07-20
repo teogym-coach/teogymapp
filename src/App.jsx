@@ -1490,19 +1490,43 @@ function buildSessionPrInfo(sessions=[]){
 // 수업 1회 리포트 요약 — Apple Fitness식 핵심 숫자(종목/볼륨/최고 중량/RPE/근육통). 전부 세션 데이터 계산만.
 function buildSessionReportStats(s={}){
   const exs=(s.exercises||[]).filter(e=>e.name);
-  let volume=0, top=0, totalSets=0;
+  let volume=0, top=0, totalSets=0, totalReps=0;
   exs.forEach(e=>getFilledSets(e).forEach(st=>{
     totalSets+=1;
     const w=Number(st.weight)||0, r=Number(st.reps)||0;
     if(w>0&&r>0) volume+=w*r;
     if(w>top) top=w;
+    totalReps+=r;
   }));
   const fb=s.memberFeedback||{};
   return {
-    exCount:exs.length, volume:Math.round(volume), top, totalSets,
+    exCount:exs.length, volume:Math.round(volume), top, totalSets, totalReps,
     rpe:Number.isFinite(Number(fb.rpe))?Number(fb.rpe):null,
     soreness:fb.sorenessLevel&&fb.sorenessLevel!=="없음"?`${formatSorenessBodyParts(fb)} ${fb.sorenessLevel}`:null,
   };
+}
+// 성장 배지 — 이번 수업을 이전 동일 부위 수업과 비교해 총 볼륨/중량/반복수/세트수/운동 개수 중
+// 가장 크게 향상된 지표 하나만 골라 "▲n% 향상"으로 표시한다(어떤 지표인지는 회원에게 노출하지 않음).
+// 감소·무변화는 절대 표시하지 않고, 비교할 이전 동일 부위 기록이 없으면 배지 자체를 표시하지 않는다.
+function buildSessionGrowthBadge(sessions=[],session){
+  if(!session?.date) return null;
+  const parts=(session.selectedTypes||normalizeTypes(session.type)).filter(t=>SESSION_BODY_PART_OPTIONS.includes(t));
+  if(!parts.length) return null;
+  const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.id||"").localeCompare(String(b.id||"")));
+  const idx=sorted.findIndex(s=>s.id===session.id);
+  if(idx<=0) return null;
+  const prev=sorted.slice(0,idx).reverse().find(s=>{
+    const pParts=(s.selectedTypes||normalizeTypes(s.type)).filter(t=>SESSION_BODY_PART_OPTIONS.includes(t));
+    return pParts.some(t=>parts.includes(t));
+  });
+  if(!prev) return null;
+  const cur=buildSessionReportStats(session), before=buildSessionReportStats(prev);
+  const metrics=[[cur.volume,before.volume],[cur.top,before.top],[cur.totalReps,before.totalReps],[cur.totalSets,before.totalSets],[cur.exCount,before.exCount]];
+  let bestPct=0;
+  metrics.forEach(([c,p])=>{ if(p>0&&c>p){ const pct=((c-p)/p)*100; if(pct>bestPct) bestPct=pct; } });
+  const rounded=Math.round(bestPct);
+  if(rounded<1) return null;
+  return {label:`▲${rounded}% 향상`};
 }
 // 운동일 = PT 수업 또는 개인운동 완료 또는 유산소 기록이 있는 날 (hasWorkoutDay = hasPT || hasPersonalWorkout || hasCardio) — 같은 날 여러 종류가 겹쳐도 운동일은 1일만 증가
 function getWorkoutDaySet(dayMap){
@@ -2242,7 +2266,7 @@ function MemberWorkout(p){
     {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
   </>;
 }
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState(journalFocusId||"__first__"); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]);
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState(journalFocusId||"__first__"); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
   // 캘린더 날짜 상세에서 "수업일지 보기"로 진입한 경우 — 해당 수업을 펼치고 읽음 처리
   useEffect(()=>{ if(journalFocusId){ setOpenId(journalFocusId); setShowAll(true); markSessionsAsRead?.([journalFocusId]); setJournalFocusId?.(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2255,13 +2279,13 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   const latestId=reversed[0]?.id;
   // 펼친 수업 카드 — 최근 수업이든 이전 수업이든 같은 구성(날짜/부위/요약/운동 아코디언/피드백 카드)
   const renderExpanded=(s,i)=>{
-    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId;
+    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId; const growth=growthBadges.get(s.id);
     return <div key={s.id} className="sj-session-group">
       <section className="sj-session-card">
         <header className="sj-sess-head">
           <div className="sj-sess-title">
             {(isLatest||isPr)&&<span className="sj-badges">{isLatest&&<em className="sj-badge latest">최근 수업</em>}{isPr&&<em className="sj-badge pr">★ PR</em>}</span>}
-            <h2>{formatKoreanDateLabel(s.date)}</h2>
+            <h2 className="sj-date-line">{formatKoreanDateLabel(s.date)}{growth&&<em className="sj-growth-badge">{growth.label}</em>}</h2>
             <p>{typeName}</p>
           </div>
           <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
@@ -2274,10 +2298,10 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   };
   // 접힌 이전 수업 카드 — 날짜/부위/종목 수/대표 운동/RPE 기록 여부로 내용을 예측할 수 있게
   const renderCollapsed=(s,i)=>{
-    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{};
+    const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{}; const growth=growthBadges.get(s.id);
     return <button key={s.id} type="button" className="sj-prev-card" onClick={()=>toggleSess(s,i)}>
       <span className="sj-prev-main">
-        <b>{formatKoreanDateLabel(s.date)}</b>
+        <span className="sj-prev-date-row"><b>{formatKoreanDateLabel(s.date)}</b>{growth&&<em className="sj-growth-badge sm">{growth.label}</em>}</span>
         <span><i className="sj-part">{typeName}</i> · {exs.length}종목</span>
       </span>
       <span className="sj-prev-side">
@@ -4788,6 +4812,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-prev-card{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:14px 16px;margin:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.04);transition:transform .15s ease,background-color .15s ease}
 .sj-prev-card:active{transform:scale(.985);background:#FBFCFE}
 .sj-prev-main{flex:1;min-width:0;display:grid;gap:4px}
+.sj-prev-date-row{display:flex;align-items:center;gap:7px}
 .sj-prev-main b{font-size:15.5px;font-weight:700;color:#1D2430;letter-spacing:-.2px;font-variant-numeric:tabular-nums}
 .sj-prev-main span{font-size:13px;font-weight:700;color:#66717C;letter-spacing:0}
 .sj-part{color:#0F9488;font-style:normal;font-weight:800}
@@ -4807,6 +4832,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-badge.move{background:rgba(139,92,246,.12);color:#8B5CF6}
 .sj-sess-title h2{font-size:20px;margin:0;letter-spacing:-.4px;color:#1D2430;font-variant-numeric:tabular-nums}
 .sj-sess-title p{margin:6px 0 0;color:#0F9488;font-weight:800;font-size:14.5px}
+.sj-date-line{display:flex;align-items:center;gap:8px}
+.sj-growth-badge{font-style:normal;font-size:11.5px;font-weight:800;color:#0F9488;background:#E3F8F4;border:1px solid #BFEEE4;border-radius:999px;padding:4px 10px;white-space:nowrap;letter-spacing:0;font-variant-numeric:tabular-nums}
+.sj-growth-badge.sm{font-size:11px;padding:3px 9px}
 .sj-collapse-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:8px 12px;font-size:12px;font-weight:800;color:#66717C;cursor:pointer;flex-shrink:0;box-shadow:0 1px 4px rgba(15,23,42,.04);-webkit-tap-highlight-color:transparent}
 .sj-session-mini>div{padding:0;border-top:0}
 .sj-ex-section{padding:12px 0 2px;border-top:1px solid #EEF1F4;margin-top:12px}

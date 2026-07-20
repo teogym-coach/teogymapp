@@ -867,8 +867,9 @@ const checks = [
       return i !== -1 && j !== -1 && i < j;
     })()
   ],
-  ['수업일지: 최근 수업 대표 카드 + 이전 수업 프리뷰 카드(날짜·부위·대표 운동·RPE 여부) + 전체 수업 기록 보기',
-    app.includes('className="sj-badge latest">최근 수업') &&
+  ['수업일지: 최근 수업 대표 카드(카드 위 압축 헤더로 "최근 수업"·부위 표시) + 이전 수업 프리뷰 카드(날짜·부위·대표 운동·RPE 여부) + 전체 수업 기록 보기',
+    app.includes('className="sj-hero-label"') &&
+    app.includes('<span>최근 수업</span>') &&
     app.includes('function formatKoreanDateLabel(') &&
     app.includes('이전 수업') &&
     app.includes('전체 수업 기록 보기')

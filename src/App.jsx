@@ -2356,7 +2356,8 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
       <section className="sj-session-card">
         <header className="sj-sess-head">
           <div className="sj-sess-title">
-            {(isLatest||isPr)&&<span className="sj-badges">{isLatest&&<em className="sj-badge latest">최근 수업</em>}{isPr&&<em className="sj-badge pr">★ PR</em>}</span>}
+            {/* "최근 수업" 표시는 카드 바로 위 sj-hero-label(압축 헤더)로 이동했으므로 여기서는 PR 배지만 남긴다(중복 방지) */}
+            {isPr&&<span className="sj-badges"><em className="sj-badge pr">★ PR</em></span>}
             <h2 className="sj-date-line"><span className="sj-date-text">{formatKoreanDateLabel(s.date)}</span>{growth&&<em className="sj-growth-badge">{growth.label}</em>}</h2>
             <p>{typeName}</p>
           </div>
@@ -2383,7 +2384,13 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     </button>;
   };
   const heroItems=[]; const prevItems=[];
-  displayed.forEach((s,i)=>{ const node=isExp(s)?renderExpanded(s):renderCollapsed(s); if(!lq&&i===0)heroItems.push(node); else prevItems.push(node); });
+  displayed.forEach((s,i)=>{ const node=isExp(s)?renderExpanded(s):renderCollapsed(s);
+    if(!lq&&i===0){
+      // 최신 수업 카드 바로 위 한 줄 압축 헤더 — "최근 수업 · 실제 부위". 카드 내부의 "최근 수업" 배지는 중복이라 제거했다(renderExpanded 참고).
+      const heroType=formatTypes(s.selectedTypes||s.type)||"운동";
+      heroItems.push(<Fragment key={`hero-${s.id}`}><div className="sj-hero-label"><span>최근 수업</span><b>{heroType}</b></div>{node}</Fragment>);
+    } else prevItems.push(node);
+  });
   return <>
     <div className="ex-search-wrap sj-search-wrap">
       <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
@@ -4892,17 +4899,20 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 }
 /* ── 수업 탭 리디자인(sj-*) — 밝은 프리미엄 톤, TEO GYM 민트(#39C7B8/#0F9488) 포인트, 이모지 대신 선형 아이콘 ── */
 .sj-page-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:6px 0 0}
-.sj-page-head~.mv2-segment{margin:0 0 10px}
+.sj-page-head~.mv2-segment{margin:0 0 8px}
 .sj-page-head~.mv2-segment button{height:38px}
 .sj-page-head~.mv2-segment button.active{color:#0F9488}
 .member-page h1.sj-page-title{margin:0}
 .sj-page-meta{color:#8B949E;font-size:12.5px;font-weight:800;white-space:nowrap}
-.member-page .sj-page-sub{margin:10px 0 26px}
-.sj-search-wrap{padding:0 0 4px}
+.member-page .sj-page-sub{margin:8px 0 10px}
+.sj-search-wrap{padding:0 0 4px;margin-bottom:2px}
 .sj-search-icon{position:absolute;left:15px;top:50%;transform:translateY(-51%);color:#A8B0BA;display:flex;pointer-events:none;font-style:normal}
 .ex-search.sj-search{height:40px;border-radius:13px;padding:0 40px 0 41px;font-size:14px}
 .sj-search-wrap .ex-search-clear{display:flex;align-items:center;color:#A8B0BA}
 .sj-section-label{font-size:13px;font-weight:900;color:#8B949E;margin:16px 2px 8px;letter-spacing:-.2px}
+/* 최신 수업 카드 바로 위 한 줄 압축 헤더 — "최근 수업 · 부위"(모바일 첫 화면에서 카드 상단 배지 한 줄을 대신해 공간을 아낀다) */
+.sj-hero-label{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:8px 2px 4px;font-size:13px;font-weight:900;color:#8B949E;letter-spacing:-.2px}
+.sj-hero-label b{color:#0F9488;font-weight:900;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .sj-prev-list{display:grid;gap:10px}
 .sj-prev-card{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:14px 16px;margin:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.04);transition:transform .15s ease,background-color .15s ease}
 .sj-prev-card:active{transform:scale(.985);background:#FBFCFE}
@@ -4952,7 +4962,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-ex-notes{display:grid;gap:6px;margin-top:10px}
 .sj-ex-notes em{background:#E9FAF7;color:#0E7C72;border-radius:12px;padding:9px 11px;font-style:normal;font-weight:800;font-size:12.5px;line-height:1.5}
 /* 오늘 수업 기록 — 수업 카드 내부 섹션(별도 카드 아님): 운동 목록 아래에 구분선으로 이어지는 같은 날짜의 흐름 */
-.sj-feedback-card{background:transparent;border:0;border-top:1px solid #EEF1F4;border-radius:0;padding:12px 0 2px;margin:12px 0 0;box-shadow:none}
+.sj-feedback-card{background:transparent;border:0;border-top:1px solid #EEF1F4;border-radius:0;padding:9px 0 2px;margin:8px 0 0;box-shadow:none}
 .sj-fb-head{display:flex;align-items:center;gap:11px}
 .sj-fb-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;background:#E9FAF7;color:#0F9488;flex-shrink:0;font-style:normal}
 .sj-fb-head b{flex:1;min-width:0;font-size:15.5px;font-weight:700;color:#0F172A;letter-spacing:-.3px}

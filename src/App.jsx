@@ -114,8 +114,16 @@ const SESSION_TYPE_OPTIONS = [
   "가슴","등","어깨","하체","팔","이두","삼두",
   "유산소","복합운동","스트레칭/이동성","기타"
 ];
-// ── "오늘의 운동 부위" — 세션 전체 수업 부위 선택(selectedTypes를 그대로 재사용, 운동별 muscleTop 자동선택과 무관) ──
+// ── "오늘의 운동 부위" — 세션 전체 수업 부위 선택(selectedTypes를 그대로 재사용).
+// 새 운동 카드의 기본 muscleTop(운동 부위)에 자동 상속되며, 첫 선택값만 사용한다(SESSION_PART_TO_MUSCLE_TOP 참고). ──
 const SESSION_BODY_PART_OPTIONS = ["등","가슴","하체","어깨","이두","삼두","상체"];
+// 오늘의 운동 부위 값 → 운동 카드 muscleTop(MUSCLE_MAP 키) 매핑. "상체"는 단일 muscleTop과 대응되지 않아 매핑하지 않는다(자동 기본값 미적용).
+const SESSION_PART_TO_MUSCLE_TOP = { "가슴":"가슴", "등":"등", "하체":"하체", "어깨":"어깨", "이두":"팔-이두근", "삼두":"팔-삼두근" };
+function getTodayMuscleTop(selectedTypes) {
+  const parts = (selectedTypes||[]).filter(t => SESSION_BODY_PART_OPTIONS.includes(t));
+  for (const p of parts) { if (SESSION_PART_TO_MUSCLE_TOP[p]) return SESSION_PART_TO_MUSCLE_TOP[p]; }
+  return "";
+}
 // type(string) → selectedTypes(array) 호환 변환
 function normalizeTypes(raw) {
   if (!raw) return [];
@@ -364,7 +372,7 @@ function upsertBodyRecord(records = [], rec = {}) {
 
 function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightReps"}; }
 function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
-function mkEx()      { return {name:"",muscleTop:"가슴",muscleSub:"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimMemo:"",stimPrimary:"",stimSecondary:"",stimNote:"",nextPlan:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
+function mkEx(top)   { const t = top || "가슴"; return {name:"",muscleTop:t,muscleSub:mSubs(t)[0]||"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimMemo:"",stimPrimary:"",stimSecondary:"",stimNote:"",nextPlan:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
 
 const STIM_RATING_OPTIONS = [
   { value:1, label:"없음", summary:"자극 없음" },
@@ -11592,8 +11600,17 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [condition,      setCondition]      = useState(editData?.condition      || "상");
   const [exercises,      setExercises]      = useState(() => {
     if (editData?.exercises) {
-      // 기존 저장 기록 열기: 저장된 내용 그대로
-      const baseExs = editData.exercises.map(e => ({...e, muscleSub: normMuscleSub(e.muscleSub)}));
+      // 기존 저장 기록 열기: 저장된 부위는 절대 덮어쓰지 않고, 비어있는 부위에만 오늘의 운동 부위를 기본값으로 보완
+      const fallbackTop = getTodayMuscleTop(selectedTypes);
+      const baseExs = editData.exercises.map(e => {
+        const u = {...e, muscleSub: normMuscleSub(e.muscleSub)};
+        if (!u.muscleTop && fallbackTop) {
+          u.muscleTop = fallbackTop;
+          u.muscleSub = mSubs(fallbackTop)[0] || u.muscleSub;
+          u.partAutoAssigned = true;
+        }
+        return u;
+      });
       // 2:1 세션 편집: B회원 운동 데이터(memberBExercises) → m2 필드로 복원
       if (editData.sessionType === "2:1" && Array.isArray(editData.memberBExercises) && editData.memberBExercises.length > 0) {
         return baseExs.map((e, i) => {
@@ -11604,8 +11621,9 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       }
       return baseExs;
     }
-    // 대표님 운동 기록 · 회원 수업 기록 모두: 빈 웨이트 운동 카드 1개로 시작 (기능 운동 기본 생성 안 함)
-    return [mkEx()];
+    // 대표님 운동 기록 · 회원 수업 기록 모두: 빈 웨이트 운동 카드 1개로 시작(기능 운동 기본 생성 안 함).
+    // 오늘의 운동 부위가 선택돼 있으면 그 부위를 기본값으로, 없으면 기존과 동일하게 mkEx() 기본값("가슴") 사용.
+    return [{...mkEx(getTodayMuscleTop(selectedTypes) || undefined), partAutoAssigned:true}];
   });
   const [stretchNotes,   setStretchNotes]   = useState(editData?.stretchingNotes || "");
   const [nextPlan,       setNextPlan]       = useState(editData?.nextPlan       || "");
@@ -11660,6 +11678,20 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     const bodyPartsOnly = prev.filter(t => SESSION_BODY_PART_OPTIONS.includes(t));
     return bodyPartsOnly.includes(part) ? bodyPartsOnly.filter(x=>x!==part) : [...bodyPartsOnly, part];
   });
+  // 오늘의 운동 부위 → 운동 카드 기본 부위 자동 상속. partAutoAssigned:true인(=아직 사용자가 직접 부위를 바꾸지 않은) 카드만 갱신하고,
+  // 사용자가 직접 바꾼 카드(partAutoAssigned:false)는 절대 덮어쓰지 않는다.
+  const todayMuscleTop = getTodayMuscleTop(selectedTypes);
+  const prevTodayMuscleTopRef = useRef(todayMuscleTop);
+  useEffect(() => {
+    if (!todayMuscleTop || prevTodayMuscleTopRef.current === todayMuscleTop) {
+      prevTodayMuscleTopRef.current = todayMuscleTop;
+      return;
+    }
+    prevTodayMuscleTopRef.current = todayMuscleTop;
+    setExercises(prev => prev.map(e => e.partAutoAssigned
+      ? { ...e, muscleTop: todayMuscleTop, muscleSub: mSubs(todayMuscleTop)[0] || e.muscleSub }
+      : e));
+  }, [todayMuscleTop]);
   const [showBodyPartPicker, setShowBodyPartPicker] = useState(false);
   const bodyPartPickerRef = useRef(null);
   // 오늘의 운동 부위 드롭다운 — 외부 영역 클릭(터치 포함) 시 닫힘
@@ -11942,10 +11974,12 @@ function updateEx(ei, key, val) {
       }
       // movementPurpose 수동 변경 감지
       if (key === "movementPurpose") u._purposeManual = true;
+      // 부위가 (직접 변경이든 이름/기구 자동 추천이든) 실제로 바뀌면 "오늘의 운동 부위 자동 상속" 대상에서 제외
+      if (u.muscleTop !== ex.muscleTop) u.partAutoAssigned = false;
       return u;
     }));
   }
-  function addEx() { setExercises(prev => [...prev, mkEx()]); } // 3번째~: 웨이트 기본값(바벨/가슴)
+  function addEx() { setExercises(prev => [...prev, {...mkEx(todayMuscleTop || undefined), partAutoAssigned:true}]); } // 3번째~: 웨이트 기본값(바벨/오늘의 운동 부위)
   function removeEx(ei) { setExercises(prev => prev.filter((_,i) => i!==ei)); }
   function updateSet(ei, si, key, val) {
     setExercises(prev => prev.map((ex,i) => {
@@ -11979,9 +12013,9 @@ function updateEx(ei, key, val) {
   function handleSave() {
     if (!sessionNo) { showToast("회차를 입력해주세요","err"); return; }
 
-    // 내부 state 필드 제거 후 저장 (_histIdx, _loaded 등 Firestore에 불필요)
+    // 내부 state 필드 제거 후 저장 (_histIdx, _loaded, partAutoAssigned 등 Firestore에 불필요 — 화면 상태 전용)
     const cleanExercises = exercises.map(e => {
-      const { _histIdx, _loaded, ...rest } = e;
+      const { _histIdx, _loaded, partAutoAssigned, ...rest } = e;
       return {
         ...rest,
         sets: (rest.sets || []).map(s => {
@@ -13089,12 +13123,12 @@ function updateEx(ei, key, val) {
           </div>
         );})}
         <div style={{display:"flex",gap:8,marginTop:10}}>
-          <button onClick={() => setExercises(prev=>[...prev, mkEx()])}
+          <button onClick={() => setExercises(prev=>[...prev, {...mkEx(todayMuscleTop || undefined), partAutoAssigned:true}])}
             style={{flex:1,padding:"9px 0",border:"1px dashed #CBD5E1",borderRadius:8,
               background:"transparent",color:"#64748B",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             + 마지막에 추가
           </button>
-          <button onClick={() => setExercises(prev=>[mkEx(),...prev])}
+          <button onClick={() => setExercises(prev=>[{...mkEx(todayMuscleTop || undefined), partAutoAssigned:true},...prev])}
             style={{flex:1,padding:"9px 0",border:"1px dashed rgba(57,199,184,.3)",borderRadius:8,
               background:"rgba(57,199,184,.05)",color:"#0F9488",fontSize:11,fontWeight:700,cursor:"pointer"}}>
             ↑ 맨 위에 추가

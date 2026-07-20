@@ -526,6 +526,9 @@ const FUNC_EX_MAP = [
   { keys:["크로커다일","crocodile"], category:"호흡", bodyParts:["요추"], tool:"맨몸" },
   // 밸런스
   { keys:["단하지","싱글레그 스탠드","외발"], category:"밸런스", bodyParts:["고관절"], tool:"맨몸" },
+  // 견갑/어깨 안정화 목적이 이름에 명시된 푸쉬업 변형만 기능 운동(안정화)으로 분류 — 일반 "푸쉬업"은 위 suggestFuncExPreset의 예외 처리에서 이미 걸러진다
+  { keys:["벽 푸쉬업","벽푸쉬업","wall push up","wall pushup","스캡 푸쉬업","스캡푸쉬업","scap push up","scap pushup","플러스 푸쉬업","플러스푸쉬업","push up plus","push-up plus","견갑 푸쉬업","견갑푸쉬업","재활 푸쉬업","재활푸쉬업","어깨 안정화 푸쉬업","어깨안정화 푸쉬업","기능성 푸쉬업","기능성푸쉬업","움직임 개선 푸쉬업","움직임개선 푸쉬업","움직임개선푸쉬업"],
+    category:"안정화", bodyParts:["견갑 주변"], tool:"맨몸" },
 ];
 
 // 부위 키워드 매핑 (운동명에 부위 키워드가 있으면 자동 설정)
@@ -585,6 +588,15 @@ function getLearnedFuncPreset(name) {
 function suggestFuncExPreset(name) {
   if (!name || name.trim().length < 2) return null;
   const n = name.toLowerCase();
+
+  // ── 푸쉬업 예외 처리 — 일반 "푸쉬업"은 맨몸 웨이트 운동(가슴)이지 기능 운동이 아니다.
+  // 이름에 재활·기능 목적 수식어(벽/스캡/플러스/견갑/재활/안정화/기능성/움직임 개선)가 명시된 경우만 아래 FUNC_EX_MAP 매칭으로 넘어가 기능 운동으로 분류한다.
+  // 개인 학습 데이터(로컬 저장, 아래 1순위 조회)보다 먼저 걸러야 과거에 잘못 학습된 "푸쉬업→기능" 캐시도 함께 차단된다.
+  const PUSHUP_NAMES = ["푸쉬업","푸시업","push up","push-up","pushup"];
+  const PUSHUP_FUNCTIONAL_MODIFIERS = ["벽","스캡","플러스","견갑","재활","안정화","기능성","움직임 개선","움직임개선","wall","scap","plus","rehab"];
+  if (PUSHUP_NAMES.some(k => n.includes(k)) && !PUSHUP_FUNCTIONAL_MODIFIERS.some(k => n.includes(k.toLowerCase()))) {
+    return null;
+  }
 
   // ── 웨이트 운동 차단 목록 (기능 운동으로 절대 분류하지 않음) ──────────
   const WEIGHT_BLOCKLIST = [

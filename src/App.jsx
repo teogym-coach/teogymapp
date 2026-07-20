@@ -5004,6 +5004,21 @@ function formatWhenLabel(at){
   const diffDays=Math.max(1,Math.round((new Date(`${todayKey}T00:00:00Z`)-new Date(`${dKey}T00:00:00Z`))/86400000));
   return `${diffDays}일 전`;
 }
+// "다음 수업 준비" 카드 저장 버튼 옆 "마지막 저장" 표시 — 오늘이면 "오늘 오후 3:42", 아니면 "7월 19일 오후 6:20"
+function formatLastSavedLabel(at){
+  if(!at) return null;
+  const raw=typeof at?.toDate==="function"?at.toDate():at;
+  const d=raw instanceof Date?raw:new Date(raw);
+  if(Number.isNaN(d.getTime())) return null;
+  const todayKey=getKoreaDateString();
+  const dKey=getKoreaDateString(d);
+  const hh=d.getHours();
+  const ampm=hh<12?"오전":"오후";
+  const h12=hh%12===0?12:hh%12;
+  const mm=String(d.getMinutes()).padStart(2,"0");
+  const timeStr=`${ampm} ${h12}:${mm}`;
+  return dKey===todayKey ? `오늘 ${timeStr}` : `${d.getMonth()+1}월 ${d.getDate()}일 ${timeStr}`;
+}
 function formatWhenDateOnly(dateStr){
   if(!dateStr) return null;
   const key=String(dateStr).slice(0,10);
@@ -11028,6 +11043,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
       showToast?.("다음 수업 준비가 저장되었습니다.");
     } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setPtSaving(false); }
   };
+  const lastPrepSavedLabel = formatLastSavedLabel(member.nextWorkoutDateUpdatedAt);
   const secPrep = (
           <section id="hub-next-session" className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12,flexWrap:"wrap"}}>
@@ -11085,8 +11101,9 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 </div>
               </div>
             </div>
-            <div style={{marginTop:14}}>
+            <div style={{marginTop:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <button className="hub-cta-compact" onClick={handleSavePrep} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
+              <span style={{fontSize:11.5,fontWeight:600,color:DB.sub}}>{lastPrepSavedLabel ? `마지막 저장: ${lastPrepSavedLabel}` : "저장 기록 없음"}</span>
             </div>
           </section>
   );

@@ -1318,7 +1318,9 @@ function MemberApp({ onLogout }) {
   const savePain=async()=>{if(painSaving)return; const noPain=form.painPart==="없음"; const hasPain=!noPain||String(form.painMemo||"").trim()!==""; if(!hasPain){alert("통증 부위나 메모를 입력해주세요.");return;} setPainSaving(true); try{assertOwnMember(); const dateKey=form.date||today; const painPart=noPain?"없음":form.painPart; const painSide=noPain?"해당 없음":form.painSide; const painVas=noPain?0:(Number(form.painVas)||0); const painMemo=String(form.painMemo||"").trim(); await saveMemberCheckin(profile.id,dateKey,{painPart,painSide,painVas,painMemo,painRecord:{part:painPart,side:painSide,vas:painVas,memo:painMemo}}); setForm(f=>({...f,painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:""})); await load(); alert("통증 기록이 저장됐어요");}catch(e){console.error("[MemberApp] pain save failed",e); alert(e?.message||"통증 저장에 실패했습니다.");}finally{setPainSaving(false);}};
   const deleteHealthRecord=async(dateKey)=>{if(!dateKey||!window.confirm(`${dateKey} 건강 기록을 삭제할까요?`))return; try{assertOwnMember(); await deleteMemberHealthRecord(profile.id,dateKey); setCheckins(prev=>prev.filter(r=>(r.date||r.id)!==dateKey)); setBody(prev=>prev?{...prev,records:(prev.records||[]).filter(r=>r.date!==dateKey&&r.id!==`member_${dateKey}`)}:prev); setNutrition(prev=>prev?{...prev,logs:(prev.logs||[]).filter(r=>r.date!==dateKey&&r.id!==dateKey)}:prev); await load(); alert("건강 기록을 삭제했어요.");}catch(e){console.error("[MemberApp] health delete failed",e); alert(e?.message||"건강 기록 삭제에 실패했습니다.");}};
   const saveSoreness=async(sessionId,report)=>{assertOwnMember(); await saveSessionSoreness(profile.id,sessionId,report); await load(); alert("근육통 기록이 저장됐어요");};
-  const saveFeedback=async(sessionId,feedback)=>{assertOwnMember(); await saveSessionMemberFeedback(profile.id,sessionId,feedback); const memo=String(feedback?.memo||"").trim(); if(memo){const session=sessions.find(x=>x.id===sessionId)||{}; await addMemberMessage(profile.id,{date:session.date||today,sessionId,sessionTitle:`${session.date||today} · ${formatTypes(session.selectedTypes||session.type)||"운동"}`,message:memo,memberMessage:memo,source:"memberAppSessionFeedback"});} await load(); alert("수업 후 상태가 저장되었습니다.");};
+  // 완료 안내는 alert()이 아닌 MemberFeedbackForm 내부 비차단 토스트(sj-fb-saved-toast)로 표시한다.
+  // alert()는 모바일에서 blur/뷰포트 재계산을 유발해 저장 직후 스크롤 위치가 튀는 원인이었다(회원 요청으로 제거).
+  const saveFeedback=async(sessionId,feedback)=>{assertOwnMember(); await saveSessionMemberFeedback(profile.id,sessionId,feedback); const memo=String(feedback?.memo||"").trim(); if(memo){const session=sessions.find(x=>x.id===sessionId)||{}; await addMemberMessage(profile.id,{date:session.date||today,sessionId,sessionTitle:`${session.date||today} · ${formatTypes(session.selectedTypes||session.type)||"운동"}`,message:memo,memberMessage:memo,source:"memberAppSessionFeedback"});} await load();};
   const saveProfileInfo=async(data)=>{assertOwnMember(); const result=await saveMemberProfileFields(profile.id,data); const nextData={...data}; setProfile(prev=>prev?{...prev,...nextData}:prev); setOnboarding(prev=>prev?{...prev,...nextData,targetWeightKg:nextData.targetWeightKg??prev.targetWeightKg,targetPeriod:nextData.targetPeriod??prev.targetPeriod,targetPeriodCustom:nextData.targetPeriodCustom??prev.targetPeriodCustom,goal:nextData.goal??prev.goal}:prev); const nextWeight=toPositiveNumber(nextData.currentWeight); if(nextWeight){const dateKey=today; setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`profile_${dateKey}`,date:dateKey,weight:nextWeight,note:"프로필 저장 반영"})}));} await load(); return result;};
   const markSessionsAsRead=async(ids)=>{if(!ids?.length||!profile?.id)return; try{assertOwnMember();}catch{return;} const newIds=ids.filter(id=>id&&!readSessionIds.has(id)); if(!newIds.length)return; setReadSessionIds(prev=>{const next=new Set(prev); newIds.forEach(id=>next.add(id)); return next;}); markSessionsRead(profile.id,newIds).catch(()=>{}); };
   const saveAttendanceToday=async()=>{if(attendanceSaving||!profile?.id)return; setAttendanceSaving(true); try{assertOwnMember(); const result=await saveAttendance(profile.id,today); if(result.duplicate){alert("오늘은 이미 운동 체크가 완료되었습니다.");}else{alert("오늘 운동이 기록되었습니다."); setAttendance(prev=>[...prev,{date:today,source:"memberApp"}]);}}catch(e){console.error("[출석]",e); alert("출석 기록에 실패했습니다.");}finally{setAttendanceSaving(false);};};
@@ -2713,9 +2715,12 @@ function MemberFeedbackForm({s,onSave}){
   const [rpeDirty,setRpeDirty]=useState(false); // 이번 세션 카드에서 RPE 숫자를 직접 눌렀는지 — 저장값도 없고 누르지도 않았으면 "선택해주세요" 힌트 표시
   // RPE·근육통·메모는 서로 독립된 저장 버튼을 가진다 — 한 항목을 저장해도 다른 두 항목의 기존 저장값은 건드리지 않는다(saveSessionMemberFeedback이 전달된 필드만 merge 저장).
   const [savingSection,setSavingSection]=useState(null); // "rpe" | "soreness" | "memo" | null — 저장 중 중복 클릭 방지
+  const [savedNotice,setSavedNotice]=useState(false); // 저장 완료 비차단 토스트(alert 대체) 표시 여부
   const cardRef=useRef(null);
   const editRef=useRef(null);
   const wantScrollRef=useRef(false); // "펼치기" 버튼을 직접 눌렀을 때만 true — 자동 스크롤 1회 실행 플래그
+  const noticeTimerRef=useRef(null);
+  useEffect(()=>()=>clearTimeout(noticeTimerRef.current),[]);
   useEffect(()=>{
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
     setRpe(initialRpe());
@@ -2729,11 +2734,26 @@ function MemberFeedbackForm({s,onSave}){
     setSoreness({level:existing.sorenessLevel||"없음",parts:memberFeedbackParts(existing),nature:existing.sorenessNature||""});
     setRpe(initialRpe()); setMemo(existing.memo||""); setOpen(false);
   };
+  // 저장 전후 스크롤 위치를 고정한다 — 원인: 저장 시 상위(App.jsx saveFeedback)가 세션 전체를 다시 불러오며(load()) 화면을
+  // 재렌더링하고, 메모 저장 시 저장 버튼 클릭으로 textarea가 blur되며 모바일 키보드가 닫혀 뷰포트 높이가 바뀐다.
+  // 두 경우 모두 새 위치로 스크롤시키는 대신 저장 직전 위치를 그대로 복원한다(behavior:"auto", smooth 금지).
+  const restoreScroll=(y)=>{
+    const apply=()=>{ if(Math.abs(window.scrollY-y)>1) window.scrollTo({top:y,behavior:"auto"}); };
+    apply();
+    requestAnimationFrame(()=>requestAnimationFrame(apply));
+    setTimeout(apply,350); // 모바일 키보드 닫힘 애니메이션이 끝난 뒤 한 번 더 보정
+  };
   const saveSection=async(key,payload)=>{
     if(savingSection)return;
+    const scrollY=window.scrollY;
     setSavingSection(key);
-    try{ await onSave?.(s.id,payload); }
-    finally{ setSavingSection(null); }
+    try{
+      await onSave?.(s.id,payload);
+      setSavedNotice(true);
+      clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current=setTimeout(()=>setSavedNotice(false),1800);
+    }
+    finally{ setSavingSection(null); restoreScroll(scrollY); }
   };
   const saveRpe=()=>saveSection("rpe",{rpe:Number(rpe)});
   const saveSorenessSection=()=>{
@@ -2806,6 +2826,8 @@ function MemberFeedbackForm({s,onSave}){
         </div>
       </div>
     </div>}
+    {/* 저장 완료 안내 — 문서 흐름 밖의 고정 위치 토스트라 레이아웃 높이·스크롤 위치에 영향을 주지 않는다(alert() 대체) */}
+    {savedNotice&&<div className="sj-fb-saved-toast" role="status">수업 후 상태가 저장되었습니다.</div>}
   </div>;
 }
 const ANALYSIS_PERIODS=[{key:"1m",label:"1개월",days:30},{key:"3m",label:"3개월",days:90},{key:"6m",label:"6개월",days:180},{key:"1y",label:"1년",days:365},{key:"all",label:"전체",days:null}];
@@ -4903,6 +4925,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-fb-label svg{color:#0F9488}
 .sj-fb-hint{font-size:12px;font-weight:600;color:#94A3B8;white-space:nowrap;flex-shrink:0}
 .sj-fb-instruction{display:block;margin-top:3px;font-size:12px;font-weight:600;color:#94A3B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sj-fb-saved-toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0F172A;color:#fff;font-size:12.5px;font-weight:700;padding:9px 16px;border-radius:999px;box-shadow:0 6px 18px rgba(15,23,42,.22);z-index:60;pointer-events:none;white-space:nowrap;max-width:88vw;overflow:hidden;text-overflow:ellipsis}
 .sj-rpe-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:10px}
 .sj-rpe-grid button{height:36px;min-width:0;padding:0;border:1px solid #E8ECF1;background:#F8F9FB;border-radius:9px;font-family:inherit;font-size:13px;font-weight:600;color:#64748B;font-variant-numeric:tabular-nums;letter-spacing:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
 .sj-rpe-grid button.active{border-color:#39C7B8;background:#fff;color:#0F9488;font-weight:700;box-shadow:0 1px 5px rgba(15,148,136,.14)}

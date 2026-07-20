@@ -798,6 +798,13 @@ const checks = [
     app.includes('if(savingSection)return;') &&
     app.includes('setSavingSection(key)')
   ],
+  ['수업 후 상태: RPE·근육통·메모 저장 시 저장 직전 스크롤 위치를 기록 후 behavior:"auto"로 복원(smooth 사용 금지), alert()는 더 이상 호출하지 않고 비차단 토스트(sj-fb-saved-toast)로 대체',
+    app.includes('const scrollY=window.scrollY;') &&
+    app.includes('restoreScroll(scrollY)') &&
+    app.includes('window.scrollTo({top:y,behavior:"auto"})') &&
+    app.includes('sj-fb-saved-toast') &&
+    !app.includes('alert("수업 후 상태가 저장되었습니다.")')
+  ],
   ['수업 후 상태: "수업 후 몸 상태" 카드는 기본 접힘(헤더 한 줄만) + 펼치기/접기 토글로 언제든 입력·수정 가능, 접힘 상태 미리보기(sj-fb-quick) 없음',
     app.includes('const [open,setOpen]=useState(false);') &&
     app.includes('펼치기 <SjIcon paths={SJ_PATHS.chevronDown}') &&

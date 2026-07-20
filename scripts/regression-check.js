@@ -886,12 +886,26 @@ const checks = [
       return i !== -1 && j !== -1 && i < j;
     })()
   ],
-  ['수업일지: 최근 수업 대표 카드(카드 위 압축 헤더로 "최근 수업"·부위 표시) + 이전 수업 프리뷰 카드(날짜·부위·대표 운동·RPE 여부) + 전체 수업 기록 보기',
-    app.includes('className="sj-hero-label"') &&
-    app.includes('<span>최근 수업</span>') &&
+  ['수업일지: 최근 수업 대표 카드(카드 밖 별도 라벨 없이 카드 내부 최상단 통합 메타 "최근 수업 · 부위 · PR" 한 줄로 표시) + 이전 수업 프리뷰 카드(날짜·부위·대표 운동·RPE 여부) + 전체 수업 기록 보기',
+    !app.includes('className="sj-hero-label"') &&
+    app.includes('className="sj-card-meta"') &&
+    app.includes('<span className="sj-card-meta-label">최근 수업</span>') &&
     app.includes('function formatKoreanDateLabel(') &&
     app.includes('이전 수업') &&
     app.includes('전체 수업 기록 보기')
+  ],
+  ['수업일지: 최신 수업 카드 통합 메타(sj-card-meta)의 부위는 formatTypes(s.selectedTypes||s.type) 실제 데이터를 사용하고, PR은 prInfo.prSessionIds(실제 PR 여부)로 판단해 PR이 없으면 표시하지 않음(자리 비우지 않음) — 카드 밖·카드 안에 부위/PR이 이중 표시되지 않도록 최신 카드는 날짜 아래 <p>{typeName}</p>를 생략',
+    (() => {
+      const start = app.indexOf('const renderExpanded=(s)=>{');
+      const end = app.indexOf('const renderCollapsed=(s)=>{');
+      const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
+      return !!body &&
+        body.includes('isLatest?') &&
+        body.includes('<span className="sj-card-meta-part">{typeName}</span>') &&
+        body.includes('{isPr&&<><span className="sj-card-meta-dot">·</span><em className="sj-card-meta-pr">PR</em></>}') &&
+        body.includes(':isPr&&<span className="sj-badges"><em className="sj-badge pr">★ PR</em></span>}') &&
+        body.includes('{!isLatest&&<p>{typeName}</p>}');
+    })()
   ],
   ['수업일지: 세트 표가 운동 유형별 열 자동 구성(중량/반복/시간, 값 있는 열만 표시)',
     app.includes('sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:"중량"') &&

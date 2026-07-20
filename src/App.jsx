@@ -2361,10 +2361,18 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
       <section className="sj-session-card">
         <header className="sj-sess-head">
           <div className="sj-sess-title">
-            {/* "최근 수업" 표시는 카드 바로 위 sj-hero-label(압축 헤더)로 이동했으므로 여기서는 PR 배지만 남긴다(중복 방지) */}
-            {isPr&&<span className="sj-badges"><em className="sj-badge pr">★ PR</em></span>}
+            {/* 최신 수업 카드만 최상단에 "최근 수업 · 부위 · PR" 한 줄 통합 메타 표시(카드 밖 별도 라벨/카드 안 독립 PR 배지는 여기로 통합해 중복 제거).
+                부위는 아래 날짜 옆 <p>에서 다시 보여주면 중복이므로 최신 카드에서는 <p> 자체를 생략한다. */}
+            {isLatest?
+              <div className="sj-card-meta">
+                <span className="sj-card-meta-label">최근 수업</span>
+                <span className="sj-card-meta-dot">·</span>
+                <span className="sj-card-meta-part">{typeName}</span>
+                {isPr&&<><span className="sj-card-meta-dot">·</span><em className="sj-card-meta-pr">PR</em></>}
+              </div>
+              :isPr&&<span className="sj-badges"><em className="sj-badge pr">★ PR</em></span>}
             <h2 className="sj-date-line"><span className="sj-date-text">{formatKoreanDateLabel(s.date)}</span>{growth&&<em className="sj-growth-badge">{growth.label}</em>}</h2>
-            <p>{typeName}</p>
+            {!isLatest&&<p>{typeName}</p>}
           </div>
           <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
         </header>
@@ -2389,13 +2397,8 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     </button>;
   };
   const heroItems=[]; const prevItems=[];
-  displayed.forEach((s,i)=>{ const node=isExp(s)?renderExpanded(s):renderCollapsed(s);
-    if(!lq&&i===0){
-      // 최신 수업 카드 바로 위 한 줄 압축 헤더 — "최근 수업 · 실제 부위". 카드 내부의 "최근 수업" 배지는 중복이라 제거했다(renderExpanded 참고).
-      const heroType=formatTypes(s.selectedTypes||s.type)||"운동";
-      heroItems.push(<Fragment key={`hero-${s.id}`}><div className="sj-hero-label"><span>최근 수업</span><b>{heroType}</b></div>{node}</Fragment>);
-    } else prevItems.push(node);
-  });
+  // "최근 수업 · 부위 · PR" 표시는 카드 밖 별도 라벨이 아니라 카드 내부 최상단 통합 메타(sj-card-meta, renderExpanded 참고)로 표시한다.
+  displayed.forEach((s,i)=>{ const node=isExp(s)?renderExpanded(s):renderCollapsed(s); if(!lq&&i===0)heroItems.push(node); else prevItems.push(node); });
   return <>
     <div className="ex-search-wrap sj-search-wrap">
       <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
@@ -4916,9 +4919,12 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .ex-search.sj-search{height:40px;border-radius:13px;padding:0 40px 0 41px;font-size:14px}
 .sj-search-wrap .ex-search-clear{display:flex;align-items:center;color:#A8B0BA}
 .sj-section-label{font-size:13px;font-weight:900;color:#8B949E;margin:16px 2px 8px;letter-spacing:-.2px}
-/* 최신 수업 카드 바로 위 한 줄 압축 헤더 — "최근 수업 · 부위"(모바일 첫 화면에서 카드 상단 배지 한 줄을 대신해 공간을 아낀다) */
-.sj-hero-label{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:8px 2px 4px;font-size:13px;font-weight:900;color:#8B949E;letter-spacing:-.2px}
-.sj-hero-label b{color:#0F9488;font-weight:900;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* 최신 수업 카드 내부 최상단 통합 메타 한 줄 — "최근 수업 · 부위 · PR"(카드 밖 별도 라벨 + 카드 안 독립 PR 배지를 한 곳으로 통합, 큰 배지가 아닌 작은 텍스트 톤) */
+.sj-card-meta{display:flex;align-items:center;flex-wrap:nowrap;gap:5px;margin:0 0 6px;font-size:12.5px;font-weight:700;overflow:hidden}
+.sj-card-meta-label{color:#66717C;white-space:nowrap;flex-shrink:0}
+.sj-card-meta-dot{color:#C0C8D3;flex-shrink:0}
+.sj-card-meta-part{color:#0F9488;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sj-card-meta-pr{font-style:normal;color:#F97316;font-weight:800;white-space:nowrap;flex-shrink:0}
 .sj-prev-list{display:grid;gap:10px}
 .sj-prev-card{width:100%;display:flex;align-items:center;gap:12px;border:1px solid #E8ECF1;background:#fff;border-radius:20px;padding:14px 16px;margin:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 8px rgba(15,23,42,.04);transition:transform .15s ease,background-color .15s ease}
 .sj-prev-card:active{transform:scale(.985);background:#FBFCFE}

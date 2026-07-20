@@ -2769,7 +2769,7 @@ function MemberFeedbackForm({s,onSave}){
   return <div className="sj-feedback-card" ref={cardRef}>
     <div className="sj-fb-head">
       <i className="sj-fb-ico"><SjIcon paths={SJ_PATHS.squarePen} size={15}/></i>
-      <b>오늘 어땠나요?</b>
+      <b>수업 후 몸 상태</b>
       <button type="button" className="sj-fb-toggle" onClick={()=>open?cancel():openWithScroll()} aria-expanded={open}>{open?<>접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></>:<>펼치기 <SjIcon paths={SJ_PATHS.chevronDown} size={13}/></>}</button>
     </div>
     {/* 접힌 상태는 헤더 한 줄만 — 단, 위험 신호(과거 기록)는 접혀 있어도 안내 유지 */}
@@ -2787,6 +2787,7 @@ function MemberFeedbackForm({s,onSave}){
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 근육통</label>
+        <span className="sj-fb-instruction">2일 안에 가장 심했던 정도를 선택해주세요.</span>
         <div className="sj-fb-inline">
           <div className="sj-chip-row">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={soreness.level===lv?"active":""} onClick={()=>setSoreness(prev=>({...prev,level:lv}))}>{lv}</button>)}</div>
           <button type="button" className="sj-fb-section-save" disabled={!!savingSection} onClick={saveSorenessSection}>{savingSection==="soreness"?"저장 중...":"근육통 저장"}</button>
@@ -4901,6 +4902,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .sj-fb-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#0F172A}
 .sj-fb-label svg{color:#0F9488}
 .sj-fb-hint{font-size:12px;font-weight:600;color:#94A3B8;white-space:nowrap;flex-shrink:0}
+.sj-fb-instruction{display:block;margin-top:3px;font-size:12px;font-weight:600;color:#94A3B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sj-rpe-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:10px}
 .sj-rpe-grid button{height:36px;min-width:0;padding:0;border:1px solid #E8ECF1;background:#F8F9FB;border-radius:9px;font-family:inherit;font-size:13px;font-weight:600;color:#64748B;font-variant-numeric:tabular-nums;letter-spacing:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
 .sj-rpe-grid button.active{border-color:#39C7B8;background:#fff;color:#0F9488;font-weight:700;box-shadow:0 1px 5px rgba(15,148,136,.14)}

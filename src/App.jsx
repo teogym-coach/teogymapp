@@ -1505,28 +1505,61 @@ function buildSessionReportStats(s={}){
     soreness:fb.sorenessLevel&&fb.sorenessLevel!=="없음"?`${formatSorenessBodyParts(fb)} ${fb.sorenessLevel}`:null,
   };
 }
-// 성장 배지 — 이번 수업을 이전 동일 부위 수업과 비교해 총 볼륨/중량/반복수/세트수/운동 개수 중
-// 가장 크게 향상된 지표 하나만 골라 "▲n% 향상"으로 표시한다(어떤 지표인지는 회원에게 노출하지 않음).
-// 감소·무변화는 절대 표시하지 않고, 비교할 이전 동일 부위 기록이 없으면 배지 자체를 표시하지 않는다.
+// muscleTop(운동 카드 부위 값) → 회원용 한글 라벨. "팔-이두근"/"팔-삼두근"만 이두/삼두로 축약하고 나머지는 저장값 그대로 사용(임의 재분류 없음).
+const MUSCLE_TOP_BADGE_LABEL={"팔-이두근":"이두","팔-삼두근":"삼두"};
+function muscleTopBadgeLabel(top){return MUSCLE_TOP_BADGE_LABEL[top]||top;}
+// 성장 배지 1차 지표(볼륨/중량/반복수/세트) — 배열 순서가 곧 동률 시 우선순위(볼륨>중량>반복수>세트)
+const GROWTH_METRIC_DEFS=[{key:"volume",label:"볼륨"},{key:"weight",label:"중량"},{key:"totalReps",label:"반복수"},{key:"totalSets",label:"세트"}];
+// 2차 지표(운동 개수) — 1차 지표에 5% 이상 향상 후보가 하나도 없을 때만 확인(우선순위 최하)
+const GROWTH_EXCOUNT_METRIC={key:"exerciseCount",label:"운동 수"};
+function namedExercises(s){return (s?.exercises||[]).filter(e=>e&&e.name);}
+// 이번 수업 운동을 muscleTop(운동 카드 부위) 기준으로 그룹화. Map 삽입 순서 = 운동 배열에 처음 등장한 순서(동률 3순위에 사용).
+function groupExercisesByMuscleTop(s){
+  const map=new Map();
+  namedExercises(s).forEach(e=>{ const g=e.muscleTop; if(!g)return; if(!map.has(g))map.set(g,[]); map.get(g).push(e); });
+  return map;
+}
+// buildSessionReportStats를 재사용해 특정 muscleTop 그룹(운동 배열)만의 볼륨/중량/반복수/세트/운동 수를 계산
+function buildMuscleGroupStats(exs){
+  const st=buildSessionReportStats({exercises:exs});
+  return {volume:st.volume,weight:st.top,totalReps:st.totalReps,totalSets:st.totalSets,exerciseCount:st.exCount};
+}
+// 성장 배지 — 이번 수업의 운동을 muscleTop(부위)별로 나눠 각 부위를 "그 부위의 가장 최근 과거 기록"과 독립 비교한다.
+// 수업 전체끼리는 비교하지 않고(과거 수업의 다른 부위 구성은 무관), 어떤 부위든 과거 동일 muscleTop 기록이 없으면 그 부위는 후보에서 제외한다.
+// 지표는 볼륨/중량/반복수/세트를 먼저 확인해 5%↑ 후보 중 최고 1개를 고르고, 그 중 5%↑가 하나도 없을 때만 운동 개수를 확인한다(운동 개수 우선순위 최하).
+// 동률이면 볼륨>중량>반복수>세트>운동 수, 그래도 같으면 이번 수업 세트 수가 많은 부위, 그래도 같으면 운동 배열에 먼저 등장한 부위 순으로 대표 1건만 남긴다.
 function buildSessionGrowthBadge(sessions=[],session){
   if(!session?.date) return null;
-  const parts=(session.selectedTypes||normalizeTypes(session.type)).filter(t=>SESSION_BODY_PART_OPTIONS.includes(t));
-  if(!parts.length) return null;
+  const groups=groupExercisesByMuscleTop(session);
+  if(!groups.size) return null;
   const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.id||"").localeCompare(String(b.id||"")));
   const idx=sorted.findIndex(s=>s.id===session.id);
   if(idx<=0) return null;
-  const prev=sorted.slice(0,idx).reverse().find(s=>{
-    const pParts=(s.selectedTypes||normalizeTypes(s.type)).filter(t=>SESSION_BODY_PART_OPTIONS.includes(t));
-    return pParts.some(t=>parts.includes(t));
-  });
-  if(!prev) return null;
-  const cur=buildSessionReportStats(session), before=buildSessionReportStats(prev);
-  const metrics=[[cur.volume,before.volume],[cur.top,before.top],[cur.totalReps,before.totalReps],[cur.totalSets,before.totalSets],[cur.exCount,before.exCount]];
-  let bestPct=0;
-  metrics.forEach(([c,p])=>{ if(p>0&&c>p){ const pct=((c-p)/p)*100; if(pct>bestPct) bestPct=pct; } });
-  const rounded=Math.round(bestPct);
-  if(rounded<1) return null;
-  return {label:`▲${rounded}% 향상`};
+  const earlier=sorted.slice(0,idx).reverse();
+  const groupStats=[...groups.entries()].map(([muscleTop,curExs],orderIdx)=>{
+    const prevSession=earlier.find(s=>namedExercises(s).some(e=>e.muscleTop===muscleTop));
+    if(!prevSession) return null;
+    const prevExs=namedExercises(prevSession).filter(e=>e.muscleTop===muscleTop);
+    return {muscleTop,orderIdx,cur:buildMuscleGroupStats(curExs),before:buildMuscleGroupStats(prevExs)};
+  }).filter(Boolean);
+  if(!groupStats.length) return null;
+  const collect=(metricDefs)=>{
+    const pool=[];
+    groupStats.forEach(({muscleTop,orderIdx,cur,before})=>{
+      metricDefs.forEach(({key,label},metricPriority)=>{
+        const p=before[key], c=cur[key];
+        if(p>0&&c>p){ const pct=((c-p)/p)*100; if(pct>=5) pool.push({pct,muscleTop,orderIdx,metricLabel:label,metricPriority,curTotalSets:cur.totalSets}); }
+      });
+    });
+    return pool;
+  };
+  let pool=collect(GROWTH_METRIC_DEFS);
+  if(!pool.length) pool=collect([GROWTH_EXCOUNT_METRIC]).map(x=>({...x,metricPriority:GROWTH_METRIC_DEFS.length}));
+  if(!pool.length) return null;
+  pool.sort((a,b)=>b.pct-a.pct||a.metricPriority-b.metricPriority||b.curTotalSets-a.curTotalSets||a.orderIdx-b.orderIdx);
+  const best=pool[0];
+  const displayPct=Math.min(99,Math.round(best.pct));
+  return {label:`${muscleTopBadgeLabel(best.muscleTop)} ${best.metricLabel} ▲${displayPct}%`};
 }
 // 운동일 = PT 수업 또는 개인운동 완료 또는 유산소 기록이 있는 날 (hasWorkoutDay = hasPT || hasPersonalWorkout || hasCardio) — 같은 날 여러 종류가 겹쳐도 운동일은 1일만 증가
 function getWorkoutDaySet(dayMap){

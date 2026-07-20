@@ -2301,7 +2301,10 @@ function MemberWorkout(p){
     {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
   </>;
 }
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set()); const [openId,setOpenId]=useState(journalFocusId||"__first__"); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+  // openId: null=사용자가 아직 선택하지 않음(항상 "현재 최신 세션"을 실제 id로 비교해 자동으로 펼침) · "__none__"=사용자가 펼쳐진 카드를 직접 접음(자동 재펼침 금지) · 그 외=해당 session.id가 펼쳐짐.
+  // 과거에는 배열 인덱스(openId==="__first__"&&i===0)로 "최근 수업"을 판정해 저장 후 재조회로 목록이 다시 그려지며 인덱스가 흔들리면 카드가 접히는 문제가 있었다 — 이제 latestId(실제 session.id) 비교로만 판정한다.
+  const [openId,setOpenId]=useState(journalFocusId||null); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
   // "수업 후 몸 상태" 피드백 카드 펼침 상태 — 세션 id별로 여기(부모)에서 관리한다.
   // MemberFeedbackForm 내부 state로 두면 저장 후 saveFeedback→load()로 세션 목록이 다시 그려질 때
   // 카드가 재마운트될 가능성에 펼침 상태가 노출되므로, 재조회와 무관한 부모 상태로 옮겨 안전하게 유지한다.
@@ -2319,13 +2322,17 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[journalFocusId]);
   const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);
-  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s,i)=>!!lq||(openId==="__first__"&&i===0)||openId===s.id; const toggleSess=(s,i)=>{setOpenId(prev=>(isExp(s,i)&&!lq)?null:s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);};
+  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const latestId=reversed[0]?.id; const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id; const toggleSess=(s)=>{setOpenId(prev=>(isExp(s)&&!lq)?"__none__":s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);};
+  // 사용자가 명시적으로 펼쳤던 session.id가 재조회 후 더 이상 존재하지 않을 때만 openId를 초기화(null=자동으로 최신 세션 펼침)한다 — 저장으로 인한 정상적인 재조회에서는 openId를 건드리지 않는다.
+  useEffect(()=>{
+    if(openId==null||openId==="__none__"||!sessions.length)return; // sessions가 아직 로딩 전(빈 배열)일 때 오탐으로 초기화하지 않도록 가드
+    if(!sessions.some(s=>s.id===openId))setOpenId(null);
+  },[sessions,openId]);
   useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
-  const latestId=reversed[0]?.id;
   // 펼친 수업 카드 — 최근 수업이든 이전 수업이든 같은 구성(날짜/부위/요약/운동 아코디언/피드백 카드)
-  const renderExpanded=(s,i)=>{
+  const renderExpanded=(s)=>{
     const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId; const growth=growthBadges.get(s.id);
     return <div key={s.id} className="sj-session-group">
       <section className="sj-session-card">
@@ -2335,7 +2342,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
             <h2 className="sj-date-line">{formatKoreanDateLabel(s.date)}{growth&&<em className="sj-growth-badge">{growth.label}</em>}</h2>
             <p>{typeName}</p>
           </div>
-          <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s,i)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
+          <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
         </header>
         <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>
         {/* 오늘 수업 기록 — 같은 수업 카드 안에서 운동 목록 아래에 이어지는 흐름(별도 카드 아님) */}
@@ -2344,9 +2351,9 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     </div>;
   };
   // 접힌 이전 수업 카드 — 날짜/부위/종목 수/대표 운동/RPE 기록 여부로 내용을 예측할 수 있게
-  const renderCollapsed=(s,i)=>{
+  const renderCollapsed=(s)=>{
     const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{}; const growth=growthBadges.get(s.id);
-    return <button key={s.id} type="button" className="sj-prev-card" onClick={()=>toggleSess(s,i)}>
+    return <button key={s.id} type="button" className="sj-prev-card" onClick={()=>toggleSess(s)}>
       <span className="sj-prev-main">
         <span className="sj-prev-date-row"><b>{formatKoreanDateLabel(s.date)}</b>{growth&&<em className="sj-growth-badge sm">{growth.label}</em>}</span>
         <span><i className="sj-part">{typeName}</i> · {exs.length}종목</span>
@@ -2358,7 +2365,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     </button>;
   };
   const heroItems=[]; const prevItems=[];
-  displayed.forEach((s,i)=>{ const node=isExp(s,i)?renderExpanded(s,i):renderCollapsed(s,i); if(!lq&&i===0)heroItems.push(node); else prevItems.push(node); });
+  displayed.forEach((s,i)=>{ const node=isExp(s)?renderExpanded(s):renderCollapsed(s); if(!lq&&i===0)heroItems.push(node); else prevItems.push(node); });
   return <>
     <div className="ex-search-wrap sj-search-wrap">
       <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>

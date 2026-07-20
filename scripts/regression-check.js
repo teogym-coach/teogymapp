@@ -822,6 +822,22 @@ const checks = [
       return !!body && !body.includes('const [open,');
     })()
   ],
+  ['수업일지: 상위 "수업 카드"(MemberJournal) 펼침 판정(isExp)이 배열 인덱스가 아니라 실제 session.id(latestId) 비교로만 이루어짐 — 저장 후 재조회로 목록이 다시 그려져 인덱스가 흔들려도 펼침 카드가 바뀌지 않음',
+    app.includes('const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;')
+  ],
+  ['수업일지: 사용자가 "접기"를 눌렀을 때만 openId가 "__none__"(자동 재펼침 금지)으로 바뀌고, saveFeedback/load() 흐름에는 setOpenId 호출이 전혀 없어 저장으로 인한 재조회가 펼침 상태를 건드리지 않음',
+    app.includes('const toggleSess=(s)=>{setOpenId(prev=>(isExp(s)&&!lq)?"__none__":s.id);') &&
+    (() => {
+      const start = app.indexOf('const saveFeedback=async(sessionId,feedback)=>{');
+      const end = app.indexOf('const saveProfileInfo=async(data)=>{', start);
+      const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
+      return !!body && !body.includes('setOpenId');
+    })()
+  ],
+  ['수업일지: 사용자가 펼쳤던 session.id가 재조회 후 실제로 더 이상 존재하지 않을 때만 openId를 초기화(null) — sessions가 아직 빈 배열(로딩 전)일 때는 오탐으로 초기화하지 않도록 가드',
+    app.includes('if(openId==null||openId==="__none__"||!sessions.length)return;') &&
+    app.includes('if(!sessions.some(s=>s.id===openId))setOpenId(null);')
+  ],
   ['수업 후 상태: RPE·근육통·메모 저장(saveSection)은 펼침 상태를 건드리지 않고(onToggle 미호출) 저장 완료 처리만 수행 — 사용자가 접기 버튼(cancel)을 누르거나 펼치기 버튼(openWithScroll)을 누를 때만 onToggle 호출',
     (() => {
       const start = app.indexOf('const saveSection=async(key,payload)=>{');

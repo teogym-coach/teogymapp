@@ -1800,6 +1800,49 @@ const checks = [
   ['목표 관리 피드 이동: goal_update 클릭 시 회원 상세(hub)로 이동 — 전용 관리자 화면이 없어 최소 기준(상세 이동) 충족',
     app.includes('goal_update: { targetScreen: "hub" }')
   ],
+
+  // ── 관리자앱 회원 상세 "회원 변화" — 목표별 핵심 변화 요약 카드 ──
+  ['회원 변화: 목표 분류·계산·카드 함수가 모두 존재',
+    app.includes('function getMemberChangeGoalType(goalRaw)') &&
+    app.includes('function buildMemberChangeSummary(rawGoal, sessions, bodyData, ci)') &&
+    app.includes('function buildMemberChangeMetrics(goalType, ctx)') &&
+    app.includes('function MemberChangeCard(') &&
+    app.includes('function MemberChangeMetricTile(')
+  ],
+  ['회원 변화: HubScreen 상단(topChrome)에 카드가 연결되고 목표 필드는 ob?.goal||member.goal을 그대로 사용',
+    app.includes('{!loading && <MemberChangeCard goal={ob?.goal || member.goal} sessions={sessions} bodyData={bodyData} checkins={ci} />}')
+  ],
+  ['회원 변화: 기존 계산 함수 재사용(getBodyWeightRecords·exVol·buildStrengthData·calcEpley1RM·getPainSummary·findPastExRecords·memberFeedbackParts·normalizeExerciseName·isSkipForStrength) — 중복 재구현 없음',
+    app.includes('function buildMemberChangeWeightInfo(bodyData) {') && app.includes('getBodyWeightRecords(bodyData)') &&
+    app.includes('sum + (exVol(e) || 0)') &&
+    app.includes('function buildMemberChangeStrength(sessions) {') && app.includes('buildStrengthData(sessions || [])') &&
+    app.includes('function buildMemberChangeExercisePerformance(sessions) {') && app.includes('findPastExRecords(sessions, cand.name, 30)') &&
+    app.includes('isSkipForStrength(e)') && app.includes('memberFeedbackParts(s.memberFeedback)') && app.includes('normalizeExerciseName(e.name)') &&
+    app.includes('getPainSummary(ci)')
+  ],
+  ['회원 변화: 목표별 3대 핵심 지표 문구가 모두 존재(다이어트/벌크업/체형교정/체중유지/건강관리)',
+    ['"시작 대비 체중 변화"', '"최근 30일 변화"', '"목표까지 남은 체중"'].every(s => app.includes(s)) &&
+    ['"근력 변화"', '"총 운동 볼륨 변화"'].every(s => app.includes(s)) &&
+    ['"통증 변화"', '"불편 부위 변화"', '"운동 수행 변화"'].every(s => app.includes(s)) &&
+    ['"최근 체중 변동 폭"', '"평균 체중"'].every(s => app.includes(s)) &&
+    ['"최근 참여 빈도"', '"RPE 변화"'].every(s => app.includes(s))
+  ],
+  ['회원 변화 체형교정: 근거 없는 움직임/좌우 균형/동작 완성도 점수를 자동 생성하지 않음',
+    !app.includes('움직임 점수') && !app.includes('좌우 균형 점수') && !app.includes('동작 완성도 점수')
+  ],
+  ['회원 변화: 데이터 부족 시 0%·임의값 대신 명시적 안내 문구 사용(emptyMetric)',
+    app.includes('const emptyMetric = (key, label, emptyText, compareText) => ({ key, label, empty: true, emptyText, compareText, detailRows: [] });') &&
+    ['"체중 기록 부족"', '"목표 체중 미등록"', '"비교 가능한 수업 기록 부족"', '"비교할 동일 운동 기록 부족"', '"통증 점수 미등록"', '"최근 불편 부위 기록 없음"'].every(s => app.includes(s))
+  ],
+  ['회원 변화: 퍼센트 계산이 이전 값 0/비정상일 때 NaN·Infinity 대신 null 반환(memberChangePct)',
+    app.includes('function memberChangePct(recent, prev) {') &&
+    app.includes('if (!Number.isFinite(r) || !Number.isFinite(p) || p === 0) return null;')
+  ],
+  ['회원 변화: 다이어트 목표의 기존 체중 그래프(HubWeightTrendSection·기간 선택)를 삭제·축소하지 않고 카드 아래에 그대로 유지',
+    app.includes('function HubWeightTrendSection({ records, chartHeight = 150 }) {') &&
+    app.includes('shouldShowWeightTrend(ob?.goal || member.goal)') &&
+    app.includes('<HubWeightTrendSection key={member.id} records={wEntries} chartHeight={isWide ? 156 : 148} />')
+  ],
 ];
 
 let failed = 0;

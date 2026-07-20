@@ -10372,6 +10372,390 @@ function HubWeightTrendSection({ records, chartHeight = 150 }) {
   );
 }
 
+// ════════════════════════════════════════════════════
+// 회원 상세 "회원 변화" — 회원 목표별 핵심 변화 요약(HubScreen 전용)
+// 기존 계산 함수(getBodyWeightRecords·buildStrengthData·calcEpley1RM·exVol·isSkipForStrength·
+// getPainSummary·getPainRecords·findPastExRecords·memberFeedbackParts·normalizeExerciseName)를
+// 그대로 재사용하고, 여기서는 "목표별로 어떤 지표를 어떤 비교 기준으로 보여줄지"만 계산한다.
+// 데이터가 부족하면 0%·임의값을 절대 만들지 않고 metric.empty=true로 그 사실만 전달한다.
+// ════════════════════════════════════════════════════
+const MEMBER_CHANGE_ROUND1 = v => Math.round(v * 10) / 10;
+function memberChangePct(recent, prev) {
+  const r = Number(recent), p = Number(prev);
+  if (!Number.isFinite(r) || !Number.isFinite(p) || p === 0) return null;
+  const pct = Math.round((r - p) / p * 100);
+  return Number.isFinite(pct) ? pct : null;
+}
+function getMemberChangeGoalType(goalRaw) {
+  const first = Array.isArray(goalRaw) ? (goalRaw.find(v => String(v || "").trim()) || "") : goalRaw;
+  const g = String(first || "").trim();
+  if (!g) return "unknown";
+  if (g.includes("체형교정") || g.includes("교정")) return "correction";
+  if (g.includes("벌크업") || g.includes("증량")) return "bulk";
+  if (g.includes("다이어트") || g.includes("감량")) return "diet";
+  if (g.includes("체중 유지") || g.includes("체중유지")) return "maintain";
+  if (g.includes("건강관리")) return "health";
+  return "unknown";
+}
+
+// ── 체중 변화(다이어트·벌크업·체중유지 공용) — 기존 getBodyWeightRecords 재사용 ──
+function buildMemberChangeWeightInfo(bodyData) {
+  const entries = getBodyWeightRecords(bodyData); // 날짜 오름차순, 유효값만
+  if (!entries.length) return { count: 0, entries: [], first: null, last: null, startDiff: null, recent30Diff: null, recent30From: null };
+  const last = entries[entries.length - 1];
+  const first = entries[0];
+  const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const before30 = entries.filter(e => e.date <= d30);
+  const start30 = before30.length ? before30[before30.length - 1] : null;
+  return {
+    count: entries.length, entries, first, last,
+    startDiff: entries.length >= 2 ? MEMBER_CHANGE_ROUND1(last.weight - first.weight) : null,
+    recent30Diff: (start30 && start30.date !== last.date) ? MEMBER_CHANGE_ROUND1(last.weight - start30.weight) : null,
+    recent30From: start30,
+  };
+}
+
+// ── 세션별 운동 볼륨(중량×횟수 합산, 기존 exVol 재사용) → 최근 N 대비 이전 N 평균 비교 ──
+function buildMemberChangeVolumePoints(sessions = []) {
+  return sessions
+    .map(s => ({ date: s.date || "", vol: (s.exercises || []).filter(e => e && e.name).reduce((sum, e) => sum + (exVol(e) || 0), 0) }))
+    .filter(s => s.date && s.vol > 0)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+function buildRecentVsPrevAvg(pointsAsc, valueKey) {
+  if (!pointsAsc || pointsAsc.length < 2) return null;
+  let recent, prev, basisText;
+  if (pointsAsc.length >= 6) {
+    recent = pointsAsc.slice(-3); prev = pointsAsc.slice(-6, -3);
+    basisText = "최근 3회 평균과 이전 3회 평균 비교";
+  } else {
+    recent = pointsAsc.slice(-1); prev = pointsAsc.slice(-2, -1);
+    basisText = "비교 가능한 기록이 6회 미만 — 최근 1회와 이전 1회 비교";
+  }
+  const avg = arr => arr.reduce((a, b) => a + b[valueKey], 0) / arr.length;
+  const recentAvg = avg(recent), prevAvg = avg(prev);
+  return { recentAvg, prevAvg, recentCount: recent.length, prevCount: prev.length, basisText, pct: memberChangePct(recentAvg, prevAvg) };
+}
+
+// ── 벌크업 대표 운동 근력 변화 — 기존 buildStrengthData(추정 1RM) 재사용, 우선순위: 기록횟수 많은 운동 ──
+function buildMemberChangeStrength(sessions) {
+  const data = buildStrengthData(sessions || []);
+  const withBoth = data.filter(d => Number.isFinite(d.recentBest) && Number.isFinite(d.olderBest) && d.olderBest > 0);
+  if (withBoth.length) {
+    const pick = [...withBoth].sort((a, b) => b.count - a.count)[0];
+    return {
+      name: pick.name, recent: pick.recentBest, prev: pick.olderBest,
+      pct: memberChangePct(pick.recentBest, pick.olderBest),
+      basisText: "최근 4주 대비 이전 기록 비교(추정 1RM 기준)", bestDate: pick.bestDate, count: pick.count,
+    };
+  }
+  // 4주 경계로 나뉘지 않는 경우: 같은 운동의 3개월 추정 1RM 추이(trendPoints) 양끝 비교로 대체
+  const withTrend = [...data].filter(d => Array.isArray(d.trendPoints) && d.trendPoints.length >= 2).sort((a, b) => b.count - a.count);
+  if (withTrend.length) {
+    const pick = withTrend[0];
+    const first = pick.trendPoints[0], lastPt = pick.trendPoints[pick.trendPoints.length - 1];
+    if (first.rm > 0 && lastPt.date !== first.date) {
+      return {
+        name: pick.name, recent: lastPt.rm, prev: first.rm,
+        pct: memberChangePct(lastPt.rm, first.rm),
+        basisText: "동일 운동 최근 기록과 이전 기록 비교(추정 1RM 기준)", bestDate: lastPt.date, count: pick.count,
+      };
+    }
+  }
+  return null;
+}
+
+// ── 체형교정: 근육통 부위 이력 — 기존 memberFeedbackParts 재사용 ──
+function buildMemberChangeSorenessParts(sessions) {
+  return (sessions || [])
+    .filter(s => s.memberFeedback && (s.memberFeedback.sorenessLevel || memberFeedbackParts(s.memberFeedback).length))
+    .map(s => ({ date: s.date || "", level: s.memberFeedback.sorenessLevel || "", parts: memberFeedbackParts(s.memberFeedback) }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+// 세트 중 중량×횟수가 가장 큰 세트를 그 기록의 대표 세트로 사용(맨몸/기록 없는 세트는 제외)
+function representativeSet(sets) {
+  let best = null, bestVol = -1;
+  (sets || []).forEach(st => {
+    const w = parseFloat(st.weight) || 0, r = parseInt(st.reps) || 0;
+    if (w > 0 && r > 0) { const vol = w * r; if (vol > bestVol) { bestVol = vol; best = { weight: w, reps: r, rpe: (st.rpe ?? null) }; } }
+  });
+  return best;
+}
+// 체형교정 대표 운동 수행 변화 — 기존 findPastExRecords·isSkipForStrength·normalizeExerciseName 재사용
+function buildMemberChangeExercisePerformance(sessions) {
+  const countMap = new Map();
+  (sessions || []).forEach(s => (s.exercises || []).forEach(e => {
+    if (!e.name || isSkipForStrength(e)) return;
+    const hasValidSet = (e.sets || []).some(st => (parseFloat(st.weight) || 0) > 0 && (parseInt(st.reps) || 0) > 0);
+    if (!hasValidSet) return;
+    const key = normalizeExerciseName(e.name);
+    if (!key) return;
+    const entry = countMap.get(key) || { name: e.name, count: 0 };
+    entry.count++; countMap.set(key, entry);
+  }));
+  const ranked = [...countMap.values()].sort((a, b) => b.count - a.count);
+  for (const cand of ranked) {
+    const records = findPastExRecords(sessions, cand.name, 30);
+    if (records.length < 2) continue;
+    const latest = records[0], earliest = records[records.length - 1];
+    const latestSet = representativeSet(latest.sets), earliestSet = representativeSet(earliest.sets);
+    if (!latestSet || !earliestSet) continue;
+    return { name: cand.name, latest: { ...latestSet, date: latest.date }, earliest: { ...earliestSet, date: earliest.date }, count: records.length };
+  }
+  return null;
+}
+
+// ── 목표별 핵심 지표 3개 계산 ──
+function buildMemberChangeMetrics(goalType, ctx) {
+  const { sessions = [], bodyData, ci = [] } = ctx;
+  const emptyMetric = (key, label, emptyText, compareText) => ({ key, label, empty: true, emptyText, compareText, detailRows: [] });
+
+  if (goalType === "diet") {
+    const w = buildMemberChangeWeightInfo(bodyData);
+    const targetW = parseFloat(bodyData?.goal?.targetWeight) || null;
+    const m1 = w.count < 2
+      ? emptyMetric("startDiff", "시작 대비 체중 변화", "체중 기록 부족", "최초 기록과 최근 기록 비교")
+      : { key: "startDiff", label: "시작 대비 체중 변화", empty: false,
+          display: `${w.startDiff > 0 ? "+" : ""}${w.startDiff}kg`,
+          compareText: `최초 기록(${w.first.date}) · 최근 기록(${w.last.date}) 비교`,
+          detailRows: [{ label: "시작 체중", value: `${w.first.weight}kg` }, { label: "최근 체중", value: `${w.last.weight}kg` }, { label: "변화", value: `${w.startDiff > 0 ? "+" : ""}${w.startDiff}kg` }] };
+    const m2 = w.recent30Diff === null
+      ? emptyMetric("recent30", "최근 30일 변화", "체중 기록 부족", "최근 30일 이전 기록과 최근 기록 비교")
+      : { key: "recent30", label: "최근 30일 변화", empty: false,
+          display: `${w.recent30Diff > 0 ? "+" : ""}${w.recent30Diff}kg`,
+          compareText: `${w.recent30From.date} 대비 ${w.last.date} 비교`,
+          detailRows: [{ label: "30일 전", value: `${w.recent30From.weight}kg` }, { label: "최근", value: `${w.last.weight}kg` }] };
+    const m3 = !targetW
+      ? emptyMetric("toGoal", "목표까지 남은 체중", "목표 체중 미등록", "현재 체중과 목표 체중 비교")
+      : w.count < 1
+      ? emptyMetric("toGoal", "목표까지 남은 체중", "체중 기록 부족", "현재 체중과 목표 체중 비교")
+      : (() => {
+          // 다이어트(체중 감량) 목표 기준 — 현재 체중이 목표 체중보다 얼마나 더 높은지("몇 kg 더 감량해야 하는지")
+          const remain = MEMBER_CHANGE_ROUND1(w.last.weight - targetW);
+          return { key: "toGoal", label: "목표까지 남은 체중", empty: false,
+            display: remain <= 0.05 ? "목표 체중 도달" : `목표까지 ${remain}kg`,
+            compareText: "현재 체중과 목표 체중 비교",
+            detailRows: [{ label: "현재 체중", value: `${w.last.weight}kg` }, { label: "목표 체중", value: `${targetW}kg` }] };
+        })();
+    return [m1, m2, m3];
+  }
+
+  if (goalType === "bulk") {
+    const strength = buildMemberChangeStrength(sessions);
+    const m1 = !strength
+      ? emptyMetric("strength", "근력 변화", "비교할 동일 운동 기록 부족", "동일 운동 최근 기록과 이전 기록 비교")
+      : { key: "strength", label: "근력 변화", empty: false,
+          display: `${strength.name} ${strength.pct === null ? "추정 1RM 비교 불가" : `${strength.pct > 0 ? "+" : ""}${strength.pct}%`}`,
+          compareText: strength.basisText,
+          detailRows: [
+            { label: "비교 운동명", value: strength.name },
+            { label: "이전 추정 1RM", value: `${Math.round(strength.prev)}kg` },
+            { label: "최근 추정 1RM", value: `${Math.round(strength.recent)}kg` },
+            { label: "변화율", value: strength.pct === null ? "-" : `${strength.pct > 0 ? "+" : ""}${strength.pct}%` },
+            { label: "기준 기록일", value: strength.bestDate || "-" },
+          ] };
+
+    const volPoints = buildMemberChangeVolumePoints(sessions);
+    const volCmp = buildRecentVsPrevAvg(volPoints, "vol");
+    const m2 = !volCmp
+      ? emptyMetric("volume", "총 운동 볼륨 변화", "비교 가능한 수업 기록 부족", "최근 수업과 이전 수업 볼륨 비교")
+      : { key: "volume", label: "총 운동 볼륨 변화", empty: false,
+          display: volCmp.pct === null ? `${Math.round(volCmp.prevAvg).toLocaleString()}kg → ${Math.round(volCmp.recentAvg).toLocaleString()}kg` : `${volCmp.pct > 0 ? "+" : ""}${volCmp.pct}%`,
+          compareText: volCmp.basisText,
+          detailRows: [
+            { label: "이전 평균 볼륨", value: `${Math.round(volCmp.prevAvg).toLocaleString()}kg` },
+            { label: "최근 평균 볼륨", value: `${Math.round(volCmp.recentAvg).toLocaleString()}kg` },
+            { label: "비교에 포함된 수업 수", value: `이전 ${volCmp.prevCount}회 · 최근 ${volCmp.recentCount}회` },
+          ] };
+
+    const w = buildMemberChangeWeightInfo(bodyData);
+    const m3 = w.count < 1
+      ? emptyMetric("weight", "체중 변화", "체중 기록 부족", "최초 기록과 최근 기록 비교")
+      : { key: "weight", label: "체중 변화", empty: false,
+          display: w.startDiff === null ? "체중 기록 부족" : `${w.startDiff > 0 ? "+" : ""}${w.startDiff}kg`,
+          sub: w.recent30Diff === null ? null : `최근 30일 ${w.recent30Diff > 0 ? "+" : ""}${w.recent30Diff}kg`,
+          compareText: "시작 기록 대비 현재 · 최근 30일 비교",
+          detailRows: [{ label: "시작 체중", value: w.first ? `${w.first.weight}kg` : "-" }, { label: "최근 체중", value: w.last ? `${w.last.weight}kg` : "-" }] };
+    return [m1, m2, m3];
+  }
+
+  if (goalType === "correction") {
+    const pain = getPainSummary(ci);
+    const painRows = pain.rows || [];
+    const m1 = painRows.length < 2
+      ? emptyMetric("pain", "통증 변화", painRows.length === 1 ? "최근 통증 기록 1회 — 비교 가능한 통증 점수 없음" : "통증 점수 미등록", "최초 기록과 최근 기록 비교(VAS 0~10)")
+      : (() => {
+          const first = painRows[0], last = painRows[painRows.length - 1];
+          const diff = MEMBER_CHANGE_ROUND1(last.vas - first.vas);
+          return { key: "pain", label: "통증 변화", empty: false,
+            display: `통증 ${first.vas} → ${last.vas}`,
+            sub: `${diff > 0 ? "+" : ""}${diff}점`,
+            compareText: `${first.date} 대비 ${last.date} 비교(VAS 0~10)`,
+            detailRows: painRows.slice(-5).map(r => ({ label: r.date, value: `VAS ${r.vas}${r.part ? ` · ${r.part}` : ""}` })) };
+        })();
+
+    const soreHist = buildMemberChangeSorenessParts(sessions);
+    const m2 = soreHist.length < 1
+      ? emptyMetric("parts", "불편 부위 변화", "최근 불편 부위 기록 없음", "최근 기록과 이전 기록 비교")
+      : soreHist.length < 2
+      ? { key: "parts", label: "불편 부위 변화", empty: false,
+          display: soreHist[0].parts.length ? soreHist[0].parts.join("/") : "없음",
+          compareText: "비교할 이전 기록 없음 — 최근 1회 기록만 존재",
+          detailRows: [{ label: soreHist[0].date, value: soreHist[0].parts.join("/") || "없음" }] }
+      : (() => {
+          const prev = soreHist[soreHist.length - 2], last = soreHist[soreHist.length - 1];
+          const same = prev.parts.length > 0 && prev.parts.length === last.parts.length && prev.parts.every(p => last.parts.includes(p));
+          return { key: "parts", label: "불편 부위 변화", empty: false,
+            display: `${prev.parts.length}곳 → ${last.parts.length}곳`,
+            sub: same ? `${last.parts.join("/")} 불편 지속` : (last.parts.length ? last.parts.join("/") : null),
+            compareText: `${prev.date} 대비 ${last.date} 비교`,
+            detailRows: [{ label: `이전(${prev.date})`, value: prev.parts.join("/") || "없음" }, { label: `최근(${last.date})`, value: last.parts.join("/") || "없음" }] };
+        })();
+
+    const perf = buildMemberChangeExercisePerformance(sessions);
+    const m3 = !perf
+      ? emptyMetric("perf", "운동 수행 변화", "비교 가능한 동일 운동 부족", "동일 운동 최근 기록과 이전 기록 비교")
+      : (() => {
+          const sameLoad = perf.earliest.weight === perf.latest.weight && perf.earliest.reps === perf.latest.reps;
+          const rpeNote = (sameLoad && perf.earliest.rpe != null && perf.latest.rpe != null && perf.earliest.rpe !== perf.latest.rpe)
+            ? `동일 수행량에서 RPE ${perf.earliest.rpe} → ${perf.latest.rpe}` : null;
+          return { key: "perf", label: "운동 수행 변화", empty: false,
+            display: `${perf.name} ${perf.earliest.weight}kg×${perf.earliest.reps}회 → ${perf.latest.weight}kg×${perf.latest.reps}회`,
+            sub: rpeNote,
+            compareText: `${perf.earliest.date} 대비 ${perf.latest.date} 비교 · 교정 완료가 아닌 운동 수행 변화입니다`,
+            detailRows: [
+              { label: `이전(${perf.earliest.date})`, value: `${perf.earliest.weight}kg × ${perf.earliest.reps}회${perf.earliest.rpe != null ? ` · RPE ${perf.earliest.rpe}` : ""}` },
+              { label: `최근(${perf.latest.date})`, value: `${perf.latest.weight}kg × ${perf.latest.reps}회${perf.latest.rpe != null ? ` · RPE ${perf.latest.rpe}` : ""}` },
+            ] };
+        })();
+    return [m1, m2, m3];
+  }
+
+  if (goalType === "maintain") {
+    const entries = getBodyWeightRecords(bodyData);
+    const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const recent30 = entries.filter(e => e.date >= d30);
+    const m1 = recent30.length < 2
+      ? emptyMetric("range30", "최근 체중 변동 폭", "체중 기록 부족", "최근 30일 기록 비교")
+      : (() => {
+          const ws = recent30.map(e => e.weight);
+          const range = MEMBER_CHANGE_ROUND1(Math.max(...ws) - Math.min(...ws));
+          return { key: "range30", label: "최근 체중 변동 폭", empty: false,
+            display: `${range}kg`, compareText: `최근 30일 기록 ${recent30.length}회 비교`,
+            detailRows: [{ label: "최고", value: `${Math.max(...ws)}kg` }, { label: "최저", value: `${Math.min(...ws)}kg` }] };
+        })();
+    const m2 = recent30.length < 1
+      ? emptyMetric("avg30", "평균 체중", "체중 기록 부족", "최근 30일 평균")
+      : (() => {
+          const avg = MEMBER_CHANGE_ROUND1(recent30.reduce((a, e) => a + e.weight, 0) / recent30.length);
+          return { key: "avg30", label: "평균 체중", empty: false, display: `${avg}kg`, compareText: `최근 30일 기록 ${recent30.length}회 평균`, detailRows: recent30.slice(-5).map(e => ({ label: e.date, value: `${e.weight}kg` })) };
+        })();
+    const volPoints = buildMemberChangeVolumePoints(sessions);
+    const volCmp = buildRecentVsPrevAvg(volPoints, "vol");
+    const m3 = !volCmp
+      ? emptyMetric("volume", "운동 수행 변화", "비교 가능한 수업 기록 부족", "최근 수업과 이전 수업 볼륨 비교")
+      : { key: "volume", label: "운동 수행 변화", empty: false,
+          display: volCmp.pct === null ? `${Math.round(volCmp.prevAvg).toLocaleString()}kg → ${Math.round(volCmp.recentAvg).toLocaleString()}kg` : `평균 볼륨 ${volCmp.pct > 0 ? "+" : ""}${volCmp.pct}%`,
+          compareText: volCmp.basisText,
+          detailRows: [{ label: "이전 평균 볼륨", value: `${Math.round(volCmp.prevAvg).toLocaleString()}kg` }, { label: "최근 평균 볼륨", value: `${Math.round(volCmp.recentAvg).toLocaleString()}kg` }] };
+    return [m1, m2, m3];
+  }
+
+  // health · unknown(목표 미등록/예상 못한 값) 공통 — 참여 빈도 · RPE 변화 · 통증 변화
+  const d30h = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const recentSessions = (sessions || []).filter(s => s.date && s.date >= d30h);
+  const m1 = { key: "freq", label: "최근 참여 빈도", empty: false, display: `최근 30일 ${recentSessions.length}회`, compareText: "최근 30일 수업/운동 기록 수", detailRows: [] };
+
+  const rpePoints = (sessions || [])
+    .filter(s => s.memberFeedback && s.memberFeedback.rpe != null && s.memberFeedback.rpe !== "")
+    .map(s => ({ date: s.date || "", value: Number(s.memberFeedback.rpe) }))
+    .filter(p => Number.isFinite(p.value))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const rpeCmp = buildRecentVsPrevAvg(rpePoints, "value");
+  const m2 = !rpeCmp
+    ? emptyMetric("rpe", "RPE 변화", "RPE 기록 부족", "최근 기록과 이전 기록 비교")
+    : { key: "rpe", label: "RPE 변화", empty: false,
+        display: `평균 RPE ${MEMBER_CHANGE_ROUND1(rpeCmp.prevAvg)} → ${MEMBER_CHANGE_ROUND1(rpeCmp.recentAvg)}`,
+        compareText: rpeCmp.basisText,
+        detailRows: [{ label: "이전 평균 RPE", value: String(MEMBER_CHANGE_ROUND1(rpeCmp.prevAvg)) }, { label: "최근 평균 RPE", value: String(MEMBER_CHANGE_ROUND1(rpeCmp.recentAvg)) }] };
+
+  const pain2 = getPainSummary(ci);
+  const painRows2 = pain2.rows || [];
+  const m3 = painRows2.length < 2
+    ? emptyMetric("pain", "통증 변화", painRows2.length === 1 ? "최근 통증 기록 1회" : "최근 통증 기록 없음", "최초 기록과 최근 기록 비교(VAS 0~10)")
+    : (() => {
+        const first = painRows2[0], last = painRows2[painRows2.length - 1];
+        return { key: "pain", label: "통증 변화", empty: false, display: `통증 ${first.vas} → ${last.vas}`, compareText: `${first.date} 대비 ${last.date} 비교(VAS 0~10)`, detailRows: painRows2.slice(-5).map(r => ({ label: r.date, value: `VAS ${r.vas}` })) };
+      })();
+  return [m1, m2, m3];
+}
+
+function buildMemberChangeSummary(rawGoal, sessions, bodyData, ci) {
+  const goalType = getMemberChangeGoalType(rawGoal);
+  const goalLabel = Array.isArray(rawGoal) ? (rawGoal.filter(Boolean).join(" · ") || "목표 미등록") : (String(rawGoal || "").trim() || "목표 미등록");
+  const basisTextByType = {
+    diet: "시작 기록 · 최근 30일 비교", bulk: "최근 4주 대비 이전 기록 비교",
+    correction: "최근 기록 대비 이전 기록 비교", maintain: "최근 30일 체중 · 운동 비교",
+    health: "최근 30일 참여 · 최근 기록 비교", unknown: "목표 미등록 — 건강관리 지표로 표시",
+  };
+  const metrics = buildMemberChangeMetrics(goalType, { sessions, bodyData, ci });
+  return { goalType, goalLabel, basisText: basisTextByType[goalType] || basisTextByType.unknown, metrics };
+}
+
+function MemberChangeMetricTile({ metric, isOpen, onToggle }) {
+  const hasDetail = !metric.empty && Array.isArray(metric.detailRows) && metric.detailRows.length > 0;
+  return (
+    <div
+      onClick={() => hasDetail && onToggle()}
+      style={{
+        border: `1px solid ${DB.border}`, borderRadius: DB.radiusSm, padding: "11px 13px",
+        background: metric.empty ? DB.bg : "#fff", cursor: hasDetail ? "pointer" : "default",
+        minHeight: 92, display: "flex", flexDirection: "column",
+      }}>
+      <span style={{ fontSize: 10.5, fontWeight: 800, color: DB.sub, fontFamily: DB.font }}>{metric.label}</span>
+      <span style={{ fontSize: 14.5, fontWeight: 800, color: metric.empty ? DB.faint : DB.text, marginTop: 5, lineHeight: 1.3, fontFamily: DB.font, wordBreak: "keep-all" }}>
+        {metric.empty ? metric.emptyText : metric.display}
+      </span>
+      {!metric.empty && metric.sub && (
+        <span style={{ fontSize: 11, fontWeight: 700, color: DB.mintSoft, marginTop: 2, fontFamily: DB.font }}>{metric.sub}</span>
+      )}
+      <span style={{ fontSize: 9.5, color: DB.faint, marginTop: "auto", paddingTop: 6, fontFamily: DB.font }}>{metric.compareText}</span>
+      {hasDetail && (
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: DB.mintSoft, marginTop: 3, fontFamily: DB.font }}>{isOpen ? "상세 접기 ▲" : "상세 보기 ▼"}</span>
+      )}
+      {isOpen && hasDetail && (
+        <div style={{ marginTop: 7, paddingTop: 7, borderTop: DB.hairline, display: "grid", gap: 4 }}>
+          {metric.detailRows.map((r, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10.5, color: DB.sub, fontFamily: DB.font }}>
+              <span>{r.label}</span><b style={{ color: DB.text, fontWeight: 800 }}>{r.value}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 회원 상세 상단 "회원 변화" 카드 — 회원 목표에 따라 서로 다른 핵심 지표 3개를 보여준다(조회 전용, 저장 로직 없음)
+function MemberChangeCard({ goal, sessions, bodyData, checkins }) {
+  const [openKey, setOpenKey] = useState(null);
+  const summary = useMemo(() => buildMemberChangeSummary(goal, sessions || [], bodyData, checkins || []), [goal, sessions, bodyData, checkins]);
+  return (
+    <div style={{ background: DB.card, border: `1px solid ${DB.border}`, borderRadius: DB.radius, boxShadow: DB.shadow, padding: "14px 16px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: "-.2px", color: DB.text, fontFamily: DB.font }}>회원 변화</span>
+        <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2.5px 9px", borderRadius: 999, background: DB.mintTint, color: DB.mintSoft, fontFamily: DB.font }}>{summary.goalLabel}</span>
+        <span style={{ fontSize: 10, color: DB.faint, marginLeft: "auto", fontFamily: DB.font }}>{summary.basisText}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 8 }}>
+        {summary.metrics.map(m => (
+          <MemberChangeMetricTile key={m.key} metric={m} isOpen={openKey === m.key} onToggle={() => setOpenKey(k => (k === m.key ? null : m.key))} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast }) {
   const isCorr = false;
   const isMyself = isOwner(member);
@@ -10410,7 +10794,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
     if (member?.id) {
       getMemberOnboarding(member.id).then(setOb).catch(()=>{});
       getAttendanceRecent(member.id, 90).then(setHubAttendance).catch(()=>{});
-      getMemberCheckins(member.id, 5).then(v=>setCi(v||[])).catch(()=>setCi([]));
+      getMemberCheckins(member.id, 60).then(v=>setCi(v||[])).catch(()=>setCi([])); // "회원 변화" 통증(VAS) 추세 비교를 위해 5→60건으로 확대(오늘 브리핑 최신 통증 표시 로직은 find() 기반이라 영향 없음)
       getMemberMessages(member.id, 5).then(v=>setMs(v||[])).catch(()=>setMs([]));
     }
   }, [member?.id]);
@@ -10810,6 +11194,10 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <button onClick={()=>setShowMemberAppManagement(v=>!v)} style={{border:`1px solid ${DB.border}`,background:DB.card,color:"#2563EB",borderRadius:11,padding:"9px 14px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer",boxShadow:DB.shadow,flexShrink:0}}>회원앱 관리 {showMemberAppManagement?"▲":"▼"}</button>
         <AdminMemberAppInviteButton member={member} onAccountCreated={onMemberPatch} />
       </div>
+
+      {/* 회원 변화 — 회원 목표별 핵심 변화 3개(스크롤 없이 바로 확인). 다이어트 목표는 이 카드 다음에 기존 "최근 체중 흐름" 그래프가 그대로 이어진다(secBrief). */}
+      {!loading && <MemberChangeCard goal={ob?.goal || member.goal} sessions={sessions} bodyData={bodyData} checkins={ci} />}
+
       <div style={{marginBottom: showMemberAppManagement?14:0}}>
         <AdminMemberAppPanel member={member} members={allMembers} onAccountCreated={onMemberPatch} showManagement={showMemberAppManagement} hideGrid={true} hideBriefing={true} />
       </div>

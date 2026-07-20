@@ -2098,11 +2098,70 @@ function HomeCalendarSummaryCard(p){
   </div>;
 }
 
+// 회원앱 홈 "후기 안내" 공지 — 관리자앱 등록 관리(registrationType/firstRegistrationDate/latestRenewalDate/registrationNoticeDone)와
+// 후기 관리(reviewStatus.requiredCount/completedCount, HubScreen 후기 관리 카드와 동일 필드) 데이터만으로 판정한다.
+// 우선순위: 필수 후기(남은 횟수 있음) > 재등록 안내(5일 이내) > 첫 등록 안내(5일 이내). 신규 필드가 없는 기존 회원은 항상 null(공지 없음).
+// TEO·test member도 회원앱 기능 판정 대상이므로 관리자용 isExcludedAdminMember 필터를 여기서는 사용하지 않는다.
+function buildRegistrationReviewNotice(profile) {
+  if (!profile) return null;
+  const required = Number(profile.reviewStatus?.requiredCount);
+  const hasReviewGoal = required === 1 || required === 2;
+  if (hasReviewGoal) {
+    const completed = Math.min(Math.max(Number(profile.reviewStatus?.completedCount) || 0, 0), required);
+    const remaining = Math.max(required - completed, 0);
+    return remaining > 0 ? { type: "required", remaining } : null;
+  }
+  const todayKST = getKoreaDateString();
+  const windowStart = dateStrDaysAgo(4);
+  const inWindow = (d) => { const s = String(d || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayKST && s >= windowStart; };
+  if (profile.registrationType === "renewal" && !profile.registrationNoticeDone && inWindow(profile.latestRenewalDate)) return { type: "renewal" };
+  if (profile.registrationType === "first" && !profile.registrationNoticeDone && inWindow(profile.firstRegistrationDate)) return { type: "first" };
+  return null;
+}
+// 회원앱 홈 후기 안내 카드 — 클릭·닫기·외부 링크·작성 완료 버튼이 전혀 없는 단순 안내형 카드.
+// 후기 작성 여부/공지 종료는 전적으로 관리자앱 데이터(buildRegistrationReviewNotice)로만 판정하며, 회원은 이 카드로 아무 것도 입력·완료 처리할 수 없다.
+function ReviewReminderCard({ notice }) {
+  if (!notice) return null;
+  const content = notice.type === "required"
+    ? {
+        icon: "💬",
+        eyebrow: "소중한 경험을 들려주세요",
+        title: notice.remaining >= 2 ? "회원님의 소중한 후기 2회가 기다리고 있어요" : "회원님의 소중한 후기 1회가 기다리고 있어요",
+        desc: notice.remaining >= 2
+          ? "회원님의 운동 이야기는 테오짐에도, 운동을 시작하려는 분들에게도 따뜻한 도움이 됩니다."
+          : "테오짐에서 느낀 변화와 운동 경험을 편하게 나눠주시면 더 좋은 수업을 만드는 데 큰 힘이 됩니다.",
+      }
+    : notice.type === "renewal"
+    ? {
+        icon: "💚",
+        eyebrow: "다시 함께해주셔서 감사합니다",
+        title: "회원님의 경험을 들려주시면 큰 힘이 됩니다",
+        desc: "다시 테오짐을 선택해주신 소중한 경험을 편하게 나눠주세요. 더 좋은 수업과 관리로 보답하겠습니다.",
+      }
+    : {
+        icon: "⭐",
+        eyebrow: "테오짐과 함께해주셔서 감사합니다",
+        title: "첫 운동의 느낌을 편하게 들려주세요",
+        desc: "회원님의 첫인상과 기대되는 변화를 나눠주시면 테오짐에 따뜻한 응원이 됩니다.",
+      };
+  return (
+    <section className="hm-review-notice" aria-label="후기 안내">
+      <span className="hm-review-notice-icon" aria-hidden="true">{content.icon}</span>
+      <div className="hm-review-notice-body">
+        <span className="hm-review-notice-eyebrow">{content.eyebrow}</span>
+        <b className="hm-review-notice-title">{content.title}</b>
+        <p className="hm-review-notice-desc">{content.desc}</p>
+      </div>
+    </section>
+  );
+}
 // 홈 리디자인 — "이름 → 목표까지 남은 수치·예상 도달 → 오늘 할 행동 → 핵심 변화 → 다음 수업·오늘 추천" 순서의 정보 위계.
 // 기존 데이터·기능(개인 운동 완료, 추천 루틴, 공지, 컨디셔닝)은 전부 유지하고 배치·위계만 재구성.
 function MemberHome(p){
+  const reviewNotice = useMemo(() => buildRegistrationReviewNotice(p.profile), [p.profile]);
   return <div className="hm-wrap">
     <MemberHomeHero {...p}/>
+    <ReviewReminderCard notice={reviewNotice}/>
     <HomeGoalCard {...p}/>
     <HomeTodayCheckCard {...p}/>
     <HomeMetricsGrid {...p}/>
@@ -4415,6 +4474,13 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-goal-weights .cur b{color:#0F9488}
 .hm-goal-empty{margin:0;color:#64748B;font-weight:700;font-size:14px;line-height:1.7}
 .hm-goal-empty b{color:#0F172A}
+/* 후기 안내 — 클릭 불가 단순 안내 카드. 흰색에 가까운 연한 민트 배경 + 얇은 민트 테두리, 경고색(빨강/주황) 사용 금지 */
+.hm-review-notice{display:flex;gap:12px;align-items:flex-start;background:#F4FBFA;border:1px solid rgba(57,199,184,.28);border-radius:20px;padding:16px 18px;margin:0 0 12px;box-shadow:0 2px 10px rgba(15,148,136,.06);animation:memberCardIn .22s ease}
+.hm-review-notice-icon{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:#E9FAF7;font-size:16px;line-height:1}
+.hm-review-notice-body{min-width:0}
+.hm-review-notice-eyebrow{display:block;color:#0F9488;font-size:11px;font-weight:800;letter-spacing:.02em;margin-bottom:4px}
+.hm-review-notice-title{display:block;color:#0F172A;font-size:14.5px;font-weight:900;line-height:1.4;letter-spacing:-.2px;word-break:keep-all}
+.hm-review-notice-desc{margin:6px 0 0;color:#64748B;font-size:12px;font-weight:600;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all}
 /* C. 오늘의 체크 — 낮은 가로형 청록 카드(아이콘 · 문구 · 버튼 한 줄) */
 .hm-check{display:flex;align-items:center;gap:12px;background:#0F9488;border-radius:24px;padding:20px 16px 20px 18px;margin:0 0 12px;color:#fff;box-shadow:0 8px 20px rgba(15,148,136,.2);animation:memberCardIn .22s ease}
 .hm-check-ico{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;border-radius:50%;background:rgba(255,255,255,.16)}
@@ -10956,6 +11022,89 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
   );
 
+  // ⑥-2 등록 관리 — 등록 구분(기존 회원/첫 등록/재등록)과 첫 등록일·최근 재등록일을 관리자가 직접 입력·수정.
+  // members/{id}.registrationType/firstRegistrationDate/latestRenewalDate/registrationNoticeDone 신규 필드만 사용(기존 필드 없어 새로 추가, 없으면 "기존 회원"=공지 없음으로 하위 호환).
+  // 회원앱 홈 후기 안내 공지의 첫 등록·재등록 5일 판정 기준 — 필수 후기(reviewStatus)가 남아있으면 그 공지가 우선 표시된다(buildRegistrationReviewNotice와 동일 우선순위).
+  const [regSaving, setRegSaving] = useState(false);
+  const registrationType = (member.registrationType === "first" || member.registrationType === "renewal") ? member.registrationType : "existing";
+  const regDateLabel = registrationType === "first" ? "첫 등록일" : registrationType === "renewal" ? "최근 재등록일" : "";
+  const regDateValue = registrationType === "first" ? (member.firstRegistrationDate || "") : registrationType === "renewal" ? (member.latestRenewalDate || "") : "";
+  const saveRegistrationType = async (type) => {
+    if (regSaving || type === registrationType) return;
+    setRegSaving(true);
+    try {
+      const patch = { registrationType: type, registrationNoticeDone: false };
+      if (type === "first") { patch.firstRegistrationDate = member.firstRegistrationDate || getKoreaDateString(); patch.latestRenewalDate = ""; }
+      else if (type === "renewal") { patch.latestRenewalDate = member.latestRenewalDate || getKoreaDateString(); patch.firstRegistrationDate = ""; }
+      else { patch.firstRegistrationDate = ""; patch.latestRenewalDate = ""; }
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      showToast?.("등록 구분이 저장되었습니다.");
+    } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setRegSaving(false); }
+  };
+  const saveRegistrationDate = async (value) => {
+    if (regSaving || registrationType === "existing") return;
+    setRegSaving(true);
+    try {
+      const field = registrationType === "first" ? "firstRegistrationDate" : "latestRenewalDate";
+      const patch = { [field]: value, registrationNoticeDone: false };
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      showToast?.("등록일이 저장되었습니다.");
+    } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setRegSaving(false); }
+  };
+  const saveRegistrationNoticeDone = async (done) => {
+    if (regSaving) return;
+    setRegSaving(true);
+    try {
+      const patch = { registrationNoticeDone: done };
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      showToast?.(done ? "등록 후기 안내를 완료 처리했습니다." : "완료 처리를 취소했습니다.");
+    } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setRegSaving(false); }
+  };
+  const regBtn = (label, onClick, { primary=false, disabled=false } = {}) => (
+    <button key={label} type="button" disabled={disabled||regSaving} onClick={onClick} style={{
+      borderRadius:999,padding:"8px 14px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,
+      cursor:(disabled||regSaving)?"default":"pointer",
+      border:`1px solid ${primary?DB.mint:DB.border}`,
+      background:primary?DB.mintTintStrong:DB.card,
+      color:primary?DB.mintSoft:DB.sub,
+      opacity:disabled?0.5:1,
+    }}>{label}</button>
+  );
+  const secRegistration = (
+          <section id="hub-sec-registration" className="hub-sec-registration" style={{...card, padding:"14px 16px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+              <span style={cardTitle}>등록 관리</span>
+              {registrationType!=="existing" && member.registrationNoticeDone && (
+                <span style={{fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:DB.mintTintStrong,color:DB.mintSoft}}>등록 후기 완료</span>
+              )}
+            </div>
+            <div style={{fontSize:11,fontWeight:800,color:DB.sub,marginBottom:6}}>등록 구분</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+              {regBtn("기존 회원", ()=>saveRegistrationType("existing"), {primary:registrationType==="existing"})}
+              {regBtn("첫 등록", ()=>saveRegistrationType("first"), {primary:registrationType==="first"})}
+              {regBtn("재등록", ()=>saveRegistrationType("renewal"), {primary:registrationType==="renewal"})}
+            </div>
+            {registrationType!=="existing" && (
+              <>
+                <div style={{marginBottom:10}}>
+                  <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:6}}>{regDateLabel}</span>
+                  <input type="date" value={regDateValue} disabled={regSaving} onChange={e=>saveRegistrationDate(e.target.value)}
+                    style={{border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"9px 12px",fontSize:13,fontWeight:800,color:DB.text,fontFamily:DB.font,cursor:regSaving?"default":"pointer"}}/>
+                </div>
+                <div style={{fontSize:11.5,color:DB.faint,marginBottom:10}}>{regDateValue?`${regDateValue}부터 5일간 회원앱 홈에 등록 후기 안내가 표시됩니다.`:"날짜를 입력하면 회원앱 홈에 안내가 표시됩니다."}</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {member.registrationNoticeDone
+                    ? regBtn("완료 취소", ()=>saveRegistrationNoticeDone(false))
+                    : regBtn("등록 후기 완료 처리", ()=>saveRegistrationNoticeDone(true), {primary:true})}
+                </div>
+              </>
+            )}
+          </section>
+  );
+
   // ⑦ 분석 도구 (기본 접힘)
   const secAnalysis = (
           <section className="hub-sec-analysis" style={{...card, padding:0}}>
@@ -11085,14 +11234,14 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <div className="hub-2panel">
           <div className="hub-side">{secBrief}{secRecent}</div>
           <div className="hub-main">
-            {secToday}{secPrep}{secReview}
+            {secToday}{secPrep}{secReview}{secRegistration}
             <div className="hub-toolrow">{secAnalysis}{secManage}</div>
           </div>
         </div>
       ) : (
-        /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 분석 → 회원관리 */
+        /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 등록 관리 → 분석 → 회원관리 */
         <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",minWidth:0}}>
-          {secToday}{secBrief}{secRecent}{secPrep}{secReview}{secAnalysis}{secManage}
+          {secToday}{secBrief}{secRecent}{secPrep}{secReview}{secRegistration}{secAnalysis}{secManage}
         </div>
       )}
 

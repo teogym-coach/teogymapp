@@ -2098,8 +2098,12 @@ function HomeCalendarSummaryCard(p){
   </div>;
 }
 
+// 후기 안내 공지 정책 시작일 — 2026-07-20부터 새로 시작하는 운영 정책이므로 이 날짜 이후에 "첫 등록/재등록 실제 날짜"가 있거나
+// "관리자가 새로 후기 필수로 지정(requiredSetAt)"한 회원에게만 적용한다. 그 이전부터 있던 등록일·재등록일·후기 필수 지정에는 소급 적용하지 않는다
+// (UNSENT_SESSION_START_DATE와 동일한 패턴 — 날짜 문자열 그대로 사전식 비교).
+const REGISTRATION_NOTICE_POLICY_START_DATE = "2026-07-20";
 // 회원앱 홈 "후기 안내" 공지 — 관리자앱 등록 관리(registrationType/firstRegistrationDate/latestRenewalDate/registrationNoticeDone)와
-// 후기 관리(reviewStatus.requiredCount/completedCount, HubScreen 후기 관리 카드와 동일 필드) 데이터만으로 판정한다.
+// 후기 관리(reviewStatus.requiredCount/completedCount/requiredSetAt, HubScreen 후기 관리 카드와 동일 필드) 데이터만으로 판정한다.
 // 우선순위: 필수 후기(남은 횟수 있음) > 재등록 안내(5일 이내) > 첫 등록 안내(5일 이내). 신규 필드가 없는 기존 회원은 항상 null(공지 없음).
 // TEO·test member도 회원앱 기능 판정 대상이므로 관리자용 isExcludedAdminMember 필터를 여기서는 사용하지 않는다.
 function buildRegistrationReviewNotice(profile) {
@@ -2107,13 +2111,15 @@ function buildRegistrationReviewNotice(profile) {
   const required = Number(profile.reviewStatus?.requiredCount);
   const hasReviewGoal = required === 1 || required === 2;
   if (hasReviewGoal) {
+    const requiredSetAt = String(profile.reviewStatus?.requiredSetAt || "").slice(0, 10);
+    if (!requiredSetAt || requiredSetAt < REGISTRATION_NOTICE_POLICY_START_DATE) return null; // 정책 이전부터 있던 필수 지정은 소급 적용하지 않음
     const completed = Math.min(Math.max(Number(profile.reviewStatus?.completedCount) || 0, 0), required);
     const remaining = Math.max(required - completed, 0);
     return remaining > 0 ? { type: "required", remaining } : null;
   }
   const todayKST = getKoreaDateString();
   const windowStart = dateStrDaysAgo(4);
-  const inWindow = (d) => { const s = String(d || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayKST && s >= windowStart; };
+  const inWindow = (d) => { const s = String(d || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayKST && s >= windowStart && s >= REGISTRATION_NOTICE_POLICY_START_DATE; };
   if (profile.registrationType === "renewal" && !profile.registrationNoticeDone && inWindow(profile.latestRenewalDate)) return { type: "renewal" };
   if (profile.registrationType === "first" && !profile.registrationNoticeDone && inWindow(profile.firstRegistrationDate)) return { type: "first" };
   return null;
@@ -10957,7 +10963,8 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           </section>
   );
 
-  // ⑥ 후기 관리 — 1단계: 목표/완료 횟수만 관리. members/{id}.reviewStatus={requiredCount,completedCount,updatedAt} 단일 필드만 사용(히스토리·요청여부 없음)
+  // ⑥ 후기 관리 — 1단계: 목표/완료 횟수만 관리. members/{id}.reviewStatus={requiredCount,completedCount,updatedAt,requiredSetAt} 단일 필드만 사용(히스토리·요청여부 없음)
+  // requiredSetAt: 후기 안내 공지 정책(2026-07-20~) 소급 적용 방지용 — "설정/다시 시작"(신규 지정)에서만 오늘 날짜로 갱신하고, "완료 추가/되돌리기"에서는 기존 값을 그대로 유지한다.
   const [reviewSaving, setReviewSaving] = useState(false);
   const [reviewRestarting, setReviewRestarting] = useState(false);
   useEffect(() => { setReviewRestarting(false); }, [member.id]);
@@ -10966,11 +10973,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
   const reviewCompleted = hasReviewGoal ? Math.min(Math.max(Number(member.reviewStatus.completedCount) || 0, 0), reviewRequired) : 0;
   const reviewRemaining = hasReviewGoal ? Math.max(reviewRequired - reviewCompleted, 0) : 0;
   const reviewDone = hasReviewGoal && reviewCompleted >= reviewRequired;
-  const saveReviewStatus = async (requiredCount, completedCount) => {
+  const saveReviewStatus = async (requiredCount, completedCount, { designate=false } = {}) => {
     if (reviewSaving) return;
     setReviewSaving(true);
     try {
-      const patch = { reviewStatus: { requiredCount, completedCount, updatedAt: new Date().toISOString() } };
+      const requiredSetAt = designate ? new Date().toISOString() : (member.reviewStatus?.requiredSetAt || null);
+      const patch = { reviewStatus: { requiredCount, completedCount, updatedAt: new Date().toISOString(), requiredSetAt } };
       await updateMember(member.id, patch);
       onMemberPatch(patch);
       setReviewRestarting(false);
@@ -10998,14 +11006,14 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               <>
                 <div style={{fontSize:12.5,color:DB.faint,marginBottom:10}}>아직 후기 목표가 설정되지 않았습니다.</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {reviewBtn("후기 1회 설정", ()=>saveReviewStatus(1,0), {primary:true})}
-                  {reviewBtn("후기 2회 설정", ()=>saveReviewStatus(2,0), {primary:true})}
+                  {reviewBtn("후기 1회 설정", ()=>saveReviewStatus(1,0,{designate:true}), {primary:true})}
+                  {reviewBtn("후기 2회 설정", ()=>saveReviewStatus(2,0,{designate:true}), {primary:true})}
                 </div>
               </>
             ) : reviewRestarting ? (
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {reviewBtn("1회로 다시 시작", ()=>saveReviewStatus(1,0), {primary:true})}
-                {reviewBtn("2회로 다시 시작", ()=>saveReviewStatus(2,0), {primary:true})}
+                {reviewBtn("1회로 다시 시작", ()=>saveReviewStatus(1,0,{designate:true}), {primary:true})}
+                {reviewBtn("2회로 다시 시작", ()=>saveReviewStatus(2,0,{designate:true}), {primary:true})}
                 {reviewBtn("취소", ()=>setReviewRestarting(false))}
               </div>
             ) : (

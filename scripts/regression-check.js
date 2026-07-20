@@ -812,7 +812,8 @@ const checks = [
     !app.includes('sj-fb-quick')
   ],
   ['수업 후 상태: 피드백 카드 펼침 상태(expandedFeedbackIds)는 MemberJournal(부모)이 세션 id별 Set으로 관리 — MemberFeedbackForm 내부 로컬 state가 아니므로 저장→load() 재조회로 세션 목록이 다시 그려져도 펼침 상태가 초기화되지 않음',
-    app.includes('const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>new Set());') &&
+    app.includes('const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>{') &&
+    app.includes('raw?new Set(JSON.parse(raw)):new Set();') &&
     app.includes('const setFeedbackOpen=useCallback((id,nextOpen)=>{') &&
     app.includes('function MemberFeedbackForm({s,onSave,open,onToggle}){') &&
     (() => {
@@ -837,6 +838,13 @@ const checks = [
   ['수업일지: 사용자가 펼쳤던 session.id가 재조회 후 실제로 더 이상 존재하지 않을 때만 openId를 초기화(null) — sessions가 아직 빈 배열(로딩 전)일 때는 오탐으로 초기화하지 않도록 가드',
     app.includes('if(openId==null||openId==="__none__"||!sessions.length)return;') &&
     app.includes('if(!sessions.some(s=>s.id===openId))setOpenId(null);')
+  ],
+  ['수업일지: openId/expandedFeedbackIds가 sessionStorage에도 저장되어 모바일 브라우저가 탭을 백그라운드에서 재로드(메모리 절약)해도 펼침 상태가 복원됨 — try/catch로 감싸 프라이빗 브라우징 등에서도 앱이 깨지지 않음',
+    app.includes('const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";') &&
+    app.includes('const JOURNAL_EXPANDED_FEEDBACK_KEY="teogym_journal_expandedFeedbackIds";') &&
+    app.includes('try{return sessionStorage.getItem(JOURNAL_OPEN_ID_KEY);}catch{return null;}') &&
+    app.includes('sessionStorage.setItem(JOURNAL_OPEN_ID_KEY,next)') &&
+    app.includes('sessionStorage.setItem(JOURNAL_EXPANDED_FEEDBACK_KEY,JSON.stringify([...next]))')
   ],
   ['수업 후 상태: RPE·근육통·메모 저장(saveSection)은 펼침 상태를 건드리지 않고(onToggle 미호출) 저장 완료 처리만 수행 — 사용자가 접기 버튼(cancel)을 누르거나 펼치기 버튼(openWithScroll)을 누를 때만 onToggle 호출',
     (() => {

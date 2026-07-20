@@ -2301,19 +2301,37 @@ function MemberWorkout(p){
     {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
   </>;
 }
+// 수업일지 상위 세션 카드 펼침 상태(openId)/피드백 카드 펼침 상태(expandedFeedbackIds)를 sessionStorage에도 저장한다 —
+// 모바일 Safari는 브라우저를 백그라운드로 전환(예: 카카오톡으로 스크린샷 전송)했다가 돌아오면 메모리 절약을 위해
+// 탭을 자체적으로 다시 로드하는 경우가 흔한데, 이때는 저장/재조회와 무관하게 순수 React state(메모리)가 전부
+// 초기화된다. sessionStorage는 탭이 실제로 닫히기 전까지는 이런 재로드에도 유지되므로, 재로드 후에도 펼침
+// 상태를 그대로 복원할 수 있다.
+const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";
+const JOURNAL_EXPANDED_FEEDBACK_KEY="teogym_journal_expandedFeedbackIds";
 function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
   // openId: null=사용자가 아직 선택하지 않음(항상 "현재 최신 세션"을 실제 id로 비교해 자동으로 펼침) · "__none__"=사용자가 펼쳐진 카드를 직접 접음(자동 재펼침 금지) · 그 외=해당 session.id가 펼쳐짐.
   // 과거에는 배열 인덱스(openId==="__first__"&&i===0)로 "최근 수업"을 판정해 저장 후 재조회로 목록이 다시 그려지며 인덱스가 흔들리면 카드가 접히는 문제가 있었다 — 이제 latestId(실제 session.id) 비교로만 판정한다.
-  const [openId,setOpenId]=useState(journalFocusId||null); const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
+  const [openId,setOpenIdState]=useState(()=>{ if(journalFocusId)return journalFocusId; try{return sessionStorage.getItem(JOURNAL_OPEN_ID_KEY);}catch{return null;} });
+  const setOpenId=useCallback(updater=>{
+    setOpenIdState(prev=>{
+      const next=typeof updater==="function"?updater(prev):updater;
+      try{ next==null?sessionStorage.removeItem(JOURNAL_OPEN_ID_KEY):sessionStorage.setItem(JOURNAL_OPEN_ID_KEY,next); }catch{}
+      return next;
+    });
+  },[]);
+  const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
   // "수업 후 몸 상태" 피드백 카드 펼침 상태 — 세션 id별로 여기(부모)에서 관리한다.
   // MemberFeedbackForm 내부 state로 두면 저장 후 saveFeedback→load()로 세션 목록이 다시 그려질 때
   // 카드가 재마운트될 가능성에 펼침 상태가 노출되므로, 재조회와 무관한 부모 상태로 옮겨 안전하게 유지한다.
-  const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>new Set());
+  const [expandedFeedbackIds,setExpandedFeedbackIds]=useState(()=>{
+    try{ const raw=sessionStorage.getItem(JOURNAL_EXPANDED_FEEDBACK_KEY); return raw?new Set(JSON.parse(raw)):new Set(); }catch{ return new Set(); }
+  });
   const setFeedbackOpen=useCallback((id,nextOpen)=>{
     setExpandedFeedbackIds(prev=>{
       if(prev.has(id)===nextOpen) return prev;
       const next=new Set(prev);
       if(nextOpen) next.add(id); else next.delete(id);
+      try{ sessionStorage.setItem(JOURNAL_EXPANDED_FEEDBACK_KEY,JSON.stringify([...next])); }catch{}
       return next;
     });
   },[]);
@@ -2327,7 +2345,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   useEffect(()=>{
     if(openId==null||openId==="__none__"||!sessions.length)return; // sessions가 아직 로딩 전(빈 배열)일 때 오탐으로 초기화하지 않도록 가드
     if(!sessions.some(s=>s.id===openId))setOpenId(null);
-  },[sessions,openId]);
+  },[sessions,openId,setOpenId]);
   useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);

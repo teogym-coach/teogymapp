@@ -1362,12 +1362,13 @@ export async function getCounselMemo(memberId) {
   }
 }
 
-export async function saveCounselMemo(memberId, memo) {
+// data: { memo, status } — status(재등록 완료/고민 중/다음 상담 예정/목표 변경/PT 종료)는 memo와 같은 문서에 필드로 저장(새 컬렉션 없음)
+export async function saveCounselMemo(memberId, data) {
   try {
     await verifyMemberOwnership(memberId);
     dbLog("saveCounselMemo", `memberId=${memberId}`);
     const ref = doc(db, "members", memberId, "counselNotes", "main");
-    const payload = { memo: memo || "", updatedAt: serverTimestamp() };
+    const payload = { memo: data?.memo || "", status: data?.status || "", updatedAt: serverTimestamp() };
     await setDoc(ref, payload, { merge: true });
     const saved = await getDoc(ref);
     return saved.data();

@@ -6148,7 +6148,7 @@ export default function App() {
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
-        {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
+        {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="consultReport" && member && (
           <div>
             <SH title="🤖 AI 초기 분석 리포트" sub={member.name}
@@ -11882,7 +11882,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               <div style={{padding:"0 18px 18px"}}>
                 <div className="hub-toolgrid" style={{marginBottom:8}}>
                   {menuBtn("🏋️","운동 분석","근력 · 훈련량 · 컨디션 · 부위 변화","exerciseAnalysis")}
-                  {menuBtn("📊","블록 피드백","부위 · 기구별 볼륨","feedback")}
+                  {menuBtn("📋","훈련 피드백","다음 수업을 위한 훈련 요약","feedback")}
                   {menuBtn("🔥","대사 추정","유산소 · 체중 분석","metabolism")}
                   {menuBtn("📋","평가 기록","체형 · 기능 · 인체도","assessment")}
                   {menuBtn("📚","운동 라이브러리","부위별 운동 기록","library")}
@@ -16356,79 +16356,235 @@ function formatVolumeKgT(v) {
 }
 
 // ════════════════════════════════════════════
-// FEEDBACK
+// 훈련 피드백 (구 블록 피드백) — 통계 나열이 아니라 "다음 수업 준비"용 화면
+// 부위·기구별 볼륨 계산은 위 buildMuscleVolumeData 등 블록 피드백 원 로직을 그대로 재사용한다.
 // ════════════════════════════════════════════
-function FeedbackScreen({ sessions, member, loading, onBack }) {
-  const [bs,setBs]=useState(10); const [bi,setBi]=useState(0); const [vm,setVm]=useState("muscle");
-  if(loading) return <div><SH title="📊 블록 피드백" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Skel n={4}/></div>;
-  if(!sessions.length) return <div><SH title="📊 블록 피드백" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Emp msg="수업 기록이 없습니다."/></div>;
+
+// 최근 구간 vs 이전 구간 사이 예상 1RM(Epley)이 오른 운동 개수 — 근력 분석(buildStrengthData)의
+// 고정 4주 기준과 달리, 선택된 블록 안에서 "최근 N회 vs 이전 N회"를 세션 개수 기준으로 비교한다.
+function countRecentStrengthRises(recentSessions, prevSessions) {
+  const bestByName = (list) => {
+    const map = {};
+    (list||[]).forEach(sess => (sess.exercises||[]).forEach(ex => {
+      if (!ex.name || isSkipForStrength(ex)) return;
+      (ex.sets||[]).forEach(st => {
+        const w = parseFloat(st.weight), r = parseInt(st.reps);
+        if (!(w > 0 && r > 0)) return;
+        const rm = calcEpley1RM(w, r);
+        if (!rm) return;
+        if (!map[ex.name] || rm > map[ex.name]) map[ex.name] = rm;
+      });
+    }));
+    return map;
+  };
+  const recentMap = bestByName(recentSessions);
+  const prevMap = bestByName(prevSessions);
+  return Object.keys(recentMap).filter(name => prevMap[name] != null && recentMap[name] > prevMap[name] * 1.02).length;
+}
+
+// 이번 블록 한 줄 평가 — 가장 많이 훈련한 부위 + 볼륨 추세 + 가장 크게 향상된 운동(있을 때만)
+function buildBlockHeadline(sl, muscleTotals, tr, strengthData) {
+  const topMuscle = muscleTotals[0]?.g || null;
+  const trPct = tr != null ? parseFloat(tr) : null;
+  const trendWord = trPct == null ? "안정적인" : trPct >= 8 ? "볼륨이 증가하는" : trPct <= -8 ? "볼륨이 감소하는" : "안정적인";
+  const pctChange = d => (d.recentBest && d.olderBest) ? ((d.recentBest - d.olderBest) / d.olderBest) : null;
+  const topRise = [...(strengthData||[])].filter(d=>d.trend==="상승").map(d=>({...d,pct:pctChange(d)})).sort((a,b)=>(b.pct||0)-(a.pct||0))[0];
+  const trainedPart = topMuscle ? `${topMuscle} 중심으로 ${trendWord} 훈련이 진행되었` : `${trendWord} 훈련이 진행되었`;
+  const risePart = topRise ? `으며, ${topRise.name} 근력이 가장 크게 향상되었습니다.` : `습니다.`;
+  return `최근 ${sl.length}회 동안 ${trainedPart}${risePart}`;
+}
+
+const CHECK_KIND_COLOR = { alert:"#ff6b6b", warn:"#ffd166", info:"#5EEAD4", muted:"#94a3b8" };
+
+// 규칙 기반 "다음 수업 체크" + "다음 상담 질문" — AI API 없이 부위 비중 · RPE · 볼륨 · 근육통 신호만으로 판단
+// 운동 이름/루틴은 절대 만들지 않고, 부위·볼륨·회복 관점의 "방향"만 문장에 담는다.
+function buildNextSessionInsight({ sl, muscleTotals, compare, muscleRecent, musclePrev }) {
+  const items = []; const questions = [];
+  const totalMuscleVol = muscleTotals.reduce((s,x)=>s+x.total,0);
+
+  if (muscleTotals.length && totalMuscleVol > 0) {
+    const top = muscleTotals[0];
+    const topShare = Math.round(top.total/totalMuscleVol*100);
+    if (topShare >= 40) {
+      items.push({ kind:"warn", text:`최근 ${top.g} 비중이 높았습니다 (${topShare}%). 다른 부위 비중 확대를 고려하세요.` });
+      questions.push(`${top.g} 위주로 훈련하셨는데, 다른 부위도 함께 진행해볼까요?`);
+    }
+    const candidates = muscleTotals.filter(x=>x.total>0);
+    if (candidates.length >= 2) {
+      const low = candidates[candidates.length-1];
+      const lowShare = Math.round(low.total/totalMuscleVol*100);
+      if (low.g !== top.g && lowShare > 0 && lowShare < 10) {
+        items.push({ kind:"info", text:`최근 ${low.g} 비중이 낮았습니다 (${lowShare}%). ${low.g} 비중 확대를 고려하세요.` });
+      }
+    }
+  }
+
+  const last2Rpe = sl.slice(-2).map(getMemberFeedbackRPE).filter(v=>v!=null);
+  if (last2Rpe.length === 2 && last2Rpe.every(v=>v>=8)) {
+    items.push({ kind:"alert", text:`최근 2회 RPE가 높았습니다 (${last2Rpe.join(", ")}). 회복 상태를 확인하세요.` });
+    questions.push("최근 RPE가 계속 높았는데, 피로감은 어떠셨나요?");
+  }
+
+  if (compare && compare.volPct != null && compare.volPct <= -10) {
+    items.push({ kind:"warn", text:`최근 볼륨이 감소했습니다 (${compare.volPct}%). 볼륨 유지 여부를 확인하세요.` });
+    questions.push("요즘 컨디션이나 시간 여유는 어떠신가요?");
+  }
+
+  const recentTotal = (muscleRecent||[]).reduce((s,x)=>s+x.total,0);
+  const prevTotal = (musclePrev||[]).reduce((s,x)=>s+x.total,0);
+  if (recentTotal > 0 && prevTotal > 0) {
+    let bestRise = null;
+    muscleRecent.forEach(({g,total})=>{
+      const recentShare = total/recentTotal;
+      const prevEntry = musclePrev.find(x=>x.g===g);
+      const prevShare = prevEntry ? prevEntry.total/prevTotal : 0;
+      const delta = recentShare - prevShare;
+      if (recentShare >= 0.15 && delta >= 0.15 && (!bestRise || delta > bestRise.delta)) bestRise = { g, delta };
+    });
+    if (bestRise) {
+      items.push({ kind:"info", text:`최근 ${bestRise.g} 훈련 증가가 확인됩니다. 유지 또는 회복 관리가 필요합니다.` });
+      questions.push(`${bestRise.g} 운동 후 회복은 이전보다 좋아지셨나요?`);
+    }
+  }
+  if (prevTotal > 0) {
+    const recentGroups = new Set(muscleRecent.filter(x=>x.total>0).map(x=>x.g));
+    const missing = musclePrev.filter(x=>x.total>0 && !recentGroups.has(x.g)).sort((a,b)=>b.total-a.total)[0];
+    if (missing) items.push({ kind:"warn", text:`최근 ${missing.g} 기록이 없습니다. 포함 여부를 확인하세요.` });
+  }
+
+  const sorenessSessions = sl.filter(s=>hasSorenessSignal(s.memberFeedback));
+  if (sorenessSessions.length >= 2) {
+    const partFreq = {};
+    sorenessSessions.forEach(s=>memberFeedbackParts(s.memberFeedback).forEach(p=>{partFreq[p]=(partFreq[p]||0)+1;}));
+    const topPart = Object.entries(partFreq).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+    items.push({ kind:"alert", text:`최근 근육통 기록이 반복됩니다 (${sorenessSessions.length}회${topPart?` · ${topPart}`:""}). 회복 상태를 확인하세요.` });
+    questions.push(topPart ? `${topPart} 근육통은 지금도 남아있나요?` : "근육통은 지금도 남아있나요?");
+  }
+
+  if (!items.length) items.push({ kind:"muted", text:"판단 가능한 데이터가 부족합니다." });
+  if (!questions.length) questions.push("요즘 컨디션은 어떠신가요?", "특별히 불편하거나 통증이 있는 부위가 있으신가요?");
+  return { items, questions: questions.slice(0,3) };
+}
+
+function TrainingFeedbackScreen({ sessions, member, loading, onBack }) {
+  const [bs,setBs]=useState(10); const [bi,setBi]=useState(0);
+  if(loading) return <div><SH title="📋 훈련 피드백" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Skel n={4}/></div>;
+  if(!sessions.length) return <div><SH title="📋 훈련 피드백" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Emp msg="수업 기록이 없습니다."/></div>;
+
   const tb=Math.ceil(sessions.length/bs); const sl=sessions.slice(bi*bs,bi*bs+bs);
-  const trendData=sl.map(s=>({name:s.sessionNo+"회",total:s.totalVolume||0}));
-  const muscleData=buildMuscleVolumeData(sl);
-  const equipData=buildEquipVolumeData(sl);
-  const detailList=buildDetailVolumeList(sl);
-  const muscleTotals=buildMuscleTotals(muscleData);
-  const equipTotals=buildEquipTotals(equipData);
-  const muscleDayAvg=buildMuscleDayAvg(sl, muscleTotals);
-  const sv=trendData.reduce((s,r)=>s+r.total,0); const pv=bi>0?sessions.slice((bi-1)*bs,bi*bs).reduce((s,ss)=>s+(ss.totalVolume||0),0):null; const tr=pv!=null&&pv>0?((sv-pv)/pv*100).toFixed(1):null;
-  const tt={background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11};
+  const sv=sl.reduce((s,r)=>s+(Number(r.totalVolume)||0),0);
+  const pv=bi>0?sessions.slice((bi-1)*bs,bi*bs).reduce((s,ss)=>s+(ss.totalVolume||0),0):null;
+  const tr=pv!=null&&pv>0?((sv-pv)/pv*100).toFixed(1):null;
+
+  const summary = buildExerciseAnalysisSummary(sl);
+  const muscleTotals = buildMuscleTotals(buildMuscleVolumeData(sl));
+  const totalMuscleVol = muscleTotals.reduce((s,x)=>s+x.total,0);
+  const topMuscle = muscleTotals[0]?.g || null;
+
+  const recent3 = sl.slice(-3);
+  const prev3 = sl.slice(Math.max(0, sl.length-6), Math.max(0, sl.length-3));
+  const hasCompare = recent3.length>0 && prev3.length>0;
+  let compare = null;
+  if (hasCompare) {
+    const volAvg = arr=>arr.reduce((s,x)=>s+(Number(x.totalVolume)||0),0)/arr.length;
+    const setsAvg = arr=>arr.reduce((s,x)=>s+calcTotalSets(x.exercises),0)/arr.length;
+    const rpeAvgOf = arr=>{const v=arr.map(getMemberFeedbackRPE).filter(x=>x!=null); return v.length?Math.round((v.reduce((a,b)=>a+b,0)/v.length)*10)/10:null;};
+    const rpeRecent=rpeAvgOf(recent3), rpePrev=rpeAvgOf(prev3);
+    compare = {
+      volPct: memberChangePct(volAvg(recent3), volAvg(prev3)),
+      setsPct: memberChangePct(setsAvg(recent3), setsAvg(prev3)),
+      rpeDiff: (rpeRecent!=null&&rpePrev!=null) ? Math.round((rpeRecent-rpePrev)*10)/10 : null,
+      risingCount: countRecentStrengthRises(recent3, prev3),
+      basisText: (recent3.length===3&&prev3.length===3) ? "최근 3회 vs 이전 3회 평균" : `최근 ${recent3.length}회 vs 이전 ${prev3.length}회 평균 (표본 부족)`,
+    };
+  }
+  const muscleRecent = buildMuscleTotals(buildMuscleVolumeData(recent3));
+  const musclePrev = buildMuscleTotals(buildMuscleVolumeData(prev3));
+
+  const headline = buildBlockHeadline(sl, muscleTotals, tr, summary.strengthData);
+  const insight = buildNextSessionInsight({ sl, muscleTotals, compare, muscleRecent, musclePrev });
+
   return (
     <div>
-      <SH title="📊 블록 피드백" sub={member?.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
+      <SH title="📋 훈련 피드백" sub={member?.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
+
+      <div style={{background:"linear-gradient(135deg,rgba(94,234,212,.10),rgba(124,111,255,.08))",border:"1px solid rgba(94,234,212,.18)",borderRadius:12,padding:"12px 14px",marginBottom:13}}>
+        <Mo c="#5EEAD4" s={9} style={{display:"block",marginBottom:4,fontWeight:800}}>이번 블록 한 줄 평가</Mo>
+        <div style={{fontSize:12.5,color:"#e2e8f0",lineHeight:1.6,fontWeight:600}}>{headline}</div>
+      </div>
+
       <div style={{display:"flex",gap:11,marginBottom:13,flexWrap:"wrap"}}>
         <div><Mo c="#94a3b8" s={8} style={{marginBottom:3}}>블록 단위</Mo><div style={{display:"flex",gap:3}}>{[5,10,20].map(n=><button key={n} onClick={()=>{setBs(n);setBi(0);}} style={{padding:"5px 12px",borderRadius:5,border:"1px solid",borderColor:bs===n?"#5EEAD4":"rgba(255,255,255,0.08)",background:bs===n?"rgba(0,229,160,.12)":"transparent",color:bs===n?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>{n}회</button>)}</div></div>
         {tb>1&&<div><Mo c="#94a3b8" s={8} style={{marginBottom:3}}>블록 선택</Mo><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{Array.from({length:tb},(_,i)=><button key={i} onClick={()=>setBi(i)} style={{padding:"5px 10px",borderRadius:5,border:"1px solid",borderColor:bi===i?"#7c6fff":"rgba(255,255,255,0.08)",background:bi===i?"rgba(124,111,255,.12)":"transparent",color:bi===i?"#7c6fff":"#94a3b8",fontSize:10,fontWeight:700}}>{i*bs+1}~{Math.min(i*bs+bs,sessions.length)}회</button>)}</div></div>}
       </div>
-      <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:11}}>
-        <StatTile label="수업 횟수" value={sl.length+"회"}/><StatTile label="총 볼륨" value={(sv/1000).toFixed(1)+"t"} sub={tr!=null?"전블록 "+(tr>0?"+":"")+tr+"%":"."}/><StatTile label="회당 평균" value={(sv/(sl.length||1)/1000).toFixed(1)+"t"}/>
-      </div>
-      <Card title="세션별 총 볼륨 추이"><ResponsiveContainer width="100%" height={150}><LineChart data={trendData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Line type="monotone" dataKey="total" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="총볼륨(kg)"/></LineChart></ResponsiveContainer></Card>
-      <div style={{display:"flex",gap:5,marginTop:11,marginBottom:11,flexWrap:"wrap"}}>
-        {[["muscle","💪 부위별"],["sets","📋 세트분석"],["equipment","🏋️ 기구별"],["detail","🔍 세부"]].map(([m,l])=><button key={m} onClick={()=>setVm(m)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid",borderColor:vm===m?"#5EEAD4":"rgba(255,255,255,0.08)",background:vm===m?"rgba(0,229,160,.12)":"transparent",color:vm===m?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:700}}>{l}</button>)}
-      </div>
-      {vm==="muscle"&&<div><Card title="💪 부위별 볼륨 분포"><ResponsiveContainer width="100%" height={175}><BarChart data={muscleData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{MUSCLE_LIST.map(g=><Bar key={g} dataKey={g} stackId="a" fill={mColor(g)}/>)}</BarChart></ResponsiveContainer></Card><Card title="💪 누적 부위별 볼륨" style={{marginTop:11}}><div style={{display:"flex",flexDirection:"column",gap:10}}>{muscleTotals.map(({g,total})=>{const {days,avg}=muscleDayAvg[g]||{days:0,avg:0};return(<div key={g}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:3}}><Mo c={mColor(g)} s={11} style={{fontWeight:700}}>{g}</Mo><div style={{textAlign:"right"}}><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div></div><div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,marginBottom:5}}><div style={{height:"100%",width:((total/(muscleTotals[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동일 {days}일</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>일평균 {avg.toLocaleString()} kg</span></div></div>);})}</div><div style={{marginTop:12,padding:"10px 12px",background:"#0B1120",borderRadius:7,border:"1px solid rgba(255,255,255,0.08)"}}><Mo c="#5EEAD4" s={9} style={{marginBottom:5}}>자동 분석</Mo><div style={{fontSize:11,color:"#7070a0",lineHeight:1.7}}>{muscleTotals[0]&&"가장 많이 훈련한 부위는 "+muscleTotals[0].g+"("+muscleTotals[0].total.toLocaleString()+"kg)입니다. "}{muscleTotals.length>1&&muscleTotals[muscleTotals.length-1].g+"("+muscleTotals[muscleTotals.length-1].total.toLocaleString()+"kg) 부위의 비중을 늘려보세요."}{tr!=null&&" 전 블록 대비 볼륨이 "+(parseFloat(tr)>0?"증가":"감소")+"("+tr+"%)했습니다."}</div></div></Card></div>}
-      {vm==="sets"&&(()=>{
-        // 세션별 총세트 + 부위별 세트 집계
-        const setTrend = buildSetTrend(sl);
-        const partSetList = buildPartSetList(sl);
-        return (
-          <div>
-            <Card title="📋 세션별 총세트 추이">
-              <ResponsiveContainer width="100%" height={150}>
-                <LineChart data={setTrend} margin={{top:6,right:6,left:-22,bottom:0}}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                  <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                  <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                  <Tooltip contentStyle={tt}/>
-                  <Line type="monotone" dataKey="sets" stroke="#818cf8" strokeWidth={2} dot={{fill:"#818cf8",r:3}} name="총세트"/>
-                </LineChart>
-              </ResponsiveContainer>
-            </Card>
-            <Card title="📋 부위별 누적 세트" style={{marginTop:11}}>
-              <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                {partSetList.map(({g,total,days,avg})=>(
-                  <div key={g}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:3}}>
-                      <Mo c={mColor(g)} s={11} style={{fontWeight:700}}>{g}</Mo>
-                      <Mo c="#6060a0" s={10}>{total}세트 합계</Mo>
-                    </div>
-                    <div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,marginBottom:5}}>
-                      <div style={{height:"100%",width:((total/(partSetList[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
-                    </div>
-                    <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동일 {days}회</span>
-                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>회당 평균 {avg}세트</span>
-                    </div>
+
+      <Card title="🗂️ 이번 블록 요약" style={{marginBottom:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(96px,1fr))",gap:8}}>
+          <StatTile label="수업 횟수" value={sl.length+"회"} />
+          <StatTile label="총 볼륨" value={formatVolumeKgT(sv)} />
+          <StatTile label="평균 볼륨" value={formatVolumeKgT(sv/(sl.length||1))} />
+          <StatTile label="평균 RPE" value={summary.avgRpe!=null?String(summary.avgRpe):"기록 없음"} />
+          <StatTile label="근력 상승 운동" value={summary.risingCount+"개"} />
+          <StatTile label="가장 많이 훈련한 부위" value={topMuscle||"기록 없음"} />
+        </div>
+      </Card>
+
+      <Card title="🧭 훈련 밸런스" style={{marginBottom:12}}>
+        <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:10}}>부위별 훈련 비중</Mo>
+        {muscleTotals.length===0 ? <Emp msg="운동 기록이 없습니다." /> : (
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {muscleTotals.map(({g,total})=>{
+              const pct = totalMuscleVol ? Math.round(total/totalMuscleVol*100) : 0;
+              return (
+                <div key={g}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <Mo c={mColor(g)} s={11} style={{fontWeight:700}}>{g}</Mo>
+                    <Mo c="#6060a0" s={10}>{pct}% · {formatVolumeKgT(total)}</Mo>
                   </div>
-                ))}
-              </div>
-              {partSetList.length === 0 && <Emp msg="세트 기록이 없습니다." />}
-            </Card>
+                  <div style={{height:6,background:"rgba(255,255,255,0.08)",borderRadius:3}}>
+                    <div style={{height:"100%",width:pct+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })()}
-      {vm==="equipment"&&<div><Card title="🏋️ 기구별 볼륨 분포"><ResponsiveContainer width="100%" height={175}><BarChart data={equipData} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{EQUIP_LIST.map(e=><Bar key={e} dataKey={e} stackId="a" fill={EQUIP_COLOR[e]}/>)}</BarChart></ResponsiveContainer></Card><Card title="🏋️ 기구별 누적 볼륨" style={{marginTop:11}}><div style={{display:"flex",flexDirection:"column",gap:7}}>{equipTotals.map(({e,total})=><div key={e}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><Mo c={EQUIP_COLOR[e]} s={10}>{e}</Mo><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div><div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:3}}><div style={{height:"100%",width:((total/(equipTotals[0]?.total||1))*100)+"%",background:EQUIP_COLOR[e],borderRadius:3,transition:"width .5s"}}/></div></div>)}</div></Card></div>}
-      {vm==="detail"&&<Card title="🔍 세부 부위별 누적 볼륨">{detailList.length===0?<Emp msg="운동 기록이 없습니다."/>:<div style={{display:"flex",flexDirection:"column",gap:7}}>{detailList.map(([key,total])=>{const col=mColor(key.split(" / ")[0]);return<div key={key}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><Mo c={col} s={10}>{key}</Mo><Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo></div><div style={{height:5,background:"rgba(255,255,255,0.08)",borderRadius:3}}><div style={{height:"100%",width:((total/(detailList[0]?.[1]||1))*100)+"%",background:col,borderRadius:3,transition:"width .5s"}}/></div></div>;})}</div>}</Card>}
+        )}
+      </Card>
+
+      <Card title="📐 최근 변화" style={{marginBottom:12}}>
+        {!compare ? <Emp msg="비교 가능한 기록이 부족합니다." /> : (
+          <div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+              <StatTile label="총 볼륨" value={compare.volPct!=null?`${compare.volPct>0?"+":""}${compare.volPct}%`:"—"} />
+              <StatTile label="세트" value={compare.setsPct!=null?`${compare.setsPct>0?"+":""}${compare.setsPct}%`:"—"} />
+              <StatTile label="평균 RPE" value={compare.rpeDiff!=null?`${compare.rpeDiff>0?"+":""}${compare.rpeDiff}`:"기록 없음"} />
+              <StatTile label="근력 상승 운동" value={compare.risingCount+"개"} />
+            </div>
+            <Mo c="#6060a0" s={9} style={{display:"block",marginTop:9}}>{compare.basisText}</Mo>
+          </div>
+        )}
+      </Card>
+
+      <Card title="✅ 다음 수업 체크" style={{marginBottom:12}}>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {insight.items.map((it,i)=>(
+            <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"9px 10px",borderRadius:8,background:"#0B1120",border:`1px solid ${CHECK_KIND_COLOR[it.kind]}22`}}>
+              <span style={{color:CHECK_KIND_COLOR[it.kind],fontSize:13,lineHeight:"1.5",flexShrink:0}}>☐</span>
+              <span style={{fontSize:11.5,color:"#cbd5e1",lineHeight:1.6}}>{it.text}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card title="💬 다음 상담에서 확인할 질문">
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {insight.questions.map((q,i)=>(
+            <div key={i} style={{fontSize:11.5,color:"#e2e8f0",lineHeight:1.6,padding:"9px 10px",background:"#0B1120",borderRadius:8,border:"1px solid rgba(255,255,255,0.06)"}}>
+              “{q}”
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

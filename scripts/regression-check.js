@@ -333,10 +333,13 @@ const checks = [
     app.includes('confirmPair') &&
     app.includes('splitting')
   ],
-  ['2:1 수업 목록 및 이어쓰기 (PairSessionListScreen)',
+  ['2:1 수업 목록 및 상태별 버튼 문구 (PairSessionListScreen)',
     app.includes('PairSessionListScreen') &&
     app.includes('onPair21') &&
-    app.includes('이어쓰기')
+    app.includes('pairSessionHasContent') &&
+    app.includes('수업 기록하기') &&
+    app.includes('기록 계속하기') &&
+    app.includes('기록 보기')
   ],
   ['회원 카드 2:1 작성중 배지',
     app.includes('2:1 작성중') &&

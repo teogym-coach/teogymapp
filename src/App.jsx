@@ -1244,6 +1244,22 @@ function isPublishedData(data = {}) {
   return sent && data.visible !== false && data.visibility !== "hidden";
 }
 function isSentData(data = {}) { return data.status === "published" || data.published === true || data.isPublished === true; }
+// 2:1 수업 기록(pairSessions 문서)에 실제로 작성된 내용이 있는지 판별 — status/splitDone 같은 상태값만으로는
+// "새 기록"과 "작성 중인 기록"을 구분할 수 없어(예: 나눠서 기록 완료 직후 같은 문서가 다음 회차용으로 초기화되어 재사용됨)
+// 종목명·세트값·피드백을 직접 확인한다. 홈 "오늘 수업" 그룹 카드 상태 표시와 2:1 목록 버튼 문구가 함께 사용한다.
+function pairSessionHasContent(ps) {
+  if (!ps) return false;
+  if (String(ps.trainerCommentA || "").trim() || String(ps.trainerCommentB || "").trim()) return true;
+  const setHasValue = (s) => s && (String(s.weight ?? "").trim() || String(s.reps ?? "").trim() || String(s.durationSec ?? "").trim());
+  const feedbackHasValue = (f) => f && (String(f.rpe ?? "").trim() || f.stimRating != null || String(f.note ?? "").trim());
+  return (ps.exercises || []).some(ex =>
+    String(ex?.name || "").trim() ||
+    (ex?.setsA || []).some(setHasValue) ||
+    (ex?.setsB || []).some(setHasValue) ||
+    feedbackHasValue(ex?.feedbackA) ||
+    feedbackHasValue(ex?.feedbackB)
+  );
+}
 function formatParts(data = {}) {
   const parts = Array.isArray(data.targetParts) && data.targetParts.length ? data.targetParts : (data.targetPart ? String(data.targetPart).split(/\s*[+,·/]\s*/).filter(Boolean) : []);
   return parts.join(" + ") || data.title || "추천 부위 미입력";
@@ -5289,6 +5305,7 @@ export default function App() {
   const [memberPrivateData, setMemberPrivateData] = useState(null);
   const [pairSessions, setPairSessions] = useState([]);
   const [editPairSession, setEditPairSession] = useState(null);
+  const [pairFormInitialDate, setPairFormInitialDate] = useState(null);
   const memberMode = isMemberMode();
   // 관리자 화면 렌더링 가드 — 회원 계정 여부 확인이 끝나기 전에는 관리자 화면을 절대 그리지 않는다.
   // uid 자체를 저장해두고 현재 user.uid와 비교하는 방식 — 로그아웃 후 다른 계정으로 재로그인해도
@@ -5524,6 +5541,14 @@ export default function App() {
     setScreen(opts.targetScreen || "hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
+  }
+
+  // 홈 "오늘 수업" 2:1 그룹 카드 → 해당 팀의 공통 2:1 수업 기록 화면으로 이동(개인 HubScreen으로 가지 않음).
+  // entryDate: 진입 시점 기준 기본 날짜(예: 홈에서는 오늘) — 실제 작성 내용이 없는 새 회차 기록에만 적용된다.
+  function goPairSession(ps, entryDate) {
+    setEditPairSession(ps);
+    setPairFormInitialDate(entryDate || getKoreaDateString());
+    setScreen("pair21Form");
   }
 
   function goHubReload() {
@@ -6105,15 +6130,15 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
-        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
-        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
+        {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
+        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
@@ -6901,7 +6926,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
@@ -6970,9 +6995,21 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const weekAgo = new Date(Date.now()-7*86400000).toISOString().slice(0,10);
   const newThisWeek = regularHomeMembers.filter(m=>(m.startDate||"")>=weekAgo).length;
 
+  // 2:1 그룹 카드 묶기용 — pairSessions.memberAId/memberBId(진행중 팀만)를 회원 ID로 역색인.
+  // 이름·날짜·시간이 우연히 같은 것만으로는 절대 묶지 않고, 이 실제 연결 필드가 있을 때만 묶는다.
+  const activePairByMemberId = useMemo(() => {
+    const map = new Map();
+    (pairSessions||[]).forEach(ps => {
+      if ((ps.teamStatus||"active") !== "active") return;
+      if (ps.memberAId) map.set(ps.memberAId, ps);
+      if (ps.memberBId) map.set(ps.memberBId, ps);
+    });
+    return map;
+  }, [pairSessions]);
+
   // 홈 "오늘 수업" — 오늘 예정/기록 중/오늘 완료 3가지 상태 모두 포함(isTodaySessionMember·getTodaySessionStatus 공통 판별 재사용).
   // 시간이 지정된 회원은 오름차순, 시간 미정 회원은 마지막 — 회원 목록·수업 예정 캘린더와 동일 기준.
-  const todaySess = regularHomeMembers
+  const rawTodaySess = regularHomeMembers
     .map(m => {
       const status = getTodaySessionStatus(m, sessionsMap, todayKST);
       if (!status) return null;
@@ -6981,12 +7018,43 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
       const part = todayDoc ? (formatTypes(todayDoc.selectedTypes||todayDoc.type) || "웨이트") : (getMemberNextSessionInfo(m).part || "부위 미정");
       return { m, status, time, todayDoc, part };
     })
-    .filter(Boolean)
-    .sort((a,b) => {
-      if (!!a.time !== !!b.time) return a.time ? -1 : 1;
-      if (a.time && b.time && a.time !== b.time) return a.time.localeCompare(b.time);
-      return String(a.m.name||"").localeCompare(String(b.m.name||""));
-    });
+    .filter(Boolean);
+
+  // 같은 진행중 2:1 팀에 속한 두 회원이 둘 다 "오늘 수업" 목록에 있으면 카드 하나로 묶는다.
+  // 상태는 개인별 판정(sessionsMap 기반) 대신 pairSessions 문서 자체(공통 기록)를 기준으로 안전하게 재판정한다.
+  const todaySess = [];
+  const pairedMemberIds = new Set();
+  rawTodaySess.forEach(item => {
+    if (pairedMemberIds.has(item.m.id)) return;
+    const ps = activePairByMemberId.get(item.m.id);
+    const partnerId = ps ? (ps.memberAId === item.m.id ? ps.memberBId : ps.memberAId) : null;
+    const partnerItem = partnerId ? rawTodaySess.find(x => x.m.id === partnerId) : null;
+    if (ps && partnerItem) {
+      pairedMemberIds.add(item.m.id);
+      pairedMemberIds.add(partnerItem.m.id);
+      const hasContent = pairSessionHasContent(ps);
+      const pairStatus = ps.splitDone ? "done" : (hasContent ? "recording" : "scheduled");
+      const pairPart = (hasContent && (ps.selectedTypes?.length || ps.type))
+        ? (formatTypes(ps.selectedTypes || ps.type) || "웨이트")
+        : (item.part || partnerItem.part || "부위 미정");
+      const [mA, mB] = ps.memberAId === item.m.id ? [item, partnerItem] : [partnerItem, item];
+      todaySess.push({
+        isPair: true, ps,
+        m: mA.m, mB: mB.m,
+        status: pairStatus,
+        time: mA.time || mB.time || null,
+        part: pairPart,
+      });
+    } else {
+      pairedMemberIds.add(item.m.id);
+      todaySess.push(item);
+    }
+  });
+  todaySess.sort((a,b) => {
+    if (!!a.time !== !!b.time) return a.time ? -1 : 1;
+    if (a.time && b.time && a.time !== b.time) return a.time.localeCompare(b.time);
+    return String(a.m.name||"").localeCompare(String(b.m.name||""));
+  });
   const todayCount = todaySess.length;
 
   const goCs = ()=>{ if(showToast) showToast("아직 준비 중인 기능입니다."); else setComingSoon(true); };
@@ -7016,7 +7084,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   }, [searchQuery, regularHomeMembers]);
   const searchResultsShown = searchResults.slice(0, 6);
   const searchHasMore = searchResults.length > 6;
-  const todayMemberIds = useMemo(() => new Set(todaySess.map(x => x.m.id)), [todaySess]);
+  const todayMemberIds = useMemo(() => new Set(todaySess.flatMap(x => x.isPair ? [x.m.id, x.mB.id] : [x.m.id])), [todaySess]);
   const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료" };
 
   const closeSearch = () => { setSearchOpen(false); setSearchActiveIdx(-1); };
@@ -7347,21 +7415,22 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                   // 압축 레이아웃 전용 짧은 상태 문구 — 상태 판별(item.status)은 그대로, "오늘 예정"만 "기록 전"으로 더 짧게(와이드 라벨은 그대로 유지)
                   const compactStatusLabel = item.status === "scheduled" ? "기록 전" : st.label;
                   return (
-                    <div key={item.m.id} className="today-row-click" onClick={()=>onSelectMember?.(item.m)} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
+                    <div key={item.m.id} className="today-row-click" onClick={()=>item.isPair?onOpenPairSession?.(item.ps,todayKST):onSelectMember?.(item.m)} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 2px",borderTop:i===0?"none":DB.hairline}}>
                       <div style={{width:3,height:36,borderRadius:2,background:st.solid,flexShrink:0}}/>
                       {/* 원형 성 아바타 — 압축 레이아웃은 폭이 좁아 이름이 잘리므로 숨기고, 그 공간을 이름에 넘긴다(와이드는 기존 그대로 유지) */}
                       {cardWide && (
                         <div style={{width:40,height:40,borderRadius:"50%",background:DB.mintTint,color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(item.m.name||"?").slice(0,1)}</div>
                       )}
                       <div style={{flex:1,minWidth:0}}>
-                        {/* 1순위: 회원 이름 — 아바타가 없는 만큼 폭을 거의 다 쓰므로 "회원"까지 대부분 그대로 보이고, 정말 길 때만 말줄임 */}
+                        {/* 1순위: 회원 이름 — 아바타가 없는 만큼 폭을 거의 다 쓰므로 "회원"까지 대부분 그대로 보이고, 정말 길 때만 말줄임. 2:1은 두 회원 이름 + PT 배지 */}
                         <div style={{fontFamily:DB.font,fontWeight:700,fontSize:cardWide?14.5:15.5,color:DB.text,letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                           {!isDone && <span style={{color:item.time?DB.sub:DB.faint,fontWeight:800,marginRight:6}}>{item.time||"시간 미정"}</span>}
-                          {item.m.name} 회원
+                          {item.isPair && <span style={{fontSize:10.5,fontWeight:800,color:DB.mintSoft,background:DB.mintTint,borderRadius:20,padding:"2px 7px",marginRight:6}}>2:1 PT</span>}
+                          {item.isPair ? <>{item.m.name} + {item.mB.name}</> : <>{item.m.name} 회원</>}
                         </div>
-                        {/* 2순위: 오늘 운동 부위 */}
+                        {/* 2순위: 오늘 운동 부위 — 2:1은 부위 뒤에 강도도 함께 표시 */}
                         <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {item.part}{(cardWide&&cond)?` · 컨디션 ${item.todayDoc.condition}`:""}
+                          {item.part}{item.isPair?` · ${item.ps.intensity||"중강도"}`:""}{(cardWide&&cond)?` · 컨디션 ${item.todayDoc.condition}`:""}
                         </div>
                         {/* 3순위: 다음 수업 메모(오늘 완료 회원만 해당) */}
                         {isDone && (
@@ -14072,6 +14141,8 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
     const ts = getTeamStatus(ps);
     const tsColor = TEAM_STATUS_COLORS[ts];
     const isMenuOpen = statusMenuId === ps.id;
+    // 버튼 문구 — status/splitDone 값만으로는 "새 기록"과 "작성 중"을 구분할 수 없어 실제 작성 내용을 직접 확인한다.
+    const editLabel = ps.splitDone ? "기록 보기" : (pairSessionHasContent(ps) ? "기록 계속하기" : "수업 기록하기");
     return (
       <div style={{position:"relative",background:"#111827",border:`1px solid ${ps.splitDone?"rgba(94,234,212,.2)":"rgba(255,209,102,.25)"}`,
         borderRadius:10,padding:"12px 13px",marginBottom:8}}
@@ -14099,7 +14170,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
             style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${ps.splitDone?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
               background:ps.splitDone?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
               color:ps.splitDone?"#94a3b8":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
-            {ps.splitDone?"보기":"이어쓰기"}
+            {editLabel}
           </button>
           {!ps.splitDone && (
             <button onClick={()=>setConfirmSplit(ps)}
@@ -14229,7 +14300,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   );
 }
 
-function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
+function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
   const isEdit = !!(editData?.id);
 
   // ID가 없으면 이름으로 자동 복원 (기존 데이터 memberAId 누락 대응)
@@ -14246,7 +14317,13 @@ function PairSessionFormScreen({ editData, members=[], onSave, onBack, onSplit, 
   const memberA = members.find(m=>m.id===memberAId)||null;
   const memberB = members.find(m=>m.id===memberBId)||null;
 
-  const [date, setDate] = useState(editData?.date||new Date().toISOString().slice(0,10));
+  // 새 회차 기록(실제 작성 내용이 없는 문서 — 신규 생성 또는 "나눠서 기록" 직후 재사용되는 빈 문서)은
+  // 이전 회차 날짜를 물려받지 않고 진입 시점 날짜(initialDate: 오늘 또는 선택한 날짜)를 기본값으로 쓴다.
+  // 실제로 작성 중이던 내용이 있는 기록만 저장된 날짜를 그대로 유지한다.
+  const [date, setDate] = useState(() => {
+    if (isEdit && pairSessionHasContent(editData)) return editData.date || initialDate || getKoreaDateString();
+    return initialDate || getKoreaDateString();
+  });
   const [intensity, setIntensity] = useState(editData?.intensity||"중강도");
   const [selectedTypes, setSelectedTypes] = useState(() => normalizeTypes(editData?.selectedTypes || editData?.type));
   const [trainerCommentA, setTrainerCommentA] = useState(editData?.trainerCommentA||"");

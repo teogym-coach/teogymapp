@@ -2032,7 +2032,7 @@ export async function savePairSession(data, id = null) {
     memberAName: data.memberAName || "",
     memberBId: data.memberBId || "",
     memberBName: data.memberBName || "",
-    date: data.date || new Date().toISOString().slice(0, 10),
+    date: data.date || getKoreaDateString(),
     status: data.status || "draft",
     // 업데이트 시 teamStatus 미제공이면 undefined → clean()이 제거 → Firestore 기존값 유지
     // 신규 생성 시 기본값 "active"는 addDoc 블록에서 별도 설정
@@ -2106,7 +2106,7 @@ export async function splitPairSession(pairSessionId, memberASessionData, member
     intensity: "중강도",
     type: "",
     selectedTypes: [],
-    date: new Date().toISOString().slice(0, 10),
+    date: getKoreaDateString(),
     splitDone: false,
     status: "draft",
     lastSplitAt: serverTimestamp(),

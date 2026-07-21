@@ -31,6 +31,7 @@ import {
   subscribeToMembers,
   subscribeToTrainerNotificationReads, markNotificationEventsRead, feedEventId,
   subscribeToExerciseClassifications, saveExerciseClassification,
+  getCounselMemo, saveCounselMemo,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -6149,6 +6150,7 @@ export default function App() {
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
+        {screen==="counselReport" && member && <CounselReportScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="consultReport" && member && (
           <div>
             <SH title="🤖 AI 초기 분석 리포트" sub={member.name}
@@ -11883,6 +11885,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 <div className="hub-toolgrid" style={{marginBottom:8}}>
                   {menuBtn("🏋️","운동 분석","근력 · 훈련량 · 컨디션 · 부위 변화","exerciseAnalysis")}
                   {menuBtn("📋","훈련 피드백","다음 수업을 위한 훈련 요약","feedback")}
+                  {menuBtn("🗣️","상담 리포트","회원의 변화를 한눈에 확인하고 다음 목표를 준비합니다","counselReport")}
                   {menuBtn("🔥","대사 추정","유산소 · 체중 분석","metabolism")}
                   {menuBtn("📋","평가 기록","체형 · 기능 · 인체도","assessment")}
                   {menuBtn("📚","운동 라이브러리","부위별 운동 기록","library")}
@@ -16583,6 +16586,312 @@ function TrainingFeedbackScreen({ sessions, member, loading, onBack }) {
               “{q}”
             </div>
           ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 상담 리포트 — 분석 화면이 아니라 "1분 안에 상담 준비" 화면.
+// 재등록 상담 · 목표 재설정 · 동기부여용. 새 계산이 필요한 곳만 새로 만들고
+// 나머지는 buildExerciseAnalysisSummary·buildMemberChangeStrength·getVolumeIncrease·
+// buildPartVolumeChange·getBodyWeightRecords 등 기존 함수를 그대로 재사용한다.
+// ════════════════════════════════════════════
+
+// 선택된 기간(회원 성장 요약 기준) 시작 시점 대비 최신 체중 변화
+function buildPeriodWeightChange(bodyData, periodSessions) {
+  const entries = getBodyWeightRecords(bodyData);
+  if (entries.length < 2) return null;
+  const periodStartDate = periodSessions[0]?.date || null;
+  let startEntry = entries[0];
+  if (periodStartDate) {
+    const before = entries.filter(e=>e.date <= periodStartDate);
+    if (before.length) startEntry = before[before.length-1];
+  }
+  const endEntry = entries[entries.length-1];
+  if (startEntry.date === endEntry.date) return null;
+  return { diff: Math.round((endEntry.weight-startEntry.weight)*10)/10, startEntry, endEntry };
+}
+
+// 세션 날짜 간격이 최근 들어 벌어졌는지(출석 빈도 저하 신호) — attendance 컬렉션 없이 sessions 날짜만으로 판단
+function computeFrequencyTrend(periodSessions) {
+  const dates = [...periodSessions].map(s=>s.date).filter(Boolean).sort();
+  if (dates.length < 4) return { freqDown:false, freqUp:false };
+  const gaps = [];
+  for (let i=1;i<dates.length;i++) gaps.push((new Date(dates[i]) - new Date(dates[i-1])) / 86400000);
+  const half = Math.max(1, Math.floor(gaps.length/2));
+  const avg = arr=>arr.reduce((a,b)=>a+b,0)/arr.length;
+  const earlierAvg = avg(gaps.slice(0,half)), recentAvg = avg(gaps.slice(-half));
+  return { freqDown: recentAvg > earlierAvg*1.4 && recentAvg > 7, freqUp: recentAvg < earlierAvg*0.7 };
+}
+
+function trendLabel(v, unit) {
+  if (v == null) return { text:"기록 부족", tone:"muted" };
+  if (v <= -unit) return { text:"감소", tone:"down" };
+  if (v >= unit) return { text:"증가", tone:"up" };
+  return { text:"유지", tone:"flat" };
+}
+
+// 가장 잘한 점 — 최대 3개, 규칙 기반(근력 상승 대표 운동 · 출석 꾸준함 · 부위 볼륨 증가)
+function buildCounselStrengths(periodSessions, summary, freqDown) {
+  const items = [];
+  const pctChange = d => (d.recentBest && d.olderBest) ? Math.round(((d.recentBest-d.olderBest)/d.olderBest)*1000)/10 : null;
+  const topRise = [...(summary.strengthData||[])].filter(d=>d.trend==="상승").map(d=>({...d,pct:pctChange(d)})).sort((a,b)=>(b.pct||0)-(a.pct||0))[0];
+  if (topRise) items.push(`${topRise.name} 근력이 크게 향상되었습니다.`);
+
+  if (periodSessions.length >= 6 && !freqDown) items.push("출석이 매우 꾸준합니다.");
+
+  const partChange = buildPartVolumeChange(periodSessions);
+  const topPartRise = [...partChange].filter(p=>p.recent>0 && p.delta>0).sort((a,b)=>b.delta-a.delta)[0];
+  if (topPartRise && topPartRise.delta >= topPartRise.first*0.2) items.push(`${topPartRise.part} 볼륨이 크게 증가했습니다.`);
+
+  return items.slice(0,3);
+}
+
+// 다음 상담에서 확인할 점 — RPE · 근육통 반복 · 목표(다이어트/벌크업)에 따른 질문만 생성, AI 미사용
+function buildCounselQuestions(periodSessions, goalType) {
+  const qs = [];
+  const last3Rpe = periodSessions.slice(-3).map(getMemberFeedbackRPE).filter(v=>v!=null);
+  const avgLast3 = last3Rpe.length ? last3Rpe.reduce((a,b)=>a+b,0)/last3Rpe.length : null;
+  if (avgLast3!=null && avgLast3>=8) qs.push("최근 RPE가 높았는데 회복은 어땠나요?");
+
+  const sorenessSessions = periodSessions.filter(s=>hasSorenessSignal(s.memberFeedback));
+  if (sorenessSessions.length>=2) {
+    const partFreq={};
+    sorenessSessions.forEach(s=>memberFeedbackParts(s.memberFeedback).forEach(p=>{partFreq[p]=(partFreq[p]||0)+1;}));
+    const topPart=Object.entries(partFreq).sort((a,b)=>b[1]-a[1])[0]?.[0];
+    if (topPart) qs.push(`${topPart} 운동 후 근육통은 얼마나 갔나요?`);
+  }
+
+  const allRpe = periodSessions.map(getMemberFeedbackRPE).filter(v=>v!=null);
+  const overallAvg = allRpe.length ? allRpe.reduce((a,b)=>a+b,0)/allRpe.length : null;
+  if (overallAvg!=null && overallAvg>=7.5 && qs.length<3) qs.push("최근 운동 강도가 힘들지는 않았나요?");
+
+  if ((goalType==="diet"||goalType==="bulk") && qs.length<4) {
+    qs.push(goalType==="diet" ? "체중 감량 속도는 만족하시나요?" : "체중 증가 속도는 만족하시나요?");
+  }
+
+  if (!qs.length) qs.push("요즘 컨디션은 어떠신가요?", "운동 진행에 불편한 점은 없으신가요?");
+  return qs.slice(0,4);
+}
+
+// 다음 목표 — 부위별 볼륨 변화(buildPartVolumeChange) + 빈도/회복 신호만으로 생성, 운동명·루틴 없음
+function buildCounselGoals({ periodSessions, volumePct, freqDown, recentRpeHigh, sorenessRepeat }) {
+  const goals = [];
+  const partChange = buildPartVolumeChange(periodSessions);
+  const trained = partChange.filter(p=>p.recent>0 || p.first>0);
+  let lowest = null;
+  if (trained.length) {
+    lowest = [...trained].sort((a,b)=>a.recent-b.recent)[0];
+    const avgRecent = trained.reduce((s,p)=>s+p.recent,0)/trained.length;
+    if (lowest && lowest.recent < avgRecent*0.6) goals.push(`${lowest.part} 볼륨 증가`);
+    const topRise = [...trained].filter(p=>p.delta>0).sort((a,b)=>b.delta-a.delta)[0];
+    if (topRise && topRise.part !== lowest?.part) goals.push(`${topRise.part} 근력 유지`);
+  }
+  if ((volumePct!=null && volumePct<=-10) || freqDown) goals.push("운동 빈도 유지");
+  if (recentRpeHigh || sorenessRepeat) goals.push("회복 확인");
+  if (!goals.length) goals.push("현재 루틴 유지");
+  return goals.slice(0,4);
+}
+
+// 상담용 한 줄 요약 — 대표가 그대로 읽을 수 있는 문장, 데이터 없으면 강제로 만들지 않음
+function buildCounselSummaryLine({ periodLabel, strength, volumePct, weightDiff, topGoal }) {
+  const hasAny = strength || volumePct!=null || weightDiff!=null;
+  if (!hasAny) return "비교 가능한 기록이 부족합니다.";
+  const clauses = [];
+  if (strength && strength.pct!=null && strength.pct>0) clauses.push(`${strength.name} 등 근력이 꾸준히 향상되었습니다`);
+  else if (volumePct!=null && volumePct>0) clauses.push("운동량이 꾸준히 증가했습니다");
+  if (weightDiff!=null && Math.abs(weightDiff)>=0.3) clauses.push(`체중은 ${weightDiff<0?"안정적으로 감소":"꾸준히 증가"}했습니다`);
+  const firstSentence = clauses.length ? `${periodLabel} 동안 ${clauses.join(", ")}.` : `${periodLabel} 동안 훈련이 꾸준히 진행되었습니다.`;
+  return topGoal ? `${firstSentence} 다음 단계에서는 ${topGoal} 방향으로 진행하면 좋겠습니다.` : firstSentence;
+}
+
+// 상담 상태 🟢🟡🔴 — 점수 대신 3단계 + 반드시 이유 동반, 근력 상승/볼륨 추세/출석 빈도만으로 판단
+function buildCounselStatus({ sessionCount, risingCount, volumePct, freqDown, recentRpeHigh, sorenessRepeat }) {
+  if (sessionCount < 2) return { level:"yellow", reason:"아직 비교할 수 있는 기록이 충분하지 않습니다." };
+  const volDown = volumePct!=null && volumePct<=-10;
+  const volUp = volumePct!=null && volumePct>=10;
+  if (freqDown && (volDown || risingCount===0)) return { level:"red", reason:"최근 출석과 운동량이 모두 감소했습니다." };
+  if (risingCount>0 && !freqDown && !volDown) return { level:"green", reason:"최근 근력과 운동량이 모두 증가했고 출석도 꾸준합니다." };
+  if (volUp && !freqDown) return { level:"green", reason:"운동량이 꾸준히 증가하고 있고 출석도 안정적입니다." };
+  if (recentRpeHigh && risingCount===0) return { level:"yellow", reason:"최근 RPE는 높지만 근력 향상은 아직 뚜렷하지 않습니다." };
+  if (sorenessRepeat) return { level:"yellow", reason:"근육통이 반복되고 있어 회복 상태를 점검하면 좋겠습니다." };
+  if (risingCount===0 && !volDown && !freqDown) return { level:"yellow", reason:"운동량은 유지되고 있지만 최근 근력 변화가 적습니다." };
+  return { level:"yellow", reason:"변화는 있지만 목표를 다시 점검하면 더 좋아질 수 있습니다." };
+}
+
+const COUNSEL_STATUS_STYLE = {
+  green:{ emoji:"🟢", color:"#22c55e", bg:"rgba(34,197,94,.10)" },
+  yellow:{ emoji:"🟡", color:"#ffd166", bg:"rgba(255,209,102,.10)" },
+  red:{ emoji:"🔴", color:"#ff6b6b", bg:"rgba(255,107,107,.10)" },
+};
+const COUNSEL_PERIODS = [
+  { key:"10", label:"최근 10회" },
+  { key:"20", label:"최근 20회" },
+  { key:"all", label:"전체" },
+];
+
+function CounselReportScreen({ member, sessions, bodyData, loading, onBack, showToast }) {
+  const [period, setPeriod] = useState("10");
+  const [memo, setMemo] = useState("");
+  const [memoLoaded, setMemoLoaded] = useState(false);
+  const [memoSaving, setMemoSaving] = useState(false);
+  const [memoSavedAt, setMemoSavedAt] = useState(null);
+  const [memoDirty, setMemoDirty] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setMemoLoaded(false);
+    getCounselMemo(member.id).then(data => {
+      if (!alive) return;
+      setMemo(data?.memo || "");
+      setMemoSavedAt(data?.updatedAt || null);
+      setMemoLoaded(true);
+      setMemoDirty(false);
+    }).catch(() => { if (alive) setMemoLoaded(true); });
+    return () => { alive = false; };
+  }, [member.id]);
+
+  if (loading) return <div><SH title="🗣️ 상담 리포트" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Skel n={4}/></div>;
+  if (!sessions.length) return <div><SH title="🗣️ 상담 리포트" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Emp msg="수업 기록이 없습니다."/></div>;
+
+  const periodSessions = pickPeriodSessions(sessions, period);
+  const periodLabel = COUNSEL_PERIODS.find(p=>p.key===period)?.label || "전체";
+  const summary = buildExerciseAnalysisSummary(periodSessions);
+  const strength = buildMemberChangeStrength(periodSessions);
+  const volumePct = getVolumeIncrease(periodSessions);
+  const weightChange = buildPeriodWeightChange(bodyData, periodSessions);
+  const { freqDown } = computeFrequencyTrend(periodSessions);
+  const last3Rpe = periodSessions.slice(-3).map(getMemberFeedbackRPE).filter(v=>v!=null);
+  const recentRpeHigh = last3Rpe.length===3 && last3Rpe.every(v=>v>=8);
+  const sorenessRepeat = periodSessions.filter(s=>hasSorenessSignal(s.memberFeedback)).length >= 2;
+  const goalType = getMemberChangeGoalType(member.goal);
+
+  const weightTrend = trendLabel(weightChange?.diff ?? null, 0.3);
+  const strengthTrend = trendLabel(strength?.pct ?? null, 5);
+  const volumeTrend = trendLabel(volumePct, 5);
+
+  const strengths = buildCounselStrengths(periodSessions, summary, freqDown);
+  const questions = buildCounselQuestions(periodSessions, goalType);
+  const goals = buildCounselGoals({ periodSessions, volumePct, freqDown, recentRpeHigh, sorenessRepeat });
+  const summaryLine = buildCounselSummaryLine({ periodLabel, strength, volumePct, weightDiff:weightChange?.diff ?? null, topGoal: goals[0] });
+  const status = buildCounselStatus({ sessionCount:periodSessions.length, risingCount:summary.risingCount, volumePct, freqDown, recentRpeHigh, sorenessRepeat });
+  const statusStyle = COUNSEL_STATUS_STYLE[status.level];
+
+  const formatMemoDate = (ts) => {
+    if (!ts) return null;
+    try { const d = ts?.toDate ? ts.toDate() : new Date(ts); return d.toLocaleString("ko-KR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }); }
+    catch { return null; }
+  };
+
+  const handleSaveMemo = async () => {
+    if (memoSaving) return;
+    setMemoSaving(true);
+    try {
+      const saved = await saveCounselMemo(member.id, memo);
+      setMemoSavedAt(saved?.updatedAt || null);
+      setMemoDirty(false);
+      showToast?.("상담 메모를 저장했습니다.");
+    } catch(e) {
+      showToast?.(e?.message || "저장 실패", "err");
+    } finally {
+      setMemoSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <SH title="🗣️ 상담 리포트" sub={member?.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
+
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:16}}>
+        {COUNSEL_PERIODS.map(p=>(
+          <button key={p.key} onClick={()=>setPeriod(p.key)}
+            style={{padding:"7px 15px",borderRadius:16,border:"1px solid",flexShrink:0,cursor:"pointer",
+              borderColor:period===p.key?"#5EEAD4":"rgba(255,255,255,0.08)",
+              background:period===p.key?"rgba(0,229,160,.12)":"transparent",
+              color:period===p.key?"#5EEAD4":"#94a3b8",fontSize:12,fontWeight:700}}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 3. 회원 성장 요약 — 화면에서 가장 크게 표시 */}
+      <Card title="🌱 회원 성장 요약" style={{marginBottom:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
+          <KpiTile large label="체중" value={weightChange?.diff!=null?`${weightChange.diff>0?"+":""}${weightChange.diff}kg`:"기록 부족"}
+            sub={weightTrend.text} accent={weightTrend.tone==="down"?"#5EEAD4":weightTrend.tone==="up"?"#ff9f43":"#94a3b8"} />
+          <KpiTile large label="근력" value={strength?.pct!=null?`${strength.pct>0?"+":""}${strength.pct}%`:"기록 부족"}
+            sub={strengthTrend.text} accent={strengthTrend.tone==="up"?"#22c55e":strengthTrend.tone==="down"?"#ff6b6b":"#94a3b8"} />
+          <KpiTile large label="총 볼륨" value={volumePct!=null?`${volumePct>0?"+":""}${volumePct}%`:"기록 부족"}
+            sub={volumeTrend.text} accent={volumeTrend.tone==="up"?"#22c55e":volumeTrend.tone==="down"?"#ff6b6b":"#94a3b8"} />
+          <KpiTile large label="수업 횟수" value={periodSessions.length+"회"} accent="#5EEAD4" />
+          <KpiTile large label="평균 RPE" value={summary.avgRpe!=null?String(summary.avgRpe):"기록 없음"} accent="#818cf8" />
+        </div>
+      </Card>
+
+      {/* 4. 가장 잘한 점 */}
+      <Card title="✓ 가장 잘한 점" style={{marginBottom:14}}>
+        {strengths.length===0 ? <Emp msg="아직 판단 가능한 데이터가 부족합니다." /> : (
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {strengths.map((t,i)=>(
+              <div key={i} style={{fontSize:13,color:"#e2e8f0",lineHeight:1.6,fontWeight:600}}>✓ {t}</div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* 5. 다음 상담에서 확인할 점 */}
+      <Card title="💬 다음 상담에서 확인할 점" style={{marginBottom:14}}>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {questions.map((q,i)=>(
+            <div key={i} style={{fontSize:12.5,color:"#e2e8f0",lineHeight:1.6,padding:"9px 10px",background:"#0B1120",borderRadius:8,border:"1px solid rgba(255,255,255,0.06)"}}>
+              • {q}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* 6. 다음 목표 */}
+      <Card title="🎯 다음 목표" style={{marginBottom:14}}>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {goals.map((g,i)=>(
+            <span key={i} style={{fontSize:11.5,fontWeight:700,color:"#5EEAD4",background:"rgba(94,234,212,.10)",border:"1px solid rgba(94,234,212,.22)",borderRadius:20,padding:"7px 13px"}}>{g}</span>
+          ))}
+        </div>
+      </Card>
+
+      {/* 7. 상담용 한 줄 요약 */}
+      <div style={{background:"linear-gradient(135deg,rgba(94,234,212,.10),rgba(124,111,255,.08))",border:"1px solid rgba(94,234,212,.18)",borderRadius:12,padding:"14px 15px",marginBottom:14}}>
+        <Mo c="#5EEAD4" s={9} style={{display:"block",marginBottom:6,fontWeight:800}}>상담용 한 줄 요약</Mo>
+        <div style={{fontSize:13.5,color:"#e2e8f0",lineHeight:1.7,fontWeight:700}}>{summaryLine}</div>
+      </div>
+
+      {/* 8. 상담 상태 */}
+      <Card style={{marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"4px 2px"}}>
+          <span style={{fontSize:28,lineHeight:1}}>{statusStyle.emoji}</span>
+          <div>
+            <Mo c={statusStyle.color} s={11} style={{display:"block",fontWeight:800,marginBottom:4}}>
+              {status.level==="green"?"변화가 매우 좋습니다":status.level==="yellow"?"목표를 다시 점검하면 더 좋아질 수 있습니다":"상담을 통한 방향 조정이 필요합니다"}
+            </Mo>
+            <div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.6}}>{status.reason}</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 9. 대표 상담 메모 — 관리자 전용, 회원에게 노출되지 않음 */}
+      <Card title="📝 대표 상담 메모 (관리자 전용)">
+        <textarea
+          value={memo}
+          disabled={!memoLoaded}
+          onChange={e=>{ setMemo(e.target.value); setMemoDirty(true); }}
+          placeholder={memoLoaded?"상담 중 참고할 메모를 입력하세요. 회원에게는 보이지 않습니다.":"불러오는 중..."}
+          style={{width:"100%",minHeight:110,resize:"vertical",background:"#0B1120",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"10px 11px",color:"#e2e8f0",fontSize:12.5,lineHeight:1.6,fontFamily:"inherit",boxSizing:"border-box"}}
+        />
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:9,gap:8,flexWrap:"wrap"}}>
+          <Mo c="#6060a0" s={9}>{memoSavedAt?`마지막 저장 ${formatMemoDate(memoSavedAt)}`:"저장된 메모 없음"}</Mo>
+          <Btn sm onClick={handleSaveMemo} disabled={!memoLoaded||memoSaving||!memoDirty}>{memoSaving?"저장 중...":"메모 저장"}</Btn>
         </div>
       </Card>
     </div>

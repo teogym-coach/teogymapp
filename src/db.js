@@ -7,6 +7,7 @@
 //    /members/{id}/bodyCheck/main         ← 바디체크
 //    /members/{id}/nutrition/meta         ← 영양 메타 (목표, 즐겨찾기)
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
+//    /members/{id}/counselNotes/main      ← 상담 리포트: 대표 상담 메모(트레이너 전용)
 //    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
 //    /exerciseClassifications/{trainerUid} ← 센터 공통 운동 라이브러리(운동명→기구/부위/세부부위 마스터 데이터)
 //
@@ -1341,6 +1342,38 @@ export async function saveCorrectionSummary(memberId, data) {
   } catch(e) {
     console.error("[DB] saveCorrectionSummary error:", e.message, `memberId=${memberId}`);
     throw new Error("교정 결과 저장 실패: " + e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════
+// 상담 리포트 — 대표 상담 메모 (트레이너 전용, 회원에게 노출 안 됨)
+// Rules: members/{id}/{그 외 서브컬렉션} 기본값(트레이너 전용)에 그대로 적용됨 — 별도 규칙 추가 없음
+// ════════════════════════════════════════════════════
+export async function getCounselMemo(memberId) {
+  try {
+    requireUid();
+    dbLog("getCounselMemo", `memberId=${memberId}`);
+    const ref = doc(db, "members", memberId, "counselNotes", "main");
+    const snap = await getDoc(ref);
+    return snap.exists() ? snap.data() : null;
+  } catch(e) {
+    console.error("[DB] getCounselMemo error:", e.message, `memberId=${memberId}`);
+    return null;
+  }
+}
+
+export async function saveCounselMemo(memberId, memo) {
+  try {
+    await verifyMemberOwnership(memberId);
+    dbLog("saveCounselMemo", `memberId=${memberId}`);
+    const ref = doc(db, "members", memberId, "counselNotes", "main");
+    const payload = { memo: memo || "", updatedAt: serverTimestamp() };
+    await setDoc(ref, payload, { merge: true });
+    const saved = await getDoc(ref);
+    return saved.data();
+  } catch(e) {
+    console.error("[DB] saveCounselMemo error:", e.message, `memberId=${memberId}`);
+    throw new Error("상담 메모 저장 실패: " + e.message);
   }
 }
 

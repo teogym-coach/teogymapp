@@ -1261,6 +1261,19 @@ function pairSessionHasContent(ps) {
     feedbackHasValue(ex?.feedbackB)
   );
 }
+// "오늘 이미 나눠서 기록을 완료했고 아직 새 회차 내용을 입력하지 않은 상태"를 splitDone 필드 없이 판정한다.
+// pairSessions는 팀당 문서 하나를 재사용하므로 splitDone을 계속 true로 남기면 다음 회차 진입 시 폼이 영구
+// 잠긴다 — 대신 나눠서 기록 시 항상 갱신되는 lastSplitAt(서버 시각)과 실제 작성 내용 유무로 매 렌더 다시 판단해
+// 날짜가 바뀌거나 새 내용이 들어오는 즉시 자동으로 "완료" 상태가 풀리게 한다.
+function pairSessionCompletedToday(ps, todayKST = getKoreaDateString()) {
+  if (!ps) return false;
+  if (ps.splitDone) return true; // 과거 로직으로 splitDone=true가 저장된 문서가 있을 경우의 호환 처리
+  if (!ps.lastSplitAt) return false;
+  if (pairSessionHasContent(ps)) return false;
+  const d = ps.lastSplitAt?.toDate ? ps.lastSplitAt.toDate() : new Date(ps.lastSplitAt);
+  if (isNaN(d?.getTime?.())) return false;
+  return getKoreaDateString(d) === todayKST;
+}
 function formatParts(data = {}) {
   const parts = Array.isArray(data.targetParts) && data.targetParts.length ? data.targetParts : (data.targetPart ? String(data.targetPart).split(/\s*[+,·/]\s*/).filter(Boolean) : []);
   return parts.join(" + ") || data.title || "추천 부위 미입력";
@@ -7051,7 +7064,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
       pairedMemberIds.add(item.m.id);
       pairedMemberIds.add(partnerItem.m.id);
       const hasContent = pairSessionHasContent(ps);
-      const pairStatus = ps.splitDone ? "done" : (hasContent ? "recording" : "scheduled");
+      const pairStatus = pairSessionCompletedToday(ps, todayKST) ? "done" : (hasContent ? "recording" : "scheduled");
       const pairPart = (hasContent && (ps.selectedTypes?.length || ps.type))
         ? (formatTypes(ps.selectedTypes || ps.type) || "웨이트")
         : (item.part || partnerItem.part || "부위 미정");
@@ -14175,8 +14188,8 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   const byStatus = pairSessions
     .filter(ps => getTeamStatus(ps) === statusFilter)
     .sort((a,b) => (b.updatedAt?.seconds||0) - (a.updatedAt?.seconds||0));
-  const drafts    = byStatus.filter(ps => !ps.splitDone);
-  const completed = byStatus.filter(ps => ps.splitDone);
+  const drafts    = byStatus.filter(ps => !pairSessionCompletedToday(ps));
+  const completed = byStatus.filter(ps => pairSessionCompletedToday(ps));
 
   async function doStatusChange(ps, newStatus) {
     if (!window.confirm(`"${ps.memberAName} + ${ps.memberBName}" 수업을 ${TEAM_STATUS_LABELS[newStatus]}(으)로 변경할까요?`)) return;
@@ -14206,10 +14219,13 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
     const ts = getTeamStatus(ps);
     const tsColor = TEAM_STATUS_COLORS[ts];
     const isMenuOpen = statusMenuId === ps.id;
-    // 버튼 문구 — status/splitDone 값만으로는 "새 기록"과 "작성 중"을 구분할 수 없어 실제 작성 내용을 직접 확인한다.
-    const editLabel = ps.splitDone ? "기록 보기" : (pairSessionHasContent(ps) ? "기록 계속하기" : "수업 기록하기");
+    // 버튼 문구 — splitDone 원시값 대신 "오늘 방금 나눠서 기록을 완료했고 아직 새 내용이 없는지"를 매번 다시 계산한다.
+    // (splitPairSession이 팀 문서를 즉시 다음 회차용 빈 문서로 재사용하므로, 날짜가 바뀌거나 새 내용이 들어오면
+    // 자동으로 "작성 중" 상태로 돌아와야 다음 예약일에 "기록 보기"로 잠겨 열리지 않는다)
+    const doneToday = pairSessionCompletedToday(ps);
+    const editLabel = doneToday ? "기록 보기" : (pairSessionHasContent(ps) ? "기록 계속하기" : "수업 기록하기");
     return (
-      <div style={{position:"relative",background:"#111827",border:`1px solid ${ps.splitDone?"rgba(94,234,212,.2)":"rgba(255,209,102,.25)"}`,
+      <div style={{position:"relative",background:"#111827",border:`1px solid ${doneToday?"rgba(94,234,212,.2)":"rgba(255,209,102,.25)"}`,
         borderRadius:10,padding:"12px 13px",marginBottom:8}}
         onClick={()=>isMenuOpen&&setStatusMenuId(null)}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
@@ -14221,7 +14237,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
             <span style={{padding:"3px 8px",borderRadius:20,background:`${tsColor}18`,color:tsColor,fontSize:9,fontWeight:800}}>{TEAM_STATUS_LABELS[ts]}</span>
-            {ps.splitDone
+            {doneToday
               ? <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(94,234,212,.12)",color:"#5EEAD4",fontSize:9,fontWeight:800}}>기록완료</span>
               : <span style={{padding:"3px 8px",borderRadius:20,background:"rgba(255,209,102,.12)",color:"#ffd166",fontSize:9,fontWeight:800}}>작성중</span>
             }
@@ -14232,12 +14248,12 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
         </Mo>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           <button onClick={()=>onEdit(ps)}
-            style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${ps.splitDone?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
-              background:ps.splitDone?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
-              color:ps.splitDone?"#94a3b8":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
+            style={{flex:1,padding:"7px 10px",borderRadius:7,border:`1px solid ${doneToday?"rgba(255,255,255,.08)":"rgba(255,209,102,.4)"}`,
+              background:doneToday?"rgba(255,255,255,.03)":"rgba(255,209,102,.08)",
+              color:doneToday?"#94a3b8":"#ffd166",fontSize:10,fontWeight:800,cursor:"pointer"}}>
             {editLabel}
           </button>
-          {!ps.splitDone && (
+          {!doneToday && (
             <button onClick={()=>setConfirmSplit(ps)}
               style={{flex:1,padding:"7px 10px",borderRadius:7,border:"1px solid rgba(94,234,212,.4)",
                 background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:10,fontWeight:800,cursor:"pointer"}}>
@@ -14408,11 +14424,14 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
   const toggleNextPairPart = (x) => {
     setNextParts(prev => x==="미정" ? [] : (prev.includes(x) ? prev.filter(p=>p!==x) : [...prev, x]));
   };
+  // 두 회원을 한 번에 Promise.all로 저장하면 한 명만 실패해도 어느 쪽이 실패했는지 알 수 없어
+  // 회원별로 개별 저장 후 Promise.allSettled로 결과를 따로 판정한다(다음 수업 저장은 nextWorkoutDate 등
+  // 회원 문서 필드만 바꾸고, 현재 pairSessions 기록·날짜는 절대 건드리지 않는다).
   const handleSaveNextPairSession = async () => {
     if (nextSaving) return;
     const targets = [];
-    if (nextTargetA && memberAId) targets.push(memberAId);
-    if (nextTargetB && memberBId) targets.push(memberBId);
+    if (nextTargetA && memberAId) targets.push({id:memberAId, name:memberA?.name||"A 회원"});
+    if (nextTargetB && memberBId) targets.push({id:memberBId, name:memberB?.name||"B 회원"});
     if (!targets.length) { showToast("최소 한 명은 선택해야 합니다", "err"); return; }
     setNextSaving(true);
     try {
@@ -14423,8 +14442,15 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
         nextWorkoutPart: part, nextPtPart: part,
         nextWorkoutDateUpdatedAt: new Date().toISOString(),
       };
-      await onSaveNextSession?.(targets, patch);
-      showToast(`다음 수업 저장 완료 ✓ (${targets.length}명)`);
+      const results = await Promise.allSettled(targets.map(t => onSaveNextSession?.([t.id], patch)));
+      const failed = targets.filter((t,i)=>results[i].status==="rejected");
+      if (failed.length === 0) {
+        showToast(`다음 수업 저장 완료 ✓ (${targets.length}명)`);
+      } else if (failed.length === targets.length) {
+        showToast(`다음 수업 저장 실패: ${failed.map(f=>f.name).join(", ")}`, "err");
+      } else {
+        showToast(`${failed.map(f=>f.name).join(", ")} 저장 실패 (나머지 회원은 저장됨, 재시도해주세요)`, "err");
+      }
     } catch(e) { showToast("저장 실패: " + (e?.message||"오류"), "err"); }
     finally { setNextSaving(false); }
   };
@@ -14444,32 +14470,53 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
     return [mkPairEx()];
   });
 
-  const saveTimerRef = useRef(null);
-  const [saveStatus, setSaveStatus] = useState("");
+  // 입력할 때마다 Firebase에 쓰던 debounce 자동 저장은 완전히 제거했다(원인: "나눠서 기록"으로 방금 초기화한
+  // 문서를, 지연 중이던 자동 저장 타이머가 뒤늦게 옛 내용으로 덮어써 "이전 날짜·내용이 다시 나타나는" 버그를
+  // 냈다). 대신 브라우저 localStorage에만 임시 저장하고, Firebase 저장은 "저장"/"나눠서 기록" 버튼을 눌렀을 때만
+  // 일어난다. 키는 같은 팀 문서(id) 또는 신규 작성 중인 A+B 조합으로 분리해 다른 팀 임시 저장과 섞이지 않는다.
+  const draftKey = editData?.id
+    ? `pairSessionDraft:${editData.id}`
+    : (memberAId && memberBId ? `pairSessionDraft:new:${memberAId}_${memberBId}` : null);
+  const [restoredNotice, setRestoredNotice] = useState(false);
+  const restoredRef = useRef(false);
 
+  // 마운트 시 1회만 복원 시도. 로컬 임시 저장이 Firestore에 실제 반영된 마지막 시점(editData.updatedAt)보다
+  // 오래된 것이면(=이미 저장/나눠서 기록이 서버에 반영된 뒤 남은 옛 회차의 잔여물) 복원하지 않고 버린다.
   useEffect(() => {
-    if (!memberAId || !memberBId) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      setSaveStatus("저장 중...");
-      try {
-        await onSave({
-          memberAId, memberAName: memberA?.name||"",
-          memberBId, memberBName: memberB?.name||"",
-          date, intensity,
-          type: selectedTypes.length ? selectedTypes.join(" · ") : "기타",
-          selectedTypes: selectedTypes.length ? selectedTypes : ["기타"],
-          exercises, trainerCommentA, trainerCommentB,
-          status: "draft",
-        });
-        const now = new Date();
-        setSaveStatus(`저장됨 ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`);
-      } catch(e) {
-        setSaveStatus("저장 실패");
+    if (!draftKey || restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (!d || typeof d !== "object") return;
+      const serverUpdatedMs = editData?.updatedAt?.seconds ? editData.updatedAt.seconds * 1000 : 0;
+      if (!d.savedAt || (serverUpdatedMs && d.savedAt < serverUpdatedMs)) {
+        localStorage.removeItem(draftKey);
+        return;
       }
-    }, 2000);
-    return () => clearTimeout(saveTimerRef.current);
-  }, [memberAId, memberBId, date, intensity, selectedTypes, exercises, trainerCommentA, trainerCommentB]);
+      if (typeof d.date === "string" && d.date) setDate(d.date);
+      if (typeof d.intensity === "string" && d.intensity) setIntensity(d.intensity);
+      if (Array.isArray(d.selectedTypes)) setSelectedTypes(d.selectedTypes);
+      if (Array.isArray(d.exercises) && d.exercises.length) setExercises(d.exercises);
+      if (typeof d.trainerCommentA === "string") setTrainerCommentA(d.trainerCommentA);
+      if (typeof d.trainerCommentB === "string") setTrainerCommentB(d.trainerCommentB);
+      setRestoredNotice(true);
+    } catch(e) {}
+  }, [draftKey]);
+
+  // 이후 매 변경마다 localStorage에만 저장(네트워크 요청 없음 — Firebase에는 절대 쓰지 않는다).
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        date, intensity, selectedTypes, exercises, trainerCommentA, trainerCommentB,
+        savedAt: Date.now(),
+      }));
+    } catch(e) {}
+  }, [draftKey, date, intensity, selectedTypes, exercises, trainerCommentA, trainerCommentB]);
+
+  const clearDraft = () => { if (draftKey) { try { localStorage.removeItem(draftKey); } catch(e) {} } };
 
   const addEx = () => setExercises(prev=>[...prev, mkPairEx()]);
   const removeEx = (ei) => {
@@ -14543,6 +14590,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
         exercises, trainerCommentA, trainerCommentB,
         status: "draft",
       });
+      clearDraft();
       showToast("저장 완료 ✓");
     } catch(e){ showToast(e.message||"저장 실패","err"); }
     finally { setSaving(false); }
@@ -14612,18 +14660,24 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
     );
   }
 
-  const isSplitDone = editData?.splitDone;
+  // splitDone 원시값 대신 "오늘 방금 나눠서 기록을 완료했고 아직 새 내용이 없는지"로 판정 —
+  // 팀 문서를 재사용하는 구조라 splitDone을 그대로 두면 다음 회차 진입 시 폼이 영구히 잠긴다.
+  const isSplitDone = pairSessionCompletedToday(editData);
 
   return (
     <div>
       <SH title={isEdit?"2:1 수업 기록":"새 2:1 수업"}
         sub={memberA&&memberB?`${memberA.name} + ${memberB.name}`:""}
-        right={
-          <div style={{display:"flex",gap:6}}>
-            {saveStatus && <Mo c="#94a3b8" s={8} style={{alignSelf:"center"}}>{saveStatus}</Mo>}
-            <Btn ghost sm onClick={onBack}>← 뒤로</Btn>
-          </div>
-        } />
+        right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+
+      {restoredNotice && (
+        <div style={{padding:"8px 12px",borderRadius:8,background:"rgba(94,234,212,.08)",
+          border:"1px solid rgba(94,234,212,.25)",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+          <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>📝 작성 중인 임시 기록을 복원했습니다</Mo>
+          <button onClick={()=>setRestoredNotice(false)}
+            style={{background:"none",border:"none",color:"#5EEAD4",fontSize:12,cursor:"pointer",padding:"2px 4px"}}>✕</button>
+        </div>
+      )}
 
       {/* 기본 정보 */}
       <div style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,
@@ -14870,53 +14924,16 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
               </div>
             )}
 
-            {/* 피드백 A/B */}
+            {/* 피드백 A/B — 2:1 화면에서는 RPE·자극도 입력을 제거하고 회원별 메모만 남긴다.
+                (기존 기록에 저장된 feedbackA/B.rpe·stimRating 값은 그대로 두고 건드리지 않는다 — updateFeedback은
+                note 필드만 갱신하므로 다른 필드는 spread로 그대로 보존된다) */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
             {[{who:"A",label:memberA?.name||"A",color:"#ffd166",borderColor:"rgba(255,209,102,.15)",key:"feedbackA"},
               {who:"B",label:memberB?.name||"B",color:"#a29bfe",borderColor:"rgba(162,155,254,.15)",key:"feedbackB"}].map(({who,label,color,borderColor,key})=>{
-              const curRpe = Number(ex[key]?.rpe)||0;
-              const curStim = ex[key]?.stimRating||null;
               return (
-              <div key={who} style={{marginBottom:6,padding:"7px 9px",borderRadius:6,
+              <div key={who} style={{padding:"7px 9px",borderRadius:6,
                 border:`1px solid ${borderColor}`,background:"rgba(255,255,255,.02)"}}>
                 <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:6}}>{label} 피드백</Mo>
-                {/* RPE 1~10 버튼 */}
-                <div style={{marginBottom:5}}>
-                  <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>RPE</Mo>
-                  <div style={{display:"flex",gap:2}}>
-                    {[1,2,3,4,5,6,7,8,9,10].map(n=>{
-                      const sel = curRpe===n;
-                      return (
-                        <button key={n} onClick={()=>!isSplitDone&&updateFeedback(ei,who,"rpe",sel?"":n)}
-                          style={{flex:1,height:28,borderRadius:4,padding:0,cursor:"pointer",
-                            border:`1px solid ${sel?color:"rgba(255,255,255,.08)"}`,
-                            background:sel?color+"28":"#0c1523",
-                            color:sel?color:"#3a3a5e",fontSize:10,fontWeight:sel?900:600,lineHeight:1}}>
-                          {n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* 자극도 버튼 */}
-                <div style={{marginBottom:5}}>
-                  <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>자극도</Mo>
-                  <div style={{display:"flex",gap:2}}>
-                    {["없음","애매함","약함","중간","강함"].map(v=>{
-                      const sel = curStim===v;
-                      return (
-                        <button key={v} onClick={()=>!isSplitDone&&updateFeedback(ei,who,"stimRating",sel?null:v)}
-                          style={{flex:1,height:28,borderRadius:4,padding:"0 2px",cursor:"pointer",
-                            border:`1px solid ${sel?color:"rgba(255,255,255,.08)"}`,
-                            background:sel?color+"28":"#0c1523",
-                            color:sel?color:"#3a3a5e",fontSize:9,fontWeight:sel?900:600,
-                            whiteSpace:"nowrap",lineHeight:1}}>
-                          {v}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* 메모 */}
                 <input placeholder="메모" value={ex[key]?.note||""}
                   disabled={isSplitDone}
                   onChange={e=>updateFeedback(ei,who,"note",e.target.value)}
@@ -14926,6 +14943,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
               </div>
               );
             })}
+            </div>
           </div>
         );
       })}
@@ -14957,15 +14975,23 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
       {/* 다음 2:1 수업 — 두 회원에게 한 번에 저장(체크 해제한 회원은 제외) */}
       <div style={{background:"#111827",border:"1px solid rgba(94,234,212,.15)",borderRadius:10,padding:"12px 13px",marginBottom:10}}>
         <Mo c="#e2e8f0" s={12} style={{display:"block",fontWeight:800,marginBottom:8}}>다음 2:1 수업</Mo>
-        <div style={{display:"flex",gap:16,marginBottom:10,flexWrap:"wrap"}}>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:700,color:"#ffd166",cursor:"pointer"}}>
-            <input type="checkbox" checked={nextTargetA} onChange={e=>setNextTargetA(e.target.checked)} />
-            {memberA?.name||"A 회원"}
-          </label>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:700,color:"#a29bfe",cursor:"pointer"}}>
-            <input type="checkbox" checked={nextTargetB} onChange={e=>setNextTargetB(e.target.checked)} />
-            {memberB?.name||"B 회원"}
-          </label>
+        {/* 체크 여부가 배경색만으로는 구분되지 않던 문제 — 크게 키운 accentColor 체크박스(선택 시 브라우저 기본
+            체크 아이콘이 색으로 채워짐) + 라벨 배경/테두리를 함께 사용. whiteSpace:nowrap+flexShrink:0으로
+            *{min-width:0} 전역 규칙 때문에 회원 이름이 한 글자씩 세로로 줄바꿈되는 것도 방지한다. */}
+        <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+          {[
+            {id:"A", checked:nextTargetA, set:setNextTargetA, name:memberA?.name||"A 회원", color:"#ffd166", bg:"rgba(255,209,102,.14)", border:"rgba(255,209,102,.5)"},
+            {id:"B", checked:nextTargetB, set:setNextTargetB, name:memberB?.name||"B 회원", color:"#a29bfe", bg:"rgba(162,155,254,.14)", border:"rgba(162,155,254,.5)"},
+          ].map(t => (
+            <label key={t.id} style={{display:"flex",alignItems:"center",gap:8,
+              fontSize:12.5,fontWeight:700,color:t.color,cursor:"pointer",flexShrink:0,whiteSpace:"nowrap",
+              padding:"8px 13px",borderRadius:9,background:t.checked?t.bg:"transparent",
+              border:`1.5px solid ${t.checked?t.border:"rgba(255,255,255,.14)"}`}}>
+              <input type="checkbox" checked={t.checked} onChange={e=>t.set(e.target.checked)}
+                style={{width:19,height:19,minWidth:19,margin:0,flexShrink:0,accentColor:t.color,cursor:"pointer"}} />
+              <span style={{whiteSpace:"nowrap"}}>{t.name}</span>
+            </label>
+          ))}
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
           <div style={{flex:"1 1 130px",minWidth:120}}>
@@ -15053,6 +15079,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
                 try {
                   await handleManualSave();
                   await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
+                  clearDraft();
                   setConfirmSplit(false);
                   // 나눠서 기록 완료 후 이 화면(폼)의 운동종목/세트/중량 로컬 state가 리셋된 Firestore 문서와
                   // 어긋나지 않도록, 목록으로 돌아가 다음에 재진입할 때 새로 초기화된 데이터로 시작하게 한다.

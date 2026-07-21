@@ -5551,6 +5551,13 @@ export default function App() {
     setScreen("pair21Form");
   }
 
+  // 2:1 기록 화면 "다음 2:1 수업" — 체크된 회원 전원에게 기존 1:1 다음 수업 필드(nextWorkoutDate/Time/Part)를
+  // 한 번에 저장한다. 새 컬렉션·새 필드 없이 기존 회원 문서 필드를 재사용(HubScreen handleSaveNextDate/Time/Part와 동일 패턴).
+  async function handleSaveNextPairSession(memberIds, patch) {
+    await Promise.all(memberIds.map(id => updateMember(id, patch)));
+    setMembers(prev => prev.map(m => memberIds.includes(m.id) ? { ...m, ...patch } : m));
+  }
+
   function goHubReload() {
     if (!member) return;
     console.log("[TEO GYM] goHubReload:", member.name, member.id);
@@ -6138,7 +6145,7 @@ export default function App() {
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
-        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
+        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <FeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
@@ -6152,7 +6159,7 @@ export default function App() {
         {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="routine_recommend" && member && <RoutineRecommendScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
-        {screen==="upcoming" && <UpcomingSessionsScreen members={members} onBack={()=>setScreen("home")} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
+        {screen==="upcoming" && <UpcomingSessionsScreen members={members} pairSessions={pairSessions} onBack={()=>setScreen("home")} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} onOpenPairSession={goPairSession} />}
         {screen==="notices" && <NoticeAdminScreen members={members} sessionsMap={sessionsMap} onBack={()=>setScreen("home")} showToast={showToast}/>}
         {screen==="daily_conditioning" && member && <DailyConditioningAdminScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
@@ -6946,6 +6953,12 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     if (!members?.length) loadMembers?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
+  // "오늘 수업" 2:1 그룹 카드는 pairSessions(memberAId/BId)가 있어야 판별 가능 — 2:1 관련 화면을 아직 안 들어간 세션에서도
+  // 홈 진입만으로 그룹핑이 동작하도록 1회 로드해 둔다(값이 이미 있으면 재요청하지 않음).
+  useEffect(()=>{
+    if (!pairSessions?.length) loadPairSessions?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
 
   const isWide = winW >= 768;
   // 아이패드 세로처럼 winW만으로는 isWide=true(사이드바 폭 236px 차지)라 오늘 수업 카드가 여전히 좁게 눌리는 경우를 잡기 위한 실제 세로 방향 판별.
@@ -7029,7 +7042,10 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     const ps = activePairByMemberId.get(item.m.id);
     const partnerId = ps ? (ps.memberAId === item.m.id ? ps.memberBId : ps.memberAId) : null;
     const partnerItem = partnerId ? rawTodaySess.find(x => x.m.id === partnerId) : null;
-    if (ps && partnerItem) {
+    // 같은 팀이어도 실제 예약 시간(nextWorkoutTime 원본값)이 다르면(예: "다음 2:1 수업"에서 한 명만 체크해서 저장한 경우)
+    // 그룹으로 묶지 않고 개인 카드로 각각 표시한다.
+    const sameNextTime = partnerItem && String(item.m.nextWorkoutTime||"").trim() === String(partnerItem.m.nextWorkoutTime||"").trim();
+    if (ps && partnerItem && sameNextTime) {
       pairedMemberIds.add(item.m.id);
       pairedMemberIds.add(partnerItem.m.id);
       const hasContent = pairSessionHasContent(ps);
@@ -8935,7 +8951,7 @@ function buildKrHolidayNameMap(year, month) {
   return map;
 }
 
-function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, loadPairSessions, showToast }) {
+function UpcomingSessionsScreen({ members = [], pairSessions = [], onBack, setScreen, loadMembers, loadPairSessions, showToast, onOpenPairSession }) {
   const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
   useEffect(() => {
     const h = () => setWinW(window.innerWidth);
@@ -8946,25 +8962,65 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
   const todayKey = getKoreaDateString();
   const [ym, setYm] = useState(todayKey.slice(0, 7));
 
+  // 2:1 예약 그룹핑에 pairSessions가 필요 — 아직 로드되지 않았으면 진입 시 1회 로드
+  useEffect(()=>{
+    if (!pairSessions?.length) loadPairSessions?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  // 진행중 2:1 팀 역색인 — 홈 화면과 동일 기준(memberAId/memberBId, teamStatus active만)
+  const activePairByMemberId = useMemo(() => {
+    const map = new Map();
+    (pairSessions||[]).forEach(ps => {
+      if ((ps.teamStatus||"active") !== "active") return;
+      if (ps.memberAId) map.set(ps.memberAId, ps);
+      if (ps.memberBId) map.set(ps.memberBId, ps);
+    });
+    return map;
+  }, [pairSessions]);
+
   // 날짜별 회원 그룹핑 — 테스트 계정/대표 개인기록 계정 제외, 다음 수업 날짜·부위가 모두 있는 회원만
-  // 각 날짜 안에서는 시간이 지정된 회원을 오름차순으로 먼저, 시간 미정 회원은 이름순으로 마지막에 배치한다.
+  // 같은 진행중 2:1 팀 + 같은 예약 시간(nextWorkoutTime 원본값 일치)인 두 회원은 한 줄(그룹)로 묶는다.
+  // 이름·날짜·시간이 우연히 같은 것만으로는 절대 묶지 않는다(memberAId/memberBId 연결이 있을 때만).
+  // 각 날짜 안에서는 시간이 지정된 항목을 오름차순으로 먼저, 시간 미정은 이름순으로 마지막에 배치한다.
   // 시간 없는 기존 예약(time 없음)도 제외하지 않고 그대로 표시한다.
   const byDate = useMemo(() => {
-    const map = new Map();
+    const rawMap = new Map();
     members.forEach(m => {
       if (isExcludedAdminMember(m)) return;
       const { date, part, time } = getMemberNextSessionInfo(m);
       if (!date || !part) return;
-      if (!map.has(date)) map.set(date, []);
-      map.get(date).push({ id: m.id, name: m.name || "이름 미정", part, time });
+      if (!rawMap.has(date)) rawMap.set(date, []);
+      rawMap.get(date).push({ id: m.id, name: m.name || "이름 미정", part, time, raw: m });
     });
-    map.forEach(list => list.sort((a, b) => {
-      if (!!a.time !== !!b.time) return a.time ? -1 : 1;
-      if (a.time && b.time && a.time !== b.time) return a.time.localeCompare(b.time);
-      return a.name.localeCompare(b.name);
-    }));
+    const map = new Map();
+    rawMap.forEach((list, date) => {
+      const consumed = new Set();
+      const grouped = [];
+      list.forEach(item => {
+        if (consumed.has(item.id)) return;
+        const ps = activePairByMemberId.get(item.id);
+        const partnerId = ps ? (ps.memberAId === item.id ? ps.memberBId : ps.memberAId) : null;
+        const partner = partnerId ? list.find(x => x.id === partnerId) : null;
+        const sameNextTime = partner && String(item.raw.nextWorkoutTime||"").trim() === String(partner.raw.nextWorkoutTime||"").trim();
+        if (ps && partner && sameNextTime) {
+          consumed.add(item.id); consumed.add(partner.id);
+          const [a, b] = ps.memberAId === item.id ? [item, partner] : [partner, item];
+          grouped.push({ isPair: true, id: `pair-${ps.id}`, ps, nameA: a.name, nameB: b.name, part: item.part, time: item.time });
+        } else {
+          consumed.add(item.id);
+          grouped.push(item);
+        }
+      });
+      grouped.sort((x, y) => {
+        if (!!x.time !== !!y.time) return x.time ? -1 : 1;
+        if (x.time && y.time && x.time !== y.time) return x.time.localeCompare(y.time);
+        return (x.isPair ? x.nameA : x.name).localeCompare(y.isPair ? y.nameA : y.name);
+      });
+      map.set(date, grouped);
+    });
     return map;
-  }, [members]);
+  }, [members, activePairByMemberId]);
 
   const [yy, mm] = ym.split("-").map(Number);
   const firstDow = new Date(yy, mm - 1, 1).getDay(); // 일요일 시작(0=일 ... 6=토, Date.getDay()를 그대로 사용)
@@ -9039,12 +9095,18 @@ function UpcomingSessionsScreen({ members = [], onBack, setScreen, loadMembers, 
                 </div>
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
                   {list.map(item => (
-                    <div key={item.id} title={`${item.time || "시간 미정"} · ${item.name} · ${item.part}`} style={{
-                      fontSize: 10, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: DB.text,
-                    }}>
+                    <div key={item.id}
+                      title={item.isPair ? `${item.time || "시간 미정"} · 2:1 · ${item.nameA} + ${item.nameB} · ${item.part} (탭하여 기록 열기)` : `${item.time || "시간 미정"} · ${item.name} · ${item.part}`}
+                      onClick={item.isPair ? () => onOpenPairSession?.(item.ps, c.key) : undefined}
+                      style={{
+                        fontSize: 10, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: DB.text,
+                        cursor: item.isPair ? "pointer" : "default",
+                        textDecoration: item.isPair ? "underline" : "none", textDecorationColor: item.isPair ? "rgba(57,199,184,.4)" : "transparent",
+                      }}>
                       <span style={{ color: item.time ? DB.mintSoft : DB.faint, fontWeight: 700 }}>{item.time || "시간 미정"}</span>
                       {" "}
-                      <b style={{ fontWeight: 700 }}>{item.name}</b>
+                      {item.isPair && <span style={{ color: DB.mintSoft, fontWeight: 800 }}>2:1 </span>}
+                      <b style={{ fontWeight: 700 }}>{item.isPair ? `${item.nameA}+${item.nameB}` : item.name}</b>
                       <span style={{ color: DB.faint }}> · </span>
                       <span style={{ color: DB.mintSoft, fontWeight: 700 }}>{item.part}</span>
                     </div>
@@ -14300,7 +14362,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   );
 }
 
-function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
+function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave, onSaveNextSession, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
   const isEdit = !!(editData?.id);
 
   // ID가 없으면 이름으로 자동 복원 (기존 데이터 memberAId 누락 대응)
@@ -14331,6 +14393,38 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
   const [saving, setSaving] = useState(false);
   const [confirmSplit, setConfirmSplit] = useState(false);
   const [splitting, setSplitting] = useState(false);
+
+  // 다음 2:1 수업 — 기존 1:1과 동일한 회원 문서 필드(nextWorkoutDate/Time/Part)를 재사용해 체크된 회원 전원에게
+  // 한 번에 저장한다(새 컬렉션·새 필드 없음). 기본값은 두 회원 모두 선택 상태이며 체크 해제 시 그 회원은 제외된다.
+  const [nextTargetA, setNextTargetA] = useState(true);
+  const [nextTargetB, setNextTargetB] = useState(true);
+  const [nextDate, setNextDate] = useState(() => memberA?.nextWorkoutDate || "");
+  const [nextTime, setNextTime] = useState(() => memberA?.nextWorkoutTime || "");
+  const [nextParts, setNextParts] = useState(() => parseNextParts(memberA?.nextWorkoutPart || memberA?.nextPtPart));
+  const [nextSaving, setNextSaving] = useState(false);
+  const toggleNextPairPart = (x) => {
+    setNextParts(prev => x==="미정" ? [] : (prev.includes(x) ? prev.filter(p=>p!==x) : [...prev, x]));
+  };
+  const handleSaveNextPairSession = async () => {
+    if (nextSaving) return;
+    const targets = [];
+    if (nextTargetA && memberAId) targets.push(memberAId);
+    if (nextTargetB && memberBId) targets.push(memberBId);
+    if (!targets.length) { showToast("최소 한 명은 선택해야 합니다", "err"); return; }
+    setNextSaving(true);
+    try {
+      const part = nextParts.length ? nextParts.join(" · ") : "미정";
+      const patch = {
+        nextWorkoutDate: nextDate || "",
+        nextWorkoutTime: nextTime || "",
+        nextWorkoutPart: part, nextPtPart: part,
+        nextWorkoutDateUpdatedAt: new Date().toISOString(),
+      };
+      await onSaveNextSession?.(targets, patch);
+      showToast(`다음 수업 저장 완료 ✓ (${targets.length}명)`);
+    } catch(e) { showToast("저장 실패: " + (e?.message||"오류"), "err"); }
+    finally { setNextSaving(false); }
+  };
 
   const mkPairSet = () => ({weight:"", reps:"", durationSec:""});
   const mkPairEx = () => ({
@@ -14855,6 +14949,55 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
                 background:"#0c1523",color:"#ddddf0",fontSize:11,boxSizing:"border-box",resize:"vertical"}} />
           </div>
         ))}
+      </div>
+
+      {/* 다음 2:1 수업 — 두 회원에게 한 번에 저장(체크 해제한 회원은 제외) */}
+      <div style={{background:"#111827",border:"1px solid rgba(94,234,212,.15)",borderRadius:10,padding:"12px 13px",marginBottom:10}}>
+        <Mo c="#e2e8f0" s={12} style={{display:"block",fontWeight:800,marginBottom:8}}>다음 2:1 수업</Mo>
+        <div style={{display:"flex",gap:16,marginBottom:10,flexWrap:"wrap"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:700,color:"#ffd166",cursor:"pointer"}}>
+            <input type="checkbox" checked={nextTargetA} onChange={e=>setNextTargetA(e.target.checked)} />
+            {memberA?.name||"A 회원"}
+          </label>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:700,color:"#a29bfe",cursor:"pointer"}}>
+            <input type="checkbox" checked={nextTargetB} onChange={e=>setNextTargetB(e.target.checked)} />
+            {memberB?.name||"B 회원"}
+          </label>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+          <div style={{flex:"1 1 130px",minWidth:120}}>
+            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
+            <input type="date" value={nextDate} onChange={e=>setNextDate(e.target.value)}
+              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+          </div>
+          <div style={{flex:"1 1 110px",minWidth:100}}>
+            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>시간</Mo>
+            <select value={nextTime} onChange={e=>setNextTime(e.target.value)}
+              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}}>
+              <option value="">시간 미정</option>
+              {NEXT_SESSION_TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+        <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:5}}>운동 부위</Mo>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+          {NEXT_PT_PART_OPTIONS.map(x=>{
+            const active = x==="미정" ? nextParts.length===0 : nextParts.includes(x);
+            return (
+              <button key={x} type="button" onClick={()=>toggleNextPairPart(x)}
+                style={{borderRadius:999,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",
+                  border:`1px solid ${active?"#5EEAD4":"rgba(255,255,255,.1)"}`,
+                  background:active?"rgba(94,234,212,.12)":"transparent",color:active?"#5EEAD4":"#94a3b8"}}>{x}</button>
+            );
+          })}
+        </div>
+        <button onClick={handleSaveNextPairSession} disabled={nextSaving}
+          style={{padding:"10px 20px",borderRadius:9,border:"none",cursor:nextSaving?"not-allowed":"pointer",
+            background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:12.5,fontWeight:800,opacity:nextSaving?0.7:1}}>
+          {nextSaving?"저장 중...":"다음 수업 저장"}
+        </button>
       </div>
 
       {/* 목록으로 가기 + 저장 + 나눠서 기록 */}

@@ -30,7 +30,7 @@ try {
   const sliceC = app.slice(app.indexOf('function hasRoutineCautionText'), app.indexOf('function ReviewRoutine'));
   const sliceEquip = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const EQUIP_COLOR'));
   const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function suggestMuscle'));
-  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, MALE_SPLIT, FEMALE_SPLIT_2WAY, FEMALE_SPLIT_3WAY, FEMALE_SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance, resolveBarbellKind, detectBarbellKindFromText, BARBELL_BASE_WEIGHT_BY_KIND };`);
+  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, SPLIT_5WAY, SPLIT_2WAY, SPLIT_3WAY, SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance, resolveBarbellKind, detectBarbellKindFromText, BARBELL_BASE_WEIGHT_BY_KIND };`);
   workoutGuideLib = factory();
 } catch (e) {
   console.error('[regression] 오늘의 운동 가이드 로직 추출 실패:', e.message);
@@ -1275,24 +1275,26 @@ const checks = [
     app.includes('["가슴","등","하체","어깨","팔"].map(x=>') &&
     !/const parts=\["가슴","등","하체","어깨","코어"\]/.test(app)
   ],
-  ['오늘의 운동 가이드: 성별 기본 분할 상수(남자 5분할/여자 2~3분할) + 2:1 공통 기본값 정의',
-    app.includes('const MALE_SPLIT         = ["하체","어깨","등","가슴","팔"];') &&
-    app.includes('const FEMALE_SPLIT_2WAY  = ["하체","가슴 · 등 · 어깨 · 팔"];') &&
-    app.includes('const FEMALE_SPLIT_3WAY  = ["하체","가슴 · 어깨 · 삼두","등 · 이두"];') &&
-    app.includes('const FEMALE_SPLIT_COMBO_2WAY = ["하체 · 가슴 · 삼두","등 · 어깨 · 이두"];') &&
-    app.includes('const PAIR_SPLIT_DEFAULT = FEMALE_SPLIT_3WAY;')
+  ['오늘의 운동 가이드: 성별 분기 없이 주당 운동 빈도 기반 기본 분할 상수 + 2:1 공통 기본값 정의',
+    app.includes('const SPLIT_5WAY       = ["하체","어깨","등","가슴","팔"];') &&
+    app.includes('const SPLIT_2WAY       = ["하체","가슴 · 등 · 어깨 · 팔"];') &&
+    app.includes('const SPLIT_3WAY       = ["하체","가슴 · 어깨 · 삼두","등 · 이두"];') &&
+    app.includes('const SPLIT_COMBO_2WAY = ["하체 · 가슴 · 삼두","등 · 어깨 · 이두"];') &&
+    app.includes('const PAIR_SPLIT_DEFAULT = SPLIT_3WAY;')
   ],
-  ['오늘의 운동 가이드: MALE_SPLIT 순환 순서 자체가 상극 조합(하체↔등, 가슴↔어깨)을 순환 인접 위치에 배치하지 않음(가슴→팔→하체→어깨→등→(순환)가슴 — 5개 인접쌍 어디에도 금지 조합 없음)',
+  ['오늘의 운동 가이드: SPLIT_5WAY 순환 순서 자체가 상극 조합(하체↔등, 가슴↔어깨)을 순환 인접 위치에 배치하지 않음(가슴→팔→하체→어깨→등→(순환)가슴 — 5개 인접쌍 어디에도 금지 조합 없음)',
     (() => {
       const CONFLICT = { "하체":"등", "등":"하체", "가슴":"어깨", "어깨":"가슴" };
       const order = ["하체","어깨","등","가슴","팔"];
       return order.every((p, i) => CONFLICT[p] !== order[(i + 1) % order.length]);
     })()
   ],
-  ['오늘의 운동 가이드: 여성 기본 분할 선택(pickFemaleBaseCycle)이 실제 기록에서 방식 B(조합형) 사용 흔적을 최우선 확인하고, 없으면 빈도로 방식 A/3분할을 가름',
-    app.includes('function pickFemaleBaseCycle(sequence,freq){') &&
-    app.includes('if(sequence.some(s=>FEMALE_SPLIT_COMBO_2WAY.includes(s)))return FEMALE_SPLIT_COMBO_2WAY;') &&
-    app.includes('return freq>=3?FEMALE_SPLIT_3WAY:FEMALE_SPLIT_2WAY;')
+  ['오늘의 운동 가이드: 기본 분할 선택(pickBaseCycle)이 실제 기록에서 조합형(SPLIT_COMBO_2WAY) 사용 흔적을 최우선 확인하고, 없으면 주당 운동 빈도로 분할 길이를 가름 — 성별 참조 없음',
+    app.includes('function pickBaseCycle(sequence,freq){') &&
+    app.includes('if(sequence.some(s=>SPLIT_COMBO_2WAY.includes(s)))return SPLIT_COMBO_2WAY;') &&
+    app.includes('if(freq>=4)return SPLIT_5WAY;') &&
+    app.includes('return freq===3?SPLIT_3WAY:SPLIT_2WAY;') &&
+    !/gender/.test(app.slice(app.indexOf('function getRecommendedPart('), app.indexOf('function formatRoutineSet')))
   ],
   ['오늘의 운동 가이드: 원본 selectedTypes 기반 콤보 라벨(partComboLabel)로 이두/삼두를 뭉개지 않고 미는/당기는 조합을 그대로 인식',
     app.includes('const PART_COMBO_ORDER = ["하체","가슴","등","어깨","이두","삼두","팔"];') &&
@@ -1302,9 +1304,15 @@ const checks = [
     app.includes('function getLatestSessionType(sessions=[]){') &&
     app.includes('return sorted[0]?.sessionType==="2:1" ? "2:1" : "1:1";')
   ],
-  ['오늘의 운동 가이드: getRecommendedPart 1순위가 성별보다 2:1 여부(isPaired)를 먼저 반영해 기본 사이클을 선택',
+  ['오늘의 운동 가이드: getRecommendedPart 1순위가 2:1 여부(isPaired)로 기본 사이클을 선택하고, 그 외에는 성별이 아니라 실제 기록/빈도(pickBaseCycle)만으로 결정',
     app.includes('const isPaired=getLatestSessionType(sessions)==="2:1";') &&
-    app.includes('const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:gender==="여성"?pickFemaleBaseCycle(sequence,freq):MALE_SPLIT;')
+    app.includes('const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:pickBaseCycle(patternSequence,freq);')
+  ],
+  ['오늘의 운동 가이드: 분할 패턴 추론이 최근 창(28일)만으로 부족하면 전체 수업 기록으로 확장해 재시도하되, 직전 수업(lastPart) 회피 로직은 최근 창만 사용해 오래된 기록을 직전 수업으로 오인하지 않음',
+    app.includes('const patternSequence=sequence.length<4?getRecentPartSequence(sessions,40,3650):sequence;') &&
+    app.includes('const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:pickBaseCycle(patternSequence,freq);') &&
+    app.includes('const inferred=inferActualSplit(patternSequence);') &&
+    app.includes('const lastPart=sequence[0];')
   ],
   ['오늘의 운동 가이드: 다음 수업 날짜 역산(2·3순위) 결과가 실제 최근 수업과 상극이면 채택하지 않고 다음 단계(패턴 이어가기/회복 회피)로 넘김 — 사이클 위치 계산만으로 상극 조합을 추천하지 않도록 보장',
     app.includes('const conflictsWithLast=lastAtoms.some(a=>candidate.split(" · ").includes(a)||candidate.split(" · ").includes(CONFLICT[a]));') &&
@@ -1336,19 +1344,19 @@ const checks = [
   ['오늘의 운동 가이드: exerciseMatchesPart가 배열(콤보 부위)도 하위호환으로 지원 + 원본 값(이두/삼두)도 함께 비교',
     app.includes('const rawVals=[e.muscleTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
   ],
-  wgScenario('오늘의 운동 가이드 시나리오1: 남성 5분할에서 가슴 다음 어깨가 추천되지 않음', lib => {
-    const r = lib.getRecommendedPart({}, [{ date: daysAgoStr(1), selectedTypes: ['가슴'], exercises: [] }], { gender: '남성' });
+  wgScenario('오늘의 운동 가이드 시나리오1: 주 5회 회원의 5분할 폴백에서 가슴 다음 어깨가 추천되지 않음', lib => {
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 5회' }, [{ date: daysAgoStr(1), selectedTypes: ['가슴'], exercises: [] }], {});
     return r.part !== '어깨';
   }),
-  wgScenario('오늘의 운동 가이드 시나리오2: 남성 5분할에서 하체 다음 등이 추천되지 않음', lib => {
-    const r = lib.getRecommendedPart({}, [{ date: daysAgoStr(1), selectedTypes: ['하체'], exercises: [] }], { gender: '남성' });
+  wgScenario('오늘의 운동 가이드 시나리오2: 주 5회 회원의 5분할 폴백에서 하체 다음 등이 추천되지 않음', lib => {
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 5회' }, [{ date: daysAgoStr(1), selectedTypes: ['하체'], exercises: [] }], {});
     return r.part !== '등';
   }),
-  wgScenario('오늘의 운동 가이드 시나리오3: 여성 기록 부족 회원에게 상체·하체 2분할이 적용될 수 있음', lib => {
-    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 2회' }, [], { gender: '여성' });
-    return arrEq(r.cycle, lib.FEMALE_SPLIT_2WAY);
+  wgScenario('오늘의 운동 가이드 시나리오3: 기록 부족 + 주 2회 회원에게 상체·하체 2분할이 적용될 수 있음(성별 무관)', lib => {
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 2회' }, [], {});
+    return arrEq(r.cycle, lib.SPLIT_2WAY);
   }),
-  wgScenario('오늘의 운동 가이드 시나리오4: 하체·가슴·삼두 / 등·어깨·이두 패턴이 반복되면 해당 2분할을 유지',
+  wgScenario('오늘의 운동 가이드 시나리오4: 하체·가슴·삼두 / 등·어깨·이두 패턴이 반복되면 해당 2분할을 유지(성별 무관)',
     lib => {
       const sessions = [
         { date: daysAgoStr(8), selectedTypes: ['하체', '가슴', '삼두'], exercises: [] },
@@ -1356,29 +1364,33 @@ const checks = [
         { date: daysAgoStr(4), selectedTypes: ['하체', '가슴', '삼두'], exercises: [] },
         { date: daysAgoStr(2), selectedTypes: ['등', '어깨', '이두'], exercises: [] },
       ];
-      const r = lib.getRecommendedPart({}, sessions, { gender: '여성' });
-      return arrEq(r.cycle, lib.FEMALE_SPLIT_COMBO_2WAY) && r.part === '하체 · 가슴 · 삼두';
+      const r = lib.getRecommendedPart({}, sessions, {});
+      return arrEq(r.cycle, lib.SPLIT_COMBO_2WAY) && r.part === '하체 · 가슴 · 삼두';
     }
   ),
-  wgScenario('오늘의 운동 가이드 시나리오5: 3분할 회원에게 하체·미는 운동·당기는 운동이 순환(당기는 다음 미는 추천, 하체·반복 회피)',
+  wgScenario('오늘의 운동 가이드 시나리오5: 주 3회·기록 부족 회원에게 하체·미는 운동·당기는 운동이 순환(당기는 다음 미는 추천, 하체·반복 회피, 성별 무관)',
     lib => {
       const sessions = [
         { date: daysAgoStr(6), selectedTypes: ['하체'], exercises: [] },
         { date: daysAgoStr(4), selectedTypes: ['가슴', '어깨', '삼두'], exercises: [] },
         { date: daysAgoStr(2), selectedTypes: ['등', '이두'], exercises: [] },
       ];
-      const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 4회' }, sessions, { gender: '여성' });
-      return arrEq(r.cycle, lib.FEMALE_SPLIT_3WAY) && r.part === '가슴 · 어깨 · 삼두';
+      const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 3회' }, sessions, {});
+      return arrEq(r.cycle, lib.SPLIT_3WAY) && r.part === '가슴 · 어깨 · 삼두';
     }
   ),
-  wgScenario('오늘의 운동 가이드 시나리오6: 2:1 진행 중(성별보다 우선) + 다음 수업 부위(하체)와 겹치면 3분할 순서를 조정',
+  wgScenario('오늘의 운동 가이드 시나리오6: 2:1 진행 중이면 성별과 무관하게 공통 기본값을 쓰고, 다음 수업 부위(하체)와 겹치면 순서를 조정',
     lib => {
       const profile = { weeklyWorkoutCount: '주 1회', nextWorkoutPart: '하체', nextWorkoutDate: daysFromNowStr(1) };
       const sessions = [{ date: daysAgoStr(40), sessionType: '2:1', selectedTypes: ['삼두'], exercises: [] }];
-      const r = lib.getRecommendedPart(profile, sessions, { gender: '남성' });
+      const r = lib.getRecommendedPart(profile, sessions, {});
       return r.isPaired === true && arrEq(r.cycle, lib.PAIR_SPLIT_DEFAULT) && r.part === '가슴 · 어깨 · 삼두';
     }
   ),
+  wgScenario('오늘의 운동 가이드 시나리오7: 주 4회 이상이고 기록이 뒷받침되지 않아도(짧은 기록) 5분할 폴백이 적용될 수 있음(성별 무관)', lib => {
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 4회' }, [], {});
+    return arrEq(r.cycle, lib.SPLIT_5WAY);
+  }),
 
   // ── 운동명 정규화 + 세트·중량·볼륨·RPE 추천 — 실제 buildReviewRoutine/recommendExerciseDose 실행 검증 ──
   wgScenario('운동명 정규화 시나리오1: "시티드 케이블로우"와 "시티드 케이블 로우"가 동일 운동으로 집계됨', lib => {
@@ -1658,14 +1670,62 @@ const checks = [
     return w === 45; // 기본값(20)+5가 아니라 실제 기록 40kg+5
   }),
 
-  ['오늘의 운동 가이드: 코어는 별도 buildReviewRoutine 호출로 "보조 운동" 한 줄로만 표시(단독 추천 아님)',
-    app.includes('const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어");') &&
-    app.includes('🧩 보조 운동')
+  ['오늘의 운동 가이드: 보조 운동 섹션 제거(메인 추천 3~4종목에만 집중, 코어 별도 추천 없음)',
+    !app.includes('🧩 보조 운동') &&
+    !app.includes('const coreRec=buildReviewRoutine(sessions,onboarding,checkins,"코어");') &&
+    !app.includes('coreAccessory')
   ],
   ['오늘의 운동 가이드: 팔 추천 시 전체 상위 4개가 아니라 이두 2개 + 삼두 2개로 균형있게 구성',
     app.includes('const armBalanced=wantsArm?[...sorted.filter(isBicep).slice(0,2),...sorted.filter(isTricep).slice(0,2)]:[];') &&
-    app.includes('const routineList=armBalanced.length?armBalanced:sorted.slice(0,4);')
+    app.includes('const routineList=armBalanced.length?armBalanced:sorted.slice(0,4);') &&
+    app.includes('routineList.sort(bySequence);')
   ],
+  ['오늘의 운동 가이드: buildReviewRoutine 후보 자격이 세트 3개 이상 요구가 아니라 트레이너 표시 또는 최소 1세트 실제 기록만 요구 — 세트가 적게 기록되는 운동도 후보에서 조기 배제되지 않음(팔 1종목만 추천되던 버그 수정)',
+    app.includes('if(!isTrainerMarkedExercise(e)&&filled.length<1)return;') &&
+    !app.includes('(!isTrainerMarkedExercise(e)&&filled.length<3)')
+  ],
+  ['오늘의 운동 가이드: buildReviewRoutine이 세션 내 등장 순서(orderIdx)를 최근 가중 평균으로 계산해 최종 추천 순서를 실제 수업 순서에 맞게 재배치',
+    app.includes('orderIdx') &&
+    app.includes('const orderRankOf=rec=>{') &&
+    app.includes('const bySequence=(a,b)=>orderRankOf(a)-orderRankOf(b);')
+  ],
+  ['오늘의 운동 가이드 UI: 추천 이유 블록이 기존 rec-group 스타일(여백 있는 구분선)을 재사용해 카드와 분리되고, 개인 운동 빈도(전체 횟수만, 부위별 아님)를 보조 문구로 반영',
+    app.includes('const weekly=computeWeeklyWorkoutCard(attendance,onboarding);') &&
+    !app.includes('className="rec-reasons"') &&
+    /\.rec-group\{border-top:1px solid #EEF1F4;padding-top:16px;margin-top:16px\}/.test(app)
+  ],
+  ['오늘의 운동 가이드: 맨몸·시간 기반 운동의 중량 배지 문구가 한 줄로 짧게 표시됨("동작 위주(중량 없음)" → "맨몸 동작")',
+    app.includes('"맨몸 동작"') && !app.includes('동작 위주(중량 없음)')
+  ],
+  wgScenario('팔 추천 버그 수정: 세트가 2개만 기록된 팔 운동도 후보에서 배제되지 않고 이두 2 + 삼두 2, 총 4종목이 추천됨', lib => {
+    const mk = w => ({ weight: w, reps: 10, volume: w * 10 });
+    const sessions = [{ date: daysAgoStr(3), isPublished: true, exercises: [
+      { name: '바벨컬', muscleTop: '이두', sets: [mk(20), mk(20)] },
+      { name: '해머컬', muscleTop: '이두', sets: [mk(14), mk(14)] },
+      { name: '케이블 푸시다운', muscleTop: '삼두', sets: [mk(15), mk(15)] },
+      { name: '오버헤드 익스텐션', muscleTop: '삼두', sets: [mk(10), mk(10)] },
+    ] }];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '팔');
+    return rec.routine.length === 4;
+  }),
+  wgScenario('실제 순서 재현: 최근 동일 부위 수업에서 반복된 등장 순서대로 추천 루틴이 정렬됨', lib => {
+    const mk = w => ({ weight: w, reps: 10, volume: w * 10 });
+    const sessions = [
+      { date: daysAgoStr(2), isPublished: true, exercises: [
+        { name: '벤치프레스', muscleTop: '가슴', sets: [mk(40), mk(40), mk(40)], rpe: 6 },
+        { name: '인클라인 벤치프레스', muscleTop: '가슴', sets: [mk(30), mk(30), mk(30)], rpe: 6 },
+      ] },
+      { date: daysAgoStr(9), isPublished: true, exercises: [
+        { name: '벤치프레스', muscleTop: '가슴', sets: [mk(37.5), mk(37.5), mk(37.5)], rpe: 6 },
+        { name: '인클라인 벤치프레스', muscleTop: '가슴', sets: [mk(27.5), mk(27.5), mk(27.5)], rpe: 6 },
+      ] },
+    ];
+    const rec = lib.buildReviewRoutine(sessions, {}, [], '가슴');
+    const names = rec.routine.map(x => lib.normalizeExerciseName(x.name));
+    const bi = names.indexOf(lib.normalizeExerciseName('벤치프레스'));
+    const ii = names.indexOf(lib.normalizeExerciseName('인클라인 벤치프레스'));
+    return bi !== -1 && ii !== -1 && bi < ii;
+  }),
 
   // ── 건강 탭: 컨디션/통증 독립 저장 ──
   ['건강 탭: 컨디션/통증이 체중·칼로리·걸음수와 분리된 독립 저장 함수(saveCondition/savePain)로 존재',

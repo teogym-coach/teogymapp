@@ -14495,6 +14495,12 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
         localStorage.removeItem(draftKey);
         return;
       }
+      // 날짜만 남고 종목명·세트값·코멘트 등 실제 작성 내용이 없는 빈 임시 기록(예: 전날 진입 후 아무것도
+      // 입력하지 않은 잔여물)은 새 회차로 취급해 버린다 — 날짜를 물려받으면 안 된다.
+      if (!pairSessionHasContent(d)) {
+        localStorage.removeItem(draftKey);
+        return;
+      }
       if (typeof d.date === "string" && d.date) setDate(d.date);
       if (typeof d.intensity === "string" && d.intensity) setIntensity(d.intensity);
       if (Array.isArray(d.selectedTypes)) setSelectedTypes(d.selectedTypes);

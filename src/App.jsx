@@ -5304,6 +5304,8 @@ export default function App() {
   const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
   const [healthHubInitialTab, setHealthHubInitialTab] = useState("대시보드"); // 오늘 입력 피드에서 특정 항목을 눌러 건강관리 허브로 이동할 때 시작 탭
   const [hubScrollTarget, setHubScrollTarget] = useState(null); // 홈 "다음 예약이 필요한 회원" 등에서 회원 상세(hub) 진입 시 특정 섹션으로 스크롤할 DOM id
+  const [trendInitialDate, setTrendInitialDate] = useState(null); // 오늘 입력 피드에서 "회원 입력 변화" 화면으로 이동할 때 자동으로 펼칠 날짜
+  const [trendInitialType, setTrendInitialType] = useState(null); // 위와 동일 — 어떤 항목(RPE/근육통/체중 등) 알림이었는지
   const [membersInitialFilter, setMembersInitialFilter] = useState(null); // 홈 "수업일지 미전송" 카드에서 회원목록 진입 시 적용할 기존 필터 키(예: "unrecorded") — MembersScreen이 마운트 시 1회 소비 후 자동으로 null로 되돌림
   const [loading,  setLoading]  = useState(false);
   // 회원 목록 전용 로딩/에러 — 다른 화면들이 공유하는 전역 loading과 분리한다.
@@ -5552,6 +5554,8 @@ export default function App() {
     setCardioLogs([]);
     setHealthHubInitialTab(opts.healthHubTab || "대시보드");
     setHubScrollTarget(opts.scrollTarget || null);
+    setTrendInitialDate(opts.initialDate || null);
+    setTrendInitialType(opts.initialType || null);
     setScreen(opts.targetScreen || "hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
@@ -6182,6 +6186,8 @@ export default function App() {
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} initialTab={healthHubInitialTab} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
+        {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
+        {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen("hub")} onSelectMember={goHub} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="bodycheck"  && member && (() => { console.log("[TEO GYM] BodyCheckScreen — memberId:", member.id, "bodyData:", !!bodyData); return true; })() && <BodyCheckScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} bodyData={bodyData} onSaveBodyData={async d => {
@@ -7097,7 +7103,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     if (!target) return;
     onMarkEventsRead?.([item.id]);
     setDrawerOpen(false);
-    onSelectMember?.(target, feedItemTarget(item.type));
+    onSelectMember?.(target, feedItemTarget(item));
   };
 
   // 회원 검색 — 홈 상단 입력창. 새 Firebase 조회 없이 이미 로드된 homeMembers만 사용해 이름으로 검색.
@@ -7769,20 +7775,23 @@ function koreanParticleEulReul(word) {
   if (!ch || code < 0xAC00 || code > 0xD7A3) return "를"; // 한글 완성형 범위 밖이면 기본값
   return (code - 0xAC00) % 28 !== 0 ? "을" : "를"; // 종성(받침) 유무로 을/를 판정
 }
-// 오늘 입력 피드 클릭 시 이동할 화면 — 세부 입력 영역까지 스크롤 앵커가 없는 화면 구조라 관련 상위 탭까지만 이동
+// 오늘 입력 피드 클릭 시 이동할 화면 — "회원 입력 변화"(memberInputTrend) 화면 하나로 통일해
+// 알림이 가리키는 날짜·항목이 곧바로 펼쳐진 상태로 열리게 한다(회원이 그날 입력한 RPE·근육통·체중·컨디션·
+// 통증·걸음수·유산소·칼로리·메모를 전부 한 화면에서 바로 확인 — 재선택 불필요).
+// goal_update만 예외: 온보딩/목표 관리 전용 관리자 화면이 따로 없어 회원 상세(허브)로 이동한다.
 const FEED_TARGET_BY_TYPE = {
-  weight:      { targetScreen: "healthhub", healthHubTab: "대시보드" },
-  pain:        { targetScreen: "healthhub", healthHubTab: "대시보드" },
-  condition:   { targetScreen: "healthhub", healthHubTab: "대시보드" },
-  kcal:        { targetScreen: "healthhub", healthHubTab: "음식" },
-  cardio:      { targetScreen: "healthhub", healthHubTab: "유산소" },
-  soreness:    { targetScreen: "soreness" },
-  rpe:         { targetScreen: "soreness" },
-  memo:        { targetScreen: "soreness" },
-  goal_update: { targetScreen: "hub" }, // 온보딩/목표 관리 전용 관리자 화면이 따로 없어 회원 상세(허브)로 이동
+  weight:      { targetScreen: "memberInputTrend" },
+  pain:        { targetScreen: "memberInputTrend" },
+  condition:   { targetScreen: "memberInputTrend" },
+  kcal:        { targetScreen: "memberInputTrend" },
+  cardio:      { targetScreen: "memberInputTrend" },
+  soreness:    { targetScreen: "memberInputTrend" },
+  rpe:         { targetScreen: "memberInputTrend" },
+  memo:        { targetScreen: "memberInputTrend" },
+  goal_update: { targetScreen: "hub" },
 };
-function feedItemTarget(type) {
-  return FEED_TARGET_BY_TYPE[type] || {};
+function feedItemTarget(item) {
+  return { ...(FEED_TARGET_BY_TYPE[item.type] || {}), initialDate: item.dateKey || null, initialType: item.type || null };
 }
 
 // 오늘 회원 입력 피드 병합 — 회원 목록 피드와 홈 알림 Drawer가 공유하는 단일 소스.
@@ -11897,6 +11906,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
               <div style={{padding:"0 18px 18px"}}>
                 <div className="hub-toolgrid" style={{marginBottom:8}}>
                   {menuBtn("🏋️","운동 분석","근력 · 훈련량 · 컨디션 · 부위 변화","exerciseAnalysis")}
+                  {menuBtn("📥","회원 입력 현황","오늘 회원들이 입력한 건강 기록 한눈에","memberInputStatus")}
                   {menuBtn("📋","훈련 피드백","다음 수업을 위한 훈련 요약","feedback")}
                   {menuBtn("🗣️","상담 리포트","회원의 변화를 한눈에 확인하고 다음 목표를 준비합니다","counselReport")}
                   {menuBtn("🔥","대사 추정","유산소 · 체중 분석","metabolism")}
@@ -19698,6 +19708,359 @@ function SorenessScreen({ member, sessions, onBack, onSaveSession, showToast }) 
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 📥 회원 입력 현황 — 오늘(KST) 회원들이 입력한 건강 기록을 카드로 모아보는 화면.
+// 새 Firestore 읽기 없이 이미 로드된 members/liveMembersById(recentActivityLog)만 사용한다.
+// ════════════════════════════════════════════
+const INPUT_STATUS_FIELD_TYPES = ["rpe","soreness","weight","condition","pain","steps","cardio","kcal","memo"];
+const INPUT_STATUS_FILTERS = [
+  ["all","전체"], ["rpe","RPE"], ["soreness","근육통"], ["weight","체중"], ["condition","컨디션"],
+  ["pain","통증"], ["steps","걸음수"], ["cardio","유산소"], ["kcal","칼로리"], ["memo","메모"],
+];
+
+// 회원별 오늘 입력을 모아 규칙 기반으로 🔴관리필요 / 🟡확인필요 / 🟢양호를 판정한다. AI API 미사용.
+function buildTodayInputStatusEntries(members, liveMembersById, todayKST) {
+  const entries = [];
+  (members||[]).forEach(m => {
+    if (isExcludedAdminMember(m)) return;
+    const live = liveMembersById[m.id];
+    const liveMember = live ? { ...m, ...live } : m;
+    const log = Array.isArray(liveMember.recentActivityLog) ? liveMember.recentActivityLog : [];
+    const todays = log.filter(a => a.dateKey === todayKST && INPUT_STATUS_FIELD_TYPES.includes(a.type));
+    if (!todays.length) return;
+    const today = {};
+    INPUT_STATUS_FIELD_TYPES.forEach(t => { const a = latestActivityByType(todays, t); if (a) today[t] = a; });
+    const lastAt = Math.max(...todays.map(a=>a.at||0));
+
+    const reasons = [];
+    let level = "green";
+    const bump = (lvl, reason) => { reasons.push(reason); if (lvl==="red" || (lvl==="yellow" && level!=="red")) level = lvl; };
+
+    if (today.rpe) {
+      const n = Number(String(today.rpe.value||"").replace(/[^0-9.]/g,""));
+      if (Number.isFinite(n)) {
+        if (n>=9) bump("red", `RPE ${n}`);
+        else if (n>=7) bump("yellow", `RPE ${n}`);
+      }
+    }
+    if (today.soreness) {
+      const v = String(today.soreness.value||"");
+      if (v.includes("심함")) bump("red", "근육통 심함");
+      else if (v.includes("보통")) bump("yellow", "근육통 보통");
+    }
+    if (today.pain) {
+      const v = String(today.pain.value||"");
+      if (!v.includes("통증 없음")) {
+        const vasMatch = v.match(/VAS\s*(\d+)/);
+        const vas = vasMatch ? Number(vasMatch[1]) : null;
+        if (vas!=null && vas>=6) bump("red", `통증 VAS ${vas}`);
+        else bump("yellow", "통증 입력");
+      }
+    }
+    if (today.condition) {
+      const v = String(today.condition.value||"");
+      if (v==="하") bump("red", "컨디션 저하");
+      else if (v==="중") bump("yellow", "컨디션 보통");
+    }
+
+    entries.push({ member: m, today, lastAt, level, reasons: [...new Set(reasons)] });
+  });
+  return entries.sort((a,b)=>b.lastAt-a.lastAt);
+}
+
+function MemberInputStatusScreen({ members, liveMembersById={}, onBack, onSelectMember }) {
+  const [filter, setFilter] = useState("all");
+  const todayKST = getKoreaDateString();
+  const entries = useMemo(()=>buildTodayInputStatusEntries(members, liveMembersById, todayKST), [members, liveMembersById, todayKST]);
+
+  const board = useMemo(()=>({
+    red: entries.filter(e=>e.level==="red"),
+    yellow: entries.filter(e=>e.level==="yellow"),
+    green: entries.filter(e=>e.level==="green"),
+  }), [entries]);
+
+  const sortedEntries = useMemo(()=>{
+    if (filter==="all") return entries;
+    return [...entries].sort((a,b)=>{
+      const ai = a.today[filter] ? 1:0, bi = b.today[filter]?1:0;
+      if (ai!==bi) return bi-ai;
+      return b.lastAt-a.lastAt;
+    });
+  }, [entries, filter]);
+
+  return (
+    <div>
+      <SH title="📥 회원 입력 현황" sub={`오늘(${todayKST}) 입력 ${entries.length}명`} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
+
+      <Card title="🤖 AI 요약" style={{marginBottom:12}}>
+        {entries.length===0 ? <Emp msg="오늘 입력한 회원이 아직 없습니다."/> : (
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {["red","yellow","green"].map(lvl=>{
+              const list = board[lvl];
+              const style = COUNSEL_STATUS_STYLE[lvl];
+              const heading = lvl==="red"?"오늘 관리가 필요한 회원":lvl==="yellow"?"확인 필요":"회복 양호";
+              return (
+                <div key={lvl} style={{padding:"9px 10px",borderRadius:9,background:style.bg,border:`1px solid ${style.color}33`}}>
+                  <Mo c={style.color} s={10} style={{fontWeight:800}}>{style.emoji} {heading} ({list.length}명)</Mo>
+                  {list.length>0 && (
+                    <div style={{marginTop:6,display:"flex",flexDirection:"column",gap:4}}>
+                      {list.map(e=>(
+                        <div key={e.member.id} style={{fontSize:11,color:"#cbd5e1"}}>
+                          <b style={{color:"#fff"}}>{e.member.name}</b>
+                          {e.reasons.length>0 && <span> — {e.reasons.join(" · ")}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:13}}>
+        {INPUT_STATUS_FILTERS.map(([key,label])=>(
+          <button key={key} onClick={()=>setFilter(key)} style={{padding:"6px 12px",borderRadius:16,border:"1px solid",flexShrink:0,cursor:"pointer",
+            borderColor:filter===key?"#5EEAD4":"rgba(255,255,255,0.08)",
+            background:filter===key?"rgba(0,229,160,.12)":"transparent",
+            color:filter===key?"#5EEAD4":"#94a3b8",fontSize:11,fontWeight:700}}>{label}</button>
+        ))}
+      </div>
+
+      {sortedEntries.length===0 ? <Emp msg="오늘 입력한 회원이 없습니다."/> : (
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {sortedEntries.map(e=>(
+            <button key={e.member.id} onClick={()=>onSelectMember?.(e.member,{targetScreen:"memberInputTrend"})}
+              style={{textAlign:"left",cursor:"pointer",width:"100%",background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"12px 13px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff"}}>{e.member.name}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  {e.level!=="green" && <Bdg color={COUNSEL_STATUS_STYLE[e.level].color}>{COUNSEL_STATUS_STYLE[e.level].emoji}</Bdg>}
+                  <Mo c="#6060a0" s={9}>{formatActivityTime(e.lastAt)}</Mo>
+                </div>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {INPUT_STATUS_FIELD_TYPES.filter(t=>e.today[t]).map(t=>(
+                  <span key={t} style={{fontSize:10.5,fontWeight:700,padding:"3px 8px",borderRadius:8,background:"rgba(255,255,255,0.05)",color:activityTone(e.today[t])}}>
+                    {ACTIVITY_ICON[t]} {ACTIVITY_LABEL[t]} {e.today[t].value}
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 📊 회원 입력 변화 — 회원 한 명의 최근 입력 추이(체중·칼로리·걸음수·컨디션·통증·유산소·RPE·근육통·메모)를
+// 그래프/카드로 모아 보여주는 화면. "회원 입력 알림" 클릭 시에도 이 화면이 열리며, 알림이 가리키는 날짜/항목으로 자동 스크롤된다.
+// ════════════════════════════════════════════
+const CONDITION_SCORE = { 하:1, 중:2, 상:3 };
+
+// 최근 추세 자동 분석(규칙 기반, AI API 미사용) — 회복 상태 · 운동 강도 · 생활습관 세 줄 요약 + 근거 수치
+function buildMemberInputTrendSummary({ rpeSeries, sorenessSeries, weightSeries, stepsSeries, cardioSeries, kcalSeries, painRecords, conditionSeries }) {
+  const avg = arr => arr.length ? Math.round((arr.reduce((a,b)=>a+b,0)/arr.length)*10)/10 : null;
+
+  const avgRpe = avg(rpeSeries.slice(-5).map(r=>r.value));
+  const weightRecent = weightSeries.slice(-10);
+  const weightDiff = weightRecent.length>=2 ? Math.round((weightRecent.at(-1).value - weightRecent[0].value)*10)/10 : null;
+  const avgCondition = avg(conditionSeries.slice(-5).map(c=>c.value));
+  const stepsAvg = avg(stepsSeries.slice(-7).map(s=>s.value));
+  const cardioAvg = avg(cardioSeries.slice(-7).map(c=>c.value));
+  const kcalAvg = avg(kcalSeries.slice(-7).map(k=>k.value));
+  const painRecent = painRecords.slice(-5);
+  const painTrend = painRecent.length>=2 ? Math.round((painRecent.at(-1).vas - painRecent[0].vas)*10)/10 : null;
+  const sorenessRepeatCount = sorenessSeries.slice(-5).filter(s=>s.value>=2).length;
+
+  let recovery;
+  if (painTrend!=null && painTrend>0) recovery = "통증이 최근 들어 심해지고 있어 회복에 주의가 필요합니다.";
+  else if (sorenessRepeatCount>=3) recovery = "근육통이 반복적으로 기록되고 있어 회복 상태를 점검할 필요가 있습니다.";
+  else if (avgCondition!=null && avgCondition>=2.5) recovery = "컨디션이 대체로 양호하게 유지되고 있습니다.";
+  else if (avgCondition!=null && avgCondition<1.8) recovery = "최근 컨디션이 낮게 기록되고 있어 회복이 더딘 편입니다.";
+  else recovery = "회복 상태는 대체로 안정적입니다.";
+
+  let intensity;
+  if (avgRpe!=null && avgRpe>=8.5) intensity = `최근 5회 평균 RPE ${avgRpe}로 강도가 높은 편입니다.`;
+  else if (avgRpe!=null && avgRpe<=5) intensity = `최근 5회 평균 RPE ${avgRpe}로 강도가 낮은 편입니다.`;
+  else if (avgRpe!=null) intensity = `최근 5회 평균 RPE ${avgRpe}로 적정 강도를 유지하고 있습니다.`;
+  else intensity = "최근 RPE 기록이 부족합니다.";
+
+  const habitParts = [];
+  if (weightDiff!=null) habitParts.push(`체중 ${weightDiff>0?"+":""}${weightDiff}kg`);
+  if (stepsAvg!=null) habitParts.push(`평균 걸음수 ${Math.round(stepsAvg).toLocaleString()}보`);
+  if (cardioAvg!=null) habitParts.push(`평균 유산소 ${Math.round(cardioAvg)}분`);
+  if (kcalAvg!=null) habitParts.push(`평균 섭취칼로리 ${Math.round(kcalAvg).toLocaleString()}kcal`);
+  const habits = habitParts.length ? habitParts.join(" · ") : "생활습관 관련 기록이 아직 부족합니다.";
+
+  return { recovery, intensity, habits, stats:{ avgRpe, weightDiff, avgCondition, stepsAvg, cardioAvg, kcalAvg, painTrend, sorenessRepeatCount } };
+}
+
+const TREND_CHART_TOOLTIP_STYLE = {background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11};
+
+// 값 하나만 있는 단순 추이(체중/칼로리/걸음수/컨디션/유산소) — 라인 그래프 1개
+function SimpleTrendCard({ id, title, icon, color, points, unit, emptyMsg, yTickFormatter, valueTooltip }) {
+  const data = points.map(p=>({name:String(p.date).slice(5), value:p.value}));
+  return (
+    <div id={id}>
+      <Card title={`${icon} ${title}`} style={{marginBottom:12}}>
+        {points.length<2 ? <Emp msg={emptyMsg||"기록이 부족합니다."}/> : (
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={data} margin={{top:6,right:8,left:-22,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
+              <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+              <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} tickFormatter={yTickFormatter} domain={yTickFormatter?[1,3]:["auto","auto"]}/>
+              <Tooltip contentStyle={TREND_CHART_TOOLTIP_STYLE} formatter={v=>[valueTooltip?valueTooltip(v):`${v}${unit||""}`, title]}/>
+              <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={{r:3,fill:color}} name={title}/>
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// 날짜 + 운동 부위를 함께 표시해야 하는 추이(RPE/근육통/통증) — 라인 그래프 + 부위 태그가 붙은 최근 기록 칩 목록
+function PartTaggedTrendCard({ id, title, icon, color, points, valueLabel, emptyMsg }) {
+  const data = points.map(p=>({name:String(p.date).slice(5), value:p.value}));
+  const recent = points.slice(-8);
+  return (
+    <div id={id}>
+      <Card title={`${icon} ${title}`} style={{marginBottom:12}}>
+        {points.length===0 ? <Emp msg={emptyMsg}/> : (
+          <>
+            {points.length>=2 && (
+              <ResponsiveContainer width="100%" height={130}>
+                <LineChart data={data} margin={{top:6,right:8,left:-22,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
+                  <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                  <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                  <Tooltip contentStyle={TREND_CHART_TOOLTIP_STYLE}/>
+                  <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={{r:3,fill:color}} name={title}/>
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+            <div style={{display:"flex",gap:6,overflowX:"auto",paddingTop:points.length>=2?10:0,paddingBottom:2}}>
+              {recent.map((p,i)=>(
+                <Fragment key={i}>
+                  <div style={{flexShrink:0,textAlign:"center",padding:"6px 9px",borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,0.08)"}}>
+                    <Mo c="#6060a0" s={8} style={{display:"block"}}>{String(p.date).slice(5)}</Mo>
+                    <Mo c="#cbd5e1" s={9} style={{display:"block",marginTop:2,fontWeight:700}}>{p.part||"-"}</Mo>
+                    <Mo c={color} s={10} style={{display:"block",marginTop:2,fontWeight:800}}>{valueLabel(p)}</Mo>
+                  </div>
+                  {i<recent.length-1 && <Mo c="#3a3a5a" s={11} style={{alignSelf:"center",flexShrink:0}}>→</Mo>}
+                </Fragment>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function MemoListCard({ id, memos }) {
+  return (
+    <div id={id}>
+      <Card title="📝 최근 메모" style={{marginBottom:12}}>
+        {memos.length===0 ? <Emp msg="최근 메모가 없습니다."/> : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {memos.map(s=>(
+              <div key={s.id} style={{padding:"9px 10px",borderRadius:8,background:"#0B1120",border:"1px solid rgba(255,255,255,0.06)"}}>
+                <Mo c="#6060a0" s={8} style={{display:"block",marginBottom:3}}>{s.date} · {formatTypes(s.selectedTypes||s.type)||"웨이트"}</Mo>
+                <div style={{fontSize:11.5,color:"#e2e8f0",lineHeight:1.6}}>{s.memberFeedback.memo}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function MemberInputTrendScreen({ member, sessions, bodyData, nutritionData, cardioLogs=[], loading, initialDate, initialType, onBack }) {
+  const [checkins, setCheckins] = useState([]);
+  const [checkinsLoading, setCheckinsLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setCheckinsLoading(true);
+    getMemberCheckins(member.id, 60).then(rows => { if (alive) { setCheckins(rows||[]); setCheckinsLoading(false); } })
+      .catch(() => { if (alive) setCheckinsLoading(false); });
+    return () => { alive = false; };
+  }, [member.id]);
+
+  const scrolledRef = useRef(false);
+  useEffect(() => {
+    if (scrolledRef.current || loading || checkinsLoading || !initialType) return;
+    scrolledRef.current = true;
+    const targetId = "trend-" + initialType;
+    requestAnimationFrame(() => { document.getElementById(targetId)?.scrollIntoView({ behavior:"smooth", block:"start" }); });
+  }, [loading, checkinsLoading, initialType]);
+
+  if (loading || checkinsLoading) return <div><SH title="📊 회원 입력 변화" sub={member?.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Skel n={5}/></div>;
+
+  const sortedCheckins = [...checkins].sort((a,b)=>String(a.date||a.id||"").localeCompare(String(b.date||b.id||"")));
+  const weightSeries = getBodyWeightRecords(bodyData).slice(-30).map(r=>({date:r.date, value:r.weight}));
+  const kcalSeries = getKcalLogs(nutritionData).slice(-30).map(r=>({date:r.date, value:r.kcal}));
+  const stepsSeries = sortedCheckins.filter(c=>Number(c.steps)>0).map(c=>({date:c.date||c.id, value:Number(c.steps)})).slice(-30);
+  const conditionSeries = sortedCheckins.filter(c=>c.condition && CONDITION_SCORE[c.condition]).map(c=>({date:c.date||c.id, value:CONDITION_SCORE[c.condition]})).slice(-30);
+  const painRecords = getPainRecords(checkins).slice(-30);
+  const cardioSeries = [...cardioLogs].filter(l=>l.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))).slice(-30).map(l=>({date:l.date, value:Number(l.durationMinutes)||0}));
+
+  const feedbackSessions = [...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const rpeSeries = feedbackSessions.filter(s=>getMemberFeedbackRPE(s)!=null).map(s=>({date:s.date, value:getMemberFeedbackRPE(s), part:formatTypes(s.selectedTypes||s.type)||"웨이트"})).slice(-30);
+  const sorenessSeries = feedbackSessions.filter(s=>hasSorenessSignal(s.memberFeedback)).map(s=>({date:s.date, value:SORENESS_LEVELS.indexOf(s.memberFeedback.sorenessLevel||"없음"), level:s.memberFeedback.sorenessLevel, part:formatSorenessBodyParts(s.memberFeedback)})).slice(-30);
+  const memoSessions = [...feedbackSessions].filter(s=>s.memberFeedback?.memo).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,10);
+  const painPoints = painRecords.map(r=>({date:r.date, value:r.vas, part:r.part}));
+
+  const summary = buildMemberInputTrendSummary({ rpeSeries, sorenessSeries, weightSeries, stepsSeries, cardioSeries, kcalSeries, painRecords, conditionSeries });
+
+  return (
+    <div>
+      <SH title="📊 회원 입력 변화" sub={member?.name} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/>
+
+      {initialDate && initialType && (
+        <div style={{background:"rgba(94,234,212,.10)",border:"1px solid rgba(94,234,212,.24)",borderRadius:10,padding:"9px 12px",marginBottom:13}}>
+          <Mo c="#5EEAD4" s={11} style={{fontWeight:800}}>🔔 {initialDate} · {ACTIVITY_LABEL[initialType]||initialType} 입력 확인</Mo>
+        </div>
+      )}
+
+      <SimpleTrendCard id="trend-weight" title="체중" icon="⚖️" color="#5EEAD4" points={weightSeries} unit="kg" emptyMsg="체중 기록이 부족합니다."/>
+      <SimpleTrendCard id="trend-kcal" title="섭취칼로리" icon="🍚" color="#ffd166" points={kcalSeries} unit="kcal" emptyMsg="칼로리 기록이 부족합니다."/>
+      <SimpleTrendCard id="trend-steps" title="걸음수" icon="👟" color="#a5b4fc" points={stepsSeries} unit="보" emptyMsg="걸음수 기록이 부족합니다."/>
+      <SimpleTrendCard id="trend-condition" title="컨디션" icon="🙂" color="#22E0C2" points={conditionSeries}
+        yTickFormatter={v=>({1:"하",2:"중",3:"상"}[v]||"")} valueTooltip={v=>({1:"하",2:"중",3:"상"}[v]||v)} emptyMsg="컨디션 기록이 부족합니다."/>
+      <PartTaggedTrendCard id="trend-pain" title="통증" icon="📍" color="#ff6b6b" points={painPoints} valueLabel={p=>`VAS ${p.value}`} emptyMsg="통증 기록이 없습니다."/>
+      <SimpleTrendCard id="trend-cardio" title="유산소" icon="❤️" color="#f97316" points={cardioSeries} unit="분" emptyMsg="유산소 기록이 부족합니다."/>
+      <PartTaggedTrendCard id="trend-rpe" title="RPE" icon="😊" color="#818cf8" points={rpeSeries} valueLabel={p=>`RPE ${p.value}`} emptyMsg="RPE 기록이 없습니다."/>
+      <PartTaggedTrendCard id="trend-soreness" title="근육통" icon="💪" color="#ff9f43" points={sorenessSeries} valueLabel={p=>p.level||"-"} emptyMsg="근육통 기록이 없습니다."/>
+      <MemoListCard id="trend-memo" memos={memoSessions}/>
+
+      <Card title="🧭 최근 추세 자동 분석">
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(96px,1fr))",gap:8,marginBottom:12}}>
+          <StatTile label="최근 5회 평균 RPE" value={summary.stats.avgRpe??"기록 없음"} />
+          <StatTile label="최근 체중 변화" value={summary.stats.weightDiff!=null?`${summary.stats.weightDiff>0?"+":""}${summary.stats.weightDiff}kg`:"기록 없음"} />
+          <StatTile label="최근 컨디션" value={summary.stats.avgCondition!=null?(summary.stats.avgCondition>=2.5?"양호":summary.stats.avgCondition>=1.8?"보통":"저하"):"기록 없음"} />
+          <StatTile label="최근 걸음수 평균" value={summary.stats.stepsAvg!=null?`${Math.round(summary.stats.stepsAvg).toLocaleString()}보`:"기록 없음"} />
+          <StatTile label="최근 유산소 평균" value={summary.stats.cardioAvg!=null?`${Math.round(summary.stats.cardioAvg)}분`:"기록 없음"} />
+          <StatTile label="최근 칼로리 평균" value={summary.stats.kcalAvg!=null?`${Math.round(summary.stats.kcalAvg).toLocaleString()}kcal`:"기록 없음"} />
+          <StatTile label="최근 통증 변화" value={summary.stats.painTrend!=null?(summary.stats.painTrend>0?"악화":summary.stats.painTrend<0?"호전":"유지"):"기록 없음"} />
+          <StatTile label="최근 근육통" value={summary.stats.sorenessRepeatCount+"회 반복"} />
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+          <div style={{fontSize:11.5,color:"#e2e8f0",lineHeight:1.6}}>💚 최근 회복 상태 — {summary.recovery}</div>
+          <div style={{fontSize:11.5,color:"#e2e8f0",lineHeight:1.6}}>🔥 최근 운동 강도 — {summary.intensity}</div>
+          <div style={{fontSize:11.5,color:"#e2e8f0",lineHeight:1.6}}>🗓️ 최근 생활습관 — {summary.habits}</div>
+        </div>
+      </Card>
     </div>
   );
 }

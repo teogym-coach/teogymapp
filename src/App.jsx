@@ -14180,6 +14180,18 @@ const HIST_DARK_TEXT = {
 };
 function histDark(hex){ return HIST_DARK_TEXT[hex] || hex; }
 
+// 숫자 전용 스타일 — 한글(Noto Sans KR)은 Hangul에 맞춰 둥글게 그려지는 폰트라 그 안의 라틴 숫자도 같이 둥글고
+// 퍼져 보인다. 날짜·회차·볼륨·세트·RPE·시간·체중·칼로리 등 "숫자" 부분만 DM Mono + tabular-nums로 분리해
+// 또렷하고 단단하게 보이도록 한다(한글 라벨·단위 자체의 폰트는 건드리지 않음).
+const HIST_NUM_FONT = {
+  fontFamily: "'DM Mono',monospace",
+  fontVariantNumeric: "tabular-nums",
+  fontFeatureSettings: '"tnum" 1, "lnum" 1',
+};
+function HistNum({ children, weight=700, style }) {
+  return <span style={{...HIST_NUM_FONT, fontWeight:weight, ...(style||{})}}>{children}</span>;
+}
+
 // 회원 공개 배지 — 히스토리 카드에서 항상 노출(숨김·삭제 금지)
 function HistPublishBadge({ s }) {
   if (s.isPublished) {
@@ -14225,8 +14237,8 @@ const HIST_WEEKDAY = ["일요일","월요일","화요일","수요일","목요일
 function formatHistoryDateParts(dateStr) {
   const s = String(dateStr||"").slice(0,10);
   const d = new Date(`${s}T12:00:00`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(d)) return { monthDay: s || "-", weekday: "" };
-  return { monthDay: `${d.getMonth()+1}월 ${d.getDate()}일`, weekday: HIST_WEEKDAY[d.getDay()] };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(d)) return { month:null, day:null, raw: s || "-", weekday: "" };
+  return { month: d.getMonth()+1, day: d.getDate(), raw:null, weekday: HIST_WEEKDAY[d.getDay()] };
 }
 
 function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, onAdd, onEdit, onDelete, onSplit, onRefresh, showToast, onStatusChange }) {
@@ -15346,7 +15358,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
             const typeLbl = formatTypes(s.selectedTypes || s.type);
             const ic = IC[s.intensity] || "#ffd166";
             const cc = CC[s.condition] || CC["상"];
-            const { monthDay, weekday } = formatHistoryDateParts(s.date);
+            const { month, day, raw, weekday } = formatHistoryDateParts(s.date);
             const partVolumes = calcPartVolumes(s.exercises);
             return (
               <div key={s.id||i}
@@ -15358,8 +15370,19 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                   {/* ── 왼쪽 70% : 날짜·회차·공개배지·부위·상태·종목 ── */}
                   <div style={{flex:isMobile?"1 1 auto":"1 1 68%",minWidth:0,width:isMobile?"100%":"auto"}}>
                     <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:4}}>
-                      <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:DB.text,letterSpacing:"-.3px"}}>{monthDay}</span>
-                      <span style={{fontFamily:DB.font,fontWeight:600,fontSize:15,color:DB.sub}}>{s.sessionNo}회차</span>
+                      <span style={{color:DB.text,letterSpacing:"-.3px"}}>
+                        {month!=null ? (
+                          <>
+                            <HistNum weight={700} style={{fontSize:26}}>{month}</HistNum>
+                            <span style={{fontFamily:DB.font,fontWeight:700,fontSize:26}}>월 </span>
+                            <HistNum weight={700} style={{fontSize:26}}>{day}</HistNum>
+                            <span style={{fontFamily:DB.font,fontWeight:700,fontSize:26}}>일</span>
+                          </>
+                        ) : <span style={{fontFamily:DB.font,fontWeight:700,fontSize:26}}>{raw}</span>}
+                      </span>
+                      <span style={{fontFamily:DB.font,fontWeight:600,fontSize:15,color:DB.sub}}>
+                        <HistNum weight={700} style={{fontSize:15}}>{s.sessionNo}</HistNum>회차
+                      </span>
                       <HistPublishBadge s={s} />
                     </div>
                     <div style={{fontFamily:DB.font,fontWeight:600,fontSize:14,color:DB.mintSoft,marginBottom:14}}>{weekday}</div>
@@ -15372,15 +15395,15 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                     {/* 대표님 운동 시간 표시 */}
                     {isOwner(member) && (s.workoutStartTime || s.workoutEndTime) && (
                       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
-                        {s.workoutStartTime && <span style={{fontFamily:DB.font,fontSize:14,color:DB.mintSoft,fontWeight:700}}>▶ {s.workoutStartTime}</span>}
-                        {s.workoutEndTime   && <span style={{fontFamily:DB.font,fontSize:14,color:"#7C3AED",fontWeight:700}}>■ {s.workoutEndTime}</span>}
+                        {s.workoutStartTime && <HistNum weight={700} style={{fontSize:14,color:DB.mintSoft}}>▶ {s.workoutStartTime}</HistNum>}
+                        {s.workoutEndTime   && <HistNum weight={700} style={{fontSize:14,color:"#7C3AED"}}>■ {s.workoutEndTime}</HistNum>}
                         {s.workoutStartTime && s.workoutEndTime && (() => {
                           const [sh,sm] = s.workoutStartTime.split(":").map(Number);
                           const [eh,em] = s.workoutEndTime.split(":").map(Number);
                           const totalMin = (eh*60+em) - (sh*60+sm);
                           if (totalMin <= 0) return null;
                           const h = Math.floor(totalMin/60), m = totalMin%60;
-                          return <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,color:"#B45309"}}>⏱ {h>0?`${h}h `:""}{m}m</span>;
+                          return <HistNum weight={700} style={{fontSize:14,color:"#B45309"}}>⏱ {h>0?`${h}h `:""}{m}m</HistNum>;
                         })()}
                       </div>
                     )}
@@ -15394,7 +15417,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                         <span style={{color:DB.faint}}>회원 수업 후 상태 </span>
                         <span style={{color:DB.mintSoft,fontWeight:700}}>{s.memberFeedback.sorenessLevel||"-"} · {formatSorenessBodyParts(s.memberFeedback)}</span>
                         <span style={{color:DB.border}}> | </span>
-                        <span style={{color:DB.mintSoft,fontWeight:700}}>RPE {s.memberFeedback.rpe ?? "-"}</span>
+                        <HistNum weight={700} style={{color:DB.mintSoft}}>RPE {s.memberFeedback.rpe ?? "-"}</HistNum>
                         {s.memberFeedback.memo && <><span style={{color:DB.border}}> | </span><span>{s.memberFeedback.memo}</span></>}
                       </div>
                     )}
@@ -15404,8 +15427,8 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap",alignItems:"center"}}>
                         <span style={{fontSize:13}}>🔥</span>
                         {s.cardio.type    && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>{s.cardio.type}</span>}
-                        {s.cardio.minutes && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>{s.cardio.minutes}분</span>}
-                        {s.cardio.calories && <span style={{fontFamily:DB.font,fontSize:14,color:DB.sub}}>{s.cardio.calories}kcal</span>}
+                        {s.cardio.minutes && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}><HistNum weight={700} style={{fontSize:14}}>{s.cardio.minutes}</HistNum>분</span>}
+                        {s.cardio.calories && <HistNum weight={700} style={{fontSize:14,color:DB.sub}}>{s.cardio.calories}kcal</HistNum>}
                       </div>
                     )}
                   </div>
@@ -15425,15 +15448,15 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                     display:"flex",flexDirection:"column",gap:10,
                     alignItems: isMobile ? "flex-start" : "flex-end",
                   }}>
-                    <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:DB.mint}}>
+                    <HistNum weight={700} style={{fontSize:24,color:DB.mint}}>
                       {(s.totalVolume||0).toLocaleString()} kg
-                    </span>
+                    </HistNum>
                     {partVolumes.length > 0 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end"}}>
                         {partVolumes.map(([g,v])=>(
                           <span key={g} style={{fontFamily:DB.font,fontSize:13,fontWeight:700,padding:"4px 10px",borderRadius:999,
                             background:mColor(g)+"18",color:histDark(mColor(g)),border:`1px solid ${mColor(g)}33`,whiteSpace:"nowrap"}}>
-                            {g} {v.toLocaleString()}kg
+                            {g} <HistNum weight={700} style={{fontSize:13}}>{v.toLocaleString()}kg</HistNum>
                           </span>
                         ))}
                       </div>
@@ -15443,7 +15466,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end",alignItems:"center"}}>
                         <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,padding:"4px 10px",borderRadius:999,
                           background:"#F1F5F9",color:DB.sub,border:`1px solid ${DB.border}`}}>
-                          {calcTotalSets(s.exercises)}세트
+                          <HistNum weight={700} style={{fontSize:14}}>{calcTotalSets(s.exercises)}</HistNum>세트
                         </span>
                         {s.intensity && (
                           <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,padding:"4px 10px",borderRadius:999,
@@ -15476,13 +15499,17 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                             <span style={{fontFamily:DB.font,fontSize:14}}>
                               {hasSoreness && <span style={{color:"#C2410C",fontWeight:700}}>💪 {formatSorenessBodyParts(feedback)} · {feedback.sorenessLevel}</span>}
                               {hasSoreness && feedback?.rpe != null && <span style={{color:DB.faint}}> · </span>}
-                              {feedback?.rpe != null && <span style={{color:"#7C3AED",fontWeight:700}}>RPE {feedback.rpe}</span>}
+                              {feedback?.rpe != null && <HistNum weight={700} style={{color:"#7C3AED"}}>RPE {feedback.rpe}</HistNum>}
                             </span>
                           )}
                           {memoText && <span style={{fontFamily:DB.font,fontSize:14,color:DB.mintSoft}}>📝 {memoText}</span>}
-                          {cardio && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>❤️ {cardio.durationMinutes ? `${cardio.durationMinutes}분` : "기록됨"}</span>}
-                          {weight != null && <span style={{fontFamily:DB.font,fontSize:14,color:DB.sub}}>⚖️ {weight}kg</span>}
-                          {kcal != null && <span style={{fontFamily:DB.font,fontSize:14,color:"#EA580C"}}>🔥 {Number(kcal).toLocaleString()}kcal</span>}
+                          {cardio && (
+                            <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>
+                              ❤️ {cardio.durationMinutes ? <><HistNum weight={700} style={{fontSize:14}}>{cardio.durationMinutes}</HistNum>분</> : "기록됨"}
+                            </span>
+                          )}
+                          {weight != null && <HistNum weight={700} style={{fontSize:14,color:DB.sub}}>⚖️ {weight}kg</HistNum>}
+                          {kcal != null && <HistNum weight={700} style={{fontSize:14,color:"#EA580C"}}>🔥 {Number(kcal).toLocaleString()}kcal</HistNum>}
                         </div>
                       );
                     })()}
@@ -15545,7 +15572,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                         <div style={{flex:1,minWidth:120,padding:"8px 11px",borderRadius:9,
                           background:"rgba(194,65,12,.05)",border:"1px solid rgba(194,65,12,.18)"}}>
                           <div style={{fontFamily:DB.font,fontSize:10.5,color:"#C2410C",fontWeight:700,marginBottom:3}}>운동 전</div>
-                          {b.vas > 0 && <span style={{fontFamily:DB.font,fontSize:12,color:bColor,fontWeight:800}}>VAS {b.vas}</span>}
+                          {b.vas > 0 && <HistNum weight={800} style={{fontSize:12,color:bColor}}>VAS {b.vas}</HistNum>}
                           {b.part && <div style={{fontFamily:DB.font,fontSize:11,color:DB.sub,marginTop:1}}>{b.part}</div>}
                           {b.situation && <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint}}>{b.situation}</div>}
                         </div>
@@ -15554,7 +15581,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                         <div style={{flex:1,minWidth:120,padding:"8px 11px",borderRadius:9,
                           background:"rgba(15,148,136,.05)",border:"1px solid rgba(15,148,136,.18)"}}>
                           <div style={{fontFamily:DB.font,fontSize:10.5,color:"#0F9488",fontWeight:700,marginBottom:3}}>운동 후</div>
-                          {a.vas > 0 && <span style={{fontFamily:DB.font,fontSize:12,color:aColor,fontWeight:800}}>VAS {a.vas}</span>}
+                          {a.vas > 0 && <HistNum weight={800} style={{fontSize:12,color:aColor}}>VAS {a.vas}</HistNum>}
                           {a.change && <div style={{fontFamily:DB.font,fontSize:11,color:aColor,marginTop:1,fontWeight:700}}>{a.change==="감소"?"✅":a.change==="증가"?"⚠️":"➡️"} {a.change}</div>}
                           {a.memo && <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.memo}</div>}
                         </div>

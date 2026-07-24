@@ -1562,7 +1562,7 @@ function namedExercises(s){return (s?.exercises||[]).filter(e=>e&&e.name);}
 // 이번 수업 운동을 muscleTop(운동 카드 부위) 기준으로 그룹화. Map 삽입 순서 = 운동 배열에 처음 등장한 순서(동률 3순위에 사용).
 function groupExercisesByMuscleTop(s){
   const map=new Map();
-  namedExercises(s).forEach(e=>{ const g=e.muscleTop; if(!g)return; if(!map.has(g))map.set(g,[]); map.get(g).push(e); });
+  namedExercises(s).forEach(e=>{ const g=getMemberFacingMuscleTop(e); if(!g)return; if(!map.has(g))map.set(g,[]); map.get(g).push(e); });
   return map;
 }
 // buildSessionReportStats를 재사용해 특정 muscleTop 그룹(운동 배열)만의 볼륨/중량/반복수/세트/운동 수를 계산
@@ -3846,9 +3846,28 @@ function GoalMetric({goal}){return <div className="metric goal-metric"><span>현
 function CurrentWeightMetric({curW}){return <div className="metric"><span>현재 체중</span><b>{formatWeightValue(curW)}</b></div>}
 function NextWorkoutMetric({profile}){const info=getNextWorkoutInfo(profile); return <div className="metric next-workout-metric"><span>다음 수업 운동</span><b>{info.part||"미정"}</b><small>{info.dateText}</small><em>{info.dDay}</em></div>}
 function normalizeWorkoutPart(part){if(["팔-이두근","팔-삼두근","이두","삼두"].includes(part))return "팔"; if(part==="복근")return "코어"; if(["기능","스트레칭/이동성"].includes(part))return "교정"; return part||"";}
+// ── 회원 표시 전용 "코어 운동" 강제 판정 ──────────────────────────────────
+// 사이드 플랭크처럼 저장된 muscleTop이 (과거 오분류·학습 데이터 오염 등으로) "가슴" 등 엉뚱한 값이어도
+// 회원에게는 항상 "코어"로 보이게 한다. 운동기록 원본 데이터(muscleTop 저장값)는 절대 건드리지 않고,
+// 회원 화면에 뿌리기 직전(getMemberFacingMuscleTop을 거치는 지점)에서만 이름 키워드로 재판정한다.
+// scripts/regression-check.js가 normalizeWorkoutPart~formatRoutineSet 구간을 텍스트로 잘라 별도 실행하므로
+// 이 구간 안(exerciseMatchesPart/getRecentPartCounts 바로 앞)에 두어야 한다 — 구간 밖으로 옮기면 그 슬라이스가 깨진다.
+const CORE_EXERCISE_NAME_KEYWORDS=["사이드플랭크","플랭크","plank","데드버그","deadbug","dead bug","버드독","birddog","bird dog","팔로프","팔로프프레스","pallof","palov press","브레이싱","bracing","캐리","carry","안티로테이션","안티로테이","antirotation","anti rotation"];
+function isCoreExerciseName(name){
+  if(!name)return false;
+  const n=normalizeExName(name);
+  if(!n)return false;
+  return CORE_EXERCISE_NAME_KEYWORDS.some(k=>n.includes(normalizeExName(k)));
+}
+// 회원에게 보여줄 muscleTop — 코어 계열 운동명이면 저장값과 무관하게 "코어"로 고정, 그 외에는 저장값 그대로 사용.
+function getMemberFacingMuscleTop(ex){
+  if(!ex)return ex?.muscleTop;
+  if(isCoreExerciseName(ex.name))return "코어";
+  return ex.muscleTop;
+}
 // exerciseMatchesPart: 정규화된 값(팔=이두+삼두 통합) 비교에 더해, 원본 값(이두/삼두처럼 normalizeWorkoutPart가 뭉개는 하위 구분)도 함께 비교한다.
 // 미는/당기는 콤보 분할("가슴 · 어깨 · 삼두"/"등 · 이두")에서 이두·삼두를 구분해 추천할 수 있도록 추가된 것으로, 기존 매칭 결과는 그대로 유지하고 새 매칭만 더한다.
-function exerciseMatchesPart(e,part){const vals=[e.muscleTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); const rawVals=[e.muscleTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));}
+function exerciseMatchesPart(e,part){const memberTop=getMemberFacingMuscleTop(e); const vals=[memberTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); const rawVals=[memberTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));}
 function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume));}
 function isTrainerMarkedExercise(e){return !!(e.isFavorite||e.favorite||e.isRecommended||e.recommended||e.memberAppRecommended);}
 
@@ -4120,7 +4139,7 @@ function recommendExerciseDose(history=[], opts={}){
 
   return {sets,reason:reasonParts.join(" ")};
 }
-function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; sessions.filter(s=>String(s.date||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(e.muscleTop||e.type); if(part)counts[part]=(counts[part]||0)+1;})); return counts;}
+function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; sessions.filter(s=>String(s.date||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(getMemberFacingMuscleTop(e)||e.type); if(part)counts[part]=(counts[part]||0)+1;})); return counts;}
 function getWorkoutFrequencyNumber(profile={}){const raw=String(profile.workoutFrequency||profile.weeklyWorkoutCount||""); const n=Number(raw.match(/\d+/)?.[0]); return Number.isFinite(n)&&n>0?n:3;}
 // 회원의 가장 최근 실제 수업이 2:1이었는지 — 과거 이력이 아니라 "현재 진행 중인 수업 형태"를 판별하는 유일한 기준.
 // 2:1 관리 화면에서 나눠서 기록되거나 수업일지에서 수동으로 2:1 표시된 세션 모두 sessionType:"2:1"로 저장되므로, 별도 조회 없이 회원 본인 sessions만으로 판별할 수 있다.
@@ -12068,7 +12087,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                 <div style={{fontSize:11,fontWeight:700,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>{formatCompactDate(todaySession.date)} · {todaySession.sessionNo}{t("회차","회차")} · {member.gymName||"테오짐"}</div>
                 <div style={{fontSize:16,fontWeight:800,letterSpacing:"-.3px",marginTop:2}}>오늘의 {t("수업일지","운동기록")}</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>
-                  {[...new Set((todaySession.exercises||[]).map(e=>e.muscleTop).filter(v=>v&&v!=="기능"))].map(p=>(
+                  {[...new Set((todaySession.exercises||[]).map(e=>getMemberFacingMuscleTop(e)).filter(v=>v&&v!=="기능"))].map(p=>(
                     <span key={p} style={{fontSize:10.5,fontWeight:700,padding:"2.5px 9px",borderRadius:999,background:DB.mintTint,color:DB.mintSoft}}>{p}</span>
                   ))}
                 </div>

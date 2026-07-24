@@ -1342,7 +1342,7 @@ const checks = [
     app.includes('function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10);')
   ],
   ['오늘의 운동 가이드: exerciseMatchesPart가 배열(콤보 부위)도 하위호환으로 지원 + 원본 값(이두/삼두)도 함께 비교',
-    app.includes('const rawVals=[e.muscleTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
+    app.includes('const rawVals=[memberTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
   ],
   wgScenario('오늘의 운동 가이드 시나리오1: 주 5회 회원의 5분할 폴백에서 가슴 다음 어깨가 추천되지 않음', lib => {
     const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 5회' }, [{ date: daysAgoStr(1), selectedTypes: ['가슴'], exercises: [] }], {});

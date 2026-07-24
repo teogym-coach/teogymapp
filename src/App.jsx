@@ -14205,12 +14205,12 @@ function HistPublishBadge({ s }) {
 function HistExerciseTags({ exercises }) {
   if (!exercises || !exercises.length) return null;
   return (
-    <div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:2}}>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:2}}>
       {exercises.map((ex, j) => {
         const base = EQUIP_COLOR[ex.equipment] || "#94a3b8";
         return (
-          <span key={j} style={{fontFamily:DB.font,fontSize:12.5,fontWeight:600,
-            padding:"5px 11px",borderRadius:7,
+          <span key={j} style={{fontFamily:DB.font,fontSize:14,fontWeight:600,
+            padding:"6px 12px",borderRadius:7,
             background:base+"1A",color:histDark(base),whiteSpace:"nowrap"}}>
             {isFuncEx(ex) ? getFuncExDisplayName(ex) : (ex.name||"?")}
           </span>
@@ -15352,45 +15352,45 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
               <div key={s.id||i}
                 onClick={() => setReportSession(s)}
                 style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:16,
-                  padding:"18px 20px",cursor:"pointer",transition:"box-shadow .15s",
+                  padding:"20px 22px",cursor:"pointer",transition:"box-shadow .15s",
                   maxWidth:"100%",overflow:"hidden",boxSizing:"border-box",boxShadow:DB.shadow}}>
-                <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:isMobile?0:20}}>
+                <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:isMobile?0:24}}>
                   {/* ── 왼쪽 70% : 날짜·회차·공개배지·부위·상태·종목 ── */}
                   <div style={{flex:isMobile?"1 1 auto":"1 1 68%",minWidth:0,width:isMobile?"100%":"auto"}}>
-                    <div style={{display:"flex",alignItems:"baseline",gap:9,flexWrap:"wrap",marginBottom:3}}>
-                      <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:DB.text,letterSpacing:"-.3px"}}>{monthDay}</span>
-                      <span style={{fontFamily:DB.font,fontWeight:600,fontSize:14,color:DB.sub}}>{s.sessionNo}회차</span>
+                    <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:4}}>
+                      <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:DB.text,letterSpacing:"-.3px"}}>{monthDay}</span>
+                      <span style={{fontFamily:DB.font,fontWeight:600,fontSize:15,color:DB.sub}}>{s.sessionNo}회차</span>
                       <HistPublishBadge s={s} />
                     </div>
-                    <div style={{fontFamily:DB.font,fontWeight:700,fontSize:13,color:DB.mintSoft,marginBottom:12}}>{weekday}</div>
+                    <div style={{fontFamily:DB.font,fontWeight:600,fontSize:14,color:DB.mintSoft,marginBottom:14}}>{weekday}</div>
 
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:21,color:DB.text,marginBottom:8,
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:22,color:DB.text,marginBottom:10,
                       whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"break-word"}}>
                       {typeLbl || "웨이트"}
                     </div>
 
                     {/* 대표님 운동 시간 표시 */}
                     {isOwner(member) && (s.workoutStartTime || s.workoutEndTime) && (
-                      <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
-                        {s.workoutStartTime && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.mintSoft,fontWeight:700}}>▶ {s.workoutStartTime}</span>}
-                        {s.workoutEndTime   && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#7C3AED",fontWeight:700}}>■ {s.workoutEndTime}</span>}
+                      <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
+                        {s.workoutStartTime && <span style={{fontFamily:DB.font,fontSize:14,color:DB.mintSoft,fontWeight:700}}>▶ {s.workoutStartTime}</span>}
+                        {s.workoutEndTime   && <span style={{fontFamily:DB.font,fontSize:14,color:"#7C3AED",fontWeight:700}}>■ {s.workoutEndTime}</span>}
                         {s.workoutStartTime && s.workoutEndTime && (() => {
                           const [sh,sm] = s.workoutStartTime.split(":").map(Number);
                           const [eh,em] = s.workoutEndTime.split(":").map(Number);
                           const totalMin = (eh*60+em) - (sh*60+sm);
                           if (totalMin <= 0) return null;
                           const h = Math.floor(totalMin/60), m = totalMin%60;
-                          return <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:"#B45309"}}>⏱ {h>0?`${h}h `:""}{m}m</span>;
+                          return <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,color:"#B45309"}}>⏱ {h>0?`${h}h `:""}{m}m</span>;
                         })()}
                       </div>
                     )}
                     {s.sorenessReport && (
-                      <div style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C",marginBottom:6}}>
+                      <div style={{fontFamily:DB.font,fontSize:14,color:"#C2410C",marginBottom:8}}>
                         근육통: {s.sorenessReport.part||"-"} · {s.sorenessReport.level||"-"} · {s.sorenessReport.timing||"-"}
                       </div>
                     )}
                     {s.memberFeedback && (
-                      <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginBottom:10,lineHeight:1.7}}>
+                      <div style={{fontFamily:DB.font,fontSize:14,color:DB.sub,marginBottom:12,lineHeight:1.7}}>
                         <span style={{color:DB.faint}}>회원 수업 후 상태 </span>
                         <span style={{color:DB.mintSoft,fontWeight:700}}>{s.memberFeedback.sorenessLevel||"-"} · {formatSorenessBodyParts(s.memberFeedback)}</span>
                         <span style={{color:DB.border}}> | </span>
@@ -15401,11 +15401,11 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                     <HistExerciseTags exercises={s.exercises} />
                     {/* 유산소 요약 배지 */}
                     {s.cardio && (s.cardio.type || s.cardio.minutes) && (
-                      <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap",alignItems:"center"}}>
-                        <span style={{fontSize:11}}>🔥</span>
-                        {s.cardio.type    && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C"}}>{s.cardio.type}</span>}
-                        {s.cardio.minutes && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C"}}>{s.cardio.minutes}분</span>}
-                        {s.cardio.calories && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.sub}}>{s.cardio.calories}kcal</span>}
+                      <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{fontSize:13}}>🔥</span>
+                        {s.cardio.type    && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>{s.cardio.type}</span>}
+                        {s.cardio.minutes && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>{s.cardio.minutes}분</span>}
+                        {s.cardio.calories && <span style={{fontFamily:DB.font,fontSize:14,color:DB.sub}}>{s.cardio.calories}kcal</span>}
                       </div>
                     )}
                   </div>
@@ -15422,16 +15422,16 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                     marginTop: isMobile ? 14 : 0,
                     paddingTop: isMobile ? 14 : 0,
                     borderTop: isMobile ? `1px solid ${DB.border}` : "none",
-                    display:"flex",flexDirection:"column",gap:8,
+                    display:"flex",flexDirection:"column",gap:10,
                     alignItems: isMobile ? "flex-start" : "flex-end",
                   }}>
-                    <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:DB.mint}}>
+                    <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:DB.mint}}>
                       {(s.totalVolume||0).toLocaleString()} kg
                     </span>
                     {partVolumes.length > 0 && (
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end"}}>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end"}}>
                         {partVolumes.map(([g,v])=>(
-                          <span key={g} style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                          <span key={g} style={{fontFamily:DB.font,fontSize:13,fontWeight:700,padding:"4px 10px",borderRadius:999,
                             background:mColor(g)+"18",color:histDark(mColor(g)),border:`1px solid ${mColor(g)}33`,whiteSpace:"nowrap"}}>
                             {g} {v.toLocaleString()}kg
                           </span>
@@ -15440,19 +15440,19 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                     )}
                     {/* 세트 수 */}
                     {calcTotalSets(s.exercises) > 0 && (
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end",alignItems:"center"}}>
-                        <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end",alignItems:"center"}}>
+                        <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,padding:"4px 10px",borderRadius:999,
                           background:"#F1F5F9",color:DB.sub,border:`1px solid ${DB.border}`}}>
                           {calcTotalSets(s.exercises)}세트
                         </span>
                         {s.intensity && (
-                          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                          <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,padding:"4px 10px",borderRadius:999,
                             background:ic+"1A",color:histDark(ic),border:`1px solid ${ic}40`}}>
                             {s.intensity}
                           </span>
                         )}
                         {s.condition && (
-                          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                          <span style={{fontFamily:DB.font,fontSize:14,fontWeight:700,padding:"4px 10px",borderRadius:999,
                             background:cc.color+"1A",color:histDark(cc.color),border:`1px solid ${cc.color}40`}}>
                             {cc.emoji} {s.condition}
                           </span>
@@ -15470,23 +15470,23 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       const hasAny = hasSoreness || feedback?.rpe != null || memoText || cardio || weight != null || kcal != null;
                       if (!hasAny) return null;
                       return (
-                        <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:isMobile?"flex-start":"flex-end",
-                          marginTop:2,paddingTop:8,borderTop:`1px solid ${DB.border}`}}>
+                        <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:isMobile?"flex-start":"flex-end",
+                          marginTop:2,paddingTop:10,borderTop:`1px solid ${DB.border}`}}>
                           {(hasSoreness || feedback?.rpe != null) && (
-                            <span style={{fontFamily:DB.font,fontSize:11.5}}>
+                            <span style={{fontFamily:DB.font,fontSize:14}}>
                               {hasSoreness && <span style={{color:"#C2410C",fontWeight:700}}>💪 {formatSorenessBodyParts(feedback)} · {feedback.sorenessLevel}</span>}
                               {hasSoreness && feedback?.rpe != null && <span style={{color:DB.faint}}> · </span>}
                               {feedback?.rpe != null && <span style={{color:"#7C3AED",fontWeight:700}}>RPE {feedback.rpe}</span>}
                             </span>
                           )}
-                          {memoText && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.mintSoft}}>📝 {memoText}</span>}
-                          {cardio && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C"}}>❤️ {cardio.durationMinutes ? `${cardio.durationMinutes}분` : "기록됨"}</span>}
-                          {weight != null && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.sub}}>⚖️ {weight}kg</span>}
-                          {kcal != null && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#EA580C"}}>🔥 {Number(kcal).toLocaleString()}kcal</span>}
+                          {memoText && <span style={{fontFamily:DB.font,fontSize:14,color:DB.mintSoft}}>📝 {memoText}</span>}
+                          {cardio && <span style={{fontFamily:DB.font,fontSize:14,color:"#C2410C"}}>❤️ {cardio.durationMinutes ? `${cardio.durationMinutes}분` : "기록됨"}</span>}
+                          {weight != null && <span style={{fontFamily:DB.font,fontSize:14,color:DB.sub}}>⚖️ {weight}kg</span>}
+                          {kcal != null && <span style={{fontFamily:DB.font,fontSize:14,color:"#EA580C"}}>🔥 {Number(kcal).toLocaleString()}kcal</span>}
                         </div>
                       );
                     })()}
-                    <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginTop:2}}>📋 리포트 보기</span>
+                    <span style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginTop:3}}>📋 리포트 보기</span>
 
                     {/* 수정/삭제 · 2:1 나눠서 기록 */}
                     <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:isMobile?"flex-start":"flex-end",
@@ -15495,12 +15495,12 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       {s.sessionType === "2:1" && s.memberBId && !["recorded","sent"].includes(s.pairStatus) && !s.isPublished && (
                         <button onClick={() => setConfirmPair(s)}
                           style={{background:"rgba(124,111,255,.08)",border:"1px solid rgba(124,111,255,.35)",borderRadius:8,
-                            color:"#6D28D9",fontSize:11.5,fontWeight:700,padding:"6px 12px",cursor:"pointer"}}>
+                            color:"#6D28D9",fontSize:13,fontWeight:700,padding:"6px 12px",cursor:"pointer"}}>
                           나눠서 기록
                         </button>
                       )}
                       {s.sessionType === "2:1" && ["recorded","sent"].includes(s.pairStatus) && (
-                        <span style={{fontFamily:DB.font,fontSize:10.5,padding:"4px 10px",borderRadius:999,fontWeight:700,
+                        <span style={{fontFamily:DB.font,fontSize:12,padding:"4px 10px",borderRadius:999,fontWeight:700,
                           background:"rgba(15,148,136,.10)",color:DB.mintSoft}}>
                           ✅ 기록 완료{s.pairRecordedAt ? ` · ${String((s.pairRecordedAt?.toDate ? s.pairRecordedAt.toDate() : s.pairRecordedAt) || "").slice(0,16).replace("T"," ")}` : ""}
                         </span>
@@ -15509,11 +15509,11 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                         <button onClick={() => onEdit(s)}
                           style={{flex:isMobile?1:"none",width:isMobile?"auto":86,height:40,cursor:"pointer",
                             border:"1px solid rgba(37,99,235,.35)",borderRadius:9,background:"rgba(37,99,235,.06)",
-                            color:"#2563EB",fontSize:12.5,fontWeight:700}}>수정</button>
+                            color:"#2563EB",fontSize:13,fontWeight:700}}>수정</button>
                         <button onClick={() => onDelete(s)}
                           style={{flex:isMobile?1:"none",width:isMobile?"auto":86,height:40,cursor:"pointer",
                             border:"1px solid rgba(220,38,38,.3)",borderRadius:9,background:"rgba(220,38,38,.06)",
-                            color:"#DC2626",fontSize:12.5,fontWeight:700}}>삭제</button>
+                            color:"#DC2626",fontSize:13,fontWeight:700}}>삭제</button>
                       </div>
                     </div>
                   </div>

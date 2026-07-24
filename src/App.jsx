@@ -6114,7 +6114,7 @@ export default function App() {
   );
 
   return (
-    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub")?"#F6F7F9":"#0B1120"}}>
+    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub"||screen==="history")?"#F6F7F9":"#0B1120"}}>
       <style>{CSS}</style>
 
       {toast && (
@@ -6129,13 +6129,17 @@ export default function App() {
       )}
 
       {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)·수업 예정(집중 모드, 확보된 높이를 캘린더에 전부 배정)·회원 상세(오늘 브리핑·오늘 운동·최근 수업·다음 수업 준비 영역을 더 크게 보기 위해 자체 헤더만 사용)에서는 숨김 */}
-      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && (
+      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && (() => {
+        // 히스토리 화면만 관리자앱 라이트 톤 상단바 — 다른 화면(screen!=="history")은 기존 다크 스타일 그대로 유지
+        const navLight = screen === "history";
+        return (
       <nav className="noprint" style={{
-        borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"0 clamp(10px,3vw,16px)",
+        borderBottom: navLight ? `1px solid ${DB.border}` : "1px solid rgba(255,255,255,0.08)",
+        padding:"0 clamp(10px,3vw,16px)",
         paddingTop:"env(safe-area-inset-top, 0px)",
         display:"flex",alignItems:"center",justifyContent:"space-between",
         height:"calc(50px + env(safe-area-inset-top, 0px))",
-        background:"#0B1120",position:"sticky",top:0,zIndex:100,
+        background: navLight ? DB.card : "#0B1120",position:"sticky",top:0,zIndex:100,
         maxWidth:"100%",overflowX:"clip"}}>
         <div style={{display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}
           onClick={() => { setMember(null); setScreen("home"); }}>
@@ -6144,11 +6148,11 @@ export default function App() {
             display:"flex",alignItems:"center",justifyContent:"center"}}>
             <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:11,color:"#2DD4BF",letterSpacing:"-.3px"}}>TG</span>
           </div>
-          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff"}}>TEO GYM</span>
+          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:navLight?DB.text:"#fff"}}>TEO GYM</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {member && (
-            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
+            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:navLight?DB.sub:"#94a3b8",
               maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {member.name}
             </span>
@@ -6160,13 +6164,14 @@ export default function App() {
             {migrating ? "⏳" : "🔧"}
           </button>
           <button onClick={handleLogout}
-            style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
-              color:"#94a3b8",fontSize:10,fontWeight:700,padding:"5px 9px"}}>
+            style={{background:navLight?DB.card:"none",border:navLight?`1px solid ${DB.border}`:"1px solid rgba(255,255,255,0.08)",borderRadius:6,
+              color:navLight?DB.sub:"#94a3b8",fontSize:10,fontWeight:700,padding:"5px 9px",cursor:"pointer"}}>
             로그아웃
           </button>
         </div>
       </nav>
-      )}
+        );
+      })()}
 
       {/* SCREENS */}
       <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming") ? {width:"100%"} : {
@@ -14165,42 +14170,63 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
 // ════════════════════════════════════════════
 // HISTORY
 // ════════════════════════════════════════════
-// 운동 종목 목록 — 8개까지 기본 표시, 초과 시 펼치기
-function ExNameList({ exercises }) {
-  const [expanded, setExpanded] = useState(false);
-  if (!exercises || !exercises.length) return null;
-  const LIMIT = 8;
-  const show  = expanded ? exercises : exercises.slice(0, LIMIT);
-  const more  = exercises.length - LIMIT;
+// 히스토리 카드 전용 색상 보정 — EQUIP_COLOR/MUSCLE_COLOR/IC/CC는 다크 카드용으로 튜닝된 값이라
+// 옅은 색(민트·노랑 등)을 밝은 카드 위 글자색으로 그대로 쓰면 가독성이 떨어진다. 배경은 원래 색의 옅은 틴트로,
+// 글자는 아래 매핑의 더 짙은 값으로 표시해 "연한 배경 + 진한 텍스트" 규칙을 지킨다(공용 색상 상수 자체는 미변경).
+const HIST_DARK_TEXT = {
+  "#7c6fff":"#6D28D9","#5EEAD4":"#0F9488","#ffd166":"#B45309","#ff9f43":"#C2410C",
+  "#ff6b6b":"#DC2626","#54a0ff":"#2563EB","#a29bfe":"#7C3AED","#00cec9":"#0E7490",
+  "#fd79a8":"#DB2777","#888":"#475569","#f97316":"#C2410C","#94a3b8":"#475569","#22c55e":"#15803D",
+};
+function histDark(hex){ return HIST_DARK_TEXT[hex] || hex; }
+
+// 회원 공개 배지 — 히스토리 카드에서 항상 노출(숨김·삭제 금지)
+function HistPublishBadge({ s }) {
+  if (s.isPublished) {
+    return (
+      <span style={{display:"inline-flex",alignItems:"center",gap:4,fontFamily:DB.font,fontSize:11,fontWeight:700,
+        padding:"3px 10px",borderRadius:999,background:"rgba(124,111,255,.08)",color:"#6D28D9",
+        border:"1px solid rgba(124,111,255,.3)",whiteSpace:"nowrap"}}>
+        🌐 회원 공개
+      </span>
+    );
+  }
+  const label = s.status === "completed" ? "비공개·완료" : "비공개·초안";
   return (
-    <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:3}}>
-      {show.map((ex, j) => (
-        <span key={j} style={{fontFamily:"'DM Mono',monospace",fontSize:8,
-          padding:"2px 7px",borderRadius:3,
-          background:(EQUIP_COLOR[ex.equipment]||"#888")+"22",
-          color: EQUIP_COLOR[ex.equipment]||"#888",
-          whiteSpace:"nowrap"}}>
-          {isFuncEx(ex) ? getFuncExDisplayName(ex) : (ex.name||"?")}
-        </span>
-      ))}
-      {!expanded && more > 0 && (
-        <button onClick={e=>{e.stopPropagation();setExpanded(true);}}
-          style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",
-            borderRadius:3,border:"1px solid rgba(255,255,255,0.08)",
-            background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
-          +{more} 더보기
-        </button>
-      )}
-      {expanded && more > 0 && (
-        <button onClick={e=>{e.stopPropagation();setExpanded(false);}}
-          style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",
-            borderRadius:3,border:"1px solid rgba(255,255,255,0.08)",
-            background:"transparent",color:"#94a3b8",cursor:"pointer"}}>
-          접기
-        </button>
-      )}
+    <span style={{display:"inline-flex",alignItems:"center",fontFamily:DB.font,fontSize:11,fontWeight:700,
+      padding:"3px 10px",borderRadius:999,background:"#F1F5F9",color:DB.sub,
+      border:`1px solid ${DB.border}`,whiteSpace:"nowrap"}}>
+      {label}
+    </span>
+  );
+}
+
+// 운동 종목 태그 — 모든 종목을 풀네임으로 항상 표시(말줄임표·+N개·접기 금지)
+function HistExerciseTags({ exercises }) {
+  if (!exercises || !exercises.length) return null;
+  return (
+    <div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:2}}>
+      {exercises.map((ex, j) => {
+        const base = EQUIP_COLOR[ex.equipment] || "#94a3b8";
+        return (
+          <span key={j} style={{fontFamily:DB.font,fontSize:12.5,fontWeight:600,
+            padding:"5px 11px",borderRadius:7,
+            background:base+"1A",color:histDark(base),whiteSpace:"nowrap"}}>
+            {isFuncEx(ex) ? getFuncExDisplayName(ex) : (ex.name||"?")}
+          </span>
+        );
+      })}
     </div>
   );
+}
+
+// "7월 21일" + "월요일" — 저장된 날짜(YYYY-MM-DD) 자체는 변경 없이 표시 형식만 간결하게 변환
+const HIST_WEEKDAY = ["일요일","월요일","화요일","수요일","목요일","금요일","토요일"];
+function formatHistoryDateParts(dateStr) {
+  const s = String(dateStr||"").slice(0,10);
+  const d = new Date(`${s}T12:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(d)) return { monthDay: s || "-", weekday: "" };
+  return { monthDay: `${d.getMonth()+1}월 ${d.getDate()}일`, weekday: HIST_WEEKDAY[d.getDay()] };
 }
 
 function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, onAdd, onEdit, onDelete, onSplit, onRefresh, showToast, onStatusChange }) {
@@ -15269,16 +15295,17 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
     <>
     {PairConfirmModal}
     <div>
-      <SH title={isOwner(member)?"📅 운동일지":"📅 히스토리"} right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+      <SH title={isOwner(member)?"📅 운동일지":"📅 히스토리"} titleColor={DB.text} subColor={DB.sub}
+        right={<Btn ghost sm onClick={onBack} style={{border:`1px solid ${DB.border}`,color:DB.sub,background:DB.card}}>← 뒤로</Btn>} />
 
       {/* 정렬 탭 */}
-      <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
         {[["recent","최근수정"],["part","부위별"],["no","회차별"]].map(([m,l])=>(
           <button key={m} onClick={()=>{setSortMode(m);setFilterPart(null);}}
-            style={{padding:"5px 11px",borderRadius:6,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
-              borderColor:sortMode===m?"#5EEAD4":"rgba(255,255,255,0.08)",
-              background:sortMode===m?"rgba(94,234,212,.12)":"transparent",
-              color:sortMode===m?"#5EEAD4":"#94a3b8"}}>
+            style={{padding:"7px 15px",borderRadius:999,border:`1px solid ${sortMode===m?"rgba(57,199,184,.4)":DB.border}`,
+              fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font,
+              background:sortMode===m?DB.mintTint:DB.card,
+              color:sortMode===m?DB.mintSoft:DB.sub}}>
             {l}
           </button>
         ))}
@@ -15286,109 +15313,152 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
 
       {/* 부위별 필터 */}
       {sortMode === "part" && availableParts.length > 0 && (
-        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
           <button onClick={()=>setFilterPart(null)}
-            style={{padding:"3px 9px",borderRadius:5,border:"1px solid",fontSize:9,cursor:"pointer",
-              borderColor:!filterPart?"#5EEAD4":"rgba(255,255,255,0.07)",
-              background:!filterPart?"rgba(94,234,212,.12)":"transparent",
-              color:!filterPart?"#5EEAD4":"#94a3b8"}}>전체</button>
+            style={{padding:"4px 11px",borderRadius:999,border:`1px solid ${!filterPart?"rgba(57,199,184,.4)":DB.border}`,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:DB.font,
+              background:!filterPart?DB.mintTint:DB.card,
+              color:!filterPart?DB.mintSoft:DB.sub}}>전체</button>
           {availableParts.map(p=>(
             <button key={p} onClick={()=>setFilterPart(p===filterPart?null:p)}
-              style={{padding:"3px 9px",borderRadius:5,border:"1px solid",fontSize:9,cursor:"pointer",
-                borderColor:filterPart===p?mColor(p):"rgba(255,255,255,0.07)",
-                background:filterPart===p?mColor(p)+"22":"transparent",
-                color:filterPart===p?mColor(p):"#94a3b8"}}>
+              style={{padding:"4px 11px",borderRadius:999,border:`1px solid ${filterPart===p?mColor(p)+"66":DB.border}`,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:DB.font,
+                background:filterPart===p?mColor(p)+"18":DB.card,
+                color:filterPart===p?histDark(mColor(p)):DB.sub}}>
               {p}
             </button>
           ))}
         </div>
       )}
 
-      <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:10}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</Mo>
-      {loading ? <Skel n={5} /> : sortedSessions.length===0 ? <Emp msg={isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."} /> : (
-        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+      <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,marginBottom:12}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</div>
+      {loading ? (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {Array.from({length:5},(_,i)=>(
+            <div key={i} style={{height:96,background:DB.card,border:`1px solid ${DB.border}`,borderRadius:16}}/>
+          ))}
+        </div>
+      ) : sortedSessions.length===0 ? (
+        <div style={{textAlign:"center",padding:"48px 16px",fontFamily:DB.font,fontSize:13,color:DB.faint}}>
+          {isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {sortedSessions.map((s,i) => {
             const typeLbl = formatTypes(s.selectedTypes || s.type);
             const ic = IC[s.intensity] || "#ffd166";
             const cc = CC[s.condition] || CC["상"];
+            const { monthDay, weekday } = formatHistoryDateParts(s.date);
+            const partVolumes = calcPartVolumes(s.exercises);
             return (
               <div key={s.id||i}
                 onClick={() => setReportSession(s)}
-                style={{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,
-                  padding:"11px 13px",cursor:"pointer",transition:"border-color .15s",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
-                <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:isMobile?0:8}}>
-                  <div style={{flex:1,minWidth:0,width:isMobile?"100%":"auto"}}>
-                    <Mo c="#94a3b8" s={9} style={{marginBottom:2,display:"block",whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"break-word"}}>{s.date} · {s.sessionNo}회차</Mo>
-                    <div style={{display:"inline-flex",marginBottom:4,padding:"2px 7px",borderRadius:999,fontSize:8,fontWeight:800,background:s.isPublished?"rgba(94,234,212,.12)":"rgba(255,209,102,.10)",color:s.isPublished?"#5EEAD4":"#ffd166",border:"1px solid "+(s.isPublished?"rgba(94,234,212,.24)":"rgba(255,209,102,.22)")}}>
-                      {s.isPublished ? "회원 공개" : (s.status === "completed" ? "비공개·완료" : "비공개·초안")}
+                style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:16,
+                  padding:"18px 20px",cursor:"pointer",transition:"box-shadow .15s",
+                  maxWidth:"100%",overflow:"hidden",boxSizing:"border-box",boxShadow:DB.shadow}}>
+                <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:isMobile?0:20}}>
+                  {/* ── 왼쪽 70% : 날짜·회차·공개배지·부위·상태·종목 ── */}
+                  <div style={{flex:isMobile?"1 1 auto":"1 1 68%",minWidth:0,width:isMobile?"100%":"auto"}}>
+                    <div style={{display:"flex",alignItems:"baseline",gap:9,flexWrap:"wrap",marginBottom:3}}>
+                      <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:DB.text,letterSpacing:"-.3px"}}>{monthDay}</span>
+                      <span style={{fontFamily:DB.font,fontWeight:600,fontSize:14,color:DB.sub}}>{s.sessionNo}회차</span>
+                      <HistPublishBadge s={s} />
                     </div>
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#fff",marginBottom:4,whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"break-word"}}>
+                    <div style={{fontFamily:DB.font,fontWeight:700,fontSize:13,color:DB.mintSoft,marginBottom:12}}>{weekday}</div>
+
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:21,color:DB.text,marginBottom:8,
+                      whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"break-word"}}>
                       {typeLbl || "웨이트"}
                     </div>
+
                     {/* 대표님 운동 시간 표시 */}
                     {isOwner(member) && (s.workoutStartTime || s.workoutEndTime) && (
-                      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
-                        {s.workoutStartTime && <Mo c="#5EEAD4" s={8}>▶ {s.workoutStartTime}</Mo>}
-                        {s.workoutEndTime   && <Mo c="#a5b4fc" s={8}>■ {s.workoutEndTime}</Mo>}
+                      <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
+                        {s.workoutStartTime && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.mintSoft,fontWeight:700}}>▶ {s.workoutStartTime}</span>}
+                        {s.workoutEndTime   && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#7C3AED",fontWeight:700}}>■ {s.workoutEndTime}</span>}
                         {s.workoutStartTime && s.workoutEndTime && (() => {
                           const [sh,sm] = s.workoutStartTime.split(":").map(Number);
                           const [eh,em] = s.workoutEndTime.split(":").map(Number);
                           const totalMin = (eh*60+em) - (sh*60+sm);
                           if (totalMin <= 0) return null;
                           const h = Math.floor(totalMin/60), m = totalMin%60;
-                          return <Mo c="#ffd166" s={8} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>⏱ {h>0?`${h}h `:""}{m}m</Mo>;
+                          return <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:"#B45309"}}>⏱ {h>0?`${h}h `:""}{m}m</span>;
                         })()}
                       </div>
                     )}
                     {s.sorenessReport && (
-                      <Mo c="#ff9f43" s={9} style={{display:"block",marginBottom:4}}>근육통: {s.sorenessReport.part||"-"} · {s.sorenessReport.level||"-"} · {s.sorenessReport.timing||"-"}</Mo>
+                      <div style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C",marginBottom:6}}>
+                        근육통: {s.sorenessReport.part||"-"} · {s.sorenessReport.level||"-"} · {s.sorenessReport.timing||"-"}
+                      </div>
                     )}
                     {s.memberFeedback && (
-                      <Mo c="#22E0C2" s={9} style={{display:"block",marginBottom:4}}>회원 수업 후 상태: {s.memberFeedback.sorenessLevel||"-"} · {formatSorenessBodyParts(s.memberFeedback)} · RPE {s.memberFeedback.rpe ?? "-"}{s.memberFeedback.memo?` · ${s.memberFeedback.memo}`:""}</Mo>
+                      <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginBottom:10,lineHeight:1.7}}>
+                        <span style={{color:DB.faint}}>회원 수업 후 상태 </span>
+                        <span style={{color:DB.mintSoft,fontWeight:700}}>{s.memberFeedback.sorenessLevel||"-"} · {formatSorenessBodyParts(s.memberFeedback)}</span>
+                        <span style={{color:DB.border}}> | </span>
+                        <span style={{color:DB.mintSoft,fontWeight:700}}>RPE {s.memberFeedback.rpe ?? "-"}</span>
+                        {s.memberFeedback.memo && <><span style={{color:DB.border}}> | </span><span>{s.memberFeedback.memo}</span></>}
+                      </div>
                     )}
-                    {s.exercises && s.exercises.length > 0 && (
-                      <ExNameList exercises={s.exercises} />
-                    )}
+                    <HistExerciseTags exercises={s.exercises} />
                     {/* 유산소 요약 배지 */}
                     {s.cardio && (s.cardio.type || s.cardio.minutes) && (
-                      <div style={{display:"flex",gap:4,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
-                        <span style={{fontSize:9,color:"#f97316"}}>🔥</span>
-                        {s.cardio.type    && <Mo c="#fdba74" s={8}>{s.cardio.type}</Mo>}
-                        {s.cardio.minutes && <Mo c="#fdba74" s={8}>{s.cardio.minutes}분</Mo>}
-                        {s.cardio.calories && <Mo c="#94a3b8" s={8}>{s.cardio.calories}kcal</Mo>}
+                      <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{fontSize:11}}>🔥</span>
+                        {s.cardio.type    && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C"}}>{s.cardio.type}</span>}
+                        {s.cardio.minutes && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C"}}>{s.cardio.minutes}분</span>}
+                        {s.cardio.calories && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.sub}}>{s.cardio.calories}kcal</span>}
                       </div>
                     )}
                   </div>
+
+                  {/* 세로 구분선 — 카드 안쪽에서만 표시(좁은 화면에서는 위쪽 가로선으로 대체) */}
+                  {!isMobile && <div style={{width:1,alignSelf:"stretch",background:DB.border,flexShrink:0}} />}
+
+                  {/* ── 오른쪽 30% : 총 볼륨·부위별 볼륨·요약 지표·수정/삭제 ── */}
                   <div style={{
+                    flex: isMobile ? "1 1 auto" : "0 0 30%",
+                    width: isMobile ? "100%" : undefined,
+                    minWidth: isMobile ? undefined : 150,
                     textAlign: isMobile ? "left" : "right",
-                    flexShrink: 0,
-                    marginLeft: isMobile ? 0 : 8,
-                    marginTop: isMobile ? 8 : 0,
-                    paddingTop: isMobile ? 8 : 0,
-                    borderTop: isMobile ? "1px solid rgba(255,255,255,0.06)" : "none",
-                    width: isMobile ? "100%" : "auto",
+                    marginTop: isMobile ? 14 : 0,
+                    paddingTop: isMobile ? 14 : 0,
+                    borderTop: isMobile ? `1px solid ${DB.border}` : "none",
+                    display:"flex",flexDirection:"column",gap:8,
+                    alignItems: isMobile ? "flex-start" : "flex-end",
                   }}>
-                    <Mo c="#5EEAD4" s={12} style={{fontWeight:700}}>{(s.totalVolume||0).toLocaleString()} kg</Mo>
-                    <PartVolBadges exercises={s.exercises} style={{marginTop:4,justifyContent:isMobile?"flex-start":"flex-end"}} />
-                    {/* 세트 수 — 트레이너 전용 */}
-                    {calcTotalSets(s.exercises) > 0 && (
-                      <div style={{display:"flex",gap:3,marginTop:4,justifyContent:isMobile?"flex-start":"flex-end",flexWrap:"wrap",alignItems:"center"}}>
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,
-                          background:"rgba(255,255,255,0.05)",color:"#94a3b8",fontWeight:600}}>
-                          {calcTotalSets(s.exercises)}세트
-                        </span>
-                        {calcPartSets(s.exercises).slice(0,3).map(([g,c])=>(
-                          <span key={g} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",
-                            borderRadius:3,background:"rgba(255,255,255,0.04)",color:"#475569"}}>
-                            {g} {c}
+                    <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:DB.mint}}>
+                      {(s.totalVolume||0).toLocaleString()} kg
+                    </span>
+                    {partVolumes.length > 0 && (
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end"}}>
+                        {partVolumes.map(([g,v])=>(
+                          <span key={g} style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                            background:mColor(g)+"18",color:histDark(mColor(g)),border:`1px solid ${mColor(g)}33`,whiteSpace:"nowrap"}}>
+                            {g} {v.toLocaleString()}kg
                           </span>
                         ))}
                       </div>
                     )}
-                    <div style={{display:"flex",gap:3,marginTop:3,justifyContent:isMobile?"flex-start":"flex-end",flexWrap:"wrap"}}>
-                      {s.intensity && <Bdg color={ic}>{s.intensity}</Bdg>}
-                      {s.condition && <Bdg color={cc.color}>{cc.emoji} {s.condition}</Bdg>}
-                    </div>
+                    {/* 세트 수 */}
+                    {calcTotalSets(s.exercises) > 0 && (
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end",alignItems:"center"}}>
+                        <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                          background:"#F1F5F9",color:DB.sub,border:`1px solid ${DB.border}`}}>
+                          {calcTotalSets(s.exercises)}세트
+                        </span>
+                        {s.intensity && (
+                          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                            background:ic+"1A",color:histDark(ic),border:`1px solid ${ic}40`}}>
+                            {s.intensity}
+                          </span>
+                        )}
+                        {s.condition && (
+                          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,
+                            background:cc.color+"1A",color:histDark(cc.color),border:`1px solid ${cc.color}40`}}>
+                            {cc.emoji} {s.condition}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {/* 회원 입력 상태 — 그날 회원이 입력한 근육통/RPE/메모/유산소/체중/칼로리를 한눈에 확인 */}
                     {(() => {
                       const feedback = s.memberFeedback;
@@ -15396,90 +15466,102 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                       const kcal = kcalByDate.get(s.date);
                       const cardio = cardioByDate.get(s.date);
                       const memoText = feedback?.memo ? (feedback.memo.length > 20 ? feedback.memo.slice(0,20)+"…" : feedback.memo) : "";
-                      const hasAny = (feedback?.sorenessLevel && feedback.sorenessLevel !== "없음") || feedback?.rpe != null || memoText || cardio || weight || kcal;
+                      const hasSoreness = feedback?.sorenessLevel && feedback.sorenessLevel !== "없음";
+                      const hasAny = hasSoreness || feedback?.rpe != null || memoText || cardio || weight != null || kcal != null;
                       if (!hasAny) return null;
                       return (
-                        <div style={{display:"flex",flexDirection:"column",gap:2,alignItems:isMobile?"flex-start":"flex-end",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
-                          {feedback?.sorenessLevel && feedback.sorenessLevel !== "없음" && (
-                            <Mo c="#ff9f43" s={8}>💪 {formatSorenessBodyParts(feedback)} · {feedback.sorenessLevel}</Mo>
+                        <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:isMobile?"flex-start":"flex-end",
+                          marginTop:2,paddingTop:8,borderTop:`1px solid ${DB.border}`}}>
+                          {(hasSoreness || feedback?.rpe != null) && (
+                            <span style={{fontFamily:DB.font,fontSize:11.5}}>
+                              {hasSoreness && <span style={{color:"#C2410C",fontWeight:700}}>💪 {formatSorenessBodyParts(feedback)} · {feedback.sorenessLevel}</span>}
+                              {hasSoreness && feedback?.rpe != null && <span style={{color:DB.faint}}> · </span>}
+                              {feedback?.rpe != null && <span style={{color:"#7C3AED",fontWeight:700}}>RPE {feedback.rpe}</span>}
+                            </span>
                           )}
-                          {feedback?.rpe != null && <Mo c="#818cf8" s={8}>😊 RPE {feedback.rpe}</Mo>}
-                          {memoText && <Mo c="#22E0C2" s={8}>📝 {memoText}</Mo>}
-                          {cardio && <Mo c="#fdba74" s={8}>❤️ {cardio.durationMinutes ? `${cardio.durationMinutes}분` : "기록됨"}</Mo>}
-                          {weight != null && <Mo c="#94a3b8" s={8}>⚖️ {weight}kg</Mo>}
-                          {kcal != null && <Mo c="#94a3b8" s={8}>🍚 {Number(kcal).toLocaleString()}kcal</Mo>}
+                          {memoText && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.mintSoft}}>📝 {memoText}</span>}
+                          {cardio && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#C2410C"}}>❤️ {cardio.durationMinutes ? `${cardio.durationMinutes}분` : "기록됨"}</span>}
+                          {weight != null && <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.sub}}>⚖️ {weight}kg</span>}
+                          {kcal != null && <span style={{fontFamily:DB.font,fontSize:11.5,color:"#EA580C"}}>🔥 {Number(kcal).toLocaleString()}kcal</span>}
                         </div>
                       );
                     })()}
-                    <Mo c="#3a3a5a" s={8} style={{marginTop:4}}>📋 리포트 보기</Mo>
+                    <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginTop:2}}>📋 리포트 보기</span>
+
+                    {/* 수정/삭제 · 2:1 나눠서 기록 */}
+                    <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:isMobile?"flex-start":"flex-end",
+                      width:isMobile?"100%":"auto",marginTop:6}}
+                      onClick={e => e.stopPropagation()}>
+                      {s.sessionType === "2:1" && s.memberBId && !["recorded","sent"].includes(s.pairStatus) && !s.isPublished && (
+                        <button onClick={() => setConfirmPair(s)}
+                          style={{background:"rgba(124,111,255,.08)",border:"1px solid rgba(124,111,255,.35)",borderRadius:8,
+                            color:"#6D28D9",fontSize:11.5,fontWeight:700,padding:"6px 12px",cursor:"pointer"}}>
+                          나눠서 기록
+                        </button>
+                      )}
+                      {s.sessionType === "2:1" && ["recorded","sent"].includes(s.pairStatus) && (
+                        <span style={{fontFamily:DB.font,fontSize:10.5,padding:"4px 10px",borderRadius:999,fontWeight:700,
+                          background:"rgba(15,148,136,.10)",color:DB.mintSoft}}>
+                          ✅ 기록 완료{s.pairRecordedAt ? ` · ${String((s.pairRecordedAt?.toDate ? s.pairRecordedAt.toDate() : s.pairRecordedAt) || "").slice(0,16).replace("T"," ")}` : ""}
+                        </span>
+                      )}
+                      <div style={{display:"flex",gap:8,width:isMobile?"100%":"auto"}}>
+                        <button onClick={() => onEdit(s)}
+                          style={{flex:isMobile?1:"none",width:isMobile?"auto":86,height:40,cursor:"pointer",
+                            border:"1px solid rgba(37,99,235,.35)",borderRadius:9,background:"rgba(37,99,235,.06)",
+                            color:"#2563EB",fontSize:12.5,fontWeight:700}}>수정</button>
+                        <button onClick={() => onDelete(s)}
+                          style={{flex:isMobile?1:"none",width:isMobile?"auto":86,height:40,cursor:"pointer",
+                            border:"1px solid rgba(220,38,38,.3)",borderRadius:9,background:"rgba(220,38,38,.06)",
+                            color:"#DC2626",fontSize:12.5,fontWeight:700}}>삭제</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 {s.trainerComment && (
-                  <div style={{marginTop:6,fontSize:10,color:"#94a3b8",borderTop:"1px solid rgba(255,255,255,0.08)",
-                    paddingTop:6,fontStyle:"italic",overflow:"hidden",
+                  <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${DB.border}`,
+                    fontFamily:DB.font,fontSize:12,color:DB.sub,fontStyle:"italic",overflow:"hidden",
                     display:"-webkit-box",WebkitLineClamp:1,WebkitBoxOrient:"vertical"}}>
                     {s.trainerComment}
                   </div>
                 )}
                 {/* 내부 메모 — 트레이너 전용 */}
                 {!cardMode && s.trainerOnlyNote && (
-                  <div style={{marginTop:6,padding:"6px 9px",borderRadius:6,
-                    background:"rgba(129,140,248,.07)",border:"1px solid rgba(129,140,248,.2)"}}>
-                    <Mo c="#818cf8" s={7} style={{display:"block",marginBottom:2,fontWeight:700}}>🔒 내부 메모</Mo>
-                    <Mo c="#a5b4fc" s={9}>{s.trainerOnlyNote}</Mo>
+                  <div style={{marginTop:10,padding:"9px 12px",borderRadius:8,
+                    background:"rgba(124,111,255,.06)",border:"1px solid rgba(124,111,255,.2)"}}>
+                    <div style={{fontFamily:DB.font,fontSize:10.5,color:"#6D28D9",fontWeight:700,marginBottom:2}}>🔒 내부 메모</div>
+                    <div style={{fontFamily:DB.font,fontSize:11.5,color:"#6D28D9"}}>{s.trainerOnlyNote}</div>
                   </div>
                 )}
                 {/* 통증 기록 요약 — 기록 있을 때만 표시 */}
                 {(s.painRecord?.before?.vas > 0 || s.painRecord?.after?.vas > 0 || s.painRecord?.before?.part || s.painRecord?.after?.change) && (() => {
                   const b  = s.painRecord?.before || {};
                   const a  = s.painRecord?.after  || {};
-                  const bColor = b.vas>=7?"#ff6b6b":b.vas>=4?"#ffd166":"#5EEAD4";
-                  const aColor = a.change==="감소"?"#5EEAD4":a.change==="증가"?"#ff6b6b":"#ffd166";
+                  const bColor = b.vas>=7?"#DC2626":b.vas>=4?"#B45309":"#0F9488";
+                  const aColor = a.change==="감소"?"#0F9488":a.change==="증가"?"#DC2626":"#B45309";
                   return (
-                    <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
+                    <div style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap"}}>
                       {(b.vas > 0 || b.part) && (
-                        <div style={{flex:1,minWidth:120,padding:"6px 9px",borderRadius:7,
-                          background:"rgba(255,159,67,.07)",border:"1px solid rgba(255,159,67,.2)"}}>
-                          <Mo c="#ff9f43" s={7} style={{display:"block",marginBottom:3,fontWeight:700}}>운동 전</Mo>
-                          {b.vas > 0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:bColor,fontWeight:800}}>VAS {b.vas}</span>}
-                          {b.part && <Mo c="#7070a0" s={9} style={{display:"block",marginTop:1}}>{b.part}</Mo>}
-                          {b.situation && <Mo c="#3a3a5a" s={8} style={{display:"block"}}>{b.situation}</Mo>}
+                        <div style={{flex:1,minWidth:120,padding:"8px 11px",borderRadius:9,
+                          background:"rgba(194,65,12,.05)",border:"1px solid rgba(194,65,12,.18)"}}>
+                          <div style={{fontFamily:DB.font,fontSize:10.5,color:"#C2410C",fontWeight:700,marginBottom:3}}>운동 전</div>
+                          {b.vas > 0 && <span style={{fontFamily:DB.font,fontSize:12,color:bColor,fontWeight:800}}>VAS {b.vas}</span>}
+                          {b.part && <div style={{fontFamily:DB.font,fontSize:11,color:DB.sub,marginTop:1}}>{b.part}</div>}
+                          {b.situation && <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint}}>{b.situation}</div>}
                         </div>
                       )}
                       {(a.vas > 0 || a.change || a.memo) && (
-                        <div style={{flex:1,minWidth:120,padding:"6px 9px",borderRadius:7,
-                          background:"rgba(0,229,160,.05)",border:"1px solid rgba(0,229,160,.18)"}}>
-                          <Mo c="#5EEAD4" s={7} style={{display:"block",marginBottom:3,fontWeight:700}}>운동 후</Mo>
-                          {a.vas > 0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:aColor,fontWeight:800}}>VAS {a.vas}</span>}
-                          {a.change && <Mo c={aColor} s={9} style={{display:"block",marginTop:1,fontWeight:700}}>{a.change==="감소"?"✅":a.change==="증가"?"⚠️":"➡️"} {a.change}</Mo>}
-                          {a.memo && <Mo c="#3a3a5a" s={8} style={{display:"block",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.memo}</Mo>}
+                        <div style={{flex:1,minWidth:120,padding:"8px 11px",borderRadius:9,
+                          background:"rgba(15,148,136,.05)",border:"1px solid rgba(15,148,136,.18)"}}>
+                          <div style={{fontFamily:DB.font,fontSize:10.5,color:"#0F9488",fontWeight:700,marginBottom:3}}>운동 후</div>
+                          {a.vas > 0 && <span style={{fontFamily:DB.font,fontSize:12,color:aColor,fontWeight:800}}>VAS {a.vas}</span>}
+                          {a.change && <div style={{fontFamily:DB.font,fontSize:11,color:aColor,marginTop:1,fontWeight:700}}>{a.change==="감소"?"✅":a.change==="증가"?"⚠️":"➡️"} {a.change}</div>}
+                          {a.memo && <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.memo}</div>}
                         </div>
                       )}
                     </div>
                   );
                 })()}
-                <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end",flexWrap:"wrap"}}
-                  onClick={e => e.stopPropagation()}>
-                  {s.sessionType === "2:1" && s.memberBId && !["recorded","sent"].includes(s.pairStatus) && !s.isPublished && (
-                    <button onClick={() => setConfirmPair(s)}
-                      style={{background:"rgba(162,155,254,.1)",border:"1px solid rgba(162,155,254,.3)",borderRadius:5,
-                        color:"#a29bfe",fontSize:10,fontWeight:800,padding:"5px 12px"}}>
-                      나눠서 기록
-                    </button>
-                  )}
-                  {s.sessionType === "2:1" && ["recorded","sent"].includes(s.pairStatus) && (
-                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"3px 7px",borderRadius:3,
-                      background:"rgba(0,229,160,.1)",color:"#5EEAD4",fontWeight:700}}>
-                      ✅ 기록 완료{s.pairRecordedAt ? ` · ${String((s.pairRecordedAt?.toDate ? s.pairRecordedAt.toDate() : s.pairRecordedAt) || "").slice(0,16).replace("T"," ")}` : ""}
-                    </span>
-                  )}
-                  <button onClick={() => onEdit(s)}
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:5,
-                      color:"#7c6fff",fontSize:10,fontWeight:700,padding:"5px 12px"}}>수정</button>
-                  <button onClick={() => onDelete(s)}
-                    style={{background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:5,
-                      color:"#ff6b6b",fontSize:10,fontWeight:700,padding:"5px 12px"}}>삭제</button>
-                </div>
               </div>
             );
           })}

@@ -12325,6 +12325,19 @@ function suggestMuscle(name, classifications) {
   return null;
 }
 
+// 신규 수업 기록 시작 시 "오늘의 운동 부위" 초기값을 결정한다.
+// 우선순위: ① 기존 수업 수정이면 그 수업에 저장된 부위만 사용(다른 값으로 절대 덮지 않음)
+//          ② 신규 기록이면 같은 날짜에 저장된 "다음 수업 준비" 부위(nextWorkoutPart)를 초기값으로 사용
+//          ③ 둘 다 없으면 빈 선택 상태
+// nextWorkoutPart는 NEXT_PT_PART_OPTIONS 값(예: "팔","코어","전신","교정")까지 포함할 수 있지만
+// "오늘의 운동 부위" UI는 SESSION_BODY_PART_OPTIONS만 다루므로, 두 옵션 목록에 공통으로 존재하는
+// 값만 그대로 채택하고(이두/삼두 등) 대응 관계가 불분명한 값은 새 매핑을 만들지 않고 걸러낸다.
+function getInitialSessionParts({ editingSession, sessionDate, member }) {
+  if (editingSession) return normalizeTypes(editingSession.selectedTypes || editingSession.type);
+  const nextDate = String(member?.nextWorkoutDate || member?.nextPtDate || "").slice(0, 10);
+  if (!nextDate || nextDate !== String(sessionDate || "").slice(0, 10)) return [];
+  return parseNextParts(member?.nextWorkoutPart || member?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
+}
 function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
   allMembers=[], classifications={}, onLearnExercise }) {
   const isCorr = false;
@@ -12348,7 +12361,11 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [gymName,        setGymName]        = useState(editData?.gymName        || last?.gymName        || "테오짐");
   const [date,           setDate]           = useState(editData?.date           || new Date().toISOString().split("T")[0]);
   const [sessionNo,      setSessionNo]      = useState(editData?.sessionNo !== undefined ? editData.sessionNo : (last ? Number(last.sessionNo||0)+1 : 1));
-  const [selectedTypes,  setSelectedTypes]  = useState(() => normalizeTypes(editData?.selectedTypes || editData?.type));
+  const [selectedTypes,  setSelectedTypes]  = useState(() => getInitialSessionParts({
+    editingSession: editData,
+    sessionDate: editData?.date || new Date().toISOString().split("T")[0],
+    member,
+  }));
   const [intensity,      setIntensity]      = useState(editData?.intensity      || "중강도");
   const [condition,      setCondition]      = useState(editData?.condition      || "상");
   const [exercises,      setExercises]      = useState(() => {

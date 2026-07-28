@@ -375,6 +375,16 @@ function mkSet()     { return {weight:"",reps:"",volume:0, recordType:"weightRep
 function mkFuncSet() { return {weight:"",reps:"",durationSec:"",volume:0, recordType:"function"}; }
 function mkEx(top)   { const t = top || "가슴"; return {name:"",muscleTop:t,muscleSub:mSubs(t)[0]||"윗가슴",equipment:"바벨",sets:[mkSet()],feedback:"",stimRating:null,stimMemo:"",stimPrimary:"",stimSecondary:"",stimNote:"",nextPlan:"",movementPurpose:"",funcCategory:"",funcBodyPart:"",funcTool:""}; }
 
+// 네트워크 지연/오프라인 큐잉 등으로 Firestore 호출의 Promise가 영영 settle되지 않을 경우에도
+// "처리 중..." 상태가 화면에 영구히 남지 않도록, 지정 시간 안에 응답이 없으면 명시적으로 실패 처리한다.
+// (호출 자체를 취소하지는 않지만, 호출부의 try/finally가 정상적으로 해제되도록 보장한다)
+function withTimeout(promise, ms = 20000, message = "요청이 지연되고 있습니다. 네트워크 상태를 확인 후 다시 시도해주세요.") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
 const STIM_RATING_OPTIONS = [
   { value:1, label:"없음", summary:"자극 없음" },
   { value:2, label:"애매함", summary:"애매함" },
@@ -5610,7 +5620,7 @@ export default function App() {
   // 2:1 기록 화면 "다음 2:1 수업" — 체크된 회원 전원에게 기존 1:1 다음 수업 필드(nextWorkoutDate/Time/Part)를
   // 한 번에 저장한다. 새 컬렉션·새 필드 없이 기존 회원 문서 필드를 재사용(HubScreen handleSaveNextDate/Time/Part와 동일 패턴).
   async function handleSaveNextPairSession(memberIds, patch) {
-    await Promise.all(memberIds.map(id => updateMember(id, patch)));
+    await withTimeout(Promise.all(memberIds.map(id => updateMember(id, patch))));
     setMembers(prev => prev.map(m => memberIds.includes(m.id) ? { ...m, ...patch } : m));
   }
 
@@ -5813,7 +5823,7 @@ export default function App() {
     if (!bMember) { showToast("B 회원을 찾을 수 없습니다", "err"); return; }
     setLoading(true);
     try {
-      const bSessions = await getSessions(bMember.id);
+      const bSessions = await withTimeout(getSessions(bMember.id));
       const bSessionNo = bSessions.length > 0
         ? Number(bSessions[bSessions.length - 1].sessionNo || 0) + 1 : 1;
       const bExercises = aSession.memberBExercises || [];
@@ -5836,13 +5846,15 @@ export default function App() {
         isPublished: false,
         status: "draft",
       };
-      await sendPairSession(member?.id, aSession.id, bMember.id, bSessionData);
-      await refreshSessionsForMember(member.id);
-      const bNewSessions = await getSessions(bMember.id);
+      await withTimeout(sendPairSession(member?.id, aSession.id, bMember.id, bSessionData));
+      await withTimeout(refreshSessionsForMember(member.id));
+      const bNewSessions = await withTimeout(getSessions(bMember.id));
       setSessionsMap(prev => ({ ...prev, [bMember.id]: bNewSessions }));
       showToast(`${bMember.name} 기록 전송 완료 ✓`);
+      return true;
     } catch(e) {
       showToast("전송 실패: " + e.message, "err");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -5982,8 +5994,8 @@ export default function App() {
   async function handleSavePairSession(data, id = null) {
     setLoading(true);
     try {
-      const saved = await savePairSession(data, id);
-      await loadPairSessions();
+      const saved = await withTimeout(savePairSession(data, id));
+      await withTimeout(loadPairSessions());
       showToast(id ? "2:1 수업 저장 완료 ✓" : "2:1 수업 생성 완료 ✓");
       return saved;
     } catch(e) {
@@ -6017,11 +6029,15 @@ export default function App() {
     } catch(e) { showToast(e.message, "err"); }
   }
 
+  // 나눠서 기록 저장 흐름: 원본(pairSession) 데이터를 기준으로 A/B 개인 수업일지를 순서대로 생성한다.
+  // 실패 시 null을 반환해 호출부(확인 모달)가 "성공한 것처럼" 다음 단계(모달 닫기·화면 이동)로
+  // 진행하지 않도록 하고, loading 상태는 예외 발생 여부와 무관하게 항상 finally에서 해제한다.
   async function handleSplitPairSession(pairSession) {
+    if (!pairSession) { showToast("2:1 수업 정보가 없습니다", "err"); return null; }
     // members 상태가 비어 있는 경우(Home→pair21 직접 진입) DB에서 즉시 로드
     let memberList = members;
     if (!memberList.length) {
-      try { memberList = await getMembers(); setMembers(memberList); } catch(e) {}
+      try { memberList = await withTimeout(getMembers()); setMembers(memberList); } catch(e) {}
     }
     // ID 검색 → 이름 검색(trim) 순서로 폴백. 기존 데이터 memberAId가 빈 문자열인 경우 대응.
     const findMember = (id, name) => {
@@ -6031,12 +6047,11 @@ export default function App() {
     };
     const mA = findMember(pairSession.memberAId, pairSession.memberAName);
     const mB = findMember(pairSession.memberBId, pairSession.memberBName);
-    if (!mA) { showToast(`${pairSession.memberAName || "A회원"} 회원 정보를 찾을 수 없습니다`, "err"); return; }
-    if (!mB) { showToast(`${pairSession.memberBName || "B회원"} 회원 정보를 찾을 수 없습니다`, "err"); return; }
+    if (!mA) { showToast(`${pairSession.memberAName || "A회원"} 회원 정보를 찾을 수 없습니다`, "err"); return null; }
+    if (!mB) { showToast(`${pairSession.memberBName || "B회원"} 회원 정보를 찾을 수 없습니다`, "err"); return null; }
     setLoading(true);
     try {
-      const ssA = await getSessions(mA.id);
-      const ssB = await getSessions(mB.id);
+      const [ssA, ssB] = await withTimeout(Promise.all([getSessions(mA.id), getSessions(mB.id)]));
       const noA = ssA.length > 0 ? Number(ssA[ssA.length-1].sessionNo||0)+1 : 1;
       const noB = ssB.length > 0 ? Number(ssB[ssB.length-1].sessionNo||0)+1 : 1;
 
@@ -6093,17 +6108,19 @@ export default function App() {
         isPublished: false, status: "draft",
       };
 
-      await splitPairSession(pairSession.id, aData, bData);
-      const [newPss, newSsA, newSsB] = await Promise.all([
+      const splitResult = await withTimeout(splitPairSession(pairSession.id, aData, bData));
+      const [newPss, newSsA, newSsB] = await withTimeout(Promise.all([
         getPairSessions(),
         getSessions(mA.id),
         getSessions(mB.id),
-      ]);
+      ]));
       setPairSessions(newPss);
       setSessionsMap(prev => ({...prev, [mA.id]: newSsA, [mB.id]: newSsB}));
       showToast(`${mA.name} + ${mB.name} 개인 기록 생성 완료 ✓`);
+      return splitResult;
     } catch(e) {
       showToast("나눠서 기록 실패: " + e.message, "err");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -12773,12 +12790,25 @@ function updateEx(ei, key, val) {
       return {...ex, sets};
     }));
   }
+  // 2:1 모드에서 회원2(B) 세트가 아직 독립적으로 손댄 적이 없으면(m2.sets 미존재) 지금까지는
+  // 화면에 회원1(A)과 같은 개수로 "미러링"되어 보이던 상태다. 이 시점에 회원1의 세트 개수를 바꾸면
+  // 그 미러링된 표시 개수도 함께 바뀌어버려 "삭제가 다른 회원에게 영향을 준다"는 문제가 생기므로,
+  // 변경 직전 개수를 그대로 회원2의 독립 배열로 굳혀(freeze) 둔 뒤 회원1만 변경한다.
+  const freezeM2SetsIfUntouched = (ex) => (sessionType==="2:1" && member2 && !ex.m2?.sets)
+    ? { m2:{...(ex.m2||{}), sets:(ex.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}))} }
+    : {};
   function addSet(ei) {
-    setExercises(prev => prev.map((ex,i) =>
-      i===ei ? {...ex, sets:[...ex.sets, isFuncEx(ex) ? mkFuncSet() : mkSet()]} : ex
-    ));
+    setExercises(prev => prev.map((ex,i) => {
+      if (i!==ei) return ex;
+      return {...ex, ...freezeM2SetsIfUntouched(ex), sets:[...ex.sets, isFuncEx(ex) ? mkFuncSet() : mkSet()]};
+    }));
   }
-  function removeSet(ei, si) { setExercises(prev => prev.map((ex,i) => i===ei ? {...ex,sets:ex.sets.filter((_,j)=>j!==si)} : ex)); }
+  function removeSet(ei, si) {
+    setExercises(prev => prev.map((ex,i) => {
+      if (i!==ei) return ex;
+      return {...ex, ...freezeM2SetsIfUntouched(ex), sets:ex.sets.filter((_,j)=>j!==si)};
+    }));
+  }
 
   function handleSave() {
     if (!sessionNo) { showToast("회차를 입력해주세요","err"); return; }
@@ -12842,22 +12872,27 @@ function updateEx(ei, key, val) {
 
     // ── 2:1 수업: B회원 운동 데이터를 A 세션 payload에 포함 (나눠서 전송 시 B 세션 생성)
     if (sessionType === "2:1" && member2) {
+      // 회원2(B)는 회원1(A)과 세트 개수가 달라질 수 있으므로, 저장 시에도 A의 세트 개수가 아니라
+      // B 자신의 실제 세트 배열(m2.sets) 길이를 기준으로 만든다. 아직 한 번도 독립적으로 손대지
+      // 않은 종목(m2.sets 없음)만 기존처럼 A 구조를 빈 값 기본형으로 사용한다(하위 호환).
       const exM2 = cleanExercises.map(e => {
         const { m2, ...rest } = e;
         if (!m2) return {...rest};
-        const m2SetsRaw = m2.sets || [];
-        const merged = (rest.sets||[]).map((s, si) => ({
-          ...s,
-          weight:      (m2SetsRaw[si]?.weight      !== undefined && m2SetsRaw[si]?.weight      !== "") ? m2SetsRaw[si].weight      : s.weight,
-          reps:        (m2SetsRaw[si]?.reps        !== undefined && m2SetsRaw[si]?.reps        !== "") ? m2SetsRaw[si].reps        : s.reps,
-          durationSec: (m2SetsRaw[si]?.durationSec !== undefined && m2SetsRaw[si]?.durationSec !== "") ? m2SetsRaw[si].durationSec : s.durationSec,
-          volume: (() => {
-            const w = parseFloat(m2SetsRaw[si]?.weight ?? s.weight) || 0;
-            const r = parseInt(m2SetsRaw[si]?.reps   ?? s.reps)   || 0;
-            return Math.round(w * r * 10) / 10;
-          })(),
-          rpe: m2.rpe || s.rpe,
-        }));
+        const m2SetsRaw = (m2.sets && m2.sets.length) ? m2.sets : (rest.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}));
+        const merged = m2SetsRaw.map((row, si) => {
+          const base = rest.sets?.[si] || {};
+          const weight      = (row.weight      !== undefined && row.weight      !== "") ? row.weight      : (base.weight ?? "");
+          const reps        = (row.reps        !== undefined && row.reps        !== "") ? row.reps        : (base.reps ?? "");
+          const durationSec = (row.durationSec !== undefined && row.durationSec !== "") ? row.durationSec : (base.durationSec ?? "");
+          const w = parseFloat(weight) || 0;
+          const r = parseInt(reps) || 0;
+          return {
+            ...base,
+            weight, reps, durationSec,
+            volume: Math.round(w * r * 10) / 10,
+            rpe: m2.rpe || base.rpe,
+          };
+        });
         return { ...rest, sets: merged, feedback: m2.note || rest.feedback };
       });
       // B 데이터를 A payload에 포함 — 나눠서 전송 전까지 B 세션은 생성되지 않음
@@ -13693,7 +13728,16 @@ function updateEx(ei, key, val) {
                   const addM2Set = () => setExercises(prev => prev.map((x,i) => {
                     if (i!==ei) return x;
                     const prevM2 = x.m2||{};
-                    return {...x, m2:{...prevM2, sets:[...(prevM2.sets||[]),{weight:"",reps:"",durationSec:""}]}};
+                    const base = prevM2.sets || (ex.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}));
+                    return {...x, m2:{...prevM2, sets:[...base,{weight:"",reps:"",durationSec:""}]}};
+                  }));
+                  // 회원2 세트 삭제 — 회원1(setsA) 배열은 절대 건드리지 않고 m2.sets만 독립적으로 줄인다.
+                  const removeM2Set = (si) => setExercises(prev => prev.map((x,i) => {
+                    if (i!==ei) return x;
+                    const prevM2 = x.m2||{};
+                    const base = prevM2.sets || (ex.sets||[]).map(()=>({weight:"",reps:"",durationSec:""}));
+                    if (base.length<=1) { showToast("최소 1세트 유지"); return x; }
+                    return {...x, m2:{...prevM2, sets:base.filter((_,j)=>j!==si)}};
                   }));
                   // 공통값 복사: 회원1 sets의 값을 회원2 sets에 덮어씀
                   const applyShared = (field) => setExercises(prev => prev.map((x,i)=>{
@@ -13743,23 +13787,24 @@ function updateEx(ei, key, val) {
                         {/* 컬럼 헤더 */}
                         <div style={{display:"grid",
                           gridTemplateColumns: isFunc
-                            ? "20px 1fr 1fr"
+                            ? "20px 1fr 1fr 16px"
                             : isTime
-                              ? "20px 1fr 1fr"
-                              : "20px 1fr 1fr",
+                              ? "20px 1fr 1fr 16px"
+                              : "20px 1fr 1fr 16px",
                           gap:4,marginBottom:3}}>
                           <Mo c="#64748B" s={7} style={{textAlign:"center"}}>SET</Mo>
                           {!isFunc && !isTime && <Mo c="#64748B" s={7} style={{textAlign:"center"}}>{weightLabel}</Mo>}
                           {isTime && <Mo c="#64748B" s={7} style={{textAlign:"center"}}>시간(초)</Mo>}
                           <Mo c="#64748B" s={7} style={{textAlign:"center"}}>횟수</Mo>
+                          <div/>
                         </div>
                         {m2sets.map((row, si) => (
                           <div key={si} style={{display:"grid",
                             gridTemplateColumns: isFunc
-                              ? "20px 1fr 1fr"
+                              ? "20px 1fr 1fr 16px"
                               : isTime
-                                ? "20px 1fr 1fr"
-                                : "20px 1fr 1fr",
+                                ? "20px 1fr 1fr 16px"
+                                : "20px 1fr 1fr 16px",
                             gap:4,marginBottom:4,alignItems:"center"}}>
                             <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",
                               background:"#F1F3F6",borderRadius:4,height:30,display:"flex",
@@ -13789,6 +13834,10 @@ function updateEx(ei, key, val) {
                               style={{textAlign:"center",height:30,padding:"0 3px",
                                 fontSize:14,fontWeight:700,borderRadius:4,
                                 border:"1px solid rgba(139,92,246,.2)",background:"#FFFFFF",color:"#0F172A"}} />
+                            {/* 회원2 개별 삭제 — 회원1 세트에는 영향 없음 */}
+                            {m2sets.length>1
+                              ? <button onClick={() => removeM2Set(si)} style={{background:"none",border:"none",color:"#64748B",fontSize:11,padding:0,textAlign:"center"}}>✕</button>
+                              : <div />}
                           </div>
                         ))}
                         {/* B회원 세트 추가 */}
@@ -14436,7 +14485,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
                   background:"transparent",color:"#94a3b8",fontSize:13,cursor:"pointer"}}>취소</button>
               <button disabled={splitting} onClick={async()=>{
                 setSplitting(true);
-                try { await onSplit(confirmSplit); setConfirmSplit(null); }
+                try { const ok = await onSplit(confirmSplit); if (ok) setConfirmSplit(null); }
                 catch(e){ showToast(e.message,"err"); }
                 finally { setSplitting(false); }
               }} style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:"pointer",
@@ -14686,8 +14735,10 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
     return {...e,[key]:sets};
   }));
 
+  // 원본 저장 — 성공/실패를 boolean으로 반환한다("나눠서 기록" 흐름이 원본 저장 실패 시
+  // 다음 단계(A/B 분할)로 넘어가지 않고 여기서 멈추도록 신호를 줘야 하기 때문).
   const handleManualSave = async () => {
-    if (!memberAId || !memberBId) { showToast("A, B 회원을 모두 선택하세요","err"); return; }
+    if (!memberAId || !memberBId) { showToast("A, B 회원을 모두 선택하세요","err"); return false; }
     setSaving(true);
     try {
       await onSave({
@@ -14701,7 +14752,8 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
       });
       clearDraft();
       showToast("저장 완료 ✓");
-    } catch(e){ showToast(e.message||"저장 실패","err"); }
+      return true;
+    } catch(e){ showToast(e.message||"저장 실패","err"); return false; }
     finally { setSaving(false); }
   };
 
@@ -15186,8 +15238,12 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
                 if (splitting) return;
                 setSplitting(true);
                 try {
-                  await handleManualSave();
-                  await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
+                  // 원본 저장 → (A/B 회원 저장은 onSplit 내부에서 순서대로 처리) 순으로 진행하되,
+                  // 앞 단계가 실패하면 다음 단계로 넘어가지 않고 여기서 멈춘다.
+                  const savedOk = await handleManualSave();
+                  if (!savedOk) return;
+                  const splitResult = await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
+                  if (!splitResult) return;
                   clearDraft();
                   setConfirmSplit(false);
                   // 나눠서 기록 완료 후 이 화면(폼)의 운동종목/세트/중량 로컬 state가 리셋된 Firestore 문서와
@@ -15305,7 +15361,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
           </button>
           <button disabled={splitting} onClick={async () => {
             setSplitting(true);
-            try { await onSendPair?.(confirmPair); setConfirmPair(null); }
+            try { const ok = await onSendPair?.(confirmPair); if (ok) setConfirmPair(null); }
             finally { setSplitting(false); }
           }} style={{flex:2,padding:"10px",borderRadius:8,border:"none",
             background:"linear-gradient(135deg,#a29bfe,#7c6fff)",

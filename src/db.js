@@ -8,6 +8,8 @@
 //    /members/{id}/nutrition/meta         ← 영양 메타 (목표, 즐겨찾기)
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
 //    /members/{id}/counselNotes/main      ← 상담 리포트: 대표 상담 메모(트레이너 전용)
+//    /members/{id}/memberOnboarding/main  ← 회원앱 온보딩 답변(v2 맵 포함) — 사전 문진의 단일 원본
+//    /consultations/{id}                  ← 상담 고객(리드). 정식 회원 전환 전까지 members를 만들지 않는다
 //    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
 //    /exerciseClassifications/{trainerUid} ← 센터 공통 운동 라이브러리(운동명→기구/부위/세부부위 마스터 데이터)
 //
@@ -1673,6 +1675,8 @@ const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
   "targetWeight", "targetWeightKg", "targetPeriod", "targetPeriodCustom",
   "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
   "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory",
+  // 온보딩 v2 — 목표/경험/생활습관/통증/병력/일정/성향 구조화 응답과 단계별 임시 저장
+  "v2", "v2Draft", "onboardingVersion", "startedAt",
 ]);
 
 function sanitizeMemberOnboardingPayload(data = {}) {
@@ -2238,4 +2242,182 @@ export async function saveCardioLog(memberId, data, logId = null) {
 export async function deleteCardioLog(memberId, logId) {
   requireUid();
   await deleteDoc(doc(db, "members", memberId, "cardioLogs", logId));
+}
+
+// ════════════════════════════════════════════════════
+// 상담 고객(리드) — consultations/{id}
+//
+// 왜 members가 아니라 별도 컬렉션인가:
+//   기존에는 "초기 상담 등록" = members 문서 생성이라, 등록하지 않은 상담 고객도 정식 회원 목록·통계·
+//   오늘 수업·알림에 전부 섞였고, 지우려면 deleteMember로 서브컬렉션까지 통째로 지우는 방법밖에 없었다.
+//   상담 고객은 수업일지·체중·식단 같은 서브컬렉션이 아예 필요 없으므로 평평한 단일 문서 컬렉션으로 분리한다.
+//
+// 하위 호환:
+//   이미 members로 만들어진 과거 상담 고객은 그대로 둔다(강제 마이그레이션 없음).
+//   유입 분석은 members.survey.visitRoutes + consultations.visitRoutes 양쪽을 합산해서 본다.
+//
+// 정식 회원 전환:
+//   convertConsultationToMember()가 members 문서를 만들고 양방향 링크(consultation.convertedMemberId /
+//   member.consultationId)를 저장한다. convertedMemberId가 이미 있으면 중복 전환을 막는다.
+// ════════════════════════════════════════════════════
+export const CONSULT_STATUS_OPTIONS = [
+  { key: "consultation_scheduled", label: "상담 예정" },
+  { key: "consultation_completed", label: "상담 완료" },
+  { key: "considering",            label: "고민 중" },
+  { key: "follow_up",              label: "추후 연락" },
+  { key: "registered",             label: "등록 확정" },
+  { key: "not_registered",         label: "미등록" },
+];
+
+export async function getConsultations() {
+  const uid = requireUid();
+  dbLog("getConsultations", `trainerUid=${uid}`);
+  try {
+    // orderBy를 쓰면 (trainerUid, createdAt) 복합 인덱스가 필요해 배포 순서에 따라 조회가 실패할 수 있으므로
+    // 서버 정렬 대신 클라이언트에서 정렬한다(상담 고객 수는 인덱스가 필요할 규모가 아니다).
+    const snap = await getDocs(query(collection(db, "consultations"), where("trainerUid", "==", uid)));
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const at = v => v?.toDate?.()?.getTime?.() || Date.parse(v) || 0;
+    return rows.sort((a, b) =>
+      String(b.consultDate || "").localeCompare(String(a.consultDate || "")) ||
+      at(b.createdAt) - at(a.createdAt)
+    );
+  } catch (e) {
+    console.error("[DB:getConsultations] read failed:", { path: "consultations", ...describeFirestoreError(e) });
+    throw e;
+  }
+}
+
+export async function addConsultation(data) {
+  const uid = requireUid();
+  const payload = {
+    ...clean(data),
+    status: data?.status || "consultation_completed",
+    trainerUid: uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  const ref = await addDoc(collection(db, "consultations"), payload);
+  dbLog("addConsultation", `생성 완료: ${ref.id}`);
+  return { id: ref.id, ...data, status: payload.status, trainerUid: uid };
+}
+
+export async function updateConsultation(id, data) {
+  const uid = requireUid();
+  const ref = doc(db, "consultations", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("상담 고객을 찾을 수 없습니다.");
+  if (snap.data().trainerUid !== uid) throw new Error("권한이 없습니다.");
+  await updateDoc(ref, { ...clean(data), trainerUid: uid, updatedAt: serverTimestamp() });
+  return { id, ...data };
+}
+
+// 상담 기록은 "등록하지 않았다"는 것 자체가 유입 분석 데이터라 기본적으로 지우지 않는다.
+// 이 함수는 잘못 입력한 중복 문서를 정정할 때만 쓴다(정식 회원으로 전환된 상담은 삭제 거부).
+export async function deleteConsultation(id) {
+  const uid = requireUid();
+  const ref = doc(db, "consultations", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.trainerUid !== uid) throw new Error("권한이 없습니다.");
+  if (data.convertedMemberId) throw new Error("이미 정식 회원으로 전환된 상담은 삭제할 수 없습니다.");
+  await deleteDoc(ref);
+}
+
+// 상담 고객 → 정식 회원 전환.
+// 회원 문서 생성은 기존 addMember를 그대로 재사용하고(등록 흐름·private 분리 로직 중복 구현 금지),
+// 성공한 뒤에만 상담 문서를 registered로 갱신한다.
+export async function convertConsultationToMember(consultationId, memberData = {}) {
+  const uid = requireUid();
+  const consultRef = doc(db, "consultations", consultationId);
+  const snap = await getDoc(consultRef);
+  if (!snap.exists()) throw new Error("상담 고객을 찾을 수 없습니다.");
+  const consult = snap.data();
+  if (consult.trainerUid !== uid) throw new Error("권한이 없습니다.");
+  if (consult.convertedMemberId) throw new Error("이미 정식 회원으로 전환된 상담 고객입니다.");
+
+  const created = await addMember({ ...memberData, consultationId });
+  await updateDoc(consultRef, {
+    status: "registered",
+    convertedMemberId: created.id,
+    convertedAt: new Date().toISOString(),
+    updatedAt: serverTimestamp(),
+  });
+  dbLog("convertConsultationToMember", `${consultationId} → members/${created.id}`);
+  return created;
+}
+
+// ════════════════════════════════════════════════════
+// 온보딩 v2 — members/{id}/memberOnboarding/main 안의 v2 맵 (단일 원본)
+//
+// 기존 평탄 필드(gender/heightCm/currentWeightKg/goal/focusAreas...)는 전혀 건드리지 않고 그대로 유지하고,
+// 새로 회원이 입력하는 목표·경험·생활습관·통증·병력·일정·성향만 v2 객체에 모아 담는다.
+// 같은 응답을 members 문서나 상담 문서에 중복 저장하지 않는다 — 관리자 화면은 이 v2를 읽어서 표시만 한다.
+//
+// members 문서에는 목록 배지용 요약 4개 필드(onboardingStatus/onboardingCompletedAt/onboardingUpdatedAt/
+// onboardingHasCaution)만 미러링한다. 회원 목록에서 회원 수만큼 서브문서를 추가로 읽지 않기 위한 캐시이며,
+// 값의 원본은 항상 memberOnboarding/main이다.
+// ════════════════════════════════════════════════════
+export const ONBOARDING_VERSION = 2;
+
+const ONBOARDING_MIRROR_FIELDS = [
+  "onboardingStatus", "onboardingCompletedAt", "onboardingUpdatedAt", "onboardingHasCaution",
+];
+
+export async function saveMemberOnboardingDraft(memberId, draft = {}, extra = {}) {
+  if (!memberId) return null;
+  requireUid();
+  const ref = doc(db, "members", memberId, "memberOnboarding", "main");
+  await setDoc(ref, clean({
+    v2Draft: draft,
+    onboardingVersion: ONBOARDING_VERSION,
+    startedAt: extra.startedAt || new Date().toISOString(),
+    updatedAt: serverTimestamp(),
+  }), { merge: true });
+  return { ok: true };
+}
+
+// 회원 본인이 members 문서에 쓸 수 있는 건 Rules memberProfileUpdateKeysAllowed 화이트리스트뿐이므로
+// 미러 필드만 담아 최소 패치로 쓴다. 실패해도 온보딩 저장 자체는 성공으로 본다(요약 배지는 재계산 가능).
+export async function syncOnboardingStatusToMember(memberId, mirror = {}) {
+  if (!memberId) return;
+  const payload = {};
+  ONBOARDING_MIRROR_FIELDS.forEach(f => {
+    if (mirror[f] !== undefined) payload[f] = mirror[f];
+  });
+  if (!Object.keys(payload).length) return;
+  try {
+    await updateDoc(doc(db, "members", memberId), { ...payload, updatedAt: serverTimestamp() });
+  } catch (e) {
+    console.warn("[DB:syncOnboardingStatusToMember]", e?.code || e?.message || e);
+  }
+}
+
+// 관리자 "내용 확인 완료" — 트레이너만 쓰는 필드라 회원 화이트리스트와 무관하다.
+export async function markOnboardingReviewed(memberId) {
+  const uid = requireUid();
+  const now = new Date().toISOString();
+  await setDoc(doc(db, "members", memberId, "memberOnboarding", "main"),
+    { reviewedAt: now, reviewedBy: uid, updatedAt: serverTimestamp() }, { merge: true });
+  await syncOnboardingStatusToMember(memberId, { onboardingStatus: "completed" }).catch(() => {});
+  return { reviewedAt: now, reviewedBy: uid };
+}
+
+// 관리자 "회원에게 수정 요청" — 회원앱 알림 + 관리자 화면 상태만 바꾸고 답변 데이터는 건드리지 않는다.
+export async function requestOnboardingUpdate(memberId, message = "") {
+  requireUid();
+  const now = new Date().toISOString();
+  await setDoc(doc(db, "members", memberId, "memberOnboarding", "main"),
+    { updateRequestedAt: now, updateRequestMessage: message || "", updatedAt: serverTimestamp() }, { merge: true });
+  try {
+    await createMemberNotification(memberId, {
+      type: "onboarding_update_request",
+      title: "사전 문진 확인 요청",
+      body: message || "운동 목표·통증·건강 정보를 최신 상태로 업데이트해주세요.",
+    });
+  } catch (e) {
+    console.warn("[DB:requestOnboardingUpdate] notification failed", e?.code || e?.message || e);
+  }
+  return { updateRequestedAt: now };
 }

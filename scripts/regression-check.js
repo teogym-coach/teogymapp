@@ -1906,6 +1906,131 @@ const checks = [
     app.includes('shouldShowWeightTrend(ob?.goal || member.goal)') &&
     app.includes('<HubWeightTrendSection key={member.id} records={wEntries} chartHeight={isWide ? 156 : 148} />')
   ],
+
+  // ── 상담 고객 분리 · 회원앱 사전 문진(온보딩 v2) 개편 ──────────────────────────
+  ['상담 분리: 신규 상담은 members가 아니라 consultations 문서만 생성',
+    db.includes('export async function addConsultation') &&
+    db.includes('addDoc(collection(db, "consultations")') &&
+    app.includes('screen==="consultationForm"') &&
+    app.includes('<ConsultationFormScreen')
+  ],
+  ['상담 분리: 상담 상태 6종(예정/완료/고민중/추후연락/등록확정/미등록)을 모두 지원',
+    ['consultation_scheduled', 'consultation_completed', 'considering', 'follow_up', 'registered', 'not_registered']
+      .every(k => db.includes(`key: "${k}"`))
+  ],
+  ['상담 분리: 미등록 상담 고객은 삭제 대상이 아니며 전환 완료건은 삭제 자체가 차단됨',
+    db.includes('if (data.convertedMemberId) throw new Error("이미 정식 회원으로 전환된 상담은 삭제할 수 없습니다.");') &&
+    app.includes('상담만 받고 등록하지 않은 분도')
+  ],
+  ['상담 → 회원 전환: 중복 전환 방지 + memberId/consultationId 상호 연결',
+    db.includes('export async function convertConsultationToMember') &&
+    db.includes('if (consult.convertedMemberId) throw new Error("이미 정식 회원으로 전환된 상담 고객입니다.");') &&
+    db.includes('await addMember({ ...memberData, consultationId });') &&
+    db.includes('convertedMemberId: created.id,') &&
+    app.includes('? await convertConsultationToMember(d.consultationId, d)')
+  ],
+  ['상담 → 회원 전환: 이름·연락처·방문 경로·상담 메모·희망 시간이 자동으로 채워짐',
+    app.includes('function handleStartConvert(c) {') &&
+    ['name: c.name', 'phone: c.phone', 'visitRoutes: Array.isArray(c.visitRoutes)', 'consultMemo: c.consultMemo', 'preferredSchedule: c.preferredSchedule']
+      .every(x => app.includes(x)) &&
+    app.includes('const fromConsultation = !isEdit && !!prefill?.consultationId;')
+  ],
+  ['상담 분리: 정식 회원 전환은 상담 상태가 "등록 확정"일 때만 가능',
+    app.includes('disabled={c.status !== "registered"}')
+  ],
+  ['상담 분리: Firestore Rules consultations는 trainerUid 소유자 전용(회원 계정 접근 차단)',
+    firestoreRules.includes('match /consultations/{consultationId}') &&
+    firestoreRules.includes("allow read: if isSignedIn() && resource.data.get('trainerUid', '') == uid();")
+  ],
+  ['상담 분리: 신규 회원 등록 화면에서 운동 설문 11단계 제거(수정 모드 8개 탭은 그대로 유지)',
+    !app.includes('"약점 & 선호 스타일", "운동 강도 성향", "목표 우선순위"') &&
+    app.includes('const survey = isEdit ? {') &&
+    app.includes('const EDIT_TABS = ["기본","목표·목적","통증·건강","운동경험","방문계기","생활습관","스케줄","메모"];')
+  ],
+  ['유입 분석: 미등록 상담 고객도 포함하되 전환 완료건은 중복 집계하지 않음',
+    app.includes('.filter(c => !c.convertedMemberId)') &&
+    app.includes('const pool = [...realMembers, ...leadRows];')
+  ],
+
+  ['온보딩 v2: 저장 위치는 기존 memberOnboarding/main 한 곳이고 v2 맵만 추가(중복 저장 없음)',
+    db.includes('doc(db, "members", memberId, "memberOnboarding", "main")') &&
+    db.includes('"v2", "v2Draft", "onboardingVersion", "startedAt",') &&
+    app.includes('v2, v2Draft: {},')
+  ],
+  ['온보딩 v2: Firestore Rules 화이트리스트에 v2/v2Draft/onboardingVersion/startedAt 추가(생성·수정 모두)',
+    (firestoreRules.match(/"v2", "v2Draft", "onboardingVersion", "startedAt"/g) || []).length === 2
+  ],
+  ['온보딩 v2: 단계별 임시 저장 + 중간 이탈 후 재진입 시 입력값·단계 복원',
+    db.includes('export async function saveMemberOnboardingDraft') &&
+    app.includes('const persistDraft = (nextStep) => {') &&
+    app.includes('const draft = (!isEditMode && existing?.v2Draft) || null;') &&
+    app.includes('const s = Number(draft?.step);')
+  ],
+  ['온보딩 v2: 조건부 질문(통증 없음/수술 없음/약물 없음/이전 PT 없음/바디프로필/재활) 적용',
+    app.includes('if (part === "없음") next = cur.includes("없음") ? [] : ["없음"];') &&
+    app.includes('{v.experience.prevPT === "있음" &&') &&
+    app.includes('{v.health.hasSurgery === "있음" &&') &&
+    app.includes('{v.health.hasMedication === "있음" &&') &&
+    app.includes('{goalList.includes("바디프로필") &&') &&
+    app.includes('{goalList.includes("재활 목적") &&')
+  ],
+  ['온보딩 v2: 상위 선택을 해제해도 상세 값을 즉시 지우지 않고 최종 제출에서만 정리',
+    app.includes('function ob2Finalize(v = {}) {') &&
+    app.includes('const cleanV2 = ob2Finalize(v);')
+  ],
+  ['온보딩 v2: 제출 중 중복 클릭 방지 + 저장 무한 대기 방지(타임아웃)',
+    app.includes('const completeOnboarding = async () => {') &&
+    app.includes('await withOnboardingTimeout(saveMemberOnboarding(profile.id, payload));')
+  ],
+  ['온보딩 v2: 기존 평탄 필드(성별/키/체중/집중부위)와 약관 동의·프로필 동기화를 그대로 유지',
+    app.includes('gender: draft?.d?.gender || existing?.gender || profile.gender || "",') &&
+    app.includes('agreedTermsAt: existing?.agreedTermsAt || now,') &&
+    app.includes('syncOnboardingToMemberProfile(profile.id, payload).catch(() => {});')
+  ],
+  ['온보딩 v2: 최우선 목표 12종 → 기존 목표 어휘 5종 자동 환산(같은 질문 두 번 하지 않음)',
+    app.includes('const OB2_GOAL_TO_LEGACY = {') &&
+    app.includes('function legacyGoalFromOb2(primaryGoal, goals = [], fallback = "") {')
+  ],
+  ['온보딩 상태: 6단계 상태 + 온보딩 데이터가 없는 기존 회원도 오류 없이 표시',
+    ['not_invited', 'invited', 'account_created', 'in_progress', 'completed', 'needs_update', 'legacy']
+      .every(k => app.includes(`${k}:`)) &&
+    app.includes('function getOnboardingStatus(member = {}, onboarding = null) {') &&
+    app.includes('if (member?.birthSource === "onboarding") return "legacy";')
+  ],
+  ['온보딩 상태: 회원 목록 배지는 members 미러 필드만 사용(목록에서 서브문서 추가 조회 없음)',
+    app.includes('function getOnboardingStatusFromMember(member = {}) {') &&
+    app.includes('const obStatus = getOnboardingStatusFromMember(m);') &&
+    !app.includes('getMemberOnboarding(m.id)')
+  ],
+  ['온보딩 상태: 미러 필드가 Rules 회원 쓰기 화이트리스트에 포함되고 전용 저장 함수 사용',
+    firestoreRules.includes('"onboardingStatus", "onboardingCompletedAt", "onboardingUpdatedAt", "onboardingHasCaution"') &&
+    db.includes('export async function syncOnboardingStatusToMember')
+  ],
+  ['관리자 요약: 회원 상세에 사전 문진 요약 카드 + 통증·병력·약물·주의사항 별도 강조 영역',
+    app.includes('function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {') &&
+    app.includes('<OnboardingSummaryCard member={member} onboarding={ob} onPatch={onMemberPatch} showToast={showToast} />') &&
+    app.includes('수업 전 반드시 확인') &&
+    app.includes('function ob2HasCaution(v2 = {}) {')
+  ],
+  ['관리자 요약: 전체 답변 보기 / 수정 요청 / 내용 확인 완료 액션 제공',
+    app.includes('전체 답변 보기') && app.includes('회원에게 수정 요청') && app.includes('내용 확인 완료') &&
+    db.includes('export async function markOnboardingReviewed') &&
+    db.includes('export async function requestOnboardingUpdate')
+  ],
+  ['관리자 요약: 회원이 통증·병력·약물·주의사항을 바꾸면 확인 완료가 풀리고 변경 확인 필요로 전환',
+    app.includes('function ob2CriticalSignature(v2 = {}) {') &&
+    app.includes('const criticalChanged = !savedV2 || prevSig !== nextSig;') &&
+    app.includes('if (criticalAt && (!reviewedAt || String(criticalAt) > String(reviewedAt))) return "needs_update";')
+  ],
+  ['관리자 홈: 오늘 해야 할 일에 사전 문진 미완료 카드 추가(기존 TodayListCard 펼치기 UX 재사용)',
+    app.includes('const onboardingPendingList = useMemo(() => {') &&
+    app.includes('title="사전 문진 미완료"') &&
+    app.includes('id="home-onboarding-pending"')
+  ],
+  ['회원앱: 제출 후에도 프로필에서 사전 문진을 다시 수정할 수 있음',
+    app.includes('mode="edit"') && app.includes('사전 문진 수정하기') &&
+    app.includes('const isEditMode = mode === "edit";')
+  ],
 ];
 
 let failed = 0;

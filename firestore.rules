@@ -135,6 +135,8 @@ service cloud.firestore {
         "birthYear", "birthMonth", "birthDay", "birthYearMonth", "birthSource",
         "fcmToken", "fcmTokenUpdatedAt",
         "memberLastInputAt", "todayInputTypes", "recentActivityLog",
+        // 온보딩 상태 미러(회원 목록 배지용 캐시) — 원본은 members/{id}/memberOnboarding/main
+        "onboardingStatus", "onboardingCompletedAt", "onboardingUpdatedAt", "onboardingHasCaution",
         "survey"
       ]) && memberSurveySyncKeysAllowed();
     }
@@ -154,7 +156,8 @@ service cloud.firestore {
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
         "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
-        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory"
+        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory",
+        "v2", "v2Draft", "onboardingVersion", "startedAt"
       ]);
     }
 
@@ -166,7 +169,8 @@ service cloud.firestore {
         "weeklyWorkoutCount", "workoutFrequency", "goal", "heightCm", "height",
         "startingWeightKg", "startWeight", "currentWeightKg", "currentWeight", "weight", "targetWeight", "targetWeightKg",
         "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate", "updatedAt",
-        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory"
+        "agreedTermsAt", "agreedPrivacyAt", "restingHeartRate", "goalHistory",
+        "v2", "v2Draft", "onboardingVersion", "startedAt"
       ]);
     }
 
@@ -391,6 +395,17 @@ service cloud.firestore {
       allow delete: if isSignedIn()
         && resource.data.get('trainerUid', '') == uid()
         && isVerifiedTrainer();
+    }
+
+    // consultations: 상담 고객(리드) — 등록 확정 전까지 members 문서를 만들지 않기 위한 트레이너 전용 컬렉션.
+    // 회원 계정은 이 컬렉션에 접근할 이유가 전혀 없으므로 trainerUid 일치만으로 전부 게이트한다.
+    match /consultations/{consultationId} {
+      allow read: if isSignedIn() && resource.data.get('trainerUid', '') == uid();
+      allow create: if isSignedIn() && request.resource.data.get('trainerUid', '') == uid();
+      allow update: if isSignedIn()
+        && resource.data.get('trainerUid', '') == uid()
+        && request.resource.data.get('trainerUid', '') == uid();
+      allow delete: if isSignedIn() && resource.data.get('trainerUid', '') == uid();
     }
 
     match /pairSessions/{pairSessionId} {

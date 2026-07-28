@@ -28,6 +28,8 @@ import {
   getReadSessionIds, markSessionsRead, SESSION_UNREAD_CUTOFF,
   saveAttendance, getAttendanceRecent, deleteAttendance,
   getCardioLogs, saveCardioLog, deleteCardioLog,
+  CONSULT_STATUS_OPTIONS, getConsultations, addConsultation, updateConsultation, deleteConsultation, convertConsultationToMember,
+  ONBOARDING_VERSION, saveMemberOnboardingDraft, syncOnboardingStatusToMember, markOnboardingReviewed, requestOnboardingUpdate,
   subscribeToMembers,
   subscribeToTrainerNotificationReads, markNotificationEventsRead, feedEventId,
   subscribeToExerciseClassifications, saveExerciseClassification,
@@ -1157,6 +1159,107 @@ function LoginScreen({ onLogin, loading, error, memberMode }) {
 const MEMBER_COLORS = { background:"#FFFFFF", pageSoft:"#F6F7F9", card:"#FFFFFF", cardSoft:"#F1F3F6", textPrimary:"#20242A", textSecondary:"#8B949E", border:"#E8ECF1", accentBlue:"#2F73F6", accentPurple:"#8B5CF6", positiveGreen:"#16C784", danger:"#FF5A5F" };
 const ONBOARDING_GOALS=["운동 기초 다지기","다이어트 성공","근육 키우기","특정 부위 집중하기","건강한 습관 만들기"];
 const ONBOARDING_FOCUS=["벌크업","상체 프레임 넓히기","대포알 어깨 만들기","다이어트 초집중","선명한 복근","뱃살 옆구리살 빼기","탄탄한 가슴 근육","굵은 팔뚝 만들기","하체 강화","직각 어깨 만들기","V자 등 만들기","힙업 만들기"];
+
+// ════════════════════════════════════════════════════
+// 사전 문진(온보딩 v2) — 회원앱이 직접 입력하고 관리자앱이 읽기만 하는 단일 원본
+// 저장 위치: members/{id}/memberOnboarding/main.v2  (기존 평탄 필드는 그대로 유지)
+// 관리자 신규 상담 등록에서 제거한 운동 목적·경험·생활습관·통증·병력·일정·성향 질문이 여기로 옮겨왔다.
+// ════════════════════════════════════════════════════
+const OB2_GOAL_OPTIONS = ["체지방 감량","근력 증가","근육 증가","체형 교정","자세 개선","통증 개선","건강 관리","체력 증가","바디프로필","재활 목적","스트레스 해소","기타"];
+const OB2_EXPERIENCE_LEVELS = ["운동 경험 없음","홈트 경험","헬스 경험","꾸준히 운동 중"];
+const OB2_EXPERIENCE_DURATION = ["3개월 미만","3~6개월","6개월~1년","1~3년","3년 이상"];
+const OB2_PREV_PT = ["없음","있음"];
+const OB2_PREV_PT_SATISFACTION = ["만족","보통","불만족"];
+const OB2_MEALS = ["1회","2회","3회","4회 이상","불규칙"];
+const OB2_FREQ = ["거의 없음","주 1~2회","주 3~4회","거의 매일"];
+const OB2_WATER = ["1L 미만","1~1.5L","1.5~2L","2L 이상"];
+const OB2_SLEEP = ["5시간 미만","5~6시간","6~7시간","7~8시간","8시간 이상"];
+const OB2_STRESS = ["낮음","보통","높음","매우 높음"];
+const OB2_PAIN_PARTS = ["목","어깨","팔꿈치","손목","허리","고관절","무릎","발목","기타"];
+const OB2_PAIN_ONSET = ["1개월 미만","1~6개월","6개월~1년","1년 이상","기억나지 않음"];
+const OB2_PREFER_TIME = ["오전 (06~12시)","오후 (12~17시)","저녁 (17~21시)","시간 상관 없음"];
+const OB2_WEEK_COUNT = ["주 1회","주 2회","주 3회","주 4회","주 5회 이상"];
+const OB2_TARGET_PERIOD = ["1개월","3개월","6개월","1년 이상","기간 미정"];
+const OB2_WEAK_PARTS = ["가슴","등","어깨","팔","하체","둔근","코어","심폐지구력"];
+const OB2_EX_STYLE = ["머신 위주","프리웨이트 위주","기능성 운동","교정 운동","유산소 위주","바디프로필 스타일","재활 중심"];
+const OB2_INTENSITY = ["천천히 배우고 싶음","적당한 강도 선호","강하게 운동 선호"];
+
+// 온보딩 v2의 세부 목표(12종) → 기존 회원앱 목표 어휘(AI_GOAL_OPTIONS 5종) 매핑.
+// 칼로리·변화 리포트·다음 수업 가이드 등 기존 화면이 전부 onboarding.goal(5종)을 읽고 있으므로,
+// 회원에게 같은 질문을 두 번 시키지 않고 최우선 목표에서 자동으로 환산한다.
+const OB2_GOAL_TO_LEGACY = {
+  "체지방 감량":"다이어트", "바디프로필":"다이어트",
+  "근력 증가":"벌크업", "근육 증가":"벌크업",
+  "체형 교정":"체형교정", "자세 개선":"체형교정",
+  "통증 개선":"건강관리", "재활 목적":"건강관리", "건강 관리":"건강관리",
+  "체력 증가":"건강관리", "스트레스 해소":"건강관리", "기타":"건강관리",
+};
+function legacyGoalFromOb2(primaryGoal, goals = [], fallback = "") {
+  const pick = primaryGoal || (Array.isArray(goals) ? goals[0] : "");
+  return OB2_GOAL_TO_LEGACY[pick] || fallback || "";
+}
+
+// 안전 정보 — 회원이 수정하면 관리자 확인 완료가 자동 해제되어야 하는 항목만 모은다.
+function ob2CriticalSignature(v2 = {}) {
+  const pain = v2.pain || {}, health = v2.health || {};
+  return JSON.stringify([
+    asArr(pain.parts), pain.worst || "", pain.situation || "", pain.onset || "", pain.trigger || "",
+    asArr(health.conditions), health.conditionEtc || "", health.surgery || "", health.medication || "", health.caution || "",
+  ]);
+}
+function asArr(v) {
+  if (Array.isArray(v)) return v.filter(Boolean).map(String);
+  if (v === undefined || v === null || v === "") return [];
+  return [String(v)];
+}
+function ob2HasCaution(v2 = {}) {
+  const pain = v2.pain || {}, health = v2.health || {};
+  const painParts = asArr(pain.parts).filter(p => p !== "없음");
+  return painParts.length > 0
+    || asArr(health.conditions).filter(c => c !== "없음").length > 0
+    || !!String(health.surgery || "").trim()
+    || !!String(health.medication || "").trim()
+    || !!String(health.caution || "").trim();
+}
+
+// 온보딩 진행 상태 — members 미러 필드가 없는 기존 회원도 오류 없이 판정되도록
+// 회원 문서(초대/가입 여부) + 온보딩 문서(작성/완료 여부)만으로 계산한다.
+const ONBOARDING_STATUS_LABEL = {
+  not_invited:     { label:"초대 전",       tone:"slate" },
+  invited:         { label:"초대 발송",     tone:"amber" },
+  account_created: { label:"가입 완료",     tone:"amber" },
+  in_progress:     { label:"작성 중",       tone:"amber" },
+  completed:       { label:"완료",          tone:"mint"  },
+  needs_update:    { label:"변경 확인 필요", tone:"rose"  },
+  legacy:          { label:"기존 회원",      tone:"slate" },
+};
+function getOnboardingStatus(member = {}, onboarding = null) {
+  const ob = onboarding || null;
+  const v2 = ob?.v2 || null;
+  const completed = !!(ob?.completedAt || ob?.completed === true);
+  if (completed) {
+    // v2 이전에 온보딩만 마친 기존 회원 — 사전 문진 답변 자체가 없으므로 "기존 회원"으로 구분한다.
+    if (!v2) return "legacy";
+    const criticalAt = v2.criticalUpdatedAt || "";
+    const reviewedAt = ob?.reviewedAt || "";
+    if (criticalAt && (!reviewedAt || String(criticalAt) > String(reviewedAt))) return "needs_update";
+    return "completed";
+  }
+  if (ob?.v2Draft || ob?.startedAt) return "in_progress";
+  if (member?.memberUid) return "account_created";
+  if (member?.memberAppInviteSentAt || member?.memberAppPasswordResetSentAt) return "invited";
+  return "not_invited";
+}
+// 회원 목록처럼 온보딩 문서를 읽지 않는 화면용 — members에 미러된 값이 있으면 그대로 쓴다.
+// 미러가 없는 기존 회원은 온보딩 완료 시 members에 남는 birthSource="onboarding" 흔적으로 "기존 회원"을 구분하고,
+// 그마저 없으면 초대/가입 여부만으로 추정한다(온보딩 문서를 추가로 읽지 않는다).
+function getOnboardingStatusFromMember(member = {}) {
+  const mirrored = member?.onboardingStatus;
+  if (mirrored && ONBOARDING_STATUS_LABEL[mirrored]) return mirrored;
+  if (member?.birthSource === "onboarding") return "legacy";
+  return getOnboardingStatus(member, null);
+}
+
 const DEFAULT_ADMIN_EMAIL = "teogym12@gmail.com";
 const DEFAULT_MEMBER_TEST_EMAIL = "teogym12.member@gmail.com";
 const NEXT_PT_PART_OPTIONS = ["상체","하체","등","가슴","어깨","팔","이두","삼두","코어","전신","교정","미정"];
@@ -1452,7 +1555,7 @@ function MemberApp({ onLogout }) {
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load();
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,cardioSaving,correctionSummaries};
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"수업"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -1461,7 +1564,509 @@ function MemberDiagnostics({profile,details}){const d=profile?._diagnostics||det
 function MemberDebugPanel({profile,logs,errors}){const failed=Object.values(errors||{}); return <MCard title="회원앱 문서 매칭 진단"><MemberDiagnostics profile={profile}/>{failed.length>0&&<div className="danger">권한/조회 실패 경로: {failed.map(e=>`${e.path} (${e.code})`).join(" · ")}</div>}<div className="notice"><b>Firestore 읽기 순서</b>{(logs||[]).map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div></MCard>}
 
 function MemberAppError({message,details,logs,onRetry,onLogout}){const isAuthMissing=details?.code==="auth/user-not-found"; const debugMode=isMemberDebugMode(); return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><div className="member-page"><MCard title="회원앱을 열 수 없습니다"><p className="danger">{message}</p>{debugMode&&details&&<><div className="notice"><b>오류 코드:</b> {details.code||"unknown"}{details.path&&<><br/><b>실패 경로:</b> {details.path}</>}</div><MemberDiagnostics details={details}/></>}{debugMode&&logs?.length>0&&<div className="notice"><b>Firestore 읽기 순서</b>{logs.map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div>}<p className="notice">{isAuthMissing?"Firebase Authentication 사용자 계정을 찾을 수 없습니다. 회원앱 초대/비밀번호 설정 상태를 확인해주세요.":"회원 정보 확인 중 문제가 발생했습니다. 다시 시도 후에도 계속되면 대표에게 문의해주세요."}</p><button className="primary" onClick={onRetry}>다시 시도</button><button className="ghost" onClick={onLogout}>로그아웃</button></MCard></div></div>}
-function MemberOnboarding({profile,body,existing,onDone}){const today=new Date().toISOString().slice(0,10); const [step,setStep]=useState(0); const [saving,setSaving]=useState(false); const [error,setError]=useState(""); const [agreeTerms,setAgreeTerms]=useState(false); const [agreePrivacy,setAgreePrivacy]=useState(false); const [legalView,setLegalView]=useState(null); const [d,setD]=useState({gender:existing?.gender||profile.gender||"",birthYear:existing?.birthYear||profile.birthYear||profile.birth||estimateBirthYearFromAge(profile)||1995,birthMonth:(m=>m?String(m).padStart(2,"0"):"01")(existing?.birthMonth||profile.birthMonth),birthDay:String(existing?.birthDay||profile.birthDay||""),heightCm:existing?.heightCm||profile.height||"",startingWeightKg:existing?.startingWeightKg||getLatestBodyWeight(body)?.weight||profile.weight||"",currentWeightKg:existing?.currentWeightKg||profile.currentWeight||getLatestBodyWeight(body)?.weight||profile.weight||"",targetWeightKg:existing?.targetWeightKg||existing?.targetWeight||existing?.goalWeight||profile.targetWeightKg||profile.targetWeight||profile.goalWeight||"",targetPeriod:existing?.targetPeriod||existing?.goalPeriod||profile.targetPeriod||"3개월",targetPeriodCustom:existing?.targetPeriodCustom||existing?.goalDeadline||existing?.targetDate||"",jobType:existing?.jobType||"",weeklyWorkoutCount:existing?.weeklyWorkoutCount||"",averageWorkoutTime:existing?.averageWorkoutTime||"",averageSteps:existing?.averageSteps||"",goal:existing?.goal||"",focusAreas:existing?.focusAreas||[]}); const qs=["성별","출생연월일","키","현재 체중","목표 체중","목표 기간","직업","주 운동 횟수","평균 운동 시간","하루 평균 걸음 수","운동 목표","집중 관리 부위","약관 동의"]; const isLastStep=step===qs.length-1; const isAgreeStep=qs[step]==="약관 동의"; const completeOnboarding=async()=>{if(saving)return; setSaving(true); setError(""); try{if(profile?.memberUid!==auth.currentUser?.uid){throw new Error("계정 정보가 일치하지 않습니다. 새로고침 후 다시 시도해주세요.");} const now=new Date().toISOString(); const deadline=goalDeadlineFromPeriod(d.targetPeriod,d.targetPeriodCustom); const payload={...d,birthYearMonth:d.birthYear&&d.birthMonth?`${d.birthYear}-${String(d.birthMonth).padStart(2,"0")}`:"",goalPeriod:d.targetPeriod,goalPeriodType:d.targetPeriod,goalDeadline:deadline,targetDate:deadline,weeklyWorkoutCount:d.weeklyWorkoutCount,completed:true,completedAt:now,weightHistoryMode:existing?.weightHistoryMode||"fresh",calorieHistoryMode:existing?.calorieHistoryMode||"fresh",weightHistoryModeStartedAt:existing?.weightHistoryModeStartedAt||now,calorieHistoryModeStartedAt:existing?.calorieHistoryModeStartedAt||now,agreedTermsAt:now,agreedPrivacyAt:now}; await withOnboardingTimeout(saveMemberOnboarding(profile.id,payload)); syncOnboardingToMemberProfile(profile.id,payload).catch(()=>{}); if(d.currentWeightKg||d.startingWeightKg){await withOnboardingTimeout(saveBodyCheck(profile.id,{...(body||{}),records:upsertBodyRecord(body?.records||[],{id:"onboarding_start",date:today,weight:d.currentWeightKg||d.startingWeightKg,note:"온보딩 초기 체중"})}));} await withOnboardingTimeout(Promise.resolve(onDone()));}catch(e){console.error("[MemberOnboarding] save failed:",e); setError(e?.code==="onboarding/timeout"?e.message:"저장에 실패했습니다. 다시 시도해주세요.");}finally{setSaving(false);}}; const nextStep=()=>{setError(""); setStep(s=>Math.min(s+1,qs.length-1));}; const prevStep=()=>{if(saving)return; setError(""); setStep(s=>Math.max(s-1,0));}; const isFirstStep=step===0; const next=()=>{if(saving)return; if(isLastStep){completeOnboarding();return;} nextStep();}; const pick=(k,v)=>{setError(""); setD(prev=>({...prev,[k]:v}));}; if(legalView) return <MemberLegalPage type={legalView} onBack={()=>setLegalView(null)}/>; return <div className="member-shell onboard"><style>{CSS+MEMBER_CSS}</style><div className="onbar"><i style={{width:`${(step+1)/qs.length*100}%`}}/></div><section className="onbody"><p>TEO GYM 회원 온보딩</p><h1>{qs[step]}</h1>{step===0&&<div className="choice2">{["남성","여성"].map(x=><button type="button" className={d.gender===x?"sel":""} onClick={()=>pick("gender",x)}>{x}</button>)}</div>}{step===1&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}><select className="bigselect" value={d.birthYear} onChange={e=>pick("birthYear",e.target.value)}>{Array.from({length:80},(_,i)=>new Date().getFullYear()-10-i).map(y=><option key={y}>{y}</option>)}</select><select className="bigselect" value={d.birthMonth} onChange={e=>pick("birthMonth",e.target.value)}>{Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0")).map(m=><option key={m} value={m}>{m}월</option>)}</select><select className="bigselect" value={d.birthDay} onChange={e=>pick("birthDay",e.target.value)}><option value="">일</option>{Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0")).map(dd=><option key={dd} value={dd}>{dd}일</option>)}</select></div>}{step===2&&<div className="numunit"><input className="bignum" type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={d.heightCm} onChange={e=>pick("heightCm",sanitizeDecimalInput(e.target.value))} placeholder="0"/><span className="numunit-suffix">cm</span></div>}{step===3&&<div className="numunit"><input className="bignum" type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={d.currentWeightKg} onChange={e=>pick("currentWeightKg",sanitizeDecimalInput(e.target.value))} placeholder="0"/><span className="numunit-suffix">kg</span></div>}{step===4&&<div className="numunit"><input className="bignum" type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={d.targetWeightKg} onChange={e=>pick("targetWeightKg",sanitizeDecimalInput(e.target.value))} placeholder="0"/><span className="numunit-suffix">kg</span></div>}{step===5&&<><Choices vals={TARGET_PERIOD_OPTIONS} cur={d.targetPeriod} onPick={v=>pick("targetPeriod",v)}/>{d.targetPeriod==="직접 입력"&&<input className="bignum" style={{marginTop:12,fontSize:"20px!important"}} value={d.targetPeriodCustom} onChange={e=>pick("targetPeriodCustom",e.target.value)} type="date" placeholder="2026-09-30"/>}</>}{step===6&&<Choices vals={JOB_ACTIVITY_OPTIONS} cur={d.jobType} onPick={v=>pick("jobType",v)}/>} {step===7&&<Choices vals={[0,1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} cur={d.weeklyWorkoutCount} onPick={v=>pick("weeklyWorkoutCount",v)}/>} {step===8&&<Choices vals={WORKOUT_TIME_OPTIONS} cur={d.averageWorkoutTime} onPick={v=>pick("averageWorkoutTime",v)}/>} {step===9&&<Choices vals={STEP_RANGE_OPTIONS} cur={d.averageSteps} onPick={v=>pick("averageSteps",v)}/>} {step===10&&<Choices vals={AI_GOAL_OPTIONS} cur={d.goal} onPick={v=>pick("goal",v)}/>} {step===11&&<Choices vals={ONBOARDING_FOCUS} cur={d.focusAreas} multi onPick={v=>pick("focusAreas",d.focusAreas.includes(v)?d.focusAreas.filter(x=>x!==v):[...d.focusAreas,v])}/>} {isAgreeStep&&<div className="agree-block"><label className="agree-row"><input type="checkbox" checked={agreeTerms} onChange={e=>setAgreeTerms(e.target.checked)}/><span className="agree-box" aria-hidden="true"/><span><button type="button" className="agree-link" onClick={e=>{e.preventDefault();e.stopPropagation();setLegalView("terms");}}>이용약관</button>에 동의합니다. (필수)</span></label><label className="agree-row"><input type="checkbox" checked={agreePrivacy} onChange={e=>setAgreePrivacy(e.target.checked)}/><span className="agree-box" aria-hidden="true"/><span><button type="button" className="agree-link" onClick={e=>{e.preventDefault();e.stopPropagation();setLegalView("privacy");}}>개인정보처리방침</button>에 동의합니다. (필수)</span></label></div>} {error&&<div className="member-error onerror" role="alert">{error}</div>}</section><div className="onnav">{!isFirstStep&&<button type="button" className="onprev" onClick={prevStep} onTouchEnd={e=>{e.preventDefault();prevStep();}} disabled={saving}>이전</button>}<button type="button" className="onnext" onClick={next} onTouchEnd={e=>{e.preventDefault();next();}} disabled={saving||(isAgreeStep&&!(agreeTerms&&agreePrivacy))}>{saving?"저장 중...":isLastStep?"시작하기":"다음"}</button></div></div>}
+// ── 회원앱 사전 문진(온보딩) — v2 ────────────────────────────────────────────
+// 관리자 "신규 상담 등록"에서 뺀 운동 목적·경험·생활습관·통증·병력·일정·성향 질문이 여기로 왔다.
+// 저장 위치는 기존과 동일한 members/{id}/memberOnboarding/main 한 곳이며,
+//   - 기존 평탄 필드(gender/heightCm/currentWeightKg/goal/focusAreas 등)는 이름·의미 그대로 유지하고
+//   - 새로 늘어난 응답만 v2 맵에 담는다(같은 답을 두 군데 저장하지 않는다).
+// mode="edit"이면 완료된 회원이 프로필에서 다시 열어 수정하는 흐름이며,
+// 통증·병력·약물·주의사항이 바뀐 경우에만 v2.criticalUpdatedAt을 갱신해 관리자 확인을 다시 요청한다.
+const OB2_CSS = `
+.ob2-q{margin:0 0 22px}
+.ob2-q>label{display:block;font-size:14px;font-weight:800;color:#20242A;margin:0 0 9px}
+.ob2-q>label small{display:block;font-size:12px;font-weight:600;color:#8B949E;margin-top:3px}
+.ob2-chips{display:flex;flex-wrap:wrap;gap:8px}
+.ob2-chips button{min-height:44px;padding:0 15px;border:1px solid #E8ECF1;border-radius:14px;background:#F6F7F9;font-size:14px;font-weight:700;color:#20242A;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,color .15s ease}
+.ob2-chips button:active{transform:scale(.97)}
+.ob2-chips button.sel{background:#2F73F6;color:#fff;border-color:#2F73F6}
+.ob2-input,.ob2-area{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:14px;background:#F6F7F9;padding:14px 15px;font-size:16px;font-weight:600;color:#20242A;font-family:inherit}
+.ob2-area{min-height:88px;resize:vertical;line-height:1.55}
+.ob2-input:focus,.ob2-area:focus{outline:none;border-color:#2F73F6;background:#fff}
+.ob2-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.ob2-cond{margin-top:12px;padding:14px;border-radius:16px;background:#F1F6FF;border:1px solid #DCE8FF}
+.ob2-cond .ob2-q:last-child{margin-bottom:0}
+.ob2-note{font-size:12.5px;font-weight:600;color:#8B949E;line-height:1.6;margin:0 0 18px}
+.ob2-warn{font-size:12.5px;font-weight:700;color:#B45309;background:#FEF6E7;border:1px solid #F7E0B5;border-radius:14px;padding:12px 14px;line-height:1.6;margin:0 0 18px}
+.ob2-sum{border:1px solid #E8ECF1;border-radius:18px;overflow:hidden;margin-bottom:18px}
+.ob2-sum div{display:flex;gap:12px;padding:12px 15px;border-top:1px solid #F1F3F6;font-size:14px}
+.ob2-sum div:first-child{border-top:none}
+.ob2-sum b{flex:0 0 96px;color:#8B949E;font-weight:700;font-size:13px}
+.ob2-sum span{flex:1;color:#20242A;font-weight:700;word-break:break-word}
+.ob2-editlink{width:100%;min-height:48px;border:1px solid #E8ECF1;border-radius:14px;background:#fff;font-size:14px;font-weight:800;color:#2F73F6;margin-bottom:10px}
+.onbody h1.ob2-title{font-size:28px;margin:14px 0 6px}
+.ob2-step{font-size:12.5px;font-weight:800;color:#2F73F6;letter-spacing:.02em}
+`;
+function Ob2Chips({options, value, onPick, multi}) {
+  const list = multi ? asArr(value) : value;
+  return <div className="ob2-chips">{options.map(o => (
+    <button key={o} type="button" className={(multi ? list.includes(o) : value === o) ? "sel" : ""}
+      onClick={() => onPick(o)}>{o}</button>
+  ))}</div>;
+}
+function Ob2Q({label, hint, children}) {
+  return <div className="ob2-q"><label>{label}{hint && <small>{hint}</small>}</label>{children}</div>;
+}
+// 상세 값은 화면에서 감출 뿐 상위 선택을 해제해도 즉시 지우지 않는다(다시 선택하면 그대로 복원됨).
+// 최종 제출 시점에만 이 함수로 정리해 관리자 요약 카드에 사라진 조건의 옛 답변이 남지 않게 한다.
+function ob2Finalize(v = {}) {
+  const goals = {...(v.goals || {})};
+  const pain = {...(v.pain || {})};
+  const health = {...(v.health || {})};
+  const experience = {...(v.experience || {})};
+  const goalList = asArr(goals.list);
+  if (!goalList.includes("바디프로필")) goals.shootDate = "";
+  if (!goalList.includes("재활 목적")) goals.rehabNote = "";
+  if (experience.prevPT !== "있음") experience.prevPTSatisfaction = "";
+  const painParts = asArr(pain.parts).filter(p => p !== "없음");
+  if (!painParts.length) { pain.worst = ""; pain.situation = ""; pain.onset = ""; pain.trigger = ""; }
+  if (health.hasSurgery !== "있음") health.surgery = "";
+  if (health.hasMedication !== "있음") health.medication = "";
+  if (!asArr(health.conditions).includes("기타")) health.conditionEtc = "";
+  return {...v, goals, pain, health, experience};
+}
+function MemberOnboarding({profile, body, existing, onDone, mode = "create", onCancel}) {
+  const isEditMode = mode === "edit";
+  const today = new Date().toISOString().slice(0, 10);
+  const draft = (!isEditMode && existing?.v2Draft) || null;
+  const savedV2 = existing?.v2 || null;
+  const [step, setStep] = useState(() => {
+    const s = Number(draft?.step);
+    return Number.isFinite(s) && s > 0 ? s : 0;
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const alreadyAgreed = !!(existing?.agreedTermsAt && existing?.agreedPrivacyAt);
+  const [agreeTerms, setAgreeTerms] = useState(alreadyAgreed);
+  const [agreePrivacy, setAgreePrivacy] = useState(alreadyAgreed);
+  const [legalView, setLegalView] = useState(null);
+
+  // 기존 평탄 필드 — 이름·의미·저장 경로 모두 종전 그대로 유지한다(회원앱/관리자앱 여러 화면이 이 값을 읽는다).
+  const [d, setD] = useState(() => ({
+    gender: draft?.d?.gender || existing?.gender || profile.gender || "",
+    birthYear: draft?.d?.birthYear || existing?.birthYear || profile.birthYear || profile.birth || estimateBirthYearFromAge(profile) || 1995,
+    birthMonth: (m => m ? String(m).padStart(2, "0") : "01")(draft?.d?.birthMonth || existing?.birthMonth || profile.birthMonth),
+    birthDay: String(draft?.d?.birthDay || existing?.birthDay || profile.birthDay || ""),
+    heightCm: draft?.d?.heightCm || existing?.heightCm || profile.height || "",
+    startingWeightKg: draft?.d?.startingWeightKg || existing?.startingWeightKg || getLatestBodyWeight(body)?.weight || profile.weight || "",
+    currentWeightKg: draft?.d?.currentWeightKg || existing?.currentWeightKg || profile.currentWeight || getLatestBodyWeight(body)?.weight || profile.weight || "",
+    targetWeightKg: draft?.d?.targetWeightKg || existing?.targetWeightKg || existing?.targetWeight || existing?.goalWeight || profile.targetWeightKg || profile.targetWeight || profile.goalWeight || "",
+    targetPeriod: draft?.d?.targetPeriod || existing?.targetPeriod || existing?.goalPeriod || profile.targetPeriod || "3개월",
+    targetPeriodCustom: draft?.d?.targetPeriodCustom || existing?.targetPeriodCustom || existing?.goalDeadline || existing?.targetDate || "",
+    jobType: draft?.d?.jobType || existing?.jobType || "",
+    weeklyWorkoutCount: draft?.d?.weeklyWorkoutCount || existing?.weeklyWorkoutCount || "",
+    averageWorkoutTime: draft?.d?.averageWorkoutTime || existing?.averageWorkoutTime || "",
+    averageSteps: draft?.d?.averageSteps || existing?.averageSteps || "",
+    goal: draft?.d?.goal || existing?.goal || "",
+    focusAreas: draft?.d?.focusAreas || existing?.focusAreas || [],
+  }));
+
+  // v2 — 이번 개편으로 새로 회원이 입력하는 구조화 응답
+  const [v, setV] = useState(() => {
+    const src = draft?.v || savedV2 || {};
+    return {
+      goals: {list: [], primary: "", detail: "", shootDate: "", rehabNote: "", ...(src.goals || {})},
+      experience: {level: "", duration: "", prevPT: "", prevPTSatisfaction: "", ...(src.experience || {})},
+      lifestyle: {meals: "", lateSnack: "", alcohol: "", water: "", delivery: "", sleep: "", stress: "", ...(src.lifestyle || {})},
+      pain: {parts: [], worst: "", situation: "", onset: "", trigger: "", ...(src.pain || {})},
+      health: {conditions: [], conditionEtc: "", hasSurgery: "", surgery: "", hasMedication: "", medication: "", caution: "", ...(src.health || {})},
+      schedule: {preferTime: [], weekCount: "", targetPeriod: "", note: "", ...(src.schedule || {})},
+      preferences: {weakParts: [], styles: [], intensity: "", ...(src.preferences || {})},
+    };
+  });
+
+  const goalList = asArr(v.goals.list);
+  const painParts = asArr(v.pain.parts);
+  const hasPain = painParts.filter(p => p !== "없음").length > 0;
+
+  const STEPS = [
+    "기본 정보", "운동 목표", "목표 체중 · 기간", "운동 경험", "생활 리듬", "식습관",
+    "통증 · 불편 부위", "병력 · 주의사항", "운동 가능 일정", "운동 성향", "최종 확인",
+  ];
+  const isLastStep = step === STEPS.length - 1;
+  const isFirstStep = step === 0;
+  const needAgree = isLastStep && !alreadyAgreed;
+
+  const setD1 = (k, val) => { setError(""); setD(p => ({...p, [k]: val})); };
+  const setV1 = (sec, k, val) => { setError(""); setV(p => ({...p, [sec]: {...p[sec], [k]: val}})); };
+  const toggle = (sec, k, val) => setV(p => {
+    const cur = asArr(p[sec][k]);
+    return {...p, [sec]: {...p[sec], [k]: cur.includes(val) ? cur.filter(x => x !== val) : [...cur, val]}};
+  });
+  // "없음"은 다른 통증 부위와 동시에 선택될 수 없다.
+  const togglePainPart = (part) => {
+    setError("");
+    setV(p => {
+      const cur = asArr(p.pain.parts);
+      let next;
+      if (part === "없음") next = cur.includes("없음") ? [] : ["없음"];
+      else next = cur.includes(part) ? cur.filter(x => x !== part) : [...cur.filter(x => x !== "없음"), part];
+      return {...p, pain: {...p.pain, parts: next}};
+    });
+  };
+
+  // 단계별 임시 저장 — 실패해도 입력 흐름을 막지 않는다(중간 이탈 복원용 보조 저장).
+  const persistDraft = (nextStep) => {
+    if (isEditMode || !profile?.id) return;
+    saveMemberOnboardingDraft(profile.id, {d, v, step: nextStep}, {startedAt: existing?.startedAt}).catch(() => {});
+  };
+
+  function validateStep() {
+    if (step === 0) {
+      if (!d.gender) return "성별을 선택해주세요.";
+      if (!String(d.heightCm).trim()) return "키를 입력해주세요.";
+      if (!String(d.currentWeightKg).trim()) return "현재 체중을 입력해주세요.";
+    }
+    if (step === 1) {
+      if (!goalList.length) return "운동 목표를 하나 이상 선택해주세요.";
+      if (!v.goals.primary) return "가장 우선순위가 높은 목표를 선택해주세요.";
+    }
+    if (step === 6 && !painParts.length) return "통증이 없다면 “없음”을 선택해주세요.";
+    return "";
+  }
+
+  const completeOnboarding = async () => {
+    if (saving) return;
+    setSaving(true); setError("");
+    try {
+      if (profile?.memberUid !== auth.currentUser?.uid) throw new Error("계정 정보가 일치하지 않습니다. 새로고침 후 다시 시도해주세요.");
+      const now = new Date().toISOString();
+      const deadline = goalDeadlineFromPeriod(d.targetPeriod, d.targetPeriodCustom);
+      const cleanV2 = ob2Finalize(v);
+      // 안전 정보(통증·병력·약물·주의사항)가 실제로 바뀐 경우에만 관리자 재확인 대상으로 표시한다.
+      const prevSig = savedV2 ? ob2CriticalSignature(savedV2) : "";
+      const nextSig = ob2CriticalSignature(cleanV2);
+      const criticalChanged = !savedV2 || prevSig !== nextSig;
+      const v2 = {
+        ...cleanV2,
+        version: ONBOARDING_VERSION,
+        updatedAt: now,
+        criticalUpdatedAt: criticalChanged ? now : (savedV2?.criticalUpdatedAt || now),
+      };
+      const payload = {
+        ...d,
+        birthYearMonth: d.birthYear && d.birthMonth ? `${d.birthYear}-${String(d.birthMonth).padStart(2, "0")}` : "",
+        goal: d.goal || legacyGoalFromOb2(v.goals.primary, goalList, existing?.goal || ""),
+        goalPeriod: d.targetPeriod, goalPeriodType: d.targetPeriod, goalDeadline: deadline, targetDate: deadline,
+        weeklyWorkoutCount: d.weeklyWorkoutCount,
+        completed: true, completedAt: existing?.completedAt || now,
+        weightHistoryMode: existing?.weightHistoryMode || "fresh",
+        calorieHistoryMode: existing?.calorieHistoryMode || "fresh",
+        weightHistoryModeStartedAt: existing?.weightHistoryModeStartedAt || now,
+        calorieHistoryModeStartedAt: existing?.calorieHistoryModeStartedAt || now,
+        agreedTermsAt: existing?.agreedTermsAt || now,
+        agreedPrivacyAt: existing?.agreedPrivacyAt || now,
+        onboardingVersion: ONBOARDING_VERSION,
+        startedAt: existing?.startedAt || now,
+        v2, v2Draft: {},
+      };
+      await withOnboardingTimeout(saveMemberOnboarding(profile.id, payload));
+      syncOnboardingToMemberProfile(profile.id, payload).catch(() => {});
+      // 회원 목록 배지용 미러 — 실패해도 원본(memberOnboarding/main)은 이미 저장됐으므로 무시한다.
+      syncOnboardingStatusToMember(profile.id, {
+        onboardingStatus: (isEditMode && criticalChanged) ? "needs_update" : "completed",
+        onboardingCompletedAt: payload.completedAt,
+        onboardingUpdatedAt: now,
+        onboardingHasCaution: ob2HasCaution(v2),
+      }).catch(() => {});
+      // 초기 체중 레코드는 최초 문진에서만 만든다.
+      // 수정 모드에서 받은 body는 회원앱 표시용으로 기간 필터가 적용된 사본이라, 이걸로 다시 저장하면
+      // 필터에서 빠진 과거 체중 기록이 지워질 수 있다(프로필 화면의 체중 수정 경로가 이미 따로 있다).
+      if (!isEditMode && (d.currentWeightKg || d.startingWeightKg)) {
+        await withOnboardingTimeout(saveBodyCheck(profile.id, {
+          ...(body || {}),
+          records: upsertBodyRecord(body?.records || [], {
+            id: "onboarding_start", date: today,
+            weight: d.currentWeightKg || d.startingWeightKg, note: "온보딩 초기 체중",
+          }),
+        }));
+      }
+      await withOnboardingTimeout(Promise.resolve(onDone()));
+    } catch (e) {
+      console.error("[MemberOnboarding] save failed:", e);
+      setError(e?.code === "onboarding/timeout" ? e.message : "저장에 실패했습니다. 다시 시도해주세요.");
+    } finally { setSaving(false); }
+  };
+
+  const goStep = (n) => { setError(""); setStep(n); persistDraft(n); if (typeof window !== "undefined") window.scrollTo(0, 0); };
+  const prevStep = () => { if (saving) return; goStep(Math.max(step - 1, 0)); };
+  const next = () => {
+    if (saving) return;
+    const msg = validateStep();
+    if (msg) { setError(msg); return; }
+    if (isLastStep) { completeOnboarding(); return; }
+    goStep(Math.min(step + 1, STEPS.length - 1));
+  };
+
+  if (legalView) return <MemberLegalPage type={legalView} onBack={() => setLegalView(null)}/>;
+
+  const sumRow = (label, value) => <div><b>{label}</b><span>{value || "-"}</span></div>;
+  const joined = arr => asArr(arr).join(", ");
+
+  return <div className="member-shell onboard">
+    <style>{CSS + MEMBER_CSS + OB2_CSS}</style>
+    <div className="onbar"><i style={{width: `${(step + 1) / STEPS.length * 100}%`}}/></div>
+    <section className="onbody">
+      <p>{isEditMode ? "사전 문진 수정" : "TEO GYM 사전 문진"}</p>
+      <span className="ob2-step">{step + 1} / {STEPS.length}</span>
+      <h1 className="ob2-title">{STEPS[step]}</h1>
+
+      {step === 0 && <>
+        <p className="ob2-note">수업을 안전하게 설계하기 위한 기본 정보예요. 3~5분이면 끝납니다.</p>
+        <Ob2Q label="성별">
+          <div className="choice2">{["남성", "여성"].map(x =>
+            <button key={x} type="button" className={d.gender === x ? "sel" : ""} onClick={() => setD1("gender", x)}>{x}</button>)}
+          </div>
+        </Ob2Q>
+        <Ob2Q label="생년월일">
+          <div className="ob2-grid3">
+            <select className="ob2-input" value={d.birthYear} onChange={e => setD1("birthYear", e.target.value)}>
+              {Array.from({length: 80}, (_, i) => new Date().getFullYear() - 10 - i).map(y => <option key={y}>{y}</option>)}
+            </select>
+            <select className="ob2-input" value={d.birthMonth} onChange={e => setD1("birthMonth", e.target.value)}>
+              {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, "0")).map(m => <option key={m} value={m}>{m}월</option>)}
+            </select>
+            <select className="ob2-input" value={d.birthDay} onChange={e => setD1("birthDay", e.target.value)}>
+              <option value="">일</option>
+              {Array.from({length: 31}, (_, i) => String(i + 1).padStart(2, "0")).map(dd => <option key={dd} value={dd}>{dd}일</option>)}
+            </select>
+          </div>
+        </Ob2Q>
+        <Ob2Q label="키 (cm)">
+          <input className="ob2-input" type="text" inputMode="decimal" value={d.heightCm}
+            onChange={e => setD1("heightCm", sanitizeDecimalInput(e.target.value))} placeholder="예: 170"/>
+        </Ob2Q>
+        <Ob2Q label="현재 체중 (kg)">
+          <input className="ob2-input" type="text" inputMode="decimal" value={d.currentWeightKg}
+            onChange={e => setD1("currentWeightKg", sanitizeDecimalInput(e.target.value))} placeholder="예: 65"/>
+        </Ob2Q>
+      </>}
+
+      {step === 1 && <>
+        <Ob2Q label="어떤 목표로 운동하시나요?" hint="복수 선택 가능">
+          <Ob2Chips multi options={OB2_GOAL_OPTIONS} value={goalList} onPick={x => { setError(""); toggle("goals", "list", x); }}/>
+        </Ob2Q>
+        {goalList.length > 0 && <Ob2Q label="가장 우선순위가 높은 목표 1개">
+          <Ob2Chips options={goalList} value={v.goals.primary} onPick={x => setV1("goals", "primary", v.goals.primary === x ? "" : x)}/>
+        </Ob2Q>}
+        <Ob2Q label="구체적인 목표" hint="예: 3개월 안에 5kg 감량, 통증 없이 계단 오르기">
+          <textarea className="ob2-area" value={v.goals.detail} onChange={e => setV1("goals", "detail", e.target.value)}
+            placeholder="자유롭게 적어주세요 (선택)"/>
+        </Ob2Q>
+        {goalList.includes("바디프로필") && <div className="ob2-cond">
+          <Ob2Q label="바디프로필 촬영 예정일" hint="정해두신 날짜가 있다면 알려주세요 (선택)">
+            <input className="ob2-input" type="date" value={v.goals.shootDate} onChange={e => setV1("goals", "shootDate", e.target.value)}/>
+          </Ob2Q>
+        </div>}
+        {goalList.includes("재활 목적") && <div className="ob2-cond">
+          <Ob2Q label="병원 진단 또는 치료 이력" hint="진단명·치료 중인 내용이 있다면 적어주세요 (선택)">
+            <textarea className="ob2-area" value={v.goals.rehabNote} onChange={e => setV1("goals", "rehabNote", e.target.value)}/>
+          </Ob2Q>
+        </div>}
+      </>}
+
+      {step === 2 && <>
+        <Ob2Q label="목표 체중 (kg)" hint="아직 정하지 않았다면 비워두셔도 됩니다">
+          <input className="ob2-input" type="text" inputMode="decimal" value={d.targetWeightKg}
+            onChange={e => setD1("targetWeightKg", sanitizeDecimalInput(e.target.value))} placeholder="예: 60"/>
+        </Ob2Q>
+        <Ob2Q label="목표 기간">
+          <Ob2Chips options={TARGET_PERIOD_OPTIONS} value={d.targetPeriod} onPick={x => setD1("targetPeriod", x)}/>
+        </Ob2Q>
+        {d.targetPeriod === "직접 입력" && <div className="ob2-cond">
+          <Ob2Q label="목표 날짜">
+            <input className="ob2-input" type="date" value={d.targetPeriodCustom}
+              onChange={e => setD1("targetPeriodCustom", e.target.value)}/>
+          </Ob2Q>
+        </div>}
+      </>}
+
+      {step === 3 && <>
+        <Ob2Q label="운동 경험">
+          <Ob2Chips options={OB2_EXPERIENCE_LEVELS} value={v.experience.level} onPick={x => setV1("experience", "level", v.experience.level === x ? "" : x)}/>
+        </Ob2Q>
+        {v.experience.level && v.experience.level !== "운동 경험 없음" && <Ob2Q label="운동 지속 기간">
+          <Ob2Chips options={OB2_EXPERIENCE_DURATION} value={v.experience.duration} onPick={x => setV1("experience", "duration", v.experience.duration === x ? "" : x)}/>
+        </Ob2Q>}
+        <Ob2Q label="이전 PT 경험">
+          <Ob2Chips options={OB2_PREV_PT} value={v.experience.prevPT} onPick={x => setV1("experience", "prevPT", v.experience.prevPT === x ? "" : x)}/>
+        </Ob2Q>
+        {v.experience.prevPT === "있음" && <div className="ob2-cond">
+          <Ob2Q label="이전 PT 만족도">
+            <Ob2Chips options={OB2_PREV_PT_SATISFACTION} value={v.experience.prevPTSatisfaction}
+              onPick={x => setV1("experience", "prevPTSatisfaction", v.experience.prevPTSatisfaction === x ? "" : x)}/>
+          </Ob2Q>
+        </div>}
+      </>}
+
+      {step === 4 && <>
+        <Ob2Q label="직업 활동량">
+          <Ob2Chips options={JOB_ACTIVITY_OPTIONS} value={d.jobType} onPick={x => setD1("jobType", d.jobType === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="평균 수면 시간">
+          <Ob2Chips options={OB2_SLEEP} value={v.lifestyle.sleep} onPick={x => setV1("lifestyle", "sleep", v.lifestyle.sleep === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="스트레스 정도">
+          <Ob2Chips options={OB2_STRESS} value={v.lifestyle.stress} onPick={x => setV1("lifestyle", "stress", v.lifestyle.stress === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="하루 평균 걸음 수">
+          <Ob2Chips options={STEP_RANGE_OPTIONS} value={d.averageSteps} onPick={x => setD1("averageSteps", d.averageSteps === x ? "" : x)}/>
+        </Ob2Q>
+      </>}
+
+      {step === 5 && <>
+        <Ob2Q label="하루 식사 횟수">
+          <Ob2Chips options={OB2_MEALS} value={v.lifestyle.meals} onPick={x => setV1("lifestyle", "meals", v.lifestyle.meals === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="야식 빈도">
+          <Ob2Chips options={OB2_FREQ} value={v.lifestyle.lateSnack} onPick={x => setV1("lifestyle", "lateSnack", v.lifestyle.lateSnack === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="음주 빈도">
+          <Ob2Chips options={OB2_FREQ} value={v.lifestyle.alcohol} onPick={x => setV1("lifestyle", "alcohol", v.lifestyle.alcohol === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="배달음식 빈도">
+          <Ob2Chips options={OB2_FREQ} value={v.lifestyle.delivery} onPick={x => setV1("lifestyle", "delivery", v.lifestyle.delivery === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="하루 물 섭취량">
+          <Ob2Chips options={OB2_WATER} value={v.lifestyle.water} onPick={x => setV1("lifestyle", "water", v.lifestyle.water === x ? "" : x)}/>
+        </Ob2Q>
+      </>}
+
+      {step === 6 && <>
+        <Ob2Q label="현재 통증이나 불편한 부위가 있나요?" hint="복수 선택 가능 · 없으면 “없음”을 선택해주세요">
+          <Ob2Chips multi options={[...OB2_PAIN_PARTS, "없음"]} value={painParts} onPick={togglePainPart}/>
+        </Ob2Q>
+        {hasPain && <div className="ob2-cond">
+          <Ob2Q label="가장 불편한 부위">
+            <Ob2Chips options={painParts.filter(p => p !== "없음")} value={v.pain.worst}
+              onPick={x => setV1("pain", "worst", v.pain.worst === x ? "" : x)}/>
+          </Ob2Q>
+          <Ob2Q label="언제부터 시작되었나요?">
+            <Ob2Chips options={OB2_PAIN_ONSET} value={v.pain.onset} onPick={x => setV1("pain", "onset", v.pain.onset === x ? "" : x)}/>
+          </Ob2Q>
+          <Ob2Q label="특정 동작에서 더 심해지나요?" hint="예: 앉았다 일어날 때, 팔을 들어올릴 때">
+            <textarea className="ob2-area" value={v.pain.trigger} onChange={e => setV1("pain", "trigger", e.target.value)}/>
+          </Ob2Q>
+          <Ob2Q label="통증 또는 불편한 상황을 자유롭게 적어주세요">
+            <textarea className="ob2-area" value={v.pain.situation} onChange={e => setV1("pain", "situation", e.target.value)}/>
+          </Ob2Q>
+        </div>}
+      </>}
+
+      {step === 7 && <>
+        <p className="ob2-warn">안전한 수업 설계를 위해 트레이너가 반드시 확인해야 하는 항목이에요. 해당되는 것이 없으면 넘어가셔도 됩니다.</p>
+        <Ob2Q label="병력" hint="복수 선택 가능 (선택)">
+          <Ob2Chips multi options={["디스크", "고혈압", "당뇨", "기타"]} value={asArr(v.health.conditions)}
+            onPick={x => { setError(""); toggle("health", "conditions", x); }}/>
+        </Ob2Q>
+        {asArr(v.health.conditions).includes("기타") && <div className="ob2-cond">
+          <Ob2Q label="기타 병력">
+            <textarea className="ob2-area" value={v.health.conditionEtc} onChange={e => setV1("health", "conditionEtc", e.target.value)}/>
+          </Ob2Q>
+        </div>}
+        <Ob2Q label="수술 경험">
+          <Ob2Chips options={["없음", "있음"]} value={v.health.hasSurgery} onPick={x => setV1("health", "hasSurgery", v.health.hasSurgery === x ? "" : x)}/>
+        </Ob2Q>
+        {v.health.hasSurgery === "있음" && <div className="ob2-cond">
+          <Ob2Q label="수술 부위와 시기">
+            <textarea className="ob2-area" value={v.health.surgery} onChange={e => setV1("health", "surgery", e.target.value)}
+              placeholder="예: 2023년 오른쪽 무릎 반월판 수술"/>
+          </Ob2Q>
+        </div>}
+        <Ob2Q label="복용 중인 약">
+          <Ob2Chips options={["없음", "있음"]} value={v.health.hasMedication} onPick={x => setV1("health", "hasMedication", v.health.hasMedication === x ? "" : x)}/>
+        </Ob2Q>
+        {v.health.hasMedication === "있음" && <div className="ob2-cond">
+          <Ob2Q label="복용 약물">
+            <textarea className="ob2-area" value={v.health.medication} onChange={e => setV1("health", "medication", e.target.value)}/>
+          </Ob2Q>
+        </div>}
+        <Ob2Q label="운동 시 주의해야 할 점" hint="트레이너가 꼭 알아야 할 내용이 있다면 적어주세요 (선택)">
+          <textarea className="ob2-area" value={v.health.caution} onChange={e => setV1("health", "caution", e.target.value)}/>
+        </Ob2Q>
+      </>}
+
+      {step === 8 && <>
+        <p className="ob2-note">테오짐 운영시간에 맞춰 수업 일정을 잡는 데 참고합니다.</p>
+        <Ob2Q label="선호 시간대" hint="복수 선택 가능">
+          <Ob2Chips multi options={OB2_PREFER_TIME} value={asArr(v.schedule.preferTime)}
+            onPick={x => { setError(""); toggle("schedule", "preferTime", x); }}/>
+        </Ob2Q>
+        <Ob2Q label="주 운동 가능 횟수">
+          <Ob2Chips options={OB2_WEEK_COUNT} value={v.schedule.weekCount}
+            onPick={x => { setV1("schedule", "weekCount", v.schedule.weekCount === x ? "" : x); setD1("weeklyWorkoutCount", x === v.schedule.weekCount ? "" : x); }}/>
+        </Ob2Q>
+        <Ob2Q label="1회 운동 가능 시간">
+          <Ob2Chips options={WORKOUT_TIME_OPTIONS} value={d.averageWorkoutTime} onPick={x => setD1("averageWorkoutTime", d.averageWorkoutTime === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="목표 달성 희망 기간">
+          <Ob2Chips options={OB2_TARGET_PERIOD} value={v.schedule.targetPeriod} onPick={x => setV1("schedule", "targetPeriod", v.schedule.targetPeriod === x ? "" : x)}/>
+        </Ob2Q>
+        <Ob2Q label="일정 관련 메모" hint="예: 수요일은 어렵습니다 (선택)">
+          <textarea className="ob2-area" value={v.schedule.note} onChange={e => setV1("schedule", "note", e.target.value)}/>
+        </Ob2Q>
+      </>}
+
+      {step === 9 && <>
+        <Ob2Q label="집중 관리하고 싶은 부위" hint="복수 선택 가능">
+          <Ob2Chips multi options={ONBOARDING_FOCUS} value={asArr(d.focusAreas)}
+            onPick={x => setD1("focusAreas", asArr(d.focusAreas).includes(x) ? asArr(d.focusAreas).filter(y => y !== x) : [...asArr(d.focusAreas), x])}/>
+        </Ob2Q>
+        <Ob2Q label="스스로 약하다고 느끼는 부위" hint="복수 선택 가능">
+          <Ob2Chips multi options={OB2_WEAK_PARTS} value={asArr(v.preferences.weakParts)}
+            onPick={x => { setError(""); toggle("preferences", "weakParts", x); }}/>
+        </Ob2Q>
+        <Ob2Q label="선호하는 운동 스타일" hint="복수 선택 가능">
+          <Ob2Chips multi options={OB2_EX_STYLE} value={asArr(v.preferences.styles)}
+            onPick={x => { setError(""); toggle("preferences", "styles", x); }}/>
+        </Ob2Q>
+        <Ob2Q label="운동 강도 성향">
+          <Ob2Chips options={OB2_INTENSITY} value={v.preferences.intensity} onPick={x => setV1("preferences", "intensity", v.preferences.intensity === x ? "" : x)}/>
+        </Ob2Q>
+      </>}
+
+      {step === 10 && <>
+        <p className="ob2-note">입력하신 내용을 확인해주세요. 수정할 항목을 눌러 바로 이동할 수 있습니다.</p>
+        <div className="ob2-sum">
+          {sumRow("기본", [d.gender, d.heightCm && `${d.heightCm}cm`, d.currentWeightKg && `${d.currentWeightKg}kg`].filter(Boolean).join(" · "))}
+          {sumRow("최우선 목표", v.goals.primary)}
+          {sumRow("전체 목표", joined(goalList))}
+          {sumRow("구체적 목표", v.goals.detail)}
+          {sumRow("운동 경험", [v.experience.level, v.experience.duration].filter(Boolean).join(" · "))}
+          {sumRow("이전 PT", [v.experience.prevPT, v.experience.prevPTSatisfaction].filter(Boolean).join(" · "))}
+          {sumRow("통증", hasPain ? joined(painParts) : "없음")}
+          {sumRow("병력", [joined(asArr(v.health.conditions)), v.health.hasSurgery === "있음" ? "수술 이력 있음" : "", v.health.hasMedication === "있음" ? "복용 약물 있음" : ""].filter(Boolean).join(" · ") || "해당 없음")}
+          {sumRow("주의사항", v.health.caution)}
+          {sumRow("일정", [joined(asArr(v.schedule.preferTime)), v.schedule.weekCount].filter(Boolean).join(" · "))}
+          {sumRow("강도 성향", v.preferences.intensity)}
+        </div>
+        <button type="button" className="ob2-editlink" onClick={() => goStep(1)}>운동 목표 수정하기</button>
+        <button type="button" className="ob2-editlink" onClick={() => goStep(6)}>통증 · 병력 수정하기</button>
+        {needAgree && <div className="agree-block">
+          <label className="agree-row">
+            <input type="checkbox" checked={agreeTerms} onChange={e => setAgreeTerms(e.target.checked)}/>
+            <span className="agree-box" aria-hidden="true"/>
+            <span><button type="button" className="agree-link" onClick={e => {e.preventDefault(); e.stopPropagation(); setLegalView("terms");}}>이용약관</button>에 동의합니다. (필수)</span>
+          </label>
+          <label className="agree-row">
+            <input type="checkbox" checked={agreePrivacy} onChange={e => setAgreePrivacy(e.target.checked)}/>
+            <span className="agree-box" aria-hidden="true"/>
+            <span><button type="button" className="agree-link" onClick={e => {e.preventDefault(); e.stopPropagation(); setLegalView("privacy");}}>개인정보처리방침</button>에 동의합니다. (필수)</span>
+          </label>
+        </div>}
+      </>}
+
+      {error && <div className="member-error onerror" role="alert">{error}</div>}
+      {isEditMode && onCancel && <button type="button" className="ghost" style={{marginTop: 10}} onClick={onCancel} disabled={saving}>수정 취소</button>}
+    </section>
+    <div className="onnav">
+      {!isFirstStep && <button type="button" className="onprev" onClick={prevStep} onTouchEnd={e => {e.preventDefault(); prevStep();}} disabled={saving}>이전</button>}
+      <button type="button" className="onnext" onClick={next} onTouchEnd={e => {e.preventDefault(); next();}}
+        disabled={saving || (needAgree && !(agreeTerms && agreePrivacy))}>
+        {saving ? "저장 중..." : isLastStep ? (isEditMode ? "수정 완료" : "제출하기") : "다음"}
+      </button>
+    </div>
+  </div>;
+}
 function Choices({vals,cur,onPick,multi}){return <div className="choices">{vals.map(v=><button key={v} onClick={()=>onPick(v)} className={(multi?cur.includes(v):cur===v)?"sel":""}>{v}</button>)}</div>}
 function SelectLine({label,value,opts,onChange,placeholder}){return <div className="form-line"><label>{label}</label><select value={value} onChange={e=>onChange(e.target.value)}>{placeholder!==undefined&&<option value="">{placeholder}</option>}{opts.map(o=><option key={o}>{o}</option>)}</select></div>}
 function InputLine({label,value,onChange,type="text"}){return <div className="form-line"><label>{label}</label><input type={type} value={value||""} onChange={e=>onChange(e.target.value)}/></div>}
@@ -3731,10 +4336,10 @@ function ProfileNoticeBanner({notices=[],onGo}){
 // 알림 설정 카드(MemberNotificationCard) — iOS PWA 알림이 안정화될 때까지 프로필에서 숨김.
 // 기능 완성 시 true로 되돌리면 기존 카드가 그대로 복귀한다(코드·데이터 미삭제).
 const SHOW_PROFILE_NOTIFICATION_CARD=false;
-function MemberProfile(p){const links=[{title:"테오짐 프로그램과 센터 소개",label:"홈페이지",url:"https://teogym.pages.dev/",color:"#0F9488",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},{title:"교정/운동 영상 보기",label:"인스타그램",url:"https://www.instagram.com/teogym_pt",color:"#E1306C",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" strokeWidth="2.5"/></svg>},{title:"운동 루틴 영상 보기",label:"유튜브",url:"https://youtube.com/@gymteo",color:"#FF0000",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96A29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58A2.78 2.78 0 0 0 3.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.95A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="currentColor" stroke="none"/></svg>},{title:"운동 정보/칼럼 보기",label:"블로그",url:"https://m.blog.naver.com/teogym",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>},{title:"센터 새소식 보기",label:"네이버 플레이스",url:"https://naver.me/5ZJFzvnv",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>}]; const loginEmail=(auth.currentUser?.email||p.profile.memberAppAccountEmail||p.profile.email||"-").trim(); const base={birthYear:p.profile.birthYear||p.onboarding.birthYear||"",birthMonth:p.profile.birthMonth||p.onboarding.birthMonth||"",birthYearMonth:p.profile.birthYearMonth||p.onboarding.birthYearMonth||"",birthDay:p.profile.birthDay||p.onboarding.birthDay||"",workoutFrequency:p.profile.workoutFrequency||p.onboarding.weeklyWorkoutCount||"",height:p.profile.height||p.onboarding.heightCm||"",startWeight:(p.startW&&p.startW!=="-"?p.startW:p.profile.startWeight)||"",currentWeight:(p.curW&&p.curW!=="-"?p.curW:p.profile.currentWeight)||"",targetWeightKg:p.onboarding.targetWeightKg||p.onboarding.targetWeight||p.onboarding.goalWeight||p.profile.targetWeightKg||p.profile.targetWeight||p.profile.goalWeight||"",targetPeriod:p.onboarding.targetPeriod||p.onboarding.goalPeriod||p.profile.targetPeriod||"",targetPeriodCustom:p.onboarding.targetPeriodCustom||p.onboarding.goalDeadline||p.onboarding.targetDate||"",goal:p.onboarding.goal||p.profile.goal||""}; const [editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[msg,setMsg]=useState(""); const [showGoalManage,setShowGoalManage]=useState(false); const noticeRef=useRef(null); const goNotices=()=>{try{noticeRef.current?.scrollIntoView({behavior:"smooth",block:"start"});}catch{noticeRef.current?.scrollIntoView();}}; const [d,setD]=useState(base); useEffect(()=>{if(!editing)setD(base);},[editing,base.workoutFrequency,base.height,base.startWeight,base.currentWeight,base.targetWeightKg,base.birthYear,base.birthMonth,base.birthDay,base.birthYearMonth,base.targetPeriod,base.targetPeriodCustom,base.goal]); const same=(a,b)=>String(a??"").trim()===String(b??"").trim(); const edit=patch=>setD(prev=>({...prev,...patch})); const cancel=()=>{setD(base);setEditing(false);p.resetMemberScroll?.();}; const save=async()=>{if(saving)return; setSaving(true);setMsg("");try{const profilePatch={}; ["birthYear","birthMonth","birthDay","workoutFrequency","height","startWeight","currentWeight","targetWeightKg","goal"].forEach(k=>{if(!same(d[k],base[k]))profilePatch[k]=d[k];}); const deadline=goalDeadlineFromPeriod(d.targetPeriod,d.targetPeriodCustom); if((!same(d.birthYear,base.birthYear)||!same(d.birthMonth,base.birthMonth))&&d.birthYear&&d.birthMonth)profilePatch.birthYearMonth=`${d.birthYear}-${String(d.birthMonth).padStart(2,"0")}`; if(!same(d.targetPeriod,base.targetPeriod)){profilePatch.targetPeriod=d.targetPeriod; profilePatch.goalPeriod=d.targetPeriod; profilePatch.goalPeriodType=d.targetPeriod;} if(!same(d.targetPeriodCustom,base.targetPeriodCustom)){profilePatch.targetPeriodCustom=d.targetPeriodCustom; profilePatch.customGoalDate=d.targetPeriodCustom;} if(deadline&&(!same(d.targetPeriod,base.targetPeriod)||!same(d.targetPeriodCustom,base.targetPeriodCustom))){profilePatch.goalDeadline=deadline; profilePatch.targetDate=deadline;} if(Object.keys(profilePatch).length){console.log("[MemberProfile] saveProfileInfo payload",{path:`members/${p.profile.id}`,fields:Object.keys(profilePatch),payload:profilePatch}); const result=await p.saveProfileInfo(profilePatch); setEditing(false);setMsg((result?.messages||["프로필 저장 성공"]).join("\n"));}else{setEditing(false);setMsg("변경된 정보가 없습니다.");}}catch(e){const paths=[`members/${p.profile.id}`,`members/${p.profile.id}/memberOnboarding/main`,`members/${p.profile.id}/bodyCheck/main`]; console.error("[MemberProfile] profile save failed",{paths,code:e?.code,message:e?.message,results:e?.profileSaveResults,failures:e?.profileSaveFailures}); const failedFields=e?.profileSaveFailures?.join("\n")||e?.message||"권한 규칙에서 허용하지 않는 필드가 포함됐을 수 있습니다."; setMsg(`저장 실패
+function MemberProfile(p){const links=[{title:"테오짐 프로그램과 센터 소개",label:"홈페이지",url:"https://teogym.pages.dev/",color:"#0F9488",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},{title:"교정/운동 영상 보기",label:"인스타그램",url:"https://www.instagram.com/teogym_pt",color:"#E1306C",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" strokeWidth="2.5"/></svg>},{title:"운동 루틴 영상 보기",label:"유튜브",url:"https://youtube.com/@gymteo",color:"#FF0000",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96A29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58A2.78 2.78 0 0 0 3.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.95A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="currentColor" stroke="none"/></svg>},{title:"운동 정보/칼럼 보기",label:"블로그",url:"https://m.blog.naver.com/teogym",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>},{title:"센터 새소식 보기",label:"네이버 플레이스",url:"https://naver.me/5ZJFzvnv",color:"#03C75A",icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>}]; const loginEmail=(auth.currentUser?.email||p.profile.memberAppAccountEmail||p.profile.email||"-").trim(); const base={birthYear:p.profile.birthYear||p.onboarding.birthYear||"",birthMonth:p.profile.birthMonth||p.onboarding.birthMonth||"",birthYearMonth:p.profile.birthYearMonth||p.onboarding.birthYearMonth||"",birthDay:p.profile.birthDay||p.onboarding.birthDay||"",workoutFrequency:p.profile.workoutFrequency||p.onboarding.weeklyWorkoutCount||"",height:p.profile.height||p.onboarding.heightCm||"",startWeight:(p.startW&&p.startW!=="-"?p.startW:p.profile.startWeight)||"",currentWeight:(p.curW&&p.curW!=="-"?p.curW:p.profile.currentWeight)||"",targetWeightKg:p.onboarding.targetWeightKg||p.onboarding.targetWeight||p.onboarding.goalWeight||p.profile.targetWeightKg||p.profile.targetWeight||p.profile.goalWeight||"",targetPeriod:p.onboarding.targetPeriod||p.onboarding.goalPeriod||p.profile.targetPeriod||"",targetPeriodCustom:p.onboarding.targetPeriodCustom||p.onboarding.goalDeadline||p.onboarding.targetDate||"",goal:p.onboarding.goal||p.profile.goal||""}; const [editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[msg,setMsg]=useState(""); const [showGoalManage,setShowGoalManage]=useState(false); const [showOnboardingEdit,setShowOnboardingEdit]=useState(false); const noticeRef=useRef(null); const goNotices=()=>{try{noticeRef.current?.scrollIntoView({behavior:"smooth",block:"start"});}catch{noticeRef.current?.scrollIntoView();}}; const [d,setD]=useState(base); useEffect(()=>{if(!editing)setD(base);},[editing,base.workoutFrequency,base.height,base.startWeight,base.currentWeight,base.targetWeightKg,base.birthYear,base.birthMonth,base.birthDay,base.birthYearMonth,base.targetPeriod,base.targetPeriodCustom,base.goal]); const same=(a,b)=>String(a??"").trim()===String(b??"").trim(); const edit=patch=>setD(prev=>({...prev,...patch})); const cancel=()=>{setD(base);setEditing(false);p.resetMemberScroll?.();}; const save=async()=>{if(saving)return; setSaving(true);setMsg("");try{const profilePatch={}; ["birthYear","birthMonth","birthDay","workoutFrequency","height","startWeight","currentWeight","targetWeightKg","goal"].forEach(k=>{if(!same(d[k],base[k]))profilePatch[k]=d[k];}); const deadline=goalDeadlineFromPeriod(d.targetPeriod,d.targetPeriodCustom); if((!same(d.birthYear,base.birthYear)||!same(d.birthMonth,base.birthMonth))&&d.birthYear&&d.birthMonth)profilePatch.birthYearMonth=`${d.birthYear}-${String(d.birthMonth).padStart(2,"0")}`; if(!same(d.targetPeriod,base.targetPeriod)){profilePatch.targetPeriod=d.targetPeriod; profilePatch.goalPeriod=d.targetPeriod; profilePatch.goalPeriodType=d.targetPeriod;} if(!same(d.targetPeriodCustom,base.targetPeriodCustom)){profilePatch.targetPeriodCustom=d.targetPeriodCustom; profilePatch.customGoalDate=d.targetPeriodCustom;} if(deadline&&(!same(d.targetPeriod,base.targetPeriod)||!same(d.targetPeriodCustom,base.targetPeriodCustom))){profilePatch.goalDeadline=deadline; profilePatch.targetDate=deadline;} if(Object.keys(profilePatch).length){console.log("[MemberProfile] saveProfileInfo payload",{path:`members/${p.profile.id}`,fields:Object.keys(profilePatch),payload:profilePatch}); const result=await p.saveProfileInfo(profilePatch); setEditing(false);setMsg((result?.messages||["프로필 저장 성공"]).join("\n"));}else{setEditing(false);setMsg("변경된 정보가 없습니다.");}}catch(e){const paths=[`members/${p.profile.id}`,`members/${p.profile.id}/memberOnboarding/main`,`members/${p.profile.id}/bodyCheck/main`]; console.error("[MemberProfile] profile save failed",{paths,code:e?.code,message:e?.message,results:e?.profileSaveResults,failures:e?.profileSaveFailures}); const failedFields=e?.profileSaveFailures?.join("\n")||e?.message||"권한 규칙에서 허용하지 않는 필드가 포함됐을 수 있습니다."; setMsg(`저장 실패
 확인 경로: ${paths.join(" · ")}
 확인 필드: targetWeightKg / weeklyWorkoutCount / goal / currentWeight
-${failedFields}`);}finally{setSaving(false);}}; if(showGoalManage) return <MemberGoalManageScreen onboarding={p.onboarding} profile={p.profile} onSave={p.saveGoalUpdate} onBack={()=>{setShowGoalManage(false);p.resetMemberScroll?.();}}/>; return <div className="mv2-profile-page"><h1>프로필</h1><ProfileHeroCard p={p} base={base}/><ProfileNoticeBanner notices={p.notices} onGo={goNotices}/><CollapsibleSection label="회원 정보" defaultOpen={false}><MCard title="회원 정보"><Info l="로그인 이메일" v={loginEmail}/><EditableInfo editing={editing} l="운동 빈도"><SelectLine label="운동 빈도" value={d.workoutFrequency} opts={[1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} onChange={v=>edit({workoutFrequency:v})}/></EditableInfo>{!editing&&<Info l="운동 빈도" v={base.workoutFrequency||"-"}/>}<EditableInfo editing={editing} l="생년월일"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}><InputLine label="출생연도" type="number" value={d.birthYear} onChange={v=>edit({birthYear:v})}/><SelectLine label="출생월" value={d.birthMonth} opts={["",...Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthMonth:v})}/><SelectLine label="출생일" value={d.birthDay} opts={["",...Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthDay:v})}/></div></EditableInfo>{!editing&&<Info l="생년월일" v={formatBirthYearMonth(base)+(base.birthDay?"-"+String(base.birthDay).padStart(2,"0"):"")}/>} {!editing&&<Info l="나이" v={formatInternationalAgeFromBirth(base)}/>}<EditableInfo editing={editing} l="키"><InputLine label="키(cm)" type="number" value={d.height} onChange={v=>edit({height:v})}/></EditableInfo>{!editing&&<Info l="키" v={base.height?`${base.height}cm`:"-"}/>}<EditableInfo editing={editing} l="시작 체중"><InputLine label="시작 체중(kg)" type="number" value={d.startWeight} onChange={v=>edit({startWeight:v})}/></EditableInfo>{!editing&&<Info l="시작 체중" v={formatWeightValue(base.startWeight)}/>}<EditableInfo editing={editing} l="현재 체중"><InputLine label="현재 체중(kg)" type="number" value={d.currentWeight} onChange={v=>edit({currentWeight:v})}/></EditableInfo>{!editing&&<Info l="현재 체중" v={formatWeightValue(base.currentWeight)}/>}<EditableInfo editing={editing} l="목표 체중"><InputLine label="목표 체중(kg)" type="number" value={d.targetWeightKg} onChange={v=>edit({targetWeightKg:v})}/></EditableInfo>{!editing&&<Info l="목표 체중" v={formatWeightValue(base.targetWeightKg)}/>}<EditableInfo editing={editing} l="목표 기간"><SelectLine label="목표 기간" value={d.targetPeriod} opts={TARGET_PERIOD_OPTIONS} onChange={v=>edit({targetPeriod:v})}/></EditableInfo>{editing&&d.targetPeriod==="직접 입력"&&<EditableInfo editing={editing} l="직접 입력"><InputLine label="목표 기간 직접 입력" type="date" value={d.targetPeriodCustom} onChange={v=>edit({targetPeriodCustom:v})}/></EditableInfo>}{!editing&&<GoalPeriodInfo currentWeight={base.currentWeight} targetWeight={base.targetWeightKg} period={base.targetPeriod} customDate={base.targetPeriodCustom}/>}<EditableInfo editing={editing} l="운동 목표"><SelectLine label="운동 목표" value={d.goal} opts={AI_GOAL_OPTIONS} onChange={v=>edit({goal:v})}/></EditableInfo>{!editing&&<Info l="운동 목표" v={base.goal||"-"}/>}<div className="profile-actions">{editing?<><button className="primary compact" onClick={save} disabled={saving}>{saving?"저장 중...":"저장"}</button><button className="ghost compact" onClick={cancel} disabled={saving}>취소</button></>:<button className="primary compact" onClick={()=>{setD(base);setEditing(true);p.resetMemberScroll?.();}}>정보 수정</button>}</div>{msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}</MCard></CollapsibleSection><div ref={noticeRef} style={{scrollMarginTop:12}}><MemberNoticeList notices={p.notices} onOpen={p.openNotice}/></div><MCard title="목표 관리"><p className="notice soft">운동 목적·집중 부위·운동 빈도 등 설정한 목표를 확인하고 수정할 수 있어요.</p><button className="primary compact" onClick={()=>setShowGoalManage(true)}>목표 관리 열기</button></MCard>{SHOW_PROFILE_NOTIFICATION_CARD&&<MemberNotificationCard memberId={p.profile.id}/>}<MCard title="바로가기"><div className="link-brand-grid">{links.map(x=><a className="link-brand-card" key={x.url} href={x.url} target="_blank" rel="noreferrer"><div className="link-brand-icon" style={{background:x.color+"18",color:x.color}}>{x.icon}</div><div className="link-brand-info"><b>{x.label}</b><span>{x.title}</span></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0C8D3" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>)}</div></MCard><button className="ghost" onClick={p.onLogout}>로그아웃</button></div>}
+${failedFields}`);}finally{setSaving(false);}}; if(showOnboardingEdit) return <MemberOnboarding profile={p.profile} body={p.body} existing={p.onboarding} mode="edit" onDone={async()=>{setShowOnboardingEdit(false); await p.reloadMemberApp?.();}} onCancel={()=>{setShowOnboardingEdit(false);p.resetMemberScroll?.();}}/>; if(showGoalManage) return <MemberGoalManageScreen onboarding={p.onboarding} profile={p.profile} onSave={p.saveGoalUpdate} onBack={()=>{setShowGoalManage(false);p.resetMemberScroll?.();}}/>; return <div className="mv2-profile-page"><h1>프로필</h1><ProfileHeroCard p={p} base={base}/><ProfileNoticeBanner notices={p.notices} onGo={goNotices}/><CollapsibleSection label="회원 정보" defaultOpen={false}><MCard title="회원 정보"><Info l="로그인 이메일" v={loginEmail}/><EditableInfo editing={editing} l="운동 빈도"><SelectLine label="운동 빈도" value={d.workoutFrequency} opts={[1,2,3,4,5,6,7].map(n=>`주 ${n}회`)} onChange={v=>edit({workoutFrequency:v})}/></EditableInfo>{!editing&&<Info l="운동 빈도" v={base.workoutFrequency||"-"}/>}<EditableInfo editing={editing} l="생년월일"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}><InputLine label="출생연도" type="number" value={d.birthYear} onChange={v=>edit({birthYear:v})}/><SelectLine label="출생월" value={d.birthMonth} opts={["",...Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthMonth:v})}/><SelectLine label="출생일" value={d.birthDay} opts={["",...Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0"))]} onChange={v=>edit({birthDay:v})}/></div></EditableInfo>{!editing&&<Info l="생년월일" v={formatBirthYearMonth(base)+(base.birthDay?"-"+String(base.birthDay).padStart(2,"0"):"")}/>} {!editing&&<Info l="나이" v={formatInternationalAgeFromBirth(base)}/>}<EditableInfo editing={editing} l="키"><InputLine label="키(cm)" type="number" value={d.height} onChange={v=>edit({height:v})}/></EditableInfo>{!editing&&<Info l="키" v={base.height?`${base.height}cm`:"-"}/>}<EditableInfo editing={editing} l="시작 체중"><InputLine label="시작 체중(kg)" type="number" value={d.startWeight} onChange={v=>edit({startWeight:v})}/></EditableInfo>{!editing&&<Info l="시작 체중" v={formatWeightValue(base.startWeight)}/>}<EditableInfo editing={editing} l="현재 체중"><InputLine label="현재 체중(kg)" type="number" value={d.currentWeight} onChange={v=>edit({currentWeight:v})}/></EditableInfo>{!editing&&<Info l="현재 체중" v={formatWeightValue(base.currentWeight)}/>}<EditableInfo editing={editing} l="목표 체중"><InputLine label="목표 체중(kg)" type="number" value={d.targetWeightKg} onChange={v=>edit({targetWeightKg:v})}/></EditableInfo>{!editing&&<Info l="목표 체중" v={formatWeightValue(base.targetWeightKg)}/>}<EditableInfo editing={editing} l="목표 기간"><SelectLine label="목표 기간" value={d.targetPeriod} opts={TARGET_PERIOD_OPTIONS} onChange={v=>edit({targetPeriod:v})}/></EditableInfo>{editing&&d.targetPeriod==="직접 입력"&&<EditableInfo editing={editing} l="직접 입력"><InputLine label="목표 기간 직접 입력" type="date" value={d.targetPeriodCustom} onChange={v=>edit({targetPeriodCustom:v})}/></EditableInfo>}{!editing&&<GoalPeriodInfo currentWeight={base.currentWeight} targetWeight={base.targetWeightKg} period={base.targetPeriod} customDate={base.targetPeriodCustom}/>}<EditableInfo editing={editing} l="운동 목표"><SelectLine label="운동 목표" value={d.goal} opts={AI_GOAL_OPTIONS} onChange={v=>edit({goal:v})}/></EditableInfo>{!editing&&<Info l="운동 목표" v={base.goal||"-"}/>}<div className="profile-actions">{editing?<><button className="primary compact" onClick={save} disabled={saving}>{saving?"저장 중...":"저장"}</button><button className="ghost compact" onClick={cancel} disabled={saving}>취소</button></>:<button className="primary compact" onClick={()=>{setD(base);setEditing(true);p.resetMemberScroll?.();}}>정보 수정</button>}</div>{msg&&<div className="member-error" style={{marginTop:8,whiteSpace:"pre-line"}}>{msg}</div>}</MCard></CollapsibleSection><div ref={noticeRef} style={{scrollMarginTop:12}}><MemberNoticeList notices={p.notices} onOpen={p.openNotice}/></div><MCard title="목표 관리"><p className="notice soft">운동 목적·집중 부위·운동 빈도 등 설정한 목표를 확인하고 수정할 수 있어요.</p><button className="primary compact" onClick={()=>setShowGoalManage(true)}>목표 관리 열기</button></MCard><MCard title="사전 문진 정보"><p className="notice soft">운동 목표·경험·생활습관·통증·병력 등 처음 작성한 사전 문진을 확인하고 수정할 수 있어요. 통증·병력·복용 약물·주의사항이 바뀌면 대표님께 자동으로 알려드립니다.</p><button className="primary compact" onClick={()=>{setShowOnboardingEdit(true);p.resetMemberScroll?.();}}>사전 문진 수정하기</button></MCard>{SHOW_PROFILE_NOTIFICATION_CARD&&<MemberNotificationCard memberId={p.profile.id}/>}<MCard title="바로가기"><div className="link-brand-grid">{links.map(x=><a className="link-brand-card" key={x.url} href={x.url} target="_blank" rel="noreferrer"><div className="link-brand-icon" style={{background:x.color+"18",color:x.color}}>{x.icon}</div><div className="link-brand-info"><b>{x.label}</b><span>{x.title}</span></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C0C8D3" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></a>)}</div></MCard><button className="ghost" onClick={p.onLogout}>로그아웃</button></div>}
 
 // 목표 관리 — 온보딩을 전체 재진행하지 않고 주요 목표 항목만 "현재 값 표시 → 수정" 방식으로 부분 수정.
 // 실제 저장은 MemberApp.saveGoalUpdate(onSave)로 위임 — 여기서는 화면/입력값 처리만 담당한다.
@@ -5370,6 +5975,12 @@ export default function App() {
   const [pairSessions, setPairSessions] = useState([]);
   const [editPairSession, setEditPairSession] = useState(null);
   const [pairFormInitialDate, setPairFormInitialDate] = useState(null);
+  // 상담 고객(리드) — 정식 회원(members)과 완전히 분리된 목록. 회원 목록/통계 상태에는 절대 섞지 않는다.
+  const [consultations, setConsultations] = useState([]);
+  const [consultationsLoading, setConsultationsLoading] = useState(false);
+  const [editConsultation, setEditConsultation] = useState(null);
+  const [consultSaving, setConsultSaving] = useState(false);
+  const [memberFormPrefill, setMemberFormPrefill] = useState(null); // 상담 → 회원 전환 시 MemberForm 초기값
   const memberMode = isMemberMode();
   // 관리자 화면 렌더링 가드 — 회원 계정 여부 확인이 끝나기 전에는 관리자 화면을 절대 그리지 않는다.
   // uid 자체를 저장해두고 현재 user.uid와 비교하는 방식 — 로그아웃 후 다른 계정으로 재로그인해도
@@ -5692,7 +6303,10 @@ export default function App() {
     // survey 데이터 → bodyData.goal + bodyData.records 자동 연동 (회원 등록 시 한 번만)
     setLoading(true);
     try {
-      const saved = await addMember(d);
+      // 상담 고객 전환이면 consultations 문서의 중복 전환 가드를 통과한 뒤 회원을 1회만 생성한다.
+      const saved = d.consultationId
+        ? await convertConsultationToMember(d.consultationId, d)
+        : await addMember(d);
       const sv = d.survey || {};
       if (sv && (sv.weight || sv.height || sv.purposes?.length || sv.priorityGoal)) {
         const memberId = saved?.id || d.id;
@@ -5729,10 +6343,69 @@ export default function App() {
           } catch(e) { console.warn("bodyCheck 자동 연동 실패:", e); }
         }
       }
-      showToast("회원 등록 완료 ✓"); setMembers(await getMembers()); setScreen("members");
+      const nextMembers = await getMembers();
+      setMembers(nextMembers);
+      if (d.consultationId) {
+        setMemberFormPrefill(null);
+        loadConsultations();
+        // 전환 직후에는 회원 상세로 보내 "회원앱 초대" 버튼을 바로 누를 수 있게 한다(생성 → 온보딩 초대 한 흐름).
+        const created = nextMembers.find(m => m.id === saved?.id);
+        showToast("정식 회원 전환 완료 ✓ 이어서 회원앱 초대를 보내주세요.");
+        if (created) { goHub(created); return; }
+        setScreen("members");
+      } else {
+        showToast("회원 등록 완료 ✓");
+        const created = nextMembers.find(m => m.id === saved?.id);
+        if (created) { goHub(created); return; }
+        setScreen("members");
+      }
     }
     catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
+  }
+
+  // ── 상담 고객(리드) 흐름 ────────────────────────────────
+  // 신규 상담은 consultations 문서만 만들고 members 문서를 만들지 않는다.
+  // "등록 확정" 상태에서 전환 버튼을 눌렀을 때만 MemberForm을 열어 정식 회원을 1회 생성한다.
+  const loadConsultations = useCallback(async () => {
+    setConsultationsLoading(true);
+    try { setConsultations(await getConsultations()); }
+    catch (e) { console.error("[TEO GYM] getConsultations 실패:", e); showToast("상담 고객을 불러오지 못했습니다.", "err"); }
+    finally { setConsultationsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSaveConsultation(data) {
+    setConsultSaving(true);
+    try {
+      if (editConsultation?.id) { await updateConsultation(editConsultation.id, data); showToast("상담 기록을 저장했습니다 ✓"); }
+      else { await addConsultation(data); showToast("상담 고객을 등록했습니다 ✓"); }
+      await loadConsultations();
+      setEditConsultation(null);
+      setScreen("consultations");
+    } catch (e) { showToast(e.message || "저장 실패", "err"); }
+    finally { setConsultSaving(false); }
+  }
+
+  async function handleDeleteConsultation(c) {
+    if (!window.confirm(`${c.name || "이 상담 고객"} 기록을 삭제할까요?\n등록하지 않은 고객도 유입 분석에 쓰이므로, 잘못 입력한 경우에만 삭제해주세요.`)) return;
+    try { await deleteConsultation(c.id); showToast("삭제 완료"); await loadConsultations(); }
+    catch (e) { showToast(e.message || "삭제 실패", "err"); }
+  }
+
+  function handleStartConvert(c) {
+    if (c.convertedMemberId) { showToast("이미 정식 회원으로 전환된 상담 고객입니다.", "err"); return; }
+    setMemberFormPrefill({
+      consultationId: c.id,
+      name: c.name || "",
+      phone: c.phone || "",
+      visitRoutes: Array.isArray(c.visitRoutes) ? c.visitRoutes : [],
+      visitEtc: c.visitEtc || "",
+      consultMemo: c.consultMemo || "",
+      consultDate: c.consultDate || "",
+      preferredSchedule: c.preferredSchedule || "",
+    });
+    setScreen("newMember");
   }
 
   // 테스트 회원 빠른 생성 — docs/member-app-test-accounts.md 참고
@@ -5801,7 +6474,18 @@ export default function App() {
   async function handleDeleteMember(id) {
     if (!window.confirm("이 회원의 모든 기록이 삭제됩니다. 계속할까요?")) return;
     setLoading(true);
-    try { await deleteMember(id); showToast("삭제 완료"); setMembers(await getMembers()); }
+    const linkedConsultationId = members.find(m => m.id === id)?.consultationId || "";
+    try {
+      await deleteMember(id);
+      // 상담에서 전환된 회원이면 상담 문서의 전환 링크만 풀어준다(상담 기록 자체는 유입 분석용으로 보존).
+      if (linkedConsultationId) {
+        try {
+          await updateConsultation(linkedConsultationId, { convertedMemberId: "", convertedAt: "", status: "considering" });
+          loadConsultations();
+        } catch (e) { console.warn("[TEO GYM] 상담 전환 링크 해제 실패:", e?.message || e); }
+      }
+      showToast("삭제 완료"); setMembers(await getMembers());
+    }
     catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }
@@ -6210,14 +6894,16 @@ export default function App() {
       })()}
 
       {/* SCREENS */}
-      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming") ? {width:"100%"} : {
+      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming"||screen==="consultations"||screen==="consultationForm") ? {width:"100%"} : {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
-        {screen==="newMember"  && <MemberForm onBack={() => { loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
+        {screen==="newMember"  && <MemberForm prefill={memberFormPrefill} onBack={() => { setMemberFormPrefill(null); if (memberFormPrefill) { setScreen("consultations"); return; } loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
+        {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
+        {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
@@ -6263,7 +6949,7 @@ export default function App() {
             }
           }} showToast={showToast} />}
         {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} nutritionData={nutritionData} bodyData={bodyData} onBack={()=>setScreen("hub")} />}
-        {screen==="referral"  && <ReferralStatsScreen members={members} onBack={()=>setScreen("hub")} />}
+        {screen==="referral"  && <ReferralStatsScreen members={members} consultations={consultations} onLoadConsultations={loadConsultations} onBack={()=>setScreen("hub")} />}
       </div>
       <div id="pportal" style={{display:"none"}} />
     </div>
@@ -6599,10 +7285,12 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
   const icBl = ni(<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>);
   const icGr = ni(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>);
   const icSc = ni(<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><circle cx="16" cy="16" r="2.2"/></>);
+  const icCs = ni(<><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></>);
 
   const navItems = [
     {key:"home",     label:"홈",           icon:icH,  fn:()=>setScreen("home")},
     {key:"members",  label:"회원 관리",     icon:icMb, fn:()=>{loadMembers&&loadMembers();setScreen("members");}},
+    {key:"consultations", label:"상담 고객", icon:icCs, fn:()=>setScreen("consultations")},
     {key:"upcoming", label:"수업 예정",     icon:icSc, fn:()=>{loadMembers&&loadMembers();setScreen("upcoming");}},
     {key:"pair21",   label:"2:1 수업 관리", icon:icP2, fn:()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}},
     {key:"sessions", label:"수업 기록",     icon:icCl, fn:goCs},
@@ -7080,6 +7768,24 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   // 대표(TEO) 개인 운동기록·테스트 계정은 홈 KPI·검색 등 "일반 회원" 집계에서 공통 제외
   const regularHomeMembers = useMemo(() => homeMembers.filter(isRegularAdminMember), [homeMembers]);
 
+  // "사전 문진 미완료" — 회원앱 가입은 했지만 아직 문진을 마치지 않은 회원 + 첫 수업이 임박한 미완료 회원.
+  // members에 미러된 온보딩 상태만 사용하므로 홈에서 서브컬렉션을 추가로 읽지 않는다.
+  const onboardingPendingList = useMemo(() => {
+    const soon = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    return regularHomeMembers.filter(m => {
+      if ((m.status || "active") === "ended") return false;
+      const st = getOnboardingStatusFromMember(m);
+      if (st === "completed" || st === "legacy") return false;
+      const firstSoon = m.firstSessionDate && m.firstSessionDate >= todayKST && m.firstSessionDate <= soon;
+      // 가입까지 마친 회원은 항상, 초대 전/발송 단계는 첫 수업이 임박했을 때만 알린다(과알림 방지)
+      return st === "account_created" || st === "in_progress" || st === "needs_update" || firstSoon;
+    }).map(m => ({
+      m,
+      obStatus: getOnboardingStatusFromMember(m),
+      firstSessionDate: m.firstSessionDate || "",
+    }));
+  }, [regularHomeMembers, todayKST]);
+
   const activeCount = regularHomeMembers.filter(m=>(m.status||"active")!=="ended").length;
   const draftPair   = (pairSessions||[]).filter(ps=>!ps.splitDone).length;
   // 홈은 "오늘 미기록"만 다룬다 (누적 미기록은 수업기록 화면에서 관리).
@@ -7461,10 +8167,13 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
              한 줄 균등 배치하고, 태블릿 세로처럼 폭은 넓지만 세로로 긴 화면(isWide && isPortrait)은 2열로 줄인다. ═══ */}
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${3+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
+          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${3+(onboardingPendingList.length>0?1:0)+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
             <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={scrollToSection("home-next-booking")} />
             <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionRows.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={scrollToSection("home-unsent-sessions")} />
             <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
+            {onboardingPendingList.length > 0 && (
+              <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
+            )}
             {draftPair > 0 && (
               <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
             )}
@@ -7685,6 +8394,26 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
           </button>
         )} />
+
+        {/* ═══ 사전 문진 미완료 — 회원앱 문진이 끝나지 않아 첫 수업 준비 정보가 비어 있는 회원 ═══ */}
+        {onboardingPendingList.length > 0 && (
+          <TodayListCard id="home-onboarding-pending" isWide={isWide} title="사전 문진 미완료" count={onboardingPendingList.length} unit="명"
+            captionText="회원앱에서 운동 목표·통증·건강 정보를 아직 작성하지 않았습니다." emptyText="모든 회원의 사전 문진이 완료됐습니다"
+            rows={onboardingPendingList} renderRow={(row,i)=>(
+            <button key={row.m.id} onClick={()=>onSelectMember?.(row.m)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
+              <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.m.name||"?").slice(0,1)}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px",display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                  {row.m.name} 회원 <OnboardingStatusBadge status={row.obStatus} />
+                </div>
+                <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>
+                  {row.firstSessionDate ? `첫 수업 ${formatMonthDayKo(row.firstSessionDate)}` : "첫 수업일 미정"}
+                </div>
+              </div>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+            </button>
+          )} />
+        )}
 
         {/* ═══ 오늘 회원 상태 — Apple Health식 링으로 오늘 입력 흐름을 한눈에 (계산만, 저장 없음) ═══ */}
         <div style={{marginBottom:GAP}}>
@@ -8820,6 +9549,13 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
                         {isPaused && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,fontFamily:DB.font}}>휴식중</span>}
                         {isEnded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(100,116,139,.1)",color:DB.sub,fontWeight:800,fontFamily:DB.font}}>종료</span>}
                         {isBirthday && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(244,114,182,.12)",color:"#DB2777",fontWeight:800,fontFamily:DB.font}}>🎂 생일</span>}
+                        {/* 사전 문진 상태 — members에 미러된 값만 사용해 회원 수만큼 서브문서를 추가로 읽지 않는다.
+                            이미 완료돼 확인까지 끝난 회원은 배지를 띄우지 않아 목록이 복잡해지지 않게 한다. */}
+                        {!isEnded && (() => {
+                          const obStatus = getOnboardingStatusFromMember(m);
+                          if (obStatus === "completed" || obStatus === "legacy") return null;
+                          return <OnboardingStatusBadge key="ob" status={obStatus} />;
+                        })()}
                         {!isEnded && draftSess && (
                           <button
                             onClick={e => { e.stopPropagation(); onResumeDraft2_1?.(m.id, draftSess); }}
@@ -9554,31 +10290,310 @@ function ConsultReportView({ member, goal={}, onClose, showClose=true }) {
   );
 }
 
-function MemberForm({ initial, onSave, onBack }) {
+// ════════════════════════════════════════════
+// 상담 고객(리드) — 정식 회원과 분리된 화면.
+// 등록하지 않은 상담 고객도 지우지 않고 여기서 상태로만 관리하며, "등록 확정"일 때만 정식 회원으로 전환한다.
+// 저장 위치는 consultations/{id} 이며 members 문서를 만들지 않는다(회원 목록·통계·오늘 수업에 섞이지 않음).
+// ════════════════════════════════════════════
+const CONSULT_STATUS_TONE = {
+  consultation_scheduled: { fg:"#1D4ED8", bg:"rgba(37,99,235,.10)" },
+  consultation_completed: { fg:DB.mintSoft, bg:DB.mintTint },
+  considering:            { fg:"#B45309", bg:"rgba(245,158,11,.12)" },
+  follow_up:              { fg:"#7C3AED", bg:"rgba(124,58,237,.10)" },
+  registered:             { fg:"#15803D", bg:"rgba(34,197,94,.12)" },
+  not_registered:         { fg:DB.sub,    bg:"rgba(100,116,139,.10)" },
+};
+const CONSULT_LIKELIHOOD = ["높음","보통","낮음"];
+function consultStatusLabel(key) {
+  return CONSULT_STATUS_OPTIONS.find(o => o.key === key)?.label || "상담 완료";
+}
+function ConsultStatusBadge({ status }) {
+  const tone = CONSULT_STATUS_TONE[status] || CONSULT_STATUS_TONE.consultation_completed;
+  return <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"3px 9px",borderRadius:999,background:tone.bg,color:tone.fg,whiteSpace:"nowrap"}}>{consultStatusLabel(status)}</span>;
+}
+
+function ConsultationsScreen({ consultations = [], loading, onBack, onRefresh, onAdd, onEdit, onConvert, onDelete, setScreen, loadMembers, loadPairSessions, showToast }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  // 상담 고객은 이 화면에서만 쓰므로 진입할 때 1회만 읽는다(회원 목록 로딩 흐름과 완전히 분리).
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    onRefresh?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const h = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  const isWide = winW >= 1024;
+
+  const FILTERS = [{ key:"all", label:"전체" }, ...CONSULT_STATUS_OPTIONS];
+  const counts = useMemo(() => {
+    const map = { all: consultations.length };
+    CONSULT_STATUS_OPTIONS.forEach(o => { map[o.key] = 0; });
+    consultations.forEach(c => { const k = c.status || "consultation_completed"; if (map[k] !== undefined) map[k] += 1; });
+    return map;
+  }, [consultations]);
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return consultations.filter(c => {
+      if (filter !== "all" && (c.status || "consultation_completed") !== filter) return false;
+      if (!q) return true;
+      return String(c.name || "").toLowerCase().includes(q) || String(c.phone || "").includes(q);
+    });
+  }, [consultations, filter, search]);
+
+  // 상담 전환율 — 미등록/고민 중도 모수에 그대로 포함해야 실제 전환율이 나온다.
+  const decided = consultations.filter(c => ["registered","not_registered"].includes(c.status));
+  const convertRate = decided.length ? Math.round(consultations.filter(c => c.status === "registered").length / decided.length * 100) : null;
+
+  return (
+    <div className={isWide ? "admin-scroll-shell" : undefined} style={{display:"flex",height:isWide?"var(--admin-layout-height, 100dvh)":"auto",minHeight:isWide?undefined:"100dvh",background:DB.bg,overflow:isWide?"hidden":"visible"}}>
+      {isWide && <AdminSidebar active="consultations" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={()=>showToast?.("아직 준비 중인 기능입니다.")} />}
+      <div style={{flex:1,overflowY:isWide?"auto":"visible",minHeight:0,height:isWide?"var(--admin-layout-height, 100dvh)":undefined,background:DB.bg,fontFamily:DB.font}}>
+        <div style={{position:"sticky",top:0,zIndex:60,background:"rgba(246,247,249,.88)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderBottom:DB.hairline}}>
+          <div style={{maxWidth:isWide?1400:820,margin:"0 auto",display:"flex",alignItems:"center",gap:10,padding:"11px 16px",paddingTop:"calc(11px + env(safe-area-inset-top,0px))",flexWrap:"wrap"}}>
+            <button onClick={onBack} aria-label="홈으로" style={{width:34,height:34,borderRadius:11,border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,fontSize:15,cursor:"pointer",flexShrink:0}}>←</button>
+            <div style={{display:"flex",alignItems:"baseline",gap:8,minWidth:0}}>
+              <span style={{fontWeight:800,fontSize:isWide?20:17,color:DB.text,letterSpacing:"-.4px",whiteSpace:"nowrap"}}>상담 고객</span>
+              <span style={{fontWeight:700,fontSize:12.5,color:DB.faint}}>{consultations.length}명{convertRate !== null ? ` · 전환율 ${convertRate}%` : ""}</span>
+            </div>
+            <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center"}}>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="이름 · 연락처 검색"
+                style={{border:`1px solid ${DB.border}`,background:"#fff",borderRadius:11,padding:"8px 12px",fontSize:12.5,fontFamily:DB.font,color:DB.text,width:isWide?200:130,boxSizing:"border-box"}} />
+              <button onClick={onRefresh} style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:11,padding:"9px 12px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>새로고침</button>
+              <button onClick={onAdd} style={{border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",borderRadius:11,padding:"9px 14px",fontSize:12,fontWeight:800,fontFamily:DB.font,cursor:"pointer",boxShadow:"0 6px 18px rgba(57,199,184,.28)"}}>+ 신규 상담</button>
+            </div>
+          </div>
+          <div style={{maxWidth:isWide?1400:820,margin:"0 auto",display:"flex",gap:6,padding:"0 16px 10px",overflowX:"auto"}}>
+            {FILTERS.map(f => (
+              <button key={f.key} onClick={()=>setFilter(f.key)}
+                style={{padding:"6px 12px",borderRadius:999,border:`1px solid ${filter===f.key?"transparent":DB.border}`,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,
+                  fontFamily:DB.font,fontSize:11.5,fontWeight:800,
+                  background:filter===f.key?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:"#fff",
+                  color:filter===f.key?"#fff":DB.sub}}>
+                {f.label} {counts[f.key] || 0}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{maxWidth:isWide?1400:820,margin:"0 auto",padding:"16px",paddingBottom:"calc(40px + env(safe-area-inset-bottom,0px))"}}>
+          <div style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"12px 15px",marginBottom:14,boxShadow:DB.shadow}}>
+            <div style={{fontSize:12.5,color:DB.sub,lineHeight:1.65}}>
+              상담만 받고 등록하지 않은 분도 <b style={{color:DB.text}}>지우지 않고</b> 여기서 상태로 관리합니다. 정식 회원 문서는 “등록 확정” 후 전환 버튼을 눌렀을 때만 만들어집니다.
+            </div>
+          </div>
+
+          {loading && <div style={{textAlign:"center",padding:"30px 0",color:DB.faint,fontSize:13}}>불러오는 중...</div>}
+
+          {!loading && rows.length === 0 && (
+            <div style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,padding:"46px 20px",textAlign:"center",boxShadow:DB.shadow}}>
+              <div style={{fontWeight:700,fontSize:14,color:DB.text}}>{consultations.length === 0 ? "아직 등록된 상담 고객이 없습니다" : "조건에 맞는 상담 고객이 없습니다"}</div>
+              <div style={{fontSize:12.5,color:DB.faint,marginTop:6}}>상담이 끝나면 “+ 신규 상담”으로 이름·연락처만 먼저 남겨두세요.</div>
+            </div>
+          )}
+
+          <div style={{display:"grid",gridTemplateColumns:isWide?"repeat(2,1fr)":"1fr",gap:12}}>
+            {rows.map(c => {
+              const converted = !!c.convertedMemberId;
+              return (
+                <div key={c.id} style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"15px 17px",boxShadow:DB.shadow}}>
+                  <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:8}}>
+                    <b style={{fontSize:15.5,fontWeight:800,color:DB.text,letterSpacing:"-.2px"}}>{c.name || "이름 미기재"}</b>
+                    <ConsultStatusBadge status={c.status} />
+                    {converted && <span style={{fontSize:10.5,fontWeight:800,padding:"3px 9px",borderRadius:999,background:"rgba(34,197,94,.12)",color:"#15803D"}}>회원 전환 완료</span>}
+                    {c.likelihood && <span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>등록 가능성 {c.likelihood}</span>}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 12px",fontSize:12.5,color:DB.sub,marginBottom:9}}>
+                    <div>연락처 · {c.phone || "-"}</div>
+                    <div>상담일 · {c.consultDate ? formatCompactDate(c.consultDate) : "-"}</div>
+                    <div style={{gridColumn:"1 / -1"}}>방문 경로 · {asArr(c.visitRoutes).join(", ") || c.visitEtc || "미기재"}</div>
+                    <div>희망 시간 · {c.preferredSchedule || "-"}</div>
+                    <div>후속 연락 · {c.followUpDate ? formatCompactDate(c.followUpDate) : "-"}</div>
+                  </div>
+                  {c.consultMemo && (
+                    <div style={{background:DB.bg,borderRadius:12,padding:"9px 12px",fontSize:12.5,color:DB.text,lineHeight:1.6,marginBottom:10,whiteSpace:"pre-wrap"}}>{c.consultMemo}</div>
+                  )}
+                  <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                    <button onClick={()=>onEdit(c)} style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:"8px 13px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>수정</button>
+                    {!converted && (
+                      <button onClick={()=>onConvert(c)}
+                        disabled={c.status !== "registered"}
+                        title={c.status !== "registered" ? "상담 상태를 “등록 확정”으로 바꾼 뒤 전환할 수 있습니다." : ""}
+                        style={{border:"none",borderRadius:10,padding:"8px 13px",fontSize:12,fontWeight:800,fontFamily:DB.font,
+                          cursor:c.status==="registered"?"pointer":"not-allowed",
+                          background:c.status==="registered"?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:DB.bg,
+                          color:c.status==="registered"?"#fff":DB.faint}}>
+                        정식 회원으로 전환
+                      </button>
+                    )}
+                    {!converted && (
+                      <button onClick={()=>onDelete(c)} style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.danger,borderRadius:10,padding:"8px 13px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer",marginLeft:"auto"}}>삭제</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 신규 상담 등록/수정 — 대표가 상담 중에 입력하는 최소 항목만 둔다.
+// 운동 목적·경험·생활습관·통증·병력·일정·성향은 회원앱 사전 문진에서 회원이 직접 작성한다.
+function ConsultationFormScreen({ initial, onSave, onBack, saving }) {
+  const isEdit = !!initial?.id;
+  const [name, setName] = useState(initial?.name || "");
+  const [phone, setPhone] = useState(initial?.phone || "");
+  const [consultDate, setConsultDate] = useState(initial?.consultDate || new Date().toISOString().slice(0, 10));
+  const [visitRoutes, setVisitRoutes] = useState(asArr(initial?.visitRoutes));
+  const [visitEtc, setVisitEtc] = useState(initial?.visitEtc || "");
+  const [visitKeyword, setVisitKeyword] = useState(initial?.visitKeyword || "");
+  const [visitAiTool, setVisitAiTool] = useState(initial?.visitAiTool || "");
+  const [consultMemo, setConsultMemo] = useState(initial?.consultMemo || "");
+  const [preferredSchedule, setPreferredSchedule] = useState(initial?.preferredSchedule || "");
+  const [followUpDate, setFollowUpDate] = useState(initial?.followUpDate || "");
+  const [status, setStatus] = useState(initial?.status || "consultation_completed");
+  const [likelihood, setLikelihood] = useState(initial?.likelihood || "");
+  const [result, setResult] = useState(initial?.result || "");
+
+  const chip = (active) => ({
+    padding:"8px 13px",borderRadius:999,cursor:"pointer",fontFamily:DB.font,fontSize:12.5,fontWeight:active?800:700,
+    border:`1px solid ${active?"transparent":DB.border}`,
+    background:active?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:"#fff",
+    color:active?"#fff":DB.sub,
+  });
+  const label = { fontFamily:DB.font, fontSize:12, fontWeight:800, color:DB.sub, display:"block", marginBottom:7 };
+  const input = { width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,background:"#fff",borderRadius:12,padding:"11px 13px",fontSize:14,fontFamily:DB.font,color:DB.text };
+  const cardBox = { background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"17px 19px",boxShadow:DB.shadow,marginBottom:12 };
+
+  const submit = () => {
+    if (!name.trim()) { window.alert("이름을 입력해주세요."); return; }
+    onSave({
+      name: name.trim(), phone: phone.trim(), consultDate,
+      visitRoutes, visitEtc, visitKeyword, visitAiTool,
+      consultMemo, preferredSchedule, followUpDate, status, likelihood, result,
+    });
+  };
+
+  return (
+    <div style={{minHeight:"100dvh",background:DB.bg,fontFamily:DB.font}}>
+      <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px calc(40px + env(safe-area-inset-bottom,0px))"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <button onClick={onBack} style={{width:34,height:34,borderRadius:11,border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,fontSize:15,cursor:"pointer"}}>←</button>
+          <div>
+            <div style={{fontWeight:800,fontSize:18,color:DB.text,letterSpacing:"-.3px"}}>{isEdit ? "상담 기록 수정" : "신규 상담 등록"}</div>
+            <div style={{fontSize:12,color:DB.faint,marginTop:1}}>운동 관련 문진은 회원앱에서 회원이 직접 작성합니다</div>
+          </div>
+        </div>
+
+        <div style={cardBox}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div><span style={label}>이름 *</span><input style={input} value={name} onChange={e=>setName(e.target.value)} placeholder="김상담" /></div>
+            <div><span style={label}>연락처</span><input style={input} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="010-0000-0000" inputMode="tel" /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><span style={label}>상담일</span><input style={input} type="date" value={consultDate} onChange={e=>setConsultDate(e.target.value)} /></div>
+            <div><span style={label}>후속 연락일</span><input style={input} type="date" value={followUpDate} onChange={e=>setFollowUpDate(e.target.value)} /></div>
+          </div>
+        </div>
+
+        <div style={cardBox}>
+          <span style={label}>방문 경로 (복수 선택)</span>
+          <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:12}}>
+            {["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"].map(r => {
+              const active = visitRoutes.includes(r);
+              return <button key={r} style={chip(active)}
+                onClick={()=>setVisitRoutes(prev => prev.includes(r) ? prev.filter(x=>x!==r) : [...prev, r])}>{r}</button>;
+            })}
+          </div>
+          {visitRoutes.includes("AI 검색") && (
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <div><span style={label}>사용한 AI</span><input style={input} value={visitAiTool} onChange={e=>setVisitAiTool(e.target.value)} placeholder="ChatGPT, Perplexity 등" /></div>
+              <div><span style={label}>검색 키워드</span><input style={input} value={visitKeyword} onChange={e=>setVisitKeyword(e.target.value)} placeholder="예: 청라 PT 추천" /></div>
+            </div>
+          )}
+          {visitRoutes.includes("기타") && (
+            <div style={{marginBottom:12}}><span style={label}>기타 경로</span><input style={input} value={visitEtc} onChange={e=>setVisitEtc(e.target.value)} placeholder="직접 입력" /></div>
+          )}
+          <span style={label}>희망 수업 요일 / 시간</span>
+          <input style={{...input, marginBottom:12}} value={preferredSchedule} onChange={e=>setPreferredSchedule(e.target.value)} placeholder="예: 화·목 저녁 7시" />
+          <span style={label}>상담 핵심 메모</span>
+          <textarea style={{...input, minHeight:96, resize:"vertical", lineHeight:1.6}} value={consultMemo} onChange={e=>setConsultMemo(e.target.value)}
+            placeholder="상담 중 들은 표현 그대로 (예: 허리가 자주 아파서 교정부터 하고 싶다고 함)" />
+        </div>
+
+        <div style={cardBox}>
+          <span style={label}>상담 상태</span>
+          <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:14}}>
+            {CONSULT_STATUS_OPTIONS.map(o => (
+              <button key={o.key} style={chip(status===o.key)} onClick={()=>setStatus(o.key)}>{o.label}</button>
+            ))}
+          </div>
+          <span style={label}>등록 가능성</span>
+          <div style={{display:"flex",gap:7,marginBottom:14}}>
+            {CONSULT_LIKELIHOOD.map(l => (
+              <button key={l} style={chip(likelihood===l)} onClick={()=>setLikelihood(likelihood===l?"":l)}>{l}</button>
+            ))}
+          </div>
+          <span style={label}>상담 결과</span>
+          <textarea style={{...input, minHeight:72, resize:"vertical", lineHeight:1.6}} value={result} onChange={e=>setResult(e.target.value)}
+            placeholder="예: 가격 확인 후 다음 주 재연락 예정" />
+        </div>
+
+        <button onClick={submit} disabled={saving || !name.trim()}
+          style={{width:"100%",border:"none",borderRadius:14,padding:"15px",fontSize:14.5,fontWeight:800,fontFamily:DB.font,
+            cursor:(saving||!name.trim())?"not-allowed":"pointer",
+            background:(saving||!name.trim())?DB.border:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,
+            color:(saving||!name.trim())?DB.faint:"#fff",boxShadow:(saving||!name.trim())?"none":"0 8px 22px rgba(57,199,184,.28)"}}>
+          {saving ? "저장 중..." : isEdit ? "상담 기록 저장" : "상담 고객 등록"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// prefill: 상담 고객 → 정식 회원 전환 시 상담 문서에서 가져온 값(이름·연락처·방문 경로·상담일·메모·희망 시간).
+// 같은 내용을 대표가 다시 입력하지 않도록 초기값으로만 주입하고, 저장은 기존 onSave 흐름을 그대로 쓴다.
+function MemberForm({ initial, onSave, onBack, prefill = null }) {
   const isEdit = !!initial;
   const sv     = initial?.survey || {};
+  const fromConsultation = !isEdit && !!prefill?.consultationId;
 
   // ── 기존 필드 (하위 호환) ──────────────────────
-  const [name,       setName]       = useState(initial?.name         || "");
+  const [name,       setName]       = useState(initial?.name         || prefill?.name || "");
   const [email,      setEmail]      = useState(initial?.email        || "");
   const [goal,       setGoal]       = useState(initial?.goal         || sv.primaryGoal || "");
   const [startDate,  setStartDate]  = useState(initial?.startDate    || new Date().toISOString().split("T")[0]);
   const [painArea,   setPainArea]   = useState(initial?.painArea     || "");
-  const [memo,       setMemo]       = useState(initial?.memo         || "");
+  const [memo,       setMemo]       = useState(initial?.memo         || prefill?.consultMemo || "");
   const [sessions,   setSessions2]  = useState(initial?.totalSessions|| "");
   const [ticketInfo, setTicketInfo] = useState(initial?.ticketInfo   || "");
 
-  // ── 설문 state ────────────────────────────────
-  const [step, setStep]   = useState(0);
+  // ── 등록 정보 (상담 분리 개편으로 추가) ──────────
+  const [phone,            setPhone]            = useState(initial?.phone            || prefill?.phone || "");
+  const [firstSessionDate, setFirstSessionDate] = useState(initial?.firstSessionDate || "");
+  const [trainerName,      setTrainerName]      = useState(initial?.trainerName      || "");
+  const [programType,      setProgramType]      = useState(initial?.programType      || "");
+
+  // ── 설문 state (수정 모드 8개 탭에서 그대로 사용) ──────────────
   // 1단계
   const [gender,   setGender]   = useState(sv.gender   || "");
   const [age,      setAge]      = useState(sv.age      || "");
   const [height,   setHeight]   = useState(sv.height   || "");
   const [weight,   setWeight]   = useState(sv.weight   || "");
-  const [job,      setJob]      = useState(sv.job      || "");
+  const [job] = useState(sv.job || ""); // 신규 등록 설문 제거 후에도 기존 회원 값 보존용(수정 저장 시 그대로 재기록)
   // 2단계
-  const [visitRoutes, setVisitRoutes] = useState(sv.visitRoutes || []);
-  const [visitEtc,    setVisitEtc]    = useState(sv.visitEtc    || "");
+  const [visitRoutes, setVisitRoutes] = useState(sv.visitRoutes || prefill?.visitRoutes || []);
+  const [visitEtc,    setVisitEtc]    = useState(sv.visitEtc    || prefill?.visitEtc || "");
   // 방문 계기 상세 (신규)
   const [visitDetail, setVisitDetail] = useState(sv.visitDetail || initial?.visitDetail || initial?.memo?.includes("방문") ? initial?.memo : sv.visitDetail || "");
   const [visitAiTool, setVisitAiTool] = useState(sv.visitAiTool || "");
@@ -9607,7 +10622,7 @@ function MemberForm({ initial, onSave, onBack }) {
   const [gymRecent,   setGymRecent]   = useState(sv.gymRecent   || "");
   // 3단계
   const [purposes,     setPurposes]    = useState(sv.purposes    || []);
-  const [primaryGoal,  setPrimaryGoal] = useState(sv.primaryGoal || "");
+  const [primaryGoal] = useState(sv.primaryGoal || "");
   // 4단계
   const [exLevel,     setExLevel]     = useState(sv.exLevel     || "");
   const [exDuration,  setExDuration]  = useState(sv.exDuration  || "");
@@ -9615,10 +10630,10 @@ function MemberForm({ initial, onSave, onBack }) {
   const [prevPTNote,  setPrevPTNote]  = useState(sv.prevPTNote  || "");
   // 5단계
   const [mealsPerDay,    setMealsPerDay]    = useState(sv.mealsPerDay    || "");
-  const [lateSnack,      setLateSnack]      = useState(sv.lateSnack      || "");
+  const [lateSnack] = useState(sv.lateSnack || "");
   const [alcohol,        setAlcohol]        = useState(sv.alcohol        || "");
-  const [waterIntake,    setWaterIntake]    = useState(sv.waterIntake    || "");
-  const [delivery,       setDelivery]       = useState(sv.delivery       || "");
+  const [waterIntake] = useState(sv.waterIntake || "");
+  const [delivery] = useState(sv.delivery || "");
   const [sleepHours,     setSleepHours]     = useState(sv.sleepHours     || "");
   const [stressLevel,    setStressLevel]    = useState(sv.stressLevel    || 3);
   // 6단계
@@ -9630,7 +10645,7 @@ function MemberForm({ initial, onSave, onBack }) {
   const [hasDisk,      setHasDisk]      = useState(sv.hasDisk      ?? false);
   const [hasHyper,     setHasHyper]     = useState(sv.hasHyper     ?? false);
   const [hasDiabetes,  setHasDiabetes]  = useState(sv.hasDiabetes  ?? false);
-  const [medHistory,   setMedHistory]   = useState(sv.medHistory   || "");
+  const [medHistory] = useState(sv.medHistory || "");
   const [exCaution,    setExCaution]    = useState(sv.exCaution    || "");
   // 8단계
   const [preferTime,   setPreferTime]   = useState(sv.preferTime   || []);
@@ -9642,8 +10657,6 @@ function MemberForm({ initial, onSave, onBack }) {
   const [intensity,    setIntensity]    = useState(sv.intensity    || "");
   const [priorityGoal, setPriorityGoal] = useState(sv.priorityGoal || "");
   const [activityLevel,setActivityLevel]= useState(sv.actLv || sv.activityLevel || "");
-  // AI 분석 리포트 표시 여부
-  const [showReport,   setShowReport]   = useState(false);
 
   // 회원앱 온보딩 완료 데이터 백필 — 관리자 상담 설문(survey)에 성별/나이/키/체중이
   // 전혀 없는 상태(과거 온보딩이 있었지만 아직 동기화된 적 없는 회원)에서 회원 상세를 열면
@@ -9665,8 +10678,6 @@ function MemberForm({ initial, onSave, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEdit, initial?.id]);
 
-  const TOTAL_STEPS = isEdit ? 1 : 11;
-  const progress    = isEdit ? 100 : Math.round(((step) / TOTAL_STEPS) * 100);
 
   // ── 편의 컴포넌트 ──────────────────────────────
   function ChipSelect({ options, value, onChange, multi=false }) {
@@ -9696,21 +10707,6 @@ function MemberForm({ initial, onSave, onBack }) {
     );
   }
 
-  function Toggle({ label, value, onChange }) {
-    return (
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-        padding:"12px 14px",background:"#111827",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",marginBottom:6}}>
-        <Mo c="#ddddf0" s={13}>{label}</Mo>
-        <div onClick={()=>onChange(!value)}
-          style={{width:46,height:26,borderRadius:13,cursor:"pointer",transition:"background .2s",
-            background:value?"#5EEAD4":"#cbd5e1",position:"relative"}}>
-          <div style={{position:"absolute",top:3,left:value?22:3,width:20,height:20,borderRadius:"50%",
-            background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}/>
-        </div>
-      </div>
-    );
-  }
-
   function StepLabel({ label }) {
     return <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
       letterSpacing:".1em",marginBottom:8,marginTop:14}}>{label}</div>;
@@ -9718,7 +10714,10 @@ function MemberForm({ initial, onSave, onBack }) {
 
   // ── 저장 핸들러 ────────────────────────────────
   function handleSave() {
-    const survey = {
+    // 수정 모드는 기존 8개 탭 전체를 그대로 저장한다(기존 회원 데이터 하위 호환 — 필드 구성 변경 없음).
+    // 신규 등록 모드는 운동 관련 설문을 회원앱 사전 문진으로 넘겼으므로 유입 분석에 필요한 방문 경로만 담는다
+    // (surveyDone을 켜지 않아 "설문 완료" 상태로 오인되지 않게 한다).
+    const survey = isEdit ? {
       gender, age, height, weight, job,
       visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo, visitAiMemo,
       visitReason: visitRealMemo, // 레거시 호환: visitReason에도 동일값 저장
@@ -9731,6 +10730,10 @@ function MemberForm({ initial, onSave, onBack }) {
       preferTime, daysPerWeek, goalPeriod,
       weakParts, exStyle, intensity, priorityGoal, actLv: activityLevel,
       surveyDone: true, surveyDate: new Date().toISOString().split("T")[0],
+    } : {
+      visitRoutes, visitEtc, visitAiTool, visitKeyword,
+      visitRealMemo: memo, visitReason: memo,
+      surveyDate: new Date().toISOString().split("T")[0],
     };
     // painArea 자동 동기화 (6단계 통증 부위)
     const syncedPainArea = painParts.length
@@ -9745,9 +10748,10 @@ function MemberForm({ initial, onSave, onBack }) {
     onSave({
       name, email: normalizedEmail, startDate, memo, totalSessions: sessions, ticketInfo,
       goal: syncedGoal, painArea: syncedPainArea,
+      phone, firstSessionDate, trainerName, programType,
+      ...(fromConsultation ? { consultationId: prefill.consultationId, consultDate: prefill.consultDate || "", preferredSchedule: prefill.preferredSchedule || "" } : {}),
       survey,
     });
-    if (!isEdit) setShowReport(true);
   }
 
   // ── 수정 모드: 탭형 전체 프로필 수정 ────────────────────
@@ -9812,7 +10816,14 @@ function MemberForm({ initial, onSave, onBack }) {
               <Field label="이름 *" value={name} onChange={setName} placeholder="김회원" />
               <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
               <MemberEmailAdminWarning email={email} />
-              <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <Field label="연락처" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
+                <Field label="담당 트레이너" value={trainerName} onChange={setTrainerName} placeholder="예: 대표" />
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
+                <Field label="첫 수업일" type="date" value={firstSessionDate} onChange={setFirstSessionDate} />
+              </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
                 <StepLabel label="성별" />
                 <div/>
@@ -10079,378 +11090,87 @@ function MemberForm({ initial, onSave, onBack }) {
     );
   }
 
-  // ── AI 분석 리포트 (등록 완료 후) ──────────────
-  if (showReport) {
-    const tempMember = { name,
-      survey:{ weakParts, exStyle, intensity, priorityGoal, purposes, exLevel, daysPerWeek,
-               sleepHours, stressLevel, painParts, hasDisk, hasHyper, hasDiabetes,
-               medications, surgeries, exCaution, surveyDate: new Date().toISOString().split("T")[0], surveyDone:true }
-    };
-    return (
-      <div>
-        <SH title="🤖 AI 초기 평가 리포트" sub={name}
-          right={<Btn ghost sm onClick={onBack}>완료 →</Btn>} />
-        <ConsultReportView member={tempMember} onClose={onBack} showClose={false} />
-        <div style={{marginTop:10}}>
-          <Btn full onClick={onBack}>✅ 상담 완료 — 회원 목록으로</Btn>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 신규 등록: 11단계 설문 ──────────────────────
-  const STEPS = [
-    "기본 정보", "방문 경로", "운동 목적", "운동 경험",
-    "생활 습관", "통증 부위", "병력 / 주의", "운동 가능 시간",
-    "약점 & 선호 스타일", "운동 강도 성향", "목표 우선순위",
-  ];
-
+  // ── 신규 등록: 한 화면 등록 폼 ──────────────────
+  // 운동 목적·경험·생활습관·통증·병력·일정·성향 질문은 회원앱 사전 문진(MemberOnboarding)으로 옮겼다.
+  // 여기서는 대표가 등록 시점에만 알 수 있는 계약 정보(등록일·첫 수업일·횟수·담당·이용권)와
+  // 상담 고객 전환 시 자동으로 넘어오는 값(이름·연락처·방문 경로·상담 메모)만 다룬다.
   return (
     <div>
-      <SH title="➕ 초기 상담 등록" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+      <SH title="➕ 회원 등록" sub={fromConsultation ? "상담 고객 → 정식 회원 전환" : "사전 문진은 회원앱에서 회원이 직접 작성합니다"}
+        right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
 
-      {/* 진행바 */}
-      <div style={{marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-          <Mo c="#5EEAD4" s={10} style={{fontWeight:700}}>{STEPS[step]}</Mo>
-          <Mo c="#94a3b8" s={9}>{step+1} / {TOTAL_STEPS}</Mo>
+      {fromConsultation && (
+        <div style={{marginBottom:12,padding:"10px 13px",borderRadius:10,
+          background:"rgba(94,234,212,.08)",border:"1px solid rgba(94,234,212,.22)"}}>
+          <Mo c="#5EEAD4" s={10} style={{fontWeight:700,display:"block",marginBottom:4}}>상담 정보 자동 반영됨</Mo>
+          <Mo c="#94a3b8" s={10}>이름 · 연락처 · 방문 경로 · 상담일 · 상담 메모 · 희망 시간은 상담 기록에서 그대로 가져왔습니다. 아래 등록 정보만 채워주세요.</Mo>
         </div>
-        <div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.08)",overflow:"hidden"}}>
-          <div style={{height:"100%",width:(((step+1)/TOTAL_STEPS)*100)+"%",
-            background:"linear-gradient(90deg,#5EEAD4,#2DD4BF)",transition:"width .3s"}}/>
+      )}
+
+      <Card title="기본 정보">
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          <Field label="이름 *" value={name} onChange={setName} placeholder="김회원" />
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+            <Field label="연락처" value={phone} onChange={setPhone} placeholder="010-0000-0000" />
+            <Field label="이메일 (회원앱 초대용)" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
+          </div>
+          <MemberEmailAdminWarning email={email} />
         </div>
-        {/* 단계 도트 */}
-        <div style={{display:"flex",gap:4,marginTop:8,justifyContent:"center"}}>
-          {STEPS.map((_,i)=>(
-            <div key={i} onClick={()=>i<step&&setStep(i)}
-              style={{width:i===step?24:8,height:8,borderRadius:4,transition:"all .2s",cursor:i<step?"pointer":"default",
-                background:i<step?"#5EEAD4":i===step?"#5EEAD4":"rgba(255,255,255,0.08)"}}/>
-          ))}
+      </Card>
+
+      <Card title="등록 정보" style={{marginTop:10}}>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+            <Field label="등록일" type="date" value={startDate} onChange={setStartDate} />
+            <Field label="첫 수업일" type="date" value={firstSessionDate} onChange={setFirstSessionDate} />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+            <Field label="PT 등록 횟수" value={sessions} onChange={setSessions2} placeholder="예: 20회" />
+            <Field label="이용권 정보" value={ticketInfo} onChange={setTicketInfo} placeholder="예: 3개월권" />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+            <Field label="담당 트레이너" value={trainerName} onChange={setTrainerName} placeholder="예: 대표" />
+            <div>
+              <StepLabel label="회원 구분" />
+              <ChipSelect options={["개인 PT","2:1 PT","교정 프로그램","재활 프로그램"]} value={programType} onChange={setProgramType} />
+            </div>
+          </div>
         </div>
+      </Card>
+
+      <Card title="상담 정보" style={{marginTop:10}}>
+        <StepLabel label="방문 경로 (복수 선택)" />
+        <ChipSelect multi
+          options={["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"]}
+          value={visitRoutes} onChange={setVisitRoutes} />
+        {visitRoutes.includes("AI 검색") && (
+          <div style={{marginTop:10}}>
+            <Field label="검색 키워드" value={visitKeyword} onChange={setVisitKeyword} placeholder="예: 청라 PT 추천" />
+          </div>
+        )}
+        {visitRoutes.includes("기타") && (
+          <div style={{marginTop:10}}>
+            <Field label="기타 경로 입력" value={visitEtc} onChange={setVisitEtc} placeholder="직접 입력" />
+          </div>
+        )}
+        <StepLabel label="상담 메모" />
+        <textarea value={memo} onChange={e=>setMemo(e.target.value)} rows={3}
+          placeholder="상담 시 들은 실제 표현 그대로 (관리자 전용, 회원에게 보이지 않음)"
+          style={{width:"100%",padding:"9px 11px",borderRadius:7,boxSizing:"border-box",
+            border:"1px solid rgba(255,255,255,0.08)",background:"#111827",color:"#ddddf0",fontSize:12,resize:"vertical"}} />
+      </Card>
+
+      <div style={{marginTop:12,padding:"11px 13px",borderRadius:10,
+        background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.2)"}}>
+        <Mo c="#a29bfe" s={10} style={{fontWeight:700,display:"block",marginBottom:4}}>다음 단계 — 사전 문진</Mo>
+        <Mo c="#94a3b8" s={10}>운동 목적 · 경험 · 생활습관 · 통증 · 병력 · 일정 · 성향은 회원이 회원앱에서 직접 작성합니다. 등록 후 회원 상세 → “회원앱 초대”를 눌러 문진을 요청해주세요.</Mo>
       </div>
 
-      <Card>
-        {/* ── Step 0: 기본 정보 ── */}
-        {step===0 && (
-          <div>
-            <Field label="이름 *" value={name} onChange={setName} placeholder="김회원" />
-            <StepLabel label="성별" />
-            <ChipSelect options={["남성","여성"]} value={gender} onChange={setGender} />
-            <div style={{marginTop:12}}>
-              <Field label="나이" value={age} onChange={setAge} placeholder="예: 32" type="number" />
-            </div>
-            <div style={{marginTop:9}}>
-              <Field label="이메일" type="email" value={email} onChange={setEmail} placeholder="member@example.com" />
-              <MemberEmailAdminWarning email={email} />
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginTop:9}}>
-              <Field label="키 (cm)" value={height} onChange={setHeight} placeholder="예: 170" type="number" />
-              <Field label="체중 (kg)" value={weight} onChange={setWeight} placeholder="예: 65" type="number" />
-            </div>
-            <div style={{marginTop:9}}>
-              <Field label="직업" value={job} onChange={setJob} placeholder="예: 직장인, 학생, 주부" />
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginTop:9}}>
-              <Field label="시작일" type="date" value={startDate} onChange={setStartDate} />
-              <Field label="등록 횟수" value={sessions} onChange={setSessions2} placeholder="예: 20회" />
-            </div>
-            <div style={{marginTop:9}}>
-              <Field label="이용권 정보" value={ticketInfo} onChange={setTicketInfo} placeholder="예: 3개월권" />
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 1: 방문 경로 ── */}
-        {step===1 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>어떻게 오셨나요?</Mo>
-            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
-            <ChipSelect multi
-              options={["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"]}
-              value={visitRoutes} onChange={setVisitRoutes} />
-
-            {/* AI 검색 상세 */}
-            {visitRoutes.includes("AI 검색") && (
-              <div style={{marginTop:10,padding:"12px",borderRadius:8,
-                background:"rgba(162,155,254,.08)",border:"1px solid rgba(162,155,254,.25)"}}>
-                <Mo c="#a29bfe" s={10} style={{display:"block",fontWeight:700,marginBottom:8}}>🤖 AI 검색 상세</Mo>
-                <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:5}}>어떤 AI로 검색하셨나요?</Mo>
-                <ChipSelect
-                  options={["ChatGPT","Perplexity","Gemini","Claude","네이버 Cue","기타"]}
-                  value={visitAiTool} onChange={setVisitAiTool} />
-                <div style={{marginTop:8}}>
-                  <Field label="검색 키워드" value={visitKeyword} onChange={setVisitKeyword}
-                    placeholder="예: 청라 PT 추천, 청라 체형교정 PT, 청라 다이어트 PT" />
-                </div>
-                <div style={{marginTop:6}}>
-                  <textarea value={visitAiMemo} onChange={e=>setVisitAiMemo(e.target.value)}
-                    placeholder="AI 검색 관련 메모 (AI가 추천한 내용, 회원이 말한 것 등)"
-                    rows={2}
-                    style={{width:"100%",padding:"8px 10px",borderRadius:6,boxSizing:"border-box",
-                      border:"1px solid rgba(162,155,254,.2)",background:"#111827",
-                      color:"#ddddf0",fontSize:12,resize:"none"}} />
-                </div>
-              </div>
-            )}
-
-            {/* 기타 경로 메모 */}
-            {visitRoutes.includes("기타") && (
-              <div style={{marginTop:10}}>
-                <Field label="기타 경로 입력" value={visitEtc} onChange={setVisitEtc} placeholder="직접 입력" />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Step 2: 운동 목적 ── */}
-        {step===2 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>운동 목적이 무엇인가요?</Mo>
-            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능</Mo>
-            <ChipSelect multi
-              options={["체지방 감량","근력 증가","체형 교정","통증 개선","자세 개선","근육 증가","건강 관리","바디프로필","재활 목적","체력 증가","스트레스 해소"]}
-              value={purposes} onChange={setPurposes} />
-            <StepLabel label="가장 우선순위 높은 목표" />
-            <textarea value={primaryGoal} onChange={e=>setPrimaryGoal(e.target.value)}
-              placeholder="예: 무릎 통증 없이 계단 오르기, 3개월 안에 5kg 감량"
-              rows={2}
-              style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:13,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-          </div>
-        )}
-
-        {/* ── Step 3: 운동 경험 ── */}
-        {step===3 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>운동 경험이 어떻게 되시나요?</Mo>
-            <ChipSelect
-              options={["운동 경험 없음","홈트 경험","헬스 경험 있음","꾸준히 운동 중"]}
-              value={exLevel} onChange={setExLevel} />
-            <StepLabel label="운동 지속 기간" />
-            <ChipSelect
-              options={["없음","1개월 미만","1~6개월","6개월~1년","1~3년","3년 이상"]}
-              value={exDuration} onChange={setExDuration} />
-            <StepLabel label="이전 PT 경험" />
-            <ChipSelect
-              options={["없음","있음 (만족)","있음 (불만족)","있음 (중립)"]}
-              value={prevPT} onChange={setPrevPT} />
-            {(prevPT && prevPT !== "없음") && (
-              <div style={{marginTop:8}}>
-                <textarea value={prevPTNote} onChange={e=>setPrevPTNote(e.target.value)}
-                  placeholder="이전 PT에서 좋았던 점 / 아쉬웠던 점을 적어주세요"
-                  rows={2}
-                  style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-                    background:"#111827",color:"#ddddf0",fontSize:13,resize:"none",
-                    boxSizing:"border-box",lineHeight:1.6}} />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Step 4: 식사 / 생활습관 ── */}
-        {step===4 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>생활 습관을 알려주세요</Mo>
-            <StepLabel label="하루 식사 횟수" />
-            <ChipSelect options={["1끼","2끼","3끼","4끼 이상"]} value={mealsPerDay} onChange={setMealsPerDay} />
-            <StepLabel label="야식 빈도" />
-            <ChipSelect options={["거의 없음","주 1~2회","주 3~4회","매일"]} value={lateSnack} onChange={setLateSnack} />
-            <StepLabel label="음주 빈도" />
-            <ChipSelect options={["안 마심","월 1~2회","주 1회","주 2회 이상"]} value={alcohol} onChange={setAlcohol} />
-            <StepLabel label="하루 물 섭취량" />
-            <ChipSelect options={["500ml 미만","500ml~1L","1~2L","2L 이상"]} value={waterIntake} onChange={setWaterIntake} />
-            <StepLabel label="배달 음식 빈도" />
-            <ChipSelect options={["거의 없음","주 1~2회","주 3~4회","거의 매일"]} value={delivery} onChange={setDelivery} />
-            <StepLabel label="평균 수면 시간" />
-            <ChipSelect options={["5시간 미만","5~6시간","6~7시간","7~8시간","8시간 이상"]} value={sleepHours} onChange={setSleepHours} />
-            <StepLabel label={`스트레스 정도 — ${stressLevel}/5`} />
-            <input type="range" min={1} max={5} value={stressLevel}
-              onChange={e=>setStressLevel(Number(e.target.value))}
-              style={{width:"100%",accentColor:"#5EEAD4"}} />
-            <div style={{display:"flex",justifyContent:"space-between"}}>
-              <Mo c="#94a3b8" s={8}>낮음</Mo>
-              <Mo c="#94a3b8" s={8}>높음</Mo>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 5: 통증 / 불편 부위 ── */}
-        {step===5 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:4}}>불편하거나 통증 있는 부위</Mo>
-            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:10}}>복수 선택 가능 · 없으면 그냥 다음</Mo>
-            <ChipSelect multi
-              options={["목","어깨","팔꿈치","손목","허리","고관절","무릎","발목","없음"]}
-              value={painParts} onChange={setPainParts} />
-            <StepLabel label="언제 가장 불편한지 작성해주세요" />
-            <textarea value={painSituation} onChange={e=>setPainSituation(e.target.value)}
-              placeholder="예: 계단 내려갈 때 무릎 통증, 오래 앉아 있으면 허리 뻐근"
-              rows={2}
-              style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:13,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-          </div>
-        )}
-
-        {/* ── Step 6: 병력 / 주의사항 ── */}
-        {step===6 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:12}}>건강 정보 (선택 입력)</Mo>
-            <Toggle label="디스크 병력" value={hasDisk} onChange={setHasDisk} />
-            <Toggle label="고혈압" value={hasHyper} onChange={setHasHyper} />
-            <Toggle label="당뇨" value={hasDiabetes} onChange={setHasDiabetes} />
-            <StepLabel label="현재 복용 약물 (없으면 비워두세요)" />
-            <Field value={medications} onChange={setMedications} placeholder="예: 혈압약, 항생제 등" />
-            <StepLabel label="수술 경험" />
-            <Field value={surgeries} onChange={setSurgeries} placeholder="예: 2022년 무릎 반월판 수술" />
-            <StepLabel label="기타 병력 / 특이사항" />
-            <textarea value={medHistory} onChange={e=>setMedHistory(e.target.value)}
-              placeholder="예: 2019년 허리 디스크 치료, 최근 두통 증상" rows={2}
-              style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:13,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-            <StepLabel label="운동 시 주의사항" />
-            <textarea value={exCaution} onChange={e=>setExCaution(e.target.value)}
-              placeholder="예: 무릎에 충격 주는 동작 제한, 고중량 스쿼트 주의" rows={2}
-              style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:13,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-          </div>
-        )}
-
-        {/* ── Step 7: 운동 가능 시간 ── */}
-        {step===7 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>운동 스케줄을 알려주세요</Mo>
-            <StepLabel label="선호 시간대" />
-            <ChipSelect
-              multi
-              options={["[평일] 오전 10~12시","[평일] 오후 12~3시","[평일] 오후 3~6시","[평일] 오후 6~8시","[평일] 오후 8~10시","[토요일] 오전","[토요일] 오후"]}
-              value={preferTime} onChange={setPreferTime} />
-            <div style={{marginTop:7,padding:"6px 10px",borderRadius:6,background:"rgba(94,234,212,.05)",
-              border:"1px solid rgba(94,234,212,.15)"}}>
-              <Mo c="#94a3b8" s={9}>운영시간: 평일 10:00~22:00 · 토요일 10:00~15:00 · 일요일/공휴일 휴무</Mo>
-            </div>
-            <StepLabel label="주 운동 가능 횟수" />
-            <ChipSelect options={["주 1회","주 2회","주 3회","주 4회","주 5회 이상"]}
-              value={daysPerWeek} onChange={setDaysPerWeek} />
-            <StepLabel label="목표 기간" />
-            <ChipSelect options={["1개월","3개월","6개월","1년","꾸준히"]}
-              value={goalPeriod} onChange={setGoalPeriod} />
-            <StepLabel label="메모 / 특이사항" />
-            <textarea value={memo} onChange={e=>setMemo(e.target.value)}
-              placeholder="기타 전달 사항을 자유롭게 적어주세요" rows={3}
-              style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",
-                background:"#111827",color:"#ddddf0",fontSize:13,resize:"none",
-                boxSizing:"border-box",lineHeight:1.6}} />
-          </div>
-        )}
-
-        {/* ── Step 8: 약점 & 선호 스타일 ── */}
-        {step===8 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>트레이닝 스타일 분석</Mo>
-            <StepLabel label="약점 부위 (복수 선택)" />
-            <ChipSelect multi
-              options={["가슴","등","어깨","팔","하체","둔근","코어","심폐지구력"]}
-              value={weakParts} onChange={setWeakParts} />
-            <StepLabel label="선호 운동 스타일" />
-            <ChipSelect multi
-              options={["머신 위주","프리웨이트 위주","기능성 운동","교정 운동","유산소 위주","바디프로필 스타일","재활 중심"]}
-              value={exStyle} onChange={setExStyle} />
-          </div>
-        )}
-
-        {/* ── Step 9: 운동 강도 성향 ── */}
-        {step===9 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>운동 강도 성향</Mo>
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
-              {[
-                ["천천히","천천히 배우고 싶음","처음부터 올바른 자세와 패턴을 익히고 싶어요","#818cf8"],
-                ["보통","적당한 강도 선호","불편하지 않은 강도에서 꾸준히 하고 싶어요","#5EEAD4"],
-                ["강하게","강하게 운동 선호","최대한 강하게 밀어붙이고 싶어요","#f97316"],
-              ].map(([key,label,desc,color])=>{
-                const active = intensity===key;
-                return (
-                  <button key={key} onClick={()=>setIntensity(active?"":key)}
-                    style={{padding:"14px 16px",borderRadius:12,border:"1px solid",cursor:"pointer",textAlign:"left",
-                      borderColor:active?color:"rgba(255,255,255,0.08)",
-                      background:active?`${color}18`:"#111827",
-                      transition:"all .12s"}}>
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,
-                      color:active?color:"#e2e8f0",marginBottom:4}}>{label}</div>
-                    <Mo c={active?"#94a3b8":"#94a3b8"} s={11}>{desc}</Mo>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 10: 목표 우선순위 ── */}
-        {step===10 && (
-          <div>
-            <Mo c="#ddddf0" s={14} style={{fontWeight:700,display:"block",marginBottom:10}}>가장 중요한 목표</Mo>
-            <Mo c="#94a3b8" s={11} style={{display:"block",marginBottom:12}}>하나만 선택해주세요</Mo>
-            <div style={{display:"flex",flexDirection:"column",gap:7}}>
-              {[
-                ["체형 교정 우선","자세와 체형을 먼저 잡고 싶어요","🧍"],
-                ["근비대 우선","근육을 키우는 게 목표예요","💪"],
-                ["체지방 감량 우선","체지방을 먼저 줄이고 싶어요","🔥"],
-                ["통증 개선 우선","통증 없이 일상생활이 하고 싶어요","🏥"],
-                ["자세 개선 우선","거북목, 굽은등 등 자세를 개선하고 싶어요","📐"],
-                ["체력 향상 우선","기초 체력과 지구력을 키우고 싶어요","⚡"],
-              ].map(([label,desc,icon])=>{
-                const active = priorityGoal===label;
-                return (
-                  <button key={label} onClick={()=>setPriorityGoal(active?"":label)}
-                    style={{padding:"12px 14px",borderRadius:10,border:"1px solid",cursor:"pointer",
-                      display:"flex",alignItems:"center",gap:12,textAlign:"left",
-                      borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
-                      background:active?"rgba(94,234,212,.12)":"#111827",
-                      transition:"all .12s"}}>
-                    <span style={{fontSize:22,flexShrink:0}}>{icon}</span>
-                    <div>
-                      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,
-                        color:active?"#5EEAD4":"#e2e8f0",marginBottom:2}}>{label}</div>
-                      <Mo c="#94a3b8" s={10}>{desc}</Mo>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 하단 버튼 */}
-        <div style={{display:"flex",gap:9,marginTop:18}}>
-          {step > 0 && (
-            <Btn ghost onClick={()=>setStep(s=>s-1)} style={{flex:1}}>← 이전</Btn>
-          )}
-          {step < TOTAL_STEPS-1 ? (
-            <Btn full={step===0} onClick={()=>setStep(s=>s+1)}
-              disabled={step===0&&!name}
-              style={{flex:step>0?2:1}}>
-              다음 →
-            </Btn>
-          ) : (
-            <Btn onClick={handleSave} disabled={!name} style={{flex:2}}>
-              ✅ 등록 + AI 분석 생성
-            </Btn>
-          )}
-        </div>
-
-        {/* 건너뛰기 */}
-        {step < TOTAL_STEPS-1 && step > 0 && (
-          <button onClick={()=>setStep(TOTAL_STEPS-1)}
-            style={{display:"block",width:"100%",marginTop:8,padding:"6px",background:"none",
-              border:"none",color:"#3a3a5a",fontSize:10,cursor:"pointer"}}>
-            나머지 건너뛰고 바로 등록하기
-          </button>
-        )}
-      </Card>
+      <div style={{marginTop:12}}>
+        <Btn full onClick={handleSave} disabled={!name.trim()}>
+          {fromConsultation ? "✅ 정식 회원으로 등록" : "✅ 회원 등록"}
+        </Btn>
+      </div>
     </div>
   );
 }
@@ -10972,6 +11692,191 @@ function MemberChangeCard({ goal, sessions, bodyData, checkins }) {
   );
 }
 
+// ════════════════════════════════════════════
+// 회원 상세 "사전 문진 요약" 카드 — 수업 전 10초 안에 파악하는 것이 목적.
+// 데이터는 members/{id}/memberOnboarding/main(HubScreen이 이미 읽어 둔 ob)만 사용하며 추가 조회를 하지 않는다.
+// 온보딩 데이터가 없는 기존 회원도 오류 없이 "미작성" 안내만 보이도록 모든 접근을 옵셔널로 처리한다.
+// ════════════════════════════════════════════
+function OnboardingStatusBadge({ status, size = "sm" }) {
+  const meta = ONBOARDING_STATUS_LABEL[status] || ONBOARDING_STATUS_LABEL.not_invited;
+  const tones = {
+    mint:  { fg:DB.mintSoft, bg:DB.mintTint },
+    amber: { fg:"#B45309",   bg:"rgba(245,158,11,.12)" },
+    rose:  { fg:"#BE123C",   bg:"rgba(244,63,94,.10)" },
+    slate: { fg:DB.sub,      bg:"rgba(100,116,139,.10)" },
+  };
+  const t = tones[meta.tone] || tones.slate;
+  return <span style={{fontFamily:DB.font,fontSize:size==="sm"?10:10.5,fontWeight:800,padding:size==="sm"?"2px 7px":"3px 9px",borderRadius:999,background:t.bg,color:t.fg,whiteSpace:"nowrap"}}>{meta.label}</span>;
+}
+
+function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [ob, setOb] = useState(onboarding || null);
+  useEffect(() => { setOb(onboarding || null); }, [onboarding]);
+
+  const v2 = ob?.v2 || null;
+  const status = getOnboardingStatus(member, ob);
+  const hasCaution = v2 ? ob2HasCaution(v2) : false;
+  const needsReview = status === "needs_update";
+  const card = { background:DB.card, border:`1px solid ${DB.border}`, borderRadius:DB.radiusSm, boxShadow:DB.shadow };
+
+  const doReview = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await markOnboardingReviewed(member.id);
+      setOb(prev => ({ ...(prev || {}), reviewedAt: r.reviewedAt, reviewedBy: r.reviewedBy }));
+      onPatch?.({ onboardingStatus: "completed" });
+      showToast?.("사전 문진 확인 완료로 표시했습니다 ✓");
+    } catch (e) { showToast?.(e.message || "저장 실패", "err"); }
+    finally { setBusy(false); }
+  };
+  const doRequestUpdate = async () => {
+    if (busy) return;
+    const msg = window.prompt("회원에게 보낼 수정 요청 메시지를 입력하세요.", "운동 목표·통증·건강 정보를 최신 상태로 업데이트해주세요.");
+    if (msg === null) return;
+    setBusy(true);
+    try {
+      await requestOnboardingUpdate(member.id, msg);
+      showToast?.("회원에게 수정 요청을 보냈습니다 ✓");
+    } catch (e) { showToast?.(e.message || "요청 실패", "err"); }
+    finally { setBusy(false); }
+  };
+
+  // 온보딩 자체가 없거나 v2 이전(기존 회원) — 억지로 빈 항목을 나열하지 않고 상태와 다음 행동만 보여준다.
+  if (!v2) {
+    return (
+      <section style={{...card, padding:"13px 16px", marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
+          <span style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text}}>사전 문진</span>
+          <OnboardingStatusBadge status={status} size="md" />
+          <span style={{fontFamily:DB.font,fontSize:12,color:DB.faint,marginLeft:"auto"}}>
+            {status === "legacy"
+              ? "이 회원은 개편 전 온보딩만 완료했습니다. 필요하면 수정 요청을 보내주세요."
+              : "회원앱에서 운동 목표·통증·건강 정보를 직접 작성합니다."}
+          </span>
+        </div>
+        <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
+          <button onClick={doRequestUpdate} disabled={busy || !member?.memberUid}
+            style={{border:`1px solid ${DB.border}`,background:"#fff",color:member?.memberUid?DB.mintSoft:DB.faint,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:member?.memberUid?"pointer":"not-allowed"}}>
+            회원에게 문진 요청
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const g = v2.goals || {}, ex = v2.experience || {}, ls = v2.lifestyle || {}, pn = v2.pain || {}, hl = v2.health || {}, sc = v2.schedule || {}, pf = v2.preferences || {};
+  const painParts = asArr(pn.parts).filter(p => p !== "없음");
+  const conditions = asArr(hl.conditions).filter(c => c !== "없음");
+  const line = (label, value) => (
+    <div style={{display:"flex",gap:10,padding:"6px 0",borderTop:DB.hairline}}>
+      <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:DB.faint,flex:"0 0 78px"}}>{label}</span>
+      <span style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:DB.text,flex:1,minWidth:0,wordBreak:"break-word"}}>{value || "-"}</span>
+    </div>
+  );
+
+  return (
+    <section style={{...card, padding:"14px 16px 13px", marginBottom:14,
+      border:`1px solid ${needsReview ? "rgba(244,63,94,.35)" : hasCaution ? "rgba(245,158,11,.35)" : DB.border}`}}>
+      <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:10}}>
+        <span style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text}}>사전 문진 요약</span>
+        <OnboardingStatusBadge status={status} size="md" />
+        {hasCaution && <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.14)",color:"#B45309"}}>⚠ 주의 정보 있음</span>}
+        <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginLeft:"auto"}}>
+          완료 {ob?.completedAt ? formatCompactDate(ob.completedAt) : "-"}
+          {v2.updatedAt ? ` · 최종 수정 ${formatCompactDate(v2.updatedAt)}` : ""}
+        </span>
+      </div>
+
+      {/* 위험/주의 — 가장 먼저, 가장 눈에 띄게 */}
+      {hasCaution ? (
+        <div style={{background:"rgba(245,158,11,.07)",border:"1px solid rgba(245,158,11,.28)",borderRadius:14,padding:"11px 13px",marginBottom:11}}>
+          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:"#B45309",marginBottom:6}}>수업 전 반드시 확인</div>
+          <div style={{display:"grid",gap:4}}>
+            {painParts.length > 0 && <div style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A"}}>통증 · {painParts.join(", ")}{pn.worst ? ` (가장 불편: ${pn.worst})` : ""}</div>}
+            {pn.trigger && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>유발 동작 · {pn.trigger}</div>}
+            {pn.situation && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>통증 상황 · {pn.situation}</div>}
+            {pn.onset && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>시작 시점 · {pn.onset}</div>}
+            {conditions.length > 0 && <div style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A"}}>병력 · {conditions.join(", ")}{hl.conditionEtc ? ` / ${hl.conditionEtc}` : ""}</div>}
+            {hl.surgery && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>수술 이력 · {hl.surgery}</div>}
+            {hl.medication && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>복용 약물 · {hl.medication}</div>}
+            {hl.caution && <div style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A"}}>주의사항 · {hl.caution}</div>}
+          </div>
+        </div>
+      ) : (
+        <div style={{background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.22)",borderRadius:14,padding:"9px 13px",marginBottom:11,fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#15803D"}}>
+          통증 · 병력 · 복용 약물 · 주의사항 모두 “없음”으로 확인됨
+        </div>
+      )}
+
+      {/* 핵심 요약 — 목표/경험/일정 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"0 20px"}}>
+        <div>
+          {line("최우선 목표", g.primary)}
+          {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
+          {line("구체적 목표", g.detail)}
+          {line("운동 경험", [ex.level, ex.duration].filter(Boolean).join(" · "))}
+          {line("이전 PT", [ex.prevPT, ex.prevPTSatisfaction].filter(Boolean).join(" · "))}
+        </div>
+        <div>
+          {line("가능 횟수", sc.weekCount)}
+          {line("선호 시간", asArr(sc.preferTime).join(", "))}
+          {line("목표 기간", sc.targetPeriod)}
+          {line("강도 성향", pf.intensity)}
+          {line("약점 부위", asArr(pf.weakParts).join(", "))}
+        </div>
+      </div>
+
+      {open && (
+        <div style={{marginTop:10,paddingTop:8,borderTop:DB.hairline}}>
+          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"4px 0 2px"}}>생활습관</div>
+          {line("식사 횟수", ls.meals)}
+          {line("야식", ls.lateSnack)}
+          {line("음주", ls.alcohol)}
+          {line("수분 섭취", ls.water)}
+          {line("배달음식", ls.delivery)}
+          {line("수면", ls.sleep)}
+          {line("스트레스", ls.stress)}
+          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"10px 0 2px"}}>운동 성향</div>
+          {line("집중 부위", asArr(ob?.focusAreas).join(", "))}
+          {line("선호 스타일", asArr(pf.styles).join(", "))}
+          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"10px 0 2px"}}>기타</div>
+          {line("일정 메모", sc.note)}
+          {line("촬영 예정일", g.shootDate ? formatCompactDate(g.shootDate) : "")}
+          {line("재활 이력", g.rehabNote)}
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:7,marginTop:11,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={()=>setOpen(v=>!v)}
+          style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
+          {open ? "요약만 보기" : "전체 답변 보기"}
+        </button>
+        <button onClick={doRequestUpdate} disabled={busy}
+          style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.mintSoft,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
+          회원에게 수정 요청
+        </button>
+        {needsReview ? (
+          <button onClick={doReview} disabled={busy}
+            style={{border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",borderRadius:10,padding:"7px 13px",fontSize:11.5,fontWeight:800,fontFamily:DB.font,cursor:"pointer"}}>
+            {busy ? "처리 중..." : "변경 내용 확인 완료"}
+          </button>
+        ) : (
+          <button onClick={doReview} disabled={busy}
+            style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
+            내용 확인 완료
+          </button>
+        )}
+        <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginLeft:"auto"}}>
+          {ob?.reviewedAt ? `확인 ${formatCompactDate(ob.reviewedAt)}` : "아직 확인하지 않음"}
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast }) {
   const isCorr = false;
   const isMyself = isOwner(member);
@@ -11410,6 +12315,9 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <button onClick={()=>setShowMemberAppManagement(v=>!v)} style={{border:`1px solid ${DB.border}`,background:DB.card,color:"#2563EB",borderRadius:11,padding:"9px 14px",fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer",boxShadow:DB.shadow,flexShrink:0}}>회원앱 관리 {showMemberAppManagement?"▲":"▼"}</button>
         <AdminMemberAppInviteButton member={member} onAccountCreated={onMemberPatch} />
       </div>
+
+      {/* 사전 문진 요약 — 수업 준비 정보 바로 위. 통증·병력·약물·주의사항은 이 카드 안에서 별도 영역으로 강조된다. */}
+      {!loading && <OnboardingSummaryCard member={member} onboarding={ob} onPatch={onMemberPatch} showToast={showToast} />}
 
       {/* 회원 변화 — 회원 목표별 핵심 변화 3개(스크롤 없이 바로 확인). 다이어트 목표는 이 카드 다음에 기존 "최근 체중 흐름" 그래프가 그대로 이어진다(secBrief). */}
       {!loading && <MemberChangeCard goal={ob?.goal || member.goal} sessions={sessions} bodyData={bodyData} checkins={ci} />}
@@ -17711,19 +18619,47 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
 // ════════════════════════════════════════════
 // 유입 분석 화면
 // ════════════════════════════════════════════
-function ReferralStatsScreen({ members=[], onBack }) {
+function ReferralStatsScreen({ members=[], consultations=[], onLoadConsultations, onBack }) {
   const [period, setPeriod] = useState("all"); // all | 90 | 30
+  // 상담 고객은 상담 화면에서만 로드되므로, 유입 분석으로 바로 들어온 경우 여기서 1회 채운다.
+  const leadsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (leadsLoadedRef.current) return;
+    leadsLoadedRef.current = true;
+    onLoadConsultations?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 대표(TEO) 개인 운동기록·테스트 회원(isTestMember)은 유입 경로 통계에 섞이지 않도록 공통 제외
   const realMembers = useMemo(()=>members.filter(isRegularAdminMember), [members]);
 
+  // 등록하지 않은 상담 고객도 유입 경로 통계에 포함한다("미등록"도 유입은 유입).
+  // 이미 정식 회원으로 전환된 상담은 members 쪽에 같은 방문 경로가 들어가 있으므로 중복 집계를 피해 제외한다.
+  // 기존 화면 코드가 전부 m.survey.* / m.startDate 를 읽으므로 같은 모양으로 변환해 그대로 흘려보낸다.
+  const leadRows = useMemo(() => (consultations||[])
+    .filter(c => !c.convertedMemberId)
+    .map(c => ({
+      id: `lead_${c.id}`,
+      name: c.name || "상담 고객",
+      startDate: c.consultDate || "",
+      isLead: true,
+      consultStatus: c.status || "consultation_completed",
+      survey: {
+        visitRoutes: asArr(c.visitRoutes),
+        visitAiTool: c.visitAiTool || "",
+        visitKeyword: c.visitKeyword || "",
+        visitRealMemo: c.consultMemo || "",
+      },
+    })), [consultations]);
+
   const filtered = useMemo(()=>{
-    if (period === "all") return realMembers;
+    const pool = [...realMembers, ...leadRows];
+    if (period === "all") return pool;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - parseInt(period));
     const cutStr = cutoff.toISOString().split("T")[0];
-    return realMembers.filter(m => (m.startDate||"") >= cutStr);
-  }, [realMembers, period]);
+    return pool.filter(m => (m.startDate||"") >= cutStr);
+  }, [realMembers, leadRows, period]);
 
   // 방문 경로 집계
   const routeCount = useMemo(()=>{
@@ -17775,6 +18711,17 @@ function ReferralStatsScreen({ members=[], onBack }) {
         ))}
         <Mo c="#3a4a5a" s={9} style={{alignSelf:"center"}}>총 {filtered.length}명</Mo>
       </div>
+
+      {/* 정식 회원 + 미등록 상담 고객 모수 안내 — "미등록"도 유입 실적이므로 통계에서 빼지 않는다 */}
+      <Card style={{marginBottom:10}}>
+        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+          <div><Mo c="#94a3b8" s={9} style={{display:"block"}}>정식 회원</Mo><Mo c="#5EEAD4" s={14} style={{fontWeight:800}}>{filtered.filter(x=>!x.isLead).length}명</Mo></div>
+          <div><Mo c="#94a3b8" s={9} style={{display:"block"}}>미등록 상담 고객</Mo><Mo c="#a29bfe" s={14} style={{fontWeight:800}}>{filtered.filter(x=>x.isLead).length}명</Mo></div>
+        </div>
+        <Mo c="#475569" s={9} style={{display:"block",marginTop:7,lineHeight:1.6}}>
+          정식 회원으로 전환된 상담은 회원 쪽에 방문 경로가 이미 반영돼 있어 중복 집계하지 않습니다.
+        </Mo>
+      </Card>
 
       {/* 방문 경로 통계 */}
       <Card title="📍 방문 경로별 회원 수" style={{marginBottom:10}}>

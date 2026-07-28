@@ -8436,6 +8436,8 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
           <div style={{fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:DB.faint,letterSpacing:".2px",marginBottom:10}}>빠른 실행</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
             <QuickMenuTile icon={qm} label="회원 관리" onClick={()=>{loadMembers();setScreen("members");}} />
+            {/* 사이드바가 없는 좁은 화면에서도 상담 고객 목록에 들어갈 수 있게 퀵메뉴에 함께 노출 */}
+            <QuickMenuTile icon={qm} label="상담 고객" onClick={()=>setScreen("consultations")} />
             <QuickMenuTile icon={qc} label="수업 관리" onClick={goCs} />
             <QuickMenuTile icon={qp} label="2:1 수업" badge={draftPair} onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
             <QuickMenuTile icon={qd} label="식단 관리" onClick={goCs} />

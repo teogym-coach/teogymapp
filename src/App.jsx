@@ -1224,6 +1224,44 @@ const OB2_WEAK_PARTS = ["가슴","등","어깨","팔","하체","둔근","코어"
 const OB2_EX_STYLE = ["머신 위주","프리웨이트 위주","기능성 운동","교정 운동","유산소 위주","바디프로필 스타일","재활 중심"];
 const OB2_INTENSITY = ["천천히 배우고 싶음","적당한 강도 선호","강하게 운동 선호"];
 
+// 상담 유입 — "처음 발견"과 "상담 결정"을 분리해서 받는다(기존 단일 "어디서 보고 오셨어요?" 질문 대체).
+// 표시 문구가 아니라 안정적인 value로 저장해 나중에 라벨 문구를 바꿔도 과거 응답 집계가 깨지지 않게 한다.
+const ACQUISITION_FIRST_TOUCH_OPTIONS = [
+  { value: "naver_search", label: "네이버 검색" },
+  { value: "naver_place", label: "네이버 플레이스" },
+  { value: "naver_blog", label: "네이버 블로그" },
+  { value: "instagram", label: "인스타그램" },
+  { value: "youtube", label: "유튜브" },
+  { value: "chatgpt", label: "ChatGPT" },
+  { value: "gemini", label: "Gemini" },
+  { value: "claude", label: "Claude" },
+  { value: "perplexity", label: "Perplexity" },
+  { value: "workout_doctor", label: "운동닥터" },
+  { value: "referral", label: "지인 소개" },
+  { value: "walk_by", label: "주변을 지나가다가" },
+  { value: "other", label: "기타" },
+];
+const ACQUISITION_DECISION_TOUCH_OPTIONS = [
+  { value: "naver_place_review", label: "네이버 플레이스 후기" },
+  { value: "naver_blog_post", label: "네이버 블로그 글" },
+  { value: "homepage", label: "테오짐 홈페이지" },
+  { value: "workout_doctor_review", label: "운동닥터 후기" },
+  { value: "instagram_content", label: "인스타그램 콘텐츠" },
+  { value: "youtube_video", label: "유튜브 영상" },
+  { value: "chatgpt_recommend", label: "ChatGPT의 설명 또는 추천" },
+  { value: "ai_recommend", label: "Gemini·Claude·Perplexity 등 AI의 설명 또는 추천" },
+  { value: "referral_recommend", label: "지인의 추천" },
+  { value: "owner_consult", label: "대표와의 상담 또는 통화" },
+  { value: "program", label: "프로그램 구성" },
+  { value: "price", label: "가격" },
+  { value: "location", label: "위치와 접근성" },
+  { value: "trial_class", label: "체험 수업" },
+  { value: "other", label: "기타" },
+];
+function acquisitionLabel(options, value) {
+  return options.find(o => o.value === value)?.label || "";
+}
+
 // 온보딩 v2의 세부 목표(12종) → 기존 회원앱 목표 어휘(AI_GOAL_OPTIONS 5종) 매핑.
 // 칼로리·변화 리포트·다음 수업 가이드 등 기존 화면이 전부 onboarding.goal(5종)을 읽고 있으므로,
 // 회원에게 같은 질문을 두 번 시키지 않고 최우선 목표에서 자동으로 환산한다.
@@ -1652,12 +1690,16 @@ const OB2_CSS = `
 .ob2-editlink{width:100%;min-height:48px;border:1px solid #E8ECF1;border-radius:14px;background:#fff;font-size:14px;font-weight:800;color:#2F73F6;margin-bottom:10px}
 .onbody h1.ob2-title{font-size:28px;margin:14px 0 6px}
 .ob2-step{font-size:12.5px;font-weight:800;color:#2F73F6;letter-spacing:.02em}
+.ob2-stepbadge{display:inline-block;font-size:11px;font-weight:800;color:#2F73F6;background:#EAF1FF;border-radius:999px;padding:4px 11px;margin-bottom:10px;letter-spacing:.01em}
+.ob2-desc{font-size:12.5px;font-weight:600;color:#8B949E;line-height:1.55;margin:0 0 12px}
+.ob2-hint{margin:10px 0 16px;padding:11px 13px;border-radius:14px;background:#F6F7F9;border:1px solid #E8ECF1;font-size:12px;font-weight:600;color:#6B7280;line-height:1.55}
 `;
 function Ob2Chips({options, value, onPick, multi}) {
   const list = multi ? asArr(value) : value;
-  return <div className="ob2-chips">{options.map(o => (
-    <button key={o} type="button" className={(multi ? list.includes(o) : value === o) ? "sel" : ""}
-      onClick={() => onPick(o)}>{o}</button>
+  const norm = options.map(o => (o && typeof o === "object") ? o : {value: o, label: o});
+  return <div className="ob2-chips">{norm.map(o => (
+    <button key={o.value} type="button" className={(multi ? list.includes(o.value) : value === o.value) ? "sel" : ""}
+      onClick={() => onPick(o.value)}>{o.label}</button>
   ))}</div>;
 }
 function Ob2Q({label, hint, children}) {
@@ -1670,6 +1712,7 @@ function ob2Finalize(v = {}) {
   const pain = {...(v.pain || {})};
   const health = {...(v.health || {})};
   const experience = {...(v.experience || {})};
+  const acquisition = {...(v.acquisition || {})};
   const goalList = asArr(goals.list);
   if (!goalList.includes("바디프로필")) goals.shootDate = "";
   if (!goalList.includes("재활 목적")) goals.rehabNote = "";
@@ -1679,7 +1722,9 @@ function ob2Finalize(v = {}) {
   if (health.hasSurgery !== "있음") health.surgery = "";
   if (health.hasMedication !== "있음") health.medication = "";
   if (!asArr(health.conditions).includes("기타")) health.conditionEtc = "";
-  return {...v, goals, pain, health, experience};
+  if (acquisition.firstTouch !== "other") acquisition.firstTouchOther = "";
+  if (acquisition.decisionTouch !== "other") acquisition.decisionTouchOther = "";
+  return {...v, goals, pain, health, experience, acquisition};
 }
 function MemberOnboarding({profile, body, existing, onDone, mode = "create", onCancel}) {
   const isEditMode = mode === "edit";
@@ -1728,6 +1773,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
       health: {conditions: [], conditionEtc: "", hasSurgery: "", surgery: "", hasMedication: "", medication: "", caution: "", ...(src.health || {})},
       schedule: {preferTime: [], weekCount: "", targetPeriod: "", note: "", ...(src.schedule || {})},
       preferences: {weakParts: [], styles: [], intensity: "", ...(src.preferences || {})},
+      acquisition: {firstTouch: "", firstTouchOther: "", decisionTouch: "", decisionTouchOther: "", ...(src.acquisition || {})},
     };
   });
 
@@ -1736,7 +1782,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
   const hasPain = painParts.filter(p => p !== "없음").length > 0;
 
   const STEPS = [
-    "기본 정보", "운동 목표", "목표 체중 · 기간", "운동 경험", "생활 리듬", "식습관",
+    "기본 정보", "처음 발견", "상담 결정", "운동 목표", "목표 체중 · 기간", "운동 경험", "생활 리듬", "식습관",
     "통증 · 불편 부위", "병력 · 주의사항", "운동 가능 일정", "운동 성향", "최종 확인",
   ];
   const isLastStep = step === STEPS.length - 1;
@@ -1774,10 +1820,18 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
       if (!String(d.currentWeightKg).trim()) return "현재 체중을 입력해주세요.";
     }
     if (step === 1) {
+      if (!v.acquisition.firstTouch) return "테오짐을 처음 알게 된 곳을 선택해주세요.";
+      if (v.acquisition.firstTouch === "other" && !v.acquisition.firstTouchOther.trim()) return "기타 경로를 직접 입력해주세요.";
+    }
+    if (step === 2) {
+      if (!v.acquisition.decisionTouch) return "상담을 결정한 이유를 선택해주세요.";
+      if (v.acquisition.decisionTouch === "other" && !v.acquisition.decisionTouchOther.trim()) return "기타 이유를 직접 입력해주세요.";
+    }
+    if (step === 3) {
       if (!goalList.length) return "운동 목표를 하나 이상 선택해주세요.";
       if (!v.goals.primary) return "가장 우선순위가 높은 목표를 선택해주세요.";
     }
-    if (step === 6 && !painParts.length) return "통증이 없다면 “없음”을 선택해주세요.";
+    if (step === 8 && !painParts.length) return "통증이 없다면 “없음”을 선택해주세요.";
     return "";
   }
 
@@ -1899,6 +1953,38 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
       </>}
 
       {step === 1 && <>
+        <span className="ob2-stepbadge">1단계 · 처음 발견</span>
+        <p className="ob2-desc">상담을 신청하기 전, 테오짐이라는 이름을 처음 발견한 경로를 선택해주세요.</p>
+        <Ob2Q label={<>테오짐을 가장 처음 <b>알게 된 곳</b>은 어디인가요?</>}>
+          <Ob2Chips options={ACQUISITION_FIRST_TOUCH_OPTIONS} value={v.acquisition.firstTouch}
+            onPick={x => setV1("acquisition", "firstTouch", x)}/>
+        </Ob2Q>
+        <div className="ob2-hint">예: ChatGPT에서 처음 알게 된 뒤 네이버 후기를 확인했다면, 여기서는 “ChatGPT”를 선택해주세요.</div>
+        {v.acquisition.firstTouch === "other" && <div className="ob2-cond">
+          <Ob2Q label="기타 경로">
+            <input className="ob2-input" value={v.acquisition.firstTouchOther}
+              onChange={e => setV1("acquisition", "firstTouchOther", e.target.value)} placeholder="직접 입력해주세요"/>
+          </Ob2Q>
+        </div>}
+      </>}
+
+      {step === 2 && <>
+        <span className="ob2-stepbadge">2단계 · 상담 결정</span>
+        <p className="ob2-desc">테오짐을 처음 알게 된 경로가 아니라, 실제 상담 신청을 결정하게 만든 한 가지를 선택해주세요.</p>
+        <Ob2Q label={<>상담을 신청하기로 <b>결정한 이유</b>는 무엇인가요?</>}>
+          <Ob2Chips options={ACQUISITION_DECISION_TOUCH_OPTIONS} value={v.acquisition.decisionTouch}
+            onPick={x => setV1("acquisition", "decisionTouch", x)}/>
+        </Ob2Q>
+        <div className="ob2-hint">예: ChatGPT에서 처음 알게 되고 운동닥터 후기를 본 뒤 상담을 신청했다면, 여기서는 “운동닥터 후기”를 선택해주세요.</div>
+        {v.acquisition.decisionTouch === "other" && <div className="ob2-cond">
+          <Ob2Q label="기타 이유">
+            <input className="ob2-input" value={v.acquisition.decisionTouchOther}
+              onChange={e => setV1("acquisition", "decisionTouchOther", e.target.value)} placeholder="직접 입력해주세요"/>
+          </Ob2Q>
+        </div>}
+      </>}
+
+      {step === 3 && <>
         <Ob2Q label="어떤 목표로 운동하시나요?" hint="복수 선택 가능">
           <Ob2Chips multi options={OB2_GOAL_OPTIONS} value={goalList} onPick={x => { setError(""); toggle("goals", "list", x); }}/>
         </Ob2Q>
@@ -1921,7 +2007,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </div>}
       </>}
 
-      {step === 2 && <>
+      {step === 4 && <>
         <Ob2Q label="목표 체중 (kg)" hint="아직 정하지 않았다면 비워두셔도 됩니다">
           <input className="ob2-input" type="text" inputMode="decimal" value={d.targetWeightKg}
             onChange={e => setD1("targetWeightKg", sanitizeDecimalInput(e.target.value))} placeholder="예: 60"/>
@@ -1937,7 +2023,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </div>}
       </>}
 
-      {step === 3 && <>
+      {step === 5 && <>
         <Ob2Q label="운동 경험">
           <Ob2Chips options={OB2_EXPERIENCE_LEVELS} value={v.experience.level} onPick={x => setV1("experience", "level", v.experience.level === x ? "" : x)}/>
         </Ob2Q>
@@ -1955,7 +2041,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </div>}
       </>}
 
-      {step === 4 && <>
+      {step === 6 && <>
         <Ob2Q label="직업 활동량">
           <Ob2Chips options={JOB_ACTIVITY_OPTIONS} value={d.jobType} onPick={x => setD1("jobType", d.jobType === x ? "" : x)}/>
         </Ob2Q>
@@ -1970,7 +2056,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </Ob2Q>
       </>}
 
-      {step === 5 && <>
+      {step === 7 && <>
         <Ob2Q label="하루 식사 횟수">
           <Ob2Chips options={OB2_MEALS} value={v.lifestyle.meals} onPick={x => setV1("lifestyle", "meals", v.lifestyle.meals === x ? "" : x)}/>
         </Ob2Q>
@@ -1988,7 +2074,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </Ob2Q>
       </>}
 
-      {step === 6 && <>
+      {step === 8 && <>
         <Ob2Q label="현재 통증이나 불편한 부위가 있나요?" hint="복수 선택 가능 · 없으면 “없음”을 선택해주세요">
           <Ob2Chips multi options={[...OB2_PAIN_PARTS, "없음"]} value={painParts} onPick={togglePainPart}/>
         </Ob2Q>
@@ -2009,7 +2095,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </div>}
       </>}
 
-      {step === 7 && <>
+      {step === 9 && <>
         <p className="ob2-warn">안전한 수업 설계를 위해 트레이너가 반드시 확인해야 하는 항목이에요. 해당되는 것이 없으면 넘어가셔도 됩니다.</p>
         <Ob2Q label="병력" hint="복수 선택 가능 (선택)">
           <Ob2Chips multi options={["디스크", "고혈압", "당뇨", "기타"]} value={asArr(v.health.conditions)}
@@ -2042,7 +2128,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </Ob2Q>
       </>}
 
-      {step === 8 && <>
+      {step === 10 && <>
         <p className="ob2-note">테오짐 운영시간에 맞춰 수업 일정을 잡는 데 참고합니다.</p>
         <Ob2Q label="선호 시간대" hint="복수 선택 가능">
           <Ob2Chips multi options={OB2_PREFER_TIME} value={asArr(v.schedule.preferTime)}
@@ -2063,7 +2149,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </Ob2Q>
       </>}
 
-      {step === 9 && <>
+      {step === 11 && <>
         <Ob2Q label="집중 관리하고 싶은 부위" hint="복수 선택 가능">
           <Ob2Chips multi options={ONBOARDING_FOCUS} value={asArr(d.focusAreas)}
             onPick={x => setD1("focusAreas", asArr(d.focusAreas).includes(x) ? asArr(d.focusAreas).filter(y => y !== x) : [...asArr(d.focusAreas), x])}/>
@@ -2081,10 +2167,12 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         </Ob2Q>
       </>}
 
-      {step === 10 && <>
+      {step === 12 && <>
         <p className="ob2-note">입력하신 내용을 확인해주세요. 수정할 항목을 눌러 바로 이동할 수 있습니다.</p>
         <div className="ob2-sum">
           {sumRow("기본", [d.gender, d.heightCm && `${d.heightCm}cm`, d.currentWeightKg && `${d.currentWeightKg}kg`].filter(Boolean).join(" · "))}
+          {sumRow("최초 발견", v.acquisition.firstTouch === "other" ? v.acquisition.firstTouchOther : acquisitionLabel(ACQUISITION_FIRST_TOUCH_OPTIONS, v.acquisition.firstTouch))}
+          {sumRow("상담 결정", v.acquisition.decisionTouch === "other" ? v.acquisition.decisionTouchOther : acquisitionLabel(ACQUISITION_DECISION_TOUCH_OPTIONS, v.acquisition.decisionTouch))}
           {sumRow("최우선 목표", v.goals.primary)}
           {sumRow("전체 목표", joined(goalList))}
           {sumRow("구체적 목표", v.goals.detail)}
@@ -2096,8 +2184,9 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
           {sumRow("일정", [joined(asArr(v.schedule.preferTime)), v.schedule.weekCount].filter(Boolean).join(" · "))}
           {sumRow("강도 성향", v.preferences.intensity)}
         </div>
-        <button type="button" className="ob2-editlink" onClick={() => goStep(1)}>운동 목표 수정하기</button>
-        <button type="button" className="ob2-editlink" onClick={() => goStep(6)}>통증 · 병력 수정하기</button>
+        <button type="button" className="ob2-editlink" onClick={() => goStep(1)}>처음 발견 · 상담 결정 수정하기</button>
+        <button type="button" className="ob2-editlink" onClick={() => goStep(3)}>운동 목표 수정하기</button>
+        <button type="button" className="ob2-editlink" onClick={() => goStep(8)}>통증 · 병력 수정하기</button>
         {needAgree && <div className="agree-block">
           <label className="agree-row">
             <input type="checkbox" checked={agreeTerms} onChange={e => setAgreeTerms(e.target.checked)}/>
@@ -11840,6 +11929,8 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
 
   // 온보딩 자체가 없거나 v2 이전(기존 회원) — 억지로 빈 항목을 나열하지 않고 상태와 다음 행동만 보여준다.
   if (!v2) {
+    // v2(최초 발견·상담 결정) 이전에 저장된 회원은 관리자가 상담 등록 시 입력한 방문 경로(survey.visitRoutes)만 있을 수 있다 — 있으면 참고용으로 함께 보여준다.
+    const legacyRoutes = Array.isArray(member?.survey?.visitRoutes) ? member.survey.visitRoutes.filter(Boolean) : [];
     return (
       <section style={{...card, padding:"11px 13px", marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",rowGap:3}}>
@@ -11850,6 +11941,11 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
               ? "이 회원은 개편 전 온보딩만 완료했습니다. 필요하면 수정 요청을 보내주세요."
               : "회원앱에서 운동 목표·통증·건강 정보를 직접 작성합니다."}
           </span>
+          {legacyRoutes.length > 0 && (
+            <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.sub,flex:"1 1 100%"}}>
+              기존 유입 경로 · {legacyRoutes.join(", ")}
+            </span>
+          )}
         </div>
         <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
           <button onClick={doRequestUpdate} disabled={busy || !member?.memberUid}
@@ -11861,13 +11957,19 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
     );
   }
 
-  const g = v2.goals || {}, ex = v2.experience || {}, ls = v2.lifestyle || {}, pn = v2.pain || {}, sc = v2.schedule || {}, pf = v2.preferences || {};
+  const g = v2.goals || {}, ex = v2.experience || {}, ls = v2.lifestyle || {}, pn = v2.pain || {}, sc = v2.schedule || {}, pf = v2.preferences || {}, ac = v2.acquisition || {};
   const line = (label, value) => (
     <div style={{display:"flex",gap:10,padding:"6px 0",borderTop:DB.hairline}}>
       <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:DB.faint,flex:"0 0 78px"}}>{label}</span>
       <span style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:DB.text,flex:1,minWidth:0,wordBreak:"break-word"}}>{value || "-"}</span>
     </div>
   );
+  // 값이 "기타"면 직접 입력 텍스트를, 아니면 저장된 value에 대응하는 한글 라벨을 보여준다.
+  const acquisitionText = (options, val, otherText) => {
+    if (!val) return "";
+    if (val === "other") return otherText || "기타";
+    return acquisitionLabel(options, val) || val;
+  };
 
   return (
     <section className={open ? "is-expanded" : undefined}
@@ -11911,6 +12013,8 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
           {/* 핵심 요약 — 목표/경험/일정 */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"0 20px",marginTop:11}}>
             <div>
+              {line("최초 발견", acquisitionText(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch, ac.firstTouchOther))}
+              {line("상담 결정", acquisitionText(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch, ac.decisionTouchOther))}
               {line("최우선 목표", g.primary)}
               {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
               {line("구체적 목표", g.detail)}

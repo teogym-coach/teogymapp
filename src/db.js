@@ -1778,6 +1778,8 @@ const ONBOARDING_PROFILE_ECHO_FIELDS = [
   "targetWeightKg", "targetWeight", "goalWeight",
   "targetPeriod", "targetPeriodCustom", "goalPeriod", "goalPeriodType", "goalDeadline", "targetDate", "customGoalDate",
   "workoutFrequency", "goal",
+  // 회원 목록 배지용 온보딩 상태 미러 — 지우지 않으면 초기화 후에도 관리자 목록에 예전 상태("완료"/"기존 회원")가 남는다.
+  "onboardingStatus", "onboardingCompletedAt", "onboardingUpdatedAt", "onboardingHasCaution",
 ];
 
 export async function resetMemberOnboarding(memberId) {
@@ -2359,7 +2361,8 @@ export async function convertConsultationToMember(consultationId, memberData = {
 // onboardingHasCaution)만 미러링한다. 회원 목록에서 회원 수만큼 서브문서를 추가로 읽지 않기 위한 캐시이며,
 // 값의 원본은 항상 memberOnboarding/main이다.
 // ════════════════════════════════════════════════════
-export const ONBOARDING_VERSION = 2;
+// v3: 상담 유입 질문을 "처음 발견"/"상담 결정" 2단계로 분리(v2.acquisition 신설) — 질문 스키마 자체는 여전히 이 파일과 App.jsx의 MemberOnboarding 한 곳에서만 관리한다.
+export const ONBOARDING_VERSION = 3;
 
 const ONBOARDING_MIRROR_FIELDS = [
   "onboardingStatus", "onboardingCompletedAt", "onboardingUpdatedAt", "onboardingHasCaution",

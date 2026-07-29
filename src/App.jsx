@@ -1495,6 +1495,12 @@ function MemberApp({ onLogout }) {
     document.addEventListener("focusout",onFocusOut);
     return ()=>{ document.removeEventListener("focusin",onFocusIn); document.removeEventListener("focusout",onFocusOut); };
   },[]);
+  // 온보딩 완료 → 홈 진입 시 하단 내비 강제 표시 —
+  // 온보딩 문진 중 텍스트 입력(키/체중 등)에 포커스가 남은 채 다음 단계로 넘어가면 일부 모바일 브라우저에서
+  // focusout이 누락되어 navHidden이 true로 남을 수 있다. 온보딩 완료 상태로 전환되는 시점엔 항상 강제로 false로
+  // 되돌려, 새로고침 없이도 하단 내비게이션이 즉시 나타나게 한다(기존 회원 로그인 시에도 안전하게 재적용됨).
+  const onboardingDone=!accessErrors.memberOnboarding&&!(onboarding?.completed===false||!onboarding?.completedAt);
+  useEffect(()=>{ if(onboardingDone) setNavHidden(false); },[onboardingDone]);
   // 앱 아이콘 배지(Badging API) — 회원앱 내부 unreadCount(수업일지+공지)와 동일한 값을 사용
   const badgeUnreadCount=useMemo(()=>{
     const sessionUnread=sessions.filter(s=>s.isPublished&&!readSessionIds.has(s.id)&&getSessionPublishDate(s)>=SESSION_UNREAD_CUTOFF).length;
@@ -1838,7 +1844,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
     } finally { setSaving(false); }
   };
 
-  const goStep = (n) => { setError(""); setStep(n); persistDraft(n); if (typeof window !== "undefined") window.scrollTo(0, 0); };
+  const goStep = (n) => { setError(""); document.activeElement?.blur?.(); setStep(n); persistDraft(n); if (typeof window !== "undefined") window.scrollTo(0, 0); };
   const prevStep = () => { if (saving) return; goStep(Math.max(step - 1, 0)); };
   const next = () => {
     if (saving) return;
@@ -5442,8 +5448,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .hm-next-btn .hm-next-btn-arr{position:absolute;right:15px}
 .hm-next-btn:active{transform:scale(.97)}
 .hm-next-detail .mcard{margin:12px 0 0;border-radius:20px}
-/* 아이패드 — 홈 본문 폭 제한(스마트폰 1열 구조 유지) */
-@media(min-width:700px){.hm-wrap{max-width:600px;margin:0 auto}}
+/* 홈 본문 폭은 다른 탭과 동일하게 .member-page 컨테이너 기준을 그대로 따른다(별도 제한 없음) */
 /* ── 대표 코멘트 — 관리받는 느낌의 핵심 영역 ── */
 .mv2-coach-card{background:linear-gradient(135deg,#F0FBF9,#FFFFFF);border:1px solid #BFE9E2;border-radius:24px;padding:20px;margin:14px 0;box-shadow:0 2px 14px rgba(15,23,42,.04)}
 .mv2-coach-head{display:flex;align-items:center;gap:11px}

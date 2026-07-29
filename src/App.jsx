@@ -167,6 +167,46 @@ function getLatestBodyWeight(bodyData, dateLimit = null) {
   return records.length ? records[records.length - 1] : null;
 }
 
+// ── 체중 변화 단일 기준 (관리자앱·회원앱 공용) ──────────────────────────
+// 기준 체중 = 날짜가 가장 오래된 실제 측정 기록 / 현재 체중 = 날짜가 가장 최근인 실제 측정 기록.
+// member.startWeight·onboarding.startingWeightKg·bodyCheck.goal.currentWeight 같은 "등록 당시 체중"은
+// 측정 기록이 아니므로 첫 측정 기준으로 절대 섞어 쓰지 않는다(회원목록과 회원 상세 수치 불일치의 원인이었음).
+// 유효 기록 판별·날짜 정렬·동일 날짜 최신 우선은 기존 getBodyWeightRecords(+upsertRecordByDate 저장 규칙)를 그대로 재사용한다.
+// liveEntry({weight,date})는 회원앱 실시간 입력(recentActivityLog)처럼 아직 다시 읽어오지 않은 최신 값이 있을 때만 전달한다.
+function getWeightProgress(bodyData, liveEntry = null) {
+  const entries = getBodyWeightRecords(bodyData).map(r => ({ date: String(r.date), weight: r.weight }));
+  const liveW = toPositiveNumber(liveEntry?.weight);
+  const liveD = liveEntry?.date ? String(liveEntry.date) : "";
+  if (liveW && liveD) {
+    const i = entries.findIndex(e => e.date === liveD);
+    if (i >= 0) entries[i] = { date: liveD, weight: liveW };           // 같은 날짜는 최신 입력이 우선
+    else { entries.push({ date: liveD, weight: liveW }); entries.sort((a, b) => a.date.localeCompare(b.date)); }
+  }
+  if (!entries.length) {
+    return { firstWeight: null, latestWeight: null, change: null, firstDate: null, latestDate: null, recordCount: 0, hasEnoughData: false };
+  }
+  const first = entries[0], last = entries[entries.length - 1];
+  const hasEnoughData = entries.length >= 2; // 기록이 1개뿐이면 변화를 만들어내지 않는다
+  return {
+    firstWeight: first.weight,
+    latestWeight: last.weight,
+    change: hasEnoughData ? Math.round((last.weight - first.weight) * 10) / 10 : null,
+    firstDate: first.date,
+    latestDate: last.date,
+    recordCount: entries.length,
+    hasEnoughData,
+  };
+}
+// 표시용 포맷 — 부동소수점 오차가 보이지 않도록 항상 소수점 첫째 자리로 정리하고 부호를 붙인다.
+function formatWeightChange(change) {
+  if (change === null || change === undefined || change === "") return null; // Number(null)===0 이므로 값 없음을 먼저 걸러낸다
+  const n = Number(change);
+  if (!Number.isFinite(n)) return null;
+  const v = Math.round(n * 10) / 10;
+  if (Math.abs(v) < 0.05) return "0kg";
+  return `${v > 0 ? "+" : "-"}${Math.abs(v).toFixed(1)}kg`;
+}
+
 // 관리자앱 상담 설문에서 이미 나이(survey.age)를 받아둔 경우 출생연도를 역산해
 // 온보딩 출생연도 선택의 기본값으로 쓴다 (정확한 값이 아니라 스크롤을 줄이기 위한 추정값 — 회원이 수정 가능).
 function estimateBirthYearFromAge(profile = {}) {
@@ -3548,7 +3588,7 @@ function getTargetWeight(profile={},onboarding={}){return toPositiveNumber(onboa
 function parseTargetWeeks(period){const t=String(period||""); const n=Number(t.match(/\d+/)?.[0]); if(!n)return null; if(t.includes("년"))return n*52; if(t.includes("개월"))return n*4.345; if(t.includes("주"))return n; return null;}
 function addDays(date,days){const d=new Date(date); d.setDate(d.getDate()+Math.max(0,Math.round(days))); return d;}
 function formatDateDot(d){return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;}
-function getWeightForecast(p){const weights=getBodyWeightRecords(p.body); const cur=toPositiveNumber(p.curW)||weights.at(-1)?.weight||toPositiveNumber(p.profile.currentWeight); const start=toPositiveNumber(p.startW)||weights[0]?.weight||cur; const target=getTargetWeight(p.profile,p.onboarding); const remain=Number.isFinite(cur)&&Number.isFinite(target)?cur-target:null; const recent=weights.slice(-6); let weekly=null; if(recent.length>=2){const first=recent[0],last=recent.at(-1); const days=Math.max(1,(new Date(last.date)-new Date(first.date))/86400000); weekly=(last.weight-first.weight)/days*7;} const neededLoss=Number.isFinite(remain)?Math.max(0,remain):0; const baseRate=Math.max(.5,Math.min(.8,cur?cur*.0065:0.65)); const actualLoss=weekly!==null&&weekly<0?Math.abs(weekly):null; const recommended=actualLoss?Math.max(.45,Math.min(.85,(actualLoss+baseRate)/2)):baseRate; const weeks=neededLoss?Math.max(1,Math.ceil(neededLoss/recommended)):0; const aggressiveWeeks=neededLoss?`${Math.ceil(neededLoss/Math.min(1,Math.max(.8,cur*.009)))}~${Math.ceil(neededLoss/Math.max(.8,cur*.008))}`:"0"; const targetWeeks=parseTargetWeeks(p.onboarding.targetPeriodCustom||p.onboarding.targetPeriod||p.onboarding.goalPeriod); const required=targetWeeks&&neededLoss?neededLoss/targetWeeks:null; const risk=required&&required>Math.max(1,cur*.01)?"high":required&&required>Math.max(.8,cur*.008)?"medium":"low"; return {cur,start,target,remain:neededLoss,recommended,weeks,estimatedDate:formatDateDot(addDays(new Date(),weeks*7)),aggressiveWeeks,risk,required,targetWeeks,possibility:risk==="high"?"조정 필요":"높음"};}
+function getWeightForecast(p){const weights=getBodyWeightRecords(p.body); const cur=toPositiveNumber(p.curW)||weights.at(-1)?.weight||toPositiveNumber(p.profile.currentWeight); const start=weights[0]?.weight||toPositiveNumber(p.startW)||cur; /* 체중 변화 단일 기준 — 실제 첫 측정 기록이 있으면 그 값이 시작 체중, 등록 당시 체중(startW)은 기록이 전혀 없을 때만 보조로 사용 */ const target=getTargetWeight(p.profile,p.onboarding); const remain=Number.isFinite(cur)&&Number.isFinite(target)?cur-target:null; const recent=weights.slice(-6); let weekly=null; if(recent.length>=2){const first=recent[0],last=recent.at(-1); const days=Math.max(1,(new Date(last.date)-new Date(first.date))/86400000); weekly=(last.weight-first.weight)/days*7;} const neededLoss=Number.isFinite(remain)?Math.max(0,remain):0; const baseRate=Math.max(.5,Math.min(.8,cur?cur*.0065:0.65)); const actualLoss=weekly!==null&&weekly<0?Math.abs(weekly):null; const recommended=actualLoss?Math.max(.45,Math.min(.85,(actualLoss+baseRate)/2)):baseRate; const weeks=neededLoss?Math.max(1,Math.ceil(neededLoss/recommended)):0; const aggressiveWeeks=neededLoss?`${Math.ceil(neededLoss/Math.min(1,Math.max(.8,cur*.009)))}~${Math.ceil(neededLoss/Math.max(.8,cur*.008))}`:"0"; const targetWeeks=parseTargetWeeks(p.onboarding.targetPeriodCustom||p.onboarding.targetPeriod||p.onboarding.goalPeriod); const required=targetWeeks&&neededLoss?neededLoss/targetWeeks:null; const risk=required&&required>Math.max(1,cur*.01)?"high":required&&required>Math.max(.8,cur*.008)?"medium":"low"; return {cur,start,target,remain:neededLoss,recommended,weeks,estimatedDate:formatDateDot(addDays(new Date(),weeks*7)),aggressiveWeeks,risk,required,targetWeeks,possibility:risk==="high"?"조정 필요":"높음"};}
 function GoalWeightForecastCard(p){const f=getWeightForecast(p); return <div className="metric goal-forecast"><span>목표 기간 예상</span><b>{f.target?f.estimatedDate:"목표 설정 필요"}</b><small>남은 감량</small><b className="goal-forecast-value">{f.remain?`-${f.remain.toFixed(1)}kg`:"0kg"}</b><small>예상 기간</small><small>약 {f.weeks}주</small><em>{f.risk==="high"?"목표 기간 조정 권장":"현재 페이스 유지 시 가능"}</em></div>}
 function summarizeStrength(sessions=[]){const rows=buildPerformanceChanges(sessions).filter(r=>Number.isFinite(r.delta)); if(!rows.length)return null; const pcts=rows.map(r=>{const b=Number(String(r.before).replace(/[^0-9.]/g,"")); const a=Number(String(r.after).replace(/[^0-9.]/g,"")); return b?((a-b)/b*100):0;}).filter(Number.isFinite); return pcts.length?Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length):null;}
 function getVolumeIncrease(sessions=[]){const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const vols=sorted.map(s=>(s.exercises||[]).reduce((sum,e)=>sum+(e.sets||[]).reduce((v,st)=>{const w=Number(st.weight||0),r=Number(st.reps||0);return v+(w>0&&r>0?w*r:0);},0),0)).filter(v=>v>0); if(vols.length<2)return null; const half=Math.max(1,Math.floor(vols.length/2)); const prev=vols.slice(0,half), recent=vols.slice(-half); const avg=a=>a.reduce((x,y)=>x+y,0)/a.length; return Math.round((avg(recent)-avg(prev))/Math.max(1,avg(prev))*100);}
@@ -3880,7 +3920,9 @@ function MemberAnalysis(p) {
   const weightData = weights.map(r => ({ date: r.date.slice(5), weight: r.weight }));
   const firstW = weights[0]?.weight ?? toPositiveNumber(p.startW);
   const curW = weights.at(-1)?.weight ?? toPositiveNumber(p.curW);
-  const wDiff = Number.isFinite(Number(firstW)) && Number.isFinite(Number(curW)) ? +(Number(curW) - Number(firstW)).toFixed(1) : null;
+  // 체중 변화는 선택 기간 안의 실제 측정 기록이 2회 이상일 때만 계산한다 —
+  // 등록 당시 체중(startW)·프로필 체중(curW)을 측정 기록과 섞으면 회원 상세와 다른 수치가 나온다(getWeightProgress와 같은 기준).
+  const wDiff = weights.length >= 2 ? +(weights.at(-1).weight - weights[0].weight).toFixed(1) : null;
 
   // 인바디 데이터
   const gender = p.onboarding?.gender || p.profile?.gender || "";
@@ -5957,6 +5999,8 @@ export default function App() {
   }, [screen]);
   const [members,  setMembers]  = useState([]);
   const [sessionsMap, setSessionsMap] = useState({}); // {memberId: sessions[]}
+  // 회원 목록 카드 체중 표시용 bodyCheck 요약 — 회원 상세와 같은 원본(bodyCheck.records)을 쓰기 위해 목록 로드 시 함께 읽는다
+  const [weightBodyById, setWeightBodyById] = useState({}); // {memberId: {records:[...]}}
   const [member,   setMember]   = useState(null);
   const [sessions, setSessions] = useState([]);
   const [editSess, setEditSess] = useState(null);
@@ -6178,6 +6222,17 @@ export default function App() {
     );
     if (isStale()) return;
     setSessionsMap(Object.fromEntries(entries));
+
+    // 회원 카드 체중(현재 체중·첫 측정 대비 변화)은 회원 상세와 같은 bodyCheck/main 기록만 사용한다.
+    // 회원별 문서 1건 읽기이며 실패해도 카드의 나머지 정보에는 영향을 주지 않는다(해당 회원만 null 폴백).
+    const bodyEntries = await Promise.all(
+      mbs.map(async m => {
+        try { return [m.id, await getBodyCheck(m.id)]; }
+        catch (e) { console.warn("[TEO GYM] loadMembers — 바디체크 조회 실패:", m.id, e.message); return [m.id, null]; }
+      })
+    );
+    if (isStale()) return;
+    setWeightBodyById(Object.fromEntries(bodyEntries));
   }, []);
 
   const loadPairSessions = useCallback(async () => {
@@ -6275,6 +6330,7 @@ export default function App() {
     // 잠깐이라도 보이는 일이 없도록 함(관리자 화면 재검증은 verifiedAdminUid 가드가 별도로 처리).
     setMembers([]);
     setSessionsMap({});
+    setWeightBodyById({});
     setSessions([]);
     setBodyData(null);
     setNutritionData(null);
@@ -6911,7 +6967,7 @@ export default function App() {
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} />}
-        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} weightBodyById={weightBodyById} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm prefill={memberFormPrefill} onBack={() => { setMemberFormPrefill(null); if (memberFormPrefill) { setScreen("consultations"); return; } loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
@@ -8926,18 +8982,15 @@ function latestActivityByType(log, type){
   (log||[]).forEach(a=>{ if(a.type===type && (!best || (a.at||0) > (best.at||0))) best = a; });
   return best;
 }
-// 체중 변화 — 최신 체중(카드에 이미 표시 중인 값)과 회원 문서의 기존 startWeight(가입 시 시작 체중, 신규 필드 아님)를 화면에서만 비교.
-// Firebase에 다시 저장하지 않음. 잘못된 값(0 이하/숫자 아님)은 비교 대상에서 제외.
-function weightChangeText(currentWeightLabel, startWeight){
-  const current = parseFloat(String(currentWeightLabel||"").replace(/[^0-9.]/g,""));
-  if (!Number.isFinite(current) || current <= 0) return null; // 오늘 표시 중인 체중값 자체가 없음
-  const start = Number(startWeight);
-  if (!Number.isFinite(start) || start <= 0) return { text:"변화 기록 없음", tone:null };
-  const diff = current - start;
+// 체중 변화 — 회원 상세와 같은 단일 기준(getWeightProgress: 실제 측정 기록의 최초값 ↔ 최근값)만 사용한다.
+// 이전에는 member.startWeight(등록 당시 체중)를 기준으로 삼아 회원 상세와 수치가 어긋났다. Firebase에 다시 저장하지 않음.
+function weightChangeText(progress){
+  if (!progress || !progress.recordCount) return null;      // 체중 측정 기록 자체가 없음 → 보조줄 표시 안 함
+  if (!progress.hasEnoughData) return { text:"변화 기록 부족", tone:null }; // 기록 1개 → 변화를 만들어내지 않는다
+  const diff = progress.change;
   if (Math.abs(diff) < 0.05) return { text:"첫 측정과 동일", tone:null };
-  const sign = diff > 0 ? "+" : "-";
   // 감량=긍정색, 증량=목표와 무관하게 중립색(경고색 아님) — 성공/실패를 임의로 단정하지 않는다
-  return { text:`첫 측정 대비 ${sign}${Math.abs(diff).toFixed(1)}kg`, tone: diff < 0 ? DB.mintSoft : DB.sub };
+  return { text:`첫 측정 대비 ${formatWeightChange(diff)}`, tone: diff < 0 ? DB.mintSoft : DB.sub };
 }
 // 회원 카드 중앙 상태 블록 5종 — 새 데이터 없이 recentActivityLog(ACTIVITY_ICON과 동일 타입)만 재사용
 const MEMBER_CARD_STATUS_FIELDS = [
@@ -9010,7 +9063,7 @@ function StatusBlock({icon,label,value,tone,muted,sub,subTone}){
   );
 }
 
-function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast, initialFilter=null, onInitialFilterConsumed }) {
+function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyById={}, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast, initialFilter=null, onInitialFilterConsumed }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   useEffect(()=>{
     const h=()=>setWinW(window.innerWidth);
@@ -9503,15 +9556,24 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, loading, memb
             const live = liveMembersById[m.id];
             const liveMember = live ? { ...m, ...live } : m;
             const activityLog = liveMember.recentActivityLog || [];
+            // 체중은 회원 상세와 같은 원본(bodyCheck.records)을 쓴다 — 목록 로드 시 함께 읽어온 요약을 사용하고,
+            // 회원앱 실시간 입력(recentActivityLog)이 더 최신이면 그 값만 현재 체중으로 덮어쓴다(기준 체중은 항상 최초 측정 기록).
+            const liveWeightAct = latestActivityByType(activityLog, "weight");
+            const weightProgress = getWeightProgress(weightBodyById[m.id], liveWeightAct ? {
+              weight: parseFloat(String(liveWeightAct.value||"").replace(/[^0-9.]/g,"")), date: liveWeightAct.dateKey,
+            } : null);
             // 카드 상태 5종 — 각 타입별 가장 최근 값만 뽑는다 (새 필드 없음, recentActivityLog 재사용)
             const statusValues = MEMBER_CARD_STATUS_FIELDS.map(f => {
               const a = latestActivityByType(activityLog, f.key);
+              if (f.key === "weight") {
+                return { ...f, value: weightProgress.latestWeight ? `${weightProgress.latestWeight}kg` : null, tone: a ? activityTone(a) : null };
+              }
               return { ...f, value: a?.value || null, tone: a ? activityTone(a) : null };
             });
             // 세로모드/모바일은 컨디션·근육통·체중 3개만, 가로모드는 5개 모두 — 데이터는 항상 5개 다 계산해두고 표시만 줄인다
             const visibleFields = isWide ? statusValues : statusValues.filter(f => f.key==="condition"||f.key==="soreness"||f.key==="weight");
-            // 체중 변화 — 카드에 이미 표시 중인 최신 체중과 기존 member.startWeight(가입 시 시작 체중) 비교, 화면 렌더링 시에만 계산
-            const weightChange = weightChangeText(statusValues.find(f=>f.key==="weight")?.value, m.startWeight);
+            // 체중 변화 — 첫 측정 기록 대비 최근 측정 기록(회원 상세 "회원 변화"와 동일 기준), 화면 렌더링 시에만 계산
+            const weightChange = weightChangeText(weightProgress);
             const isBirthday = isTodayBirthday(m);
             const next = nextSessionInfoLabel(m, meta, today);
             // 오늘 수업 상태 문구 — "예정/기록 중/완료 · 운동부위" (부위는 예정이면 다음 수업 예정 부위, 기록 중·완료면 오늘 기록된 운동 부위)
@@ -11297,7 +11359,7 @@ function HubWeightTrendSection({ records, chartHeight = 150 }) {
           {latest.weight}<small style={{fontSize:10.5,fontWeight:600,color:DB.faint,marginLeft:1}}>kg</small>
         </span>
         {mode === "recent" && periodDiff !== null && diffChip(`최근 ${view.length}회`, periodDiff)}
-        {totalDiff !== null && diffChip("시작 대비", totalDiff)}
+        {totalDiff !== null && diffChip("첫 측정 대비", totalDiff)}
       </div>
       {all.length === 1 ? (
         <div style={{fontSize:11,color:DB.faint,fontFamily:DB.font,marginTop:4}}>
@@ -11347,9 +11409,10 @@ function getMemberChangeGoalType(goalRaw) {
   return "unknown";
 }
 
-// ── 체중 변화(다이어트·벌크업·체중유지 공용) — 기존 getBodyWeightRecords 재사용 ──
+// ── 체중 변화(다이어트·벌크업·체중유지 공용) — 첫 측정 대비 변화는 공용 헬퍼 getWeightProgress 재사용 ──
 function buildMemberChangeWeightInfo(bodyData) {
   const entries = getBodyWeightRecords(bodyData); // 날짜 오름차순, 유효값만
+  const progress = getWeightProgress(bodyData);   // 첫 측정 ↔ 최근 측정 단일 기준(회원목록 카드와 동일)
   if (!entries.length) return { count: 0, entries: [], first: null, last: null, startDiff: null, recent30Diff: null, recent30From: null };
   const last = entries[entries.length - 1];
   const first = entries[0];
@@ -11358,7 +11421,7 @@ function buildMemberChangeWeightInfo(bodyData) {
   const start30 = before30.length ? before30[before30.length - 1] : null;
   return {
     count: entries.length, entries, first, last,
-    startDiff: entries.length >= 2 ? MEMBER_CHANGE_ROUND1(last.weight - first.weight) : null,
+    startDiff: progress.change,
     recent30Diff: (start30 && start30.date !== last.date) ? MEMBER_CHANGE_ROUND1(last.weight - start30.weight) : null,
     recent30From: start30,
   };
@@ -11463,15 +11526,15 @@ function buildMemberChangeMetrics(goalType, ctx) {
     const w = buildMemberChangeWeightInfo(bodyData);
     const targetW = parseFloat(bodyData?.goal?.targetWeight) || null;
     const m1 = w.count < 2
-      ? emptyMetric("startDiff", "시작 대비 체중 변화", "체중 기록 부족", "최초 기록과 최근 기록 비교")
-      : { key: "startDiff", label: "시작 대비 체중 변화", empty: false,
-          display: `${w.startDiff > 0 ? "+" : ""}${w.startDiff}kg`,
+      ? emptyMetric("startDiff", "첫 측정 대비 체중 변화", "체중 기록 부족", "최초 기록과 최근 기록 비교")
+      : { key: "startDiff", label: "첫 측정 대비 체중 변화", empty: false,
+          display: formatWeightChange(w.startDiff),
           compareText: `최초 기록(${w.first.date}) · 최근 기록(${w.last.date}) 비교`,
-          detailRows: [{ label: "시작 체중", value: `${w.first.weight}kg` }, { label: "최근 체중", value: `${w.last.weight}kg` }, { label: "변화", value: `${w.startDiff > 0 ? "+" : ""}${w.startDiff}kg` }] };
+          detailRows: [{ label: "첫 측정 체중", value: `${w.first.weight}kg` }, { label: "최근 체중", value: `${w.last.weight}kg` }, { label: "변화", value: formatWeightChange(w.startDiff) }] };
     const m2 = w.recent30Diff === null
       ? emptyMetric("recent30", "최근 30일 변화", "체중 기록 부족", "최근 30일 이전 기록과 최근 기록 비교")
       : { key: "recent30", label: "최근 30일 변화", empty: false,
-          display: `${w.recent30Diff > 0 ? "+" : ""}${w.recent30Diff}kg`,
+          display: formatWeightChange(w.recent30Diff),
           compareText: `${w.recent30From.date} 대비 ${w.last.date} 비교`,
           detailRows: [{ label: "30일 전", value: `${w.recent30From.weight}kg` }, { label: "최근", value: `${w.last.weight}kg` }] };
     const m3 = !targetW
@@ -11521,10 +11584,10 @@ function buildMemberChangeMetrics(goalType, ctx) {
     const m3 = w.count < 1
       ? emptyMetric("weight", "체중 변화", "체중 기록 부족", "최초 기록과 최근 기록 비교")
       : { key: "weight", label: "체중 변화", empty: false,
-          display: w.startDiff === null ? "체중 기록 부족" : `${w.startDiff > 0 ? "+" : ""}${w.startDiff}kg`,
-          sub: w.recent30Diff === null ? null : `최근 30일 ${w.recent30Diff > 0 ? "+" : ""}${w.recent30Diff}kg`,
-          compareText: "시작 기록 대비 현재 · 최근 30일 비교",
-          detailRows: [{ label: "시작 체중", value: w.first ? `${w.first.weight}kg` : "-" }, { label: "최근 체중", value: w.last ? `${w.last.weight}kg` : "-" }] };
+          display: w.startDiff === null ? "체중 기록 부족" : formatWeightChange(w.startDiff),
+          sub: w.recent30Diff === null ? null : `최근 30일 ${formatWeightChange(w.recent30Diff)}`,
+          compareText: "첫 측정 기록 대비 현재 · 최근 30일 비교",
+          detailRows: [{ label: "첫 측정 체중", value: w.first ? `${w.first.weight}kg` : "-" }, { label: "최근 체중", value: w.last ? `${w.last.weight}kg` : "-" }] };
     return [m1, m2, m3];
   }
 
@@ -12933,7 +12996,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                       체중 변화
                       {wBadge(wDiff7d,"7일")}
                       {wBadge(wDiff30d,"30일")}
-                      {wBadge(wDiff,"시작")}
+                      {wBadge(wDiff,"첫 측정")}
                       {toGoal!==null&&<span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:8,background:"rgba(124,111,255,.10)",color:"#6D28D9"}}>목표 {toGoal>0?"+":""}{toGoal}kg</span>}
                     </div>
                     <ResponsiveContainer width="100%" height={120}>
@@ -12945,7 +13008,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
                         <Line type="monotone" dataKey="w" stroke={DB.mint} strokeWidth={2} dot={{fill:DB.mint,r:3}} name="체중(kg)"/>
                       </LineChart>
                     </ResponsiveContainer>
-                    {(()=>{const diff=(wData[wData.length-1].w-wData[0].w).toFixed(1);const col=diff<0?DB.mintSoft:diff>0?"#c2410c":DB.faint;const txt=diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"변화없음";return<div style={{textAlign:"center",marginTop:2,fontSize:10.5,color:col,fontWeight:700}}>{txt} kg (시작 대비)</div>;})()}
+                    {(()=>{const diff=(wData[wData.length-1].w-wData[0].w).toFixed(1);const col=diff<0?DB.mintSoft:diff>0?"#c2410c":DB.faint;const txt=diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"변화없음";return<div style={{textAlign:"center",marginTop:2,fontSize:10.5,color:col,fontWeight:700}}>{txt} kg (첫 측정 대비)</div>;})()}
                   </div>
                 )}
                 {hubAttendance.length > 0 && (() => {
@@ -19153,9 +19216,12 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
   const weeklyLoss= (daysLeft && totalLoss > 0) ? totalLoss / (daysLeft / 7) : 0;
   const weeklyPct = cw > 0 ? (weeklyLoss / cw) * 100 : 0;
 
+  // 체중 변화 기준 통일 — 목표 설정 시 입력한 체중(goal.currentWeight)이 아니라 실제 측정 기록의 최초·최근 값만 비교한다(getWeightProgress).
+  const weightProgress = getWeightProgress(bodyData);
   const latestRec    = records.length > 0 ? records.slice().sort((a,b) => b.date.localeCompare(a.date))[0] : null;
-  const latestWeight = latestRec ? parseFloat(latestRec.weight) : cw;
-  const lostSoFar    = (cw && latestRec) ? +(cw - latestWeight).toFixed(1) : 0;
+  const latestWeight = weightProgress.latestWeight ?? cw;
+  // 감량이면 양수(▼), 증량이면 음수(▲) — 기존 표시 부호 방향은 그대로 유지, 기준만 첫 측정 기록으로 교체
+  const lostSoFar    = weightProgress.hasEnoughData ? -weightProgress.change : 0;
   const progressPct  = (cw && tw && cw !== tw) ? Math.min(100, Math.max(0, ((cw - latestWeight) / (cw - tw)) * 100)) : 0;
 
   function getAssessment() {
@@ -19263,7 +19329,7 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                     </div>
                     {lostSoFar !== 0 && (
                       <Mo c={lostSoFar>0?"#5EEAD4":"#ff6b6b"} s={11}>
-                        {lostSoFar>0?"▼ ":"▲ "}{Math.abs(lostSoFar)}kg 시작 대비
+                        {lostSoFar>0?"▼ ":"▲ "}{Math.abs(lostSoFar)}kg 첫 측정 대비
                       </Mo>
                     )}
                   </div>

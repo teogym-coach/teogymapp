@@ -35,6 +35,23 @@ try {
 } catch (e) {
   console.error('[regression] 오늘의 운동 가이드 로직 추출 실패:', e.message);
 }
+// ── 체중 변화 단일 기준: 실제 실행 시나리오 검증 ──
+// 회원목록·회원 상세·분석 화면이 모두 같은 수치를 보여야 하므로, 공용 헬퍼 원본 코드를 그대로 슬라이스해 실행한다.
+let weightProgressLib = null;
+try {
+  const sliceNum = app.slice(app.indexOf('function toPositiveNumber'), app.indexOf('function getBodyWeightRecords'));
+  const sliceRec = app.slice(app.indexOf('function getBodyWeightRecords'), app.indexOf('function getLatestBodyWeight'));
+  const sliceProg = app.slice(app.indexOf('function getWeightProgress'), app.indexOf('function estimateBirthYearFromAge'));
+  weightProgressLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceProg}\nreturn { getWeightProgress, formatWeightChange, getBodyWeightRecords };`)();
+} catch (e) {
+  console.error('[regression] 체중 변화 헬퍼 추출 실패:', e.message);
+}
+function wpScenario(name, fn) {
+  if (!weightProgressLib) return [name, false];
+  try { return [name, !!fn(weightProgressLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 const daysAgoStr = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const daysFromNowStr = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 function wgScenario(name, fn) {
@@ -1884,7 +1901,7 @@ const checks = [
     app.includes('getPainSummary(ci)')
   ],
   ['회원 변화: 목표별 3대 핵심 지표 문구가 모두 존재(다이어트/벌크업/체형교정/체중유지/건강관리)',
-    ['"시작 대비 체중 변화"', '"최근 30일 변화"', '"목표까지 남은 체중"'].every(s => app.includes(s)) &&
+    ['"첫 측정 대비 체중 변화"', '"최근 30일 변화"', '"목표까지 남은 체중"'].every(s => app.includes(s)) &&
     ['"근력 변화"', '"총 운동 볼륨 변화"'].every(s => app.includes(s)) &&
     ['"통증 변화"', '"불편 부위 변화"', '"운동 수행 변화"'].every(s => app.includes(s)) &&
     ['"최근 체중 변동 폭"', '"평균 체중"'].every(s => app.includes(s)) &&
@@ -1906,6 +1923,84 @@ const checks = [
     app.includes('shouldShowWeightTrend(ob?.goal || member.goal)') &&
     app.includes('<HubWeightTrendSection key={member.id} records={wEntries} chartHeight={isWide ? 156 : 148} />')
   ],
+
+  // ── 체중 변화 기준 통일(회원목록 ↔ 회원 상세 ↔ 분석 도구) ──────────────────────────
+  ['체중 변화: 공용 헬퍼 getWeightProgress/formatWeightChange 존재 + 등록 체중(startWeight)을 기준으로 쓰지 않음',
+    app.includes('function getWeightProgress(bodyData, liveEntry = null) {') &&
+    app.includes('function formatWeightChange(change) {') &&
+    app.includes('function weightChangeText(progress){') &&
+    !app.includes('weightChangeText(statusValues.find(f=>f.key==="weight")?.value, m.startWeight)')
+  ],
+  ['체중 변화: 회원목록 카드가 회원 상세와 같은 원본(bodyCheck.records)으로 현재 체중·변화를 계산',
+    app.includes('const [weightBodyById, setWeightBodyById] = useState({});') &&
+    app.includes('return [m.id, await getBodyCheck(m.id)];') &&
+    app.includes('weightBodyById={weightBodyById}') &&
+    app.includes('const weightProgress = getWeightProgress(weightBodyById[m.id], liveWeightAct ? {') &&
+    app.includes('const weightChange = weightChangeText(weightProgress);')
+  ],
+  ['체중 변화: 회원 변화 카드·바디체크 대시보드·목표 예상이 모두 첫 측정 기록 기준을 사용',
+    app.includes('const progress = getWeightProgress(bodyData);   // 첫 측정 ↔ 최근 측정 단일 기준(회원목록 카드와 동일)') &&
+    app.includes('startDiff: progress.change,') &&
+    app.includes('const lostSoFar    = weightProgress.hasEnoughData ? -weightProgress.change : 0;') &&
+    app.includes('const start=weights[0]?.weight||toPositiveNumber(p.startW)||cur;')
+  ],
+  ['체중 변화: 회원앱 분석 탭도 기간 내 실제 측정 기록 2회 이상일 때만 변화 계산(등록 체중과 혼용 없음)',
+    app.includes('const wDiff = weights.length >= 2 ? +(weights.at(-1).weight - weights[0].weight).toFixed(1) : null;') &&
+    app.includes('if (weights.length < 2) return { metricLabel: null, before: null, after: null };')
+  ],
+  ['체중 변화: 화면 문구가 "첫 측정 대비"로 통일(체중 변화 표시에 "시작 대비" 잔존 없음)',
+    app.includes('diffChip("첫 측정 대비", totalDiff)') &&
+    app.includes('kg 첫 측정 대비') &&
+    app.includes('{wBadge(wDiff,"첫 측정")}') &&
+    !app.includes('시작 대비')
+  ],
+  wpScenario('체중 변화 시나리오: 강미주 케이스(55.7 → 53) = -2.7kg, 회원목록·회원 상세 동일', lib => {
+    const body = { records: [
+      { date: '2026-06-02', weight: 55.7 }, { date: '2026-06-20', weight: 54.4 }, { date: '2026-07-29', weight: 53 },
+    ] };
+    const p = lib.getWeightProgress(body);
+    return p.firstWeight === 55.7 && p.latestWeight === 53 && p.change === -2.7 && p.recordCount === 3 &&
+      p.firstDate === '2026-06-02' && p.latestDate === '2026-07-29' && lib.formatWeightChange(p.change) === '-2.7kg';
+  }),
+  wpScenario('체중 변화 시나리오: 증가한 회원(60 → 61.5) = +1.5kg', lib => {
+    const p = lib.getWeightProgress({ records: [{ date: '2026-05-01', weight: 60 }, { date: '2026-07-01', weight: 61.5 }] });
+    return p.change === 1.5 && lib.formatWeightChange(p.change) === '+1.5kg';
+  }),
+  wpScenario('체중 변화 시나리오: 기록 1개면 변화를 만들지 않음(0kg 문구 없음)', lib => {
+    const p = lib.getWeightProgress({ records: [{ date: '2026-07-01', weight: 58 }] });
+    return p.recordCount === 1 && p.hasEnoughData === false && p.change === null && p.latestWeight === 58;
+  }),
+  wpScenario('체중 변화 시나리오: 기록이 없으면 NaN 없이 null 반환', lib => {
+    const a = lib.getWeightProgress(null), b = lib.getWeightProgress({ records: [] });
+    return [a, b].every(p => p.recordCount === 0 && p.change === null && p.latestWeight === null && p.firstWeight === null) &&
+      lib.formatWeightChange(null) === null;
+  }),
+  wpScenario('체중 변화 시나리오: 문자열·null·0·빈값 레거시 기록도 정상 처리', lib => {
+    const p = lib.getWeightProgress({ records: [
+      { date: '2026-06-02', weight: '55.7' }, { date: '2026-06-10', weight: 0 }, { date: '2026-06-15', weight: '' },
+      { date: '2026-06-20', weight: null }, { date: '', weight: 54 }, { date: '2026-07-29', weight: '53' },
+    ] });
+    return p.firstWeight === 55.7 && p.latestWeight === 53 && p.change === -2.7 && p.recordCount === 2;
+  }),
+  wpScenario('체중 변화 시나리오: 배열이 날짜순이 아니어도 실제 날짜 기준 최초·최근 선택', lib => {
+    const p = lib.getWeightProgress({ records: [
+      { date: '2026-07-29', weight: 53 }, { date: '2026-06-02', weight: 55.7 }, { date: '2026-07-01', weight: 54 },
+    ] });
+    return p.firstWeight === 55.7 && p.latestWeight === 53 && p.change === -2.7;
+  }),
+  wpScenario('체중 변화 시나리오: 회원앱 실시간 입력(liveEntry)은 현재 체중만 갱신하고 기준은 첫 측정 유지', lib => {
+    const body = { records: [{ date: '2026-06-02', weight: 55.7 }, { date: '2026-07-29', weight: 53 }] };
+    const sameDay = lib.getWeightProgress(body, { weight: 52.5, date: '2026-07-29' }); // 같은 날짜는 최신 입력 우선
+    const newDay = lib.getWeightProgress(body, { weight: 52, date: '2026-07-30' });
+    return sameDay.recordCount === 2 && sameDay.latestWeight === 52.5 && sameDay.firstWeight === 55.7 && sameDay.change === -3.2 &&
+      newDay.recordCount === 3 && newDay.latestWeight === 52 && newDay.change === -3.7;
+  }),
+  wpScenario('체중 변화 시나리오: 부동소수점 오차가 표시에 남지 않음(-2.7kg / 0kg / +1.2kg)', lib => {
+    const p = lib.getWeightProgress({ records: [{ date: '2026-06-02', weight: 55.7 }, { date: '2026-07-29', weight: 53 }] });
+    return String(p.change) === '-2.7' &&
+      lib.formatWeightChange(0) === '0kg' && lib.formatWeightChange(1.2000000001) === '+1.2kg' &&
+      lib.formatWeightChange(-2.7000000001) === '-2.7kg';
+  }),
 
   // ── 상담 고객 분리 · 회원앱 사전 문진(온보딩 v2) 개편 ──────────────────────────
   ['상담 분리: 신규 상담은 members가 아니라 consultations 문서만 생성',

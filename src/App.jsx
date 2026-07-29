@@ -12268,12 +12268,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
     <>
       <style>{`
         .hub-light button:focus-visible{outline:2px solid ${DB.mint};outline-offset:2px;}
-        /* 가로(>=1024px): 진짜 2패널 — 좌: 오늘 브리핑·최근 수업 / 우: 오늘 수업·다음 수업 준비.
+        /* 가로(>=1024px): 진짜 2패널 — 좌: 오늘 브리핑·분석 도구·회원 관리·최근 수업 / 우: 오늘 수업·다음 수업 준비·후기·등록.
            우측에 부위 버튼·전송 버튼 등 콘텐츠가 많아 좌:우 = 0.8fr:1.3fr(약 38:62)로 우측을 더 넓게 배분 */
         .hub-2panel{display:grid;grid-template-columns:minmax(320px,0.8fr) minmax(480px,1.3fr);gap:16px;align-items:start;}
-        .hub-side{display:flex;flex-direction:column;gap:14px;min-width:0;position:sticky;top:10px;}
+        /* 좌측은 카드 4개로 뷰포트보다 길어질 수 있어 sticky를 쓰지 않는다 — 고정하면 컬럼 하단(최근 수업)에 접근할 수 없다 */
+        .hub-side{display:flex;flex-direction:column;gap:14px;min-width:0;}
         .hub-main{display:flex;flex-direction:column;gap:14px;min-width:0;}
-        .hub-toolrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
         /* 상단 한 행 — 좌: 사전 문진(40%) / 우: 회원 변화(60%). 문진이 오른쪽 빈 공간을 만들지 않도록 좁게 두고,
            아래 "오늘 브리핑·오늘 수업"을 첫 화면 안으로 끌어올린다. 두 카드의 marginBottom은 행 gap으로 대체한다. */
         .hub-toprow{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,6fr);gap:14px;align-items:start;margin-bottom:14px;}
@@ -13022,14 +13022,12 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
       {topChrome}
 
       {isWide ? (
-        /* 가로(>=1024px): 2패널 — 좌: 브리핑·최근 수업(sticky) / 우: 오늘 수업·다음 준비·분석·회원관리.
-           우측이 더 넓어야 할 콘텐츠(부위 버튼·전송 버튼·다음 수업 준비 그리드)가 많아 좌 0.8fr : 우 1.3fr 비율 사용 */
+        /* 가로(>=1024px): 2패널 — 좌: 오늘 브리핑·분석 도구·회원 관리·최근 수업 / 우: 오늘 수업·다음 준비·후기·등록.
+           기본 접힘 카드인 분석 도구·회원 관리를 좌측으로 옮겨 좌우 컬럼 높이를 맞추고 전체 스크롤을 줄인다.
+           우측이 더 넓어야 할 콘텐츠(부위 버튼·전송 버튼·다음 수업 준비 그리드)가 많아 좌 0.8fr : 우 1.3fr 비율은 그대로 유지 */
         <div className="hub-2panel">
-          <div className="hub-side">{secBrief}{secRecent}</div>
-          <div className="hub-main">
-            {secToday}{secPrep}{secReview}{secRegistration}
-            <div className="hub-toolrow">{secAnalysis}{secManage}</div>
-          </div>
+          <div className="hub-side">{secBrief}{secAnalysis}{secManage}{secRecent}</div>
+          <div className="hub-main">{secToday}{secPrep}{secReview}{secRegistration}</div>
         </div>
       ) : (
         /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 등록 관리 → 분석 → 회원관리 */

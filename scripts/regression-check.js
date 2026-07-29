@@ -52,6 +52,25 @@ function wpScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 홈 "수업일지 미전송": 0회차(체험 수업) 제외 판정 실제 실행 시나리오 검증 ──
+// 0회차(숫자 0·문자열 "0"·"0회차")는 미전송 목록에서 제외되고, 1회차 이상과 회차 정보 없는 기록은 기존 기준 그대로 판정돼야 한다.
+let unsentSessionLib = null;
+try {
+  const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
+  const sliceOwner = app.slice(app.indexOf('const isOwner = (m)'), app.indexOf('function isExcludedAdminMember'));
+  const sliceExcluded = app.slice(app.indexOf('function isExcludedAdminMember'), app.indexOf('const isRegularAdminMember'));
+  const sliceUnsent = app.slice(app.indexOf('const UNSENT_SESSION_START_DATE'), app.indexOf('function buildReviewPendingList'));
+  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE };`)();
+} catch (e) {
+  console.error('[regression] 수업일지 미전송 헬퍼 추출 실패:', e.message);
+}
+function usScenario(name, fn) {
+  if (!unsentSessionLib) return [name, false];
+  try { return [name, !!fn(unsentSessionLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 const daysAgoStr = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const daysFromNowStr = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 function wgScenario(name, fn) {
@@ -61,8 +80,44 @@ function wgScenario(name, fn) {
 }
 const arrEq = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
 
+const unsentMockMember = (id) => ({ id, name: id, status: 'active' });
+const unsentMockDate = daysAgoStr(1);
+const unsentToday = daysAgoStr(0);
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
+  ...[
+    ['수업일지 미전송: 0회차(숫자) + 미전송 → 목록에서 제외', lib => {
+      const members = [unsentMockMember('trial_num')];
+      const sessionsMap = { trial_num: [{ sessionNo: 0, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['수업일지 미전송: 0회차(문자열 "0"/"0회차") + 미전송 → 목록에서 제외', lib => {
+      const members = [unsentMockMember('trial_str1'), unsentMockMember('trial_str2')];
+      const sessionsMap = {
+        trial_str1: [{ sessionNo: '0', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }],
+        trial_str2: [{ sessionNo: '0회차', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }],
+      };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['수업일지 미전송: 1회차 이상 + 미전송 → 기존처럼 목록에 표시', lib => {
+      const members = [unsentMockMember('real1')];
+      const sessionsMap = { real1: [{ sessionNo: 1, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
+    ['수업일지 미전송: 1회차 이상 + 전송 완료 → 목록에서 제외', lib => {
+      const members = [unsentMockMember('sent1')];
+      const sessionsMap = { sent1: [{ sessionNo: 2, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: true }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['수업일지 미전송: 회차 정보 없음/파싱 불가 + 미전송 → 0회차로 간주하지 않고 기존처럼 표시', lib => {
+      const members = [unsentMockMember('nono1'), unsentMockMember('nono2')];
+      const sessionsMap = {
+        nono1: [{ date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }],
+        nono2: [{ sessionNo: '', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }],
+      };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 2;
+    }],
+  ].map(([name, fn]) => usScenario(name, fn)),
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
   ['대표 운동기록 저장', app.includes('isOwner') && app.includes('OWNER_LEGACY_NAME') && app.includes('대표님')],
   ['체형평가 저장', db.includes('export async function saveAssessment') && db.includes('members", memberId, "assessments"')],

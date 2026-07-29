@@ -8778,10 +8778,20 @@ function toUnsentCheckDateKey(raw) {
   if (typeof raw === "number") return getKoreaDateString(new Date(raw)); // 숫자 timestamp(ms)
   return String(raw).slice(0, 10);
 }
+// 0회차(체험 수업) 판별 — sessionNo가 숫자 0 또는 "0"·"0회차" 같은 문자열 형태로 저장된 경우만 0회차로 인정한다.
+// 값이 비어있거나("") 숫자로 해석할 수 없으면 절대 0회차로 간주하지 않는다(회차 정보 없음 = 기존 판정 그대로 유지).
+function isTrialSessionNo(sessionNo) {
+  if (sessionNo === 0) return true;
+  if (typeof sessionNo !== "string") return false;
+  const numPart = sessionNo.trim().replace(/회차\s*$/, "").trim();
+  if (!numPart || !/^\d+$/.test(numPart)) return false;
+  return Number(numPart) === 0;
+}
 // 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
 // 저장돼 있는데 아직 회원에게 전송(isPublished)만 안 된 회원"만 대상 — 오늘 수업 기록이 저장됐지만 미전송,
 // 또는 UNSENT_SESSION_START_DATE 이후 과거 수업 기록이 저장됐지만 미전송인 경우만 포함
 // (hasRealExercise 판별은 buildNextBookingList와 동일). 미래 날짜 데이터가 섞여도 d<=todayKST로 방어.
+// 0회차(체험 수업, isTrialSessionNo)는 판정 대상에서 완전히 제외 — 기록 자체는 삭제·숨김하지 않고 이 목록에서만 뺀다.
 // 회원당 한 행만 노출(가장 최근 미전송 날짜 대표 표시) — 추가 미전송 건수는 count로 함께 반환해 목록에서 보조 표시한다.
 function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayKST) {
   const rows = [];
@@ -8794,6 +8804,7 @@ function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayK
     let latestDate = "";
     let unsentCount = 0;
     ss.forEach(s => {
+      if (isTrialSessionNo(s.sessionNo)) return; // 체험 수업(0회차)은 미전송 판정 대상 아님
       const d = toUnsentCheckDateKey(s.date || s.sessionDate || s.createdAt);
       if (!d || d < UNSENT_SESSION_START_DATE || d > todayKST) return; // 기준일 이전·미래 예약은 제외
       const hasRealExercise = (s.exercises || []).some(e => e?.name || isFuncEx(e));

@@ -2012,6 +2012,12 @@ const checks = [
     app.includes('수업 전 반드시 확인') &&
     app.includes('function ob2HasCaution(v2 = {}) {')
   ],
+  ['관리자 요약: 사전 문진 카드는 기본 접힘 + 접힌 상태에서도 주의 N건 요약 노출',
+    app.includes('function ob2CautionItems(v2 = {}) {') &&
+    app.includes('const cautionItems = v2 ? ob2CautionItems(v2) : [];') &&
+    app.includes('`⚠ 주의 ${cautionItems.length}건`') &&
+    app.includes('주의사항 없음 · 통증 · 병력 · 복용 약물 모두 “없음”으로 확인됨')
+  ],
   ['관리자 요약: 전체 답변 보기 / 수정 요청 / 내용 확인 완료 액션 제공',
     app.includes('전체 답변 보기') && app.includes('회원에게 수정 요청') && app.includes('내용 확인 완료') &&
     db.includes('export async function markOnboardingReviewed') &&

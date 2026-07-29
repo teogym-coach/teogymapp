@@ -1212,14 +1212,25 @@ function asArr(v) {
   if (v === undefined || v === null || v === "") return [];
   return [String(v)];
 }
-function ob2HasCaution(v2 = {}) {
+// 수업 전 반드시 확인해야 하는 항목(통증·병력·수술·약물·주의사항)만 뽑아 한 줄 요약으로 만든다.
+// 접힌 카드의 "주의 N건"과 펼친 카드의 강조 영역이 같은 판정을 쓰도록 이 목록 하나만 사용한다.
+function ob2CautionItems(v2 = {}) {
   const pain = v2.pain || {}, health = v2.health || {};
+  const items = [];
   const painParts = asArr(pain.parts).filter(p => p !== "없음");
-  return painParts.length > 0
-    || asArr(health.conditions).filter(c => c !== "없음").length > 0
-    || !!String(health.surgery || "").trim()
-    || !!String(health.medication || "").trim()
-    || !!String(health.caution || "").trim();
+  if (painParts.length > 0) items.push({ label:"통증", text: painParts.join(", ") + (pain.worst ? ` (가장 불편: ${pain.worst})` : "") });
+  const conditions = asArr(health.conditions).filter(c => c !== "없음");
+  if (conditions.length > 0) items.push({ label:"병력", text: conditions.join(", ") + (health.conditionEtc ? ` / ${health.conditionEtc}` : "") });
+  const surgery = String(health.surgery || "").trim();
+  if (surgery) items.push({ label:"수술 이력", text: surgery });
+  const medication = String(health.medication || "").trim();
+  if (medication) items.push({ label:"복용 약물", text: medication });
+  const caution = String(health.caution || "").trim();
+  if (caution) items.push({ label:"주의사항", text: caution });
+  return items;
+}
+function ob2HasCaution(v2 = {}) {
+  return ob2CautionItems(v2).length > 0;
 }
 
 // 온보딩 진행 상태 — members 미러 필드가 없는 기존 회원도 오류 없이 판정되도록
@@ -11719,7 +11730,8 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
 
   const v2 = ob?.v2 || null;
   const status = getOnboardingStatus(member, ob);
-  const hasCaution = v2 ? ob2HasCaution(v2) : false;
+  const cautionItems = v2 ? ob2CautionItems(v2) : [];
+  const hasCaution = cautionItems.length > 0;
   const needsReview = status === "needs_update";
   const card = { background:DB.card, border:`1px solid ${DB.border}`, borderRadius:DB.radiusSm, boxShadow:DB.shadow };
 
@@ -11769,9 +11781,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
     );
   }
 
-  const g = v2.goals || {}, ex = v2.experience || {}, ls = v2.lifestyle || {}, pn = v2.pain || {}, hl = v2.health || {}, sc = v2.schedule || {}, pf = v2.preferences || {};
-  const painParts = asArr(pn.parts).filter(p => p !== "없음");
-  const conditions = asArr(hl.conditions).filter(c => c !== "없음");
+  const g = v2.goals || {}, ex = v2.experience || {}, ls = v2.lifestyle || {}, pn = v2.pain || {}, sc = v2.schedule || {}, pf = v2.preferences || {};
   const line = (label, value) => (
     <div style={{display:"flex",gap:10,padding:"6px 0",borderTop:DB.hairline}}>
       <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:700,color:DB.faint,flex:"0 0 78px"}}>{label}</span>
@@ -11783,84 +11793,90 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
     <section style={{...card, padding:"14px 16px 13px", marginBottom:14,
       border:`1px solid ${needsReview ? "rgba(244,63,94,.35)" : hasCaution ? "rgba(245,158,11,.35)" : DB.border}`}}>
       <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:10}}>
-        <span style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text}}>사전 문진 요약</span>
+        <span style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text}}>사전 문진</span>
         <OnboardingStatusBadge status={status} size="md" />
-        {hasCaution && <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.14)",color:"#B45309"}}>⚠ 주의 정보 있음</span>}
         <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginLeft:"auto"}}>
-          완료 {ob?.completedAt ? formatCompactDate(ob.completedAt) : "-"}
-          {v2.updatedAt ? ` · 최종 수정 ${formatCompactDate(v2.updatedAt)}` : ""}
+          {ob?.completedAt ? `${formatCompactDate(ob.completedAt)} 제출` : "제출일 -"}
+          {v2.updatedAt ? ` · 수정 ${formatCompactDate(v2.updatedAt)}` : ""}
         </span>
       </div>
 
-      {/* 위험/주의 — 가장 먼저, 가장 눈에 띄게 */}
+      {/* 위험/주의 — 접힌 상태에서도 항상 보이는 유일한 본문 */}
       {hasCaution ? (
-        <div style={{background:"rgba(245,158,11,.07)",border:"1px solid rgba(245,158,11,.28)",borderRadius:14,padding:"11px 13px",marginBottom:11}}>
-          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:"#B45309",marginBottom:6}}>수업 전 반드시 확인</div>
+        <div style={{background:"rgba(245,158,11,.07)",border:"1px solid rgba(245,158,11,.28)",borderRadius:14,padding:open?"11px 13px":"9px 13px"}}>
+          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:"#B45309",marginBottom:6}}>
+            {open ? "수업 전 반드시 확인" : `⚠ 주의 ${cautionItems.length}건`}
+          </div>
           <div style={{display:"grid",gap:4}}>
-            {painParts.length > 0 && <div style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A"}}>통증 · {painParts.join(", ")}{pn.worst ? ` (가장 불편: ${pn.worst})` : ""}</div>}
-            {pn.trigger && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>유발 동작 · {pn.trigger}</div>}
-            {pn.situation && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>통증 상황 · {pn.situation}</div>}
-            {pn.onset && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>시작 시점 · {pn.onset}</div>}
-            {conditions.length > 0 && <div style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A"}}>병력 · {conditions.join(", ")}{hl.conditionEtc ? ` / ${hl.conditionEtc}` : ""}</div>}
-            {hl.surgery && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>수술 이력 · {hl.surgery}</div>}
-            {hl.medication && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>복용 약물 · {hl.medication}</div>}
-            {hl.caution && <div style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A"}}>주의사항 · {hl.caution}</div>}
+            {cautionItems.map(it => (
+              <div key={it.label} style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A",
+                ...(open ? {} : {whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"})}}>
+                {it.label} · {it.text}
+              </div>
+            ))}
+            {open && pn.trigger && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>유발 동작 · {pn.trigger}</div>}
+            {open && pn.situation && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>통증 상황 · {pn.situation}</div>}
+            {open && pn.onset && <div style={{fontFamily:DB.font,fontSize:12.5,color:"#92600A"}}>시작 시점 · {pn.onset}</div>}
           </div>
         </div>
       ) : (
-        <div style={{background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.22)",borderRadius:14,padding:"9px 13px",marginBottom:11,fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#15803D"}}>
-          통증 · 병력 · 복용 약물 · 주의사항 모두 “없음”으로 확인됨
+        <div style={{background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.22)",borderRadius:14,padding:"9px 13px",fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#15803D"}}>
+          주의사항 없음 · 통증 · 병력 · 복용 약물 모두 “없음”으로 확인됨
         </div>
       )}
-
-      {/* 핵심 요약 — 목표/경험/일정 */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"0 20px"}}>
-        <div>
-          {line("최우선 목표", g.primary)}
-          {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
-          {line("구체적 목표", g.detail)}
-          {line("운동 경험", [ex.level, ex.duration].filter(Boolean).join(" · "))}
-          {line("이전 PT", [ex.prevPT, ex.prevPTSatisfaction].filter(Boolean).join(" · "))}
-        </div>
-        <div>
-          {line("가능 횟수", sc.weekCount)}
-          {line("선호 시간", asArr(sc.preferTime).join(", "))}
-          {line("목표 기간", sc.targetPeriod)}
-          {line("강도 성향", pf.intensity)}
-          {line("약점 부위", asArr(pf.weakParts).join(", "))}
-        </div>
-      </div>
 
       {open && (
-        <div style={{marginTop:10,paddingTop:8,borderTop:DB.hairline}}>
-          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"4px 0 2px"}}>생활습관</div>
-          {line("식사 횟수", ls.meals)}
-          {line("야식", ls.lateSnack)}
-          {line("음주", ls.alcohol)}
-          {line("수분 섭취", ls.water)}
-          {line("배달음식", ls.delivery)}
-          {line("수면", ls.sleep)}
-          {line("스트레스", ls.stress)}
-          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"10px 0 2px"}}>운동 성향</div>
-          {line("집중 부위", asArr(ob?.focusAreas).join(", "))}
-          {line("선호 스타일", asArr(pf.styles).join(", "))}
-          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"10px 0 2px"}}>기타</div>
-          {line("일정 메모", sc.note)}
-          {line("촬영 예정일", g.shootDate ? formatCompactDate(g.shootDate) : "")}
-          {line("재활 이력", g.rehabNote)}
-        </div>
+        <>
+          {/* 핵심 요약 — 목표/경험/일정 */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"0 20px",marginTop:11}}>
+            <div>
+              {line("최우선 목표", g.primary)}
+              {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
+              {line("구체적 목표", g.detail)}
+              {line("운동 경험", [ex.level, ex.duration].filter(Boolean).join(" · "))}
+              {line("이전 PT", [ex.prevPT, ex.prevPTSatisfaction].filter(Boolean).join(" · "))}
+            </div>
+            <div>
+              {line("가능 횟수", sc.weekCount)}
+              {line("선호 시간", asArr(sc.preferTime).join(", "))}
+              {line("목표 기간", sc.targetPeriod)}
+              {line("강도 성향", pf.intensity)}
+              {line("약점 부위", asArr(pf.weakParts).join(", "))}
+            </div>
+          </div>
+
+          <div style={{marginTop:10,paddingTop:8,borderTop:DB.hairline}}>
+            <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"4px 0 2px"}}>생활습관</div>
+            {line("식사 횟수", ls.meals)}
+            {line("야식", ls.lateSnack)}
+            {line("음주", ls.alcohol)}
+            {line("수분 섭취", ls.water)}
+            {line("배달음식", ls.delivery)}
+            {line("수면", ls.sleep)}
+            {line("스트레스", ls.stress)}
+            <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"10px 0 2px"}}>운동 성향</div>
+            {line("집중 부위", asArr(ob?.focusAreas).join(", "))}
+            {line("선호 스타일", asArr(pf.styles).join(", "))}
+            <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:DB.faint,margin:"10px 0 2px"}}>기타</div>
+            {line("일정 메모", sc.note)}
+            {line("촬영 예정일", g.shootDate ? formatCompactDate(g.shootDate) : "")}
+            {line("재활 이력", g.rehabNote)}
+          </div>
+        </>
       )}
 
-      <div style={{display:"flex",gap:7,marginTop:11,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:7,marginTop:open?11:9,flexWrap:"wrap",alignItems:"center"}}>
         <button onClick={()=>setOpen(v=>!v)}
           style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
-          {open ? "요약만 보기" : "전체 답변 보기"}
+          {open ? "접기 ▴" : "전체 답변 보기 ▾"}
         </button>
-        <button onClick={doRequestUpdate} disabled={busy}
-          style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.mintSoft,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
-          회원에게 수정 요청
-        </button>
-        {needsReview ? (
+        {open && (
+          <button onClick={doRequestUpdate} disabled={busy}
+            style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.mintSoft,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
+            회원에게 수정 요청
+          </button>
+        )}
+        {open && (needsReview ? (
           <button onClick={doReview} disabled={busy}
             style={{border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",borderRadius:10,padding:"7px 13px",fontSize:11.5,fontWeight:800,fontFamily:DB.font,cursor:"pointer"}}>
             {busy ? "처리 중..." : "변경 내용 확인 완료"}
@@ -11870,10 +11886,17 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
             style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
             내용 확인 완료
           </button>
+        ))}
+        {open && (
+          <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginLeft:"auto"}}>
+            {ob?.reviewedAt ? `확인 ${formatCompactDate(ob.reviewedAt)}` : "아직 확인하지 않음"}
+          </span>
         )}
-        <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginLeft:"auto"}}>
-          {ob?.reviewedAt ? `확인 ${formatCompactDate(ob.reviewedAt)}` : "아직 확인하지 않음"}
-        </span>
+        {!open && needsReview && (
+          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,color:"#BE123C",marginLeft:"auto"}}>
+            회원이 문진을 수정했습니다 — 펼쳐서 확인해주세요
+          </span>
+        )}
       </div>
     </section>
   );

@@ -11657,18 +11657,18 @@ function MemberChangeMetricTile({ metric, isOpen, onToggle }) {
     <div
       onClick={() => hasDetail && onToggle()}
       style={{
-        border: `1px solid ${DB.border}`, borderRadius: DB.radiusSm, padding: "11px 13px",
+        border: `1px solid ${DB.border}`, borderRadius: DB.radiusSm, padding: "9px 11px",
         background: metric.empty ? DB.bg : "#fff", cursor: hasDetail ? "pointer" : "default",
-        minHeight: 92, display: "flex", flexDirection: "column",
+        minHeight: 84, display: "flex", flexDirection: "column",
       }}>
       <span style={{ fontSize: 10.5, fontWeight: 800, color: DB.sub, fontFamily: DB.font }}>{metric.label}</span>
-      <span style={{ fontSize: 14.5, fontWeight: 800, color: metric.empty ? DB.faint : DB.text, marginTop: 5, lineHeight: 1.3, fontFamily: DB.font, wordBreak: "keep-all" }}>
+      <span style={{ fontSize: 14.5, fontWeight: 800, color: metric.empty ? DB.faint : DB.text, marginTop: 4, lineHeight: 1.25, fontFamily: DB.font, wordBreak: "keep-all" }}>
         {metric.empty ? metric.emptyText : metric.display}
       </span>
       {!metric.empty && metric.sub && (
-        <span style={{ fontSize: 11, fontWeight: 700, color: DB.mintSoft, marginTop: 2, fontFamily: DB.font }}>{metric.sub}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: DB.mintSoft, marginTop: 2, fontFamily: DB.font, lineHeight: 1.3 }}>{metric.sub}</span>
       )}
-      <span style={{ fontSize: 9.5, color: DB.faint, marginTop: "auto", paddingTop: 6, fontFamily: DB.font }}>{metric.compareText}</span>
+      <span style={{ fontSize: 9.5, color: DB.faint, marginTop: "auto", paddingTop: 5, lineHeight: 1.3, fontFamily: DB.font }}>{metric.compareText}</span>
       {hasDetail && (
         <span style={{ fontSize: 9.5, fontWeight: 700, color: DB.mintSoft, marginTop: 3, fontFamily: DB.font }}>{isOpen ? "상세 접기 ▲" : "상세 보기 ▼"}</span>
       )}
@@ -11690,13 +11690,14 @@ function MemberChangeCard({ goal, sessions, bodyData, checkins }) {
   const [openKey, setOpenKey] = useState(null);
   const summary = useMemo(() => buildMemberChangeSummary(goal, sessions || [], bodyData, checkins || []), [goal, sessions, bodyData, checkins]);
   return (
-    <div style={{ background: DB.card, border: `1px solid ${DB.border}`, borderRadius: DB.radius, boxShadow: DB.shadow, padding: "14px 16px", marginBottom: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+    <div style={{ background: DB.card, border: `1px solid ${DB.border}`, borderRadius: DB.radius, boxShadow: DB.shadow, padding: "11px 13px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 3, marginBottom: 7 }}>
         <span style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: "-.2px", color: DB.text, fontFamily: DB.font }}>회원 변화</span>
         <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2.5px 9px", borderRadius: 999, background: DB.mintTint, color: DB.mintSoft, fontFamily: DB.font }}>{summary.goalLabel}</span>
         <span style={{ fontSize: 10, color: DB.faint, marginLeft: "auto", fontFamily: DB.font }}>{summary.basisText}</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 8 }}>
+      {/* 사전 문진과 같은 행(60% 폭)에서도 지표 3개가 한 줄에 들어가도록 최소 폭을 124px로 둔다 — 지표 구성·계산은 그대로 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(124px, 1fr))", gap: 7 }}>
         {summary.metrics.map(m => (
           <MemberChangeMetricTile key={m.key} metric={m} isOpen={openKey === m.key} onToggle={() => setOpenKey(k => (k === m.key ? null : m.key))} />
         ))}
@@ -11761,19 +11762,19 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   // 온보딩 자체가 없거나 v2 이전(기존 회원) — 억지로 빈 항목을 나열하지 않고 상태와 다음 행동만 보여준다.
   if (!v2) {
     return (
-      <section style={{...card, padding:"13px 16px", marginBottom:14}}>
-        <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
+      <section style={{...card, padding:"11px 13px", marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",rowGap:3}}>
           <span style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text}}>사전 문진</span>
           <OnboardingStatusBadge status={status} size="md" />
-          <span style={{fontFamily:DB.font,fontSize:12,color:DB.faint,marginLeft:"auto"}}>
+          <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,lineHeight:1.4,flex:"1 1 100%"}}>
             {status === "legacy"
               ? "이 회원은 개편 전 온보딩만 완료했습니다. 필요하면 수정 요청을 보내주세요."
               : "회원앱에서 운동 목표·통증·건강 정보를 직접 작성합니다."}
           </span>
         </div>
-        <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
           <button onClick={doRequestUpdate} disabled={busy || !member?.memberUid}
-            style={{border:`1px solid ${DB.border}`,background:"#fff",color:member?.memberUid?DB.mintSoft:DB.faint,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:member?.memberUid?"pointer":"not-allowed"}}>
+            style={{border:`1px solid ${DB.border}`,background:"#fff",color:member?.memberUid?DB.mintSoft:DB.faint,borderRadius:10,padding:"6px 11px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:member?.memberUid?"pointer":"not-allowed"}}>
             회원에게 문진 요청
           </button>
         </div>
@@ -11790,12 +11791,13 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   );
 
   return (
-    <section style={{...card, padding:"14px 16px 13px", marginBottom:14,
+    <section className={open ? "is-expanded" : undefined}
+      style={{...card, padding:open?"13px 15px 12px":"11px 13px 10px", marginBottom:14,
       border:`1px solid ${needsReview ? "rgba(244,63,94,.35)" : hasCaution ? "rgba(245,158,11,.35)" : DB.border}`}}>
-      <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",rowGap:3,marginBottom:7}}>
         <span style={{fontFamily:DB.font,fontWeight:800,fontSize:13.5,color:DB.text}}>사전 문진</span>
         <OnboardingStatusBadge status={status} size="md" />
-        <span style={{fontFamily:DB.font,fontSize:11,color:DB.faint,marginLeft:"auto"}}>
+        <span style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,marginLeft:"auto",whiteSpace:"nowrap"}}>
           {ob?.completedAt ? `${formatCompactDate(ob.completedAt)} 제출` : "제출일 -"}
           {v2.updatedAt ? ` · 수정 ${formatCompactDate(v2.updatedAt)}` : ""}
         </span>
@@ -11803,13 +11805,13 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
 
       {/* 위험/주의 — 접힌 상태에서도 항상 보이는 유일한 본문 */}
       {hasCaution ? (
-        <div style={{background:"rgba(245,158,11,.07)",border:"1px solid rgba(245,158,11,.28)",borderRadius:14,padding:open?"11px 13px":"9px 13px"}}>
-          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:"#B45309",marginBottom:6}}>
+        <div style={{background:"rgba(245,158,11,.07)",border:"1px solid rgba(245,158,11,.28)",borderRadius:12,padding:open?"11px 13px":"7px 11px"}}>
+          <div style={{fontFamily:DB.font,fontSize:11,fontWeight:800,color:"#B45309",marginBottom:open?6:4}}>
             {open ? "수업 전 반드시 확인" : `⚠ 주의 ${cautionItems.length}건`}
           </div>
-          <div style={{display:"grid",gap:4}}>
+          <div style={{display:"grid",gap:open?4:2}}>
             {cautionItems.map(it => (
-              <div key={it.label} style={{fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#92600A",
+              <div key={it.label} style={{fontFamily:DB.font,fontSize:12,fontWeight:700,color:"#92600A",lineHeight:1.35,
                 ...(open ? {} : {whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"})}}>
                 {it.label} · {it.text}
               </div>
@@ -11820,7 +11822,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
           </div>
         </div>
       ) : (
-        <div style={{background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.22)",borderRadius:14,padding:"9px 13px",fontFamily:DB.font,fontSize:12.5,fontWeight:700,color:"#15803D"}}>
+        <div style={{background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.22)",borderRadius:12,padding:"8px 11px",fontFamily:DB.font,fontSize:12,fontWeight:700,color:"#15803D",lineHeight:1.4}}>
           주의사항 없음 · 통증 · 병력 · 복용 약물 모두 “없음”으로 확인됨
         </div>
       )}
@@ -11865,9 +11867,9 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
         </>
       )}
 
-      <div style={{display:"flex",gap:7,marginTop:open?11:9,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:7,marginTop:open?11:7,flexWrap:"wrap",rowGap:5,alignItems:"center"}}>
         <button onClick={()=>setOpen(v=>!v)}
-          style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:"7px 12px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
+          style={{border:`1px solid ${DB.border}`,background:"#fff",color:DB.sub,borderRadius:10,padding:open?"7px 12px":"6px 11px",fontSize:11.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>
           {open ? "접기 ▴" : "전체 답변 보기 ▾"}
         </button>
         {open && (
@@ -11893,7 +11895,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
           </span>
         )}
         {!open && needsReview && (
-          <span style={{fontFamily:DB.font,fontSize:11,fontWeight:700,color:"#BE123C",marginLeft:"auto"}}>
+          <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:"#BE123C",marginLeft:"auto",lineHeight:1.3,minWidth:0}}>
             회원이 문진을 수정했습니다 — 펼쳐서 확인해주세요
           </span>
         )}
@@ -12272,6 +12274,13 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         .hub-side{display:flex;flex-direction:column;gap:14px;min-width:0;position:sticky;top:10px;}
         .hub-main{display:flex;flex-direction:column;gap:14px;min-width:0;}
         .hub-toolrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+        /* 상단 한 행 — 좌: 사전 문진(40%) / 우: 회원 변화(60%). 문진이 오른쪽 빈 공간을 만들지 않도록 좁게 두고,
+           아래 "오늘 브리핑·오늘 수업"을 첫 화면 안으로 끌어올린다. 두 카드의 marginBottom은 행 gap으로 대체한다. */
+        .hub-toprow{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,6fr);gap:14px;align-items:start;margin-bottom:14px;}
+        .hub-toprow>*{margin-bottom:0 !important;min-width:0;}
+        /* 문진을 펼치면(is-expanded) 문진 카드와 그 뒤 카드가 각각 행 전체 폭을 사용 — 회원 변화는 자연히 다음 행으로 내려간다 */
+        .hub-toprow>.is-expanded,.hub-toprow>.is-expanded~*{grid-column:1/-1;}
+        @media(max-width:1023px){.hub-toprow{grid-template-columns:1fr;gap:14px;}}
         .hub-vitals{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:${DB.border};border-radius:${DB.radiusSm}px;overflow:hidden;}
         .hub-vitals>div{background:${DB.card};}
         .hub-toolgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
@@ -12285,6 +12294,7 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
           .hub-2panel{gap:10px;}
           .hub-side{gap:9px;}
           .hub-main{gap:9px;}
+          .hub-toprow{gap:10px;margin-bottom:10px !important;}
           .hub-sec-brief{padding:9px 12px 8px !important;}
           .hub-sec-recent{padding:8px 6px 5px !important;}
           .hub-sec-today{padding:11px 14px !important;}
@@ -12341,11 +12351,16 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
         <AdminMemberAppInviteButton member={member} onAccountCreated={onMemberPatch} />
       </div>
 
-      {/* 사전 문진 요약 — 수업 준비 정보 바로 위. 통증·병력·약물·주의사항은 이 카드 안에서 별도 영역으로 강조된다. */}
-      {!loading && <OnboardingSummaryCard member={member} onboarding={ob} onPatch={onMemberPatch} showToast={showToast} />}
+      {/* 상단 한 행 — 좌: 사전 문진 요약(위험 정보 확인용, 40%) / 우: 회원 변화(숫자 카드 3개, 60%).
+          좁은 화면(<1024px)에서는 기존처럼 사전 문진 → 회원 변화 순서로 1열이 된다.
+          사전 문진을 펼치면 CSS(.hub-toprow>.is-expanded)로 두 카드가 각각 전체 폭 행이 된다. */}
+      <div className="hub-toprow" style={loading?{marginBottom:0}:undefined}>
+        {/* 사전 문진 요약 — 통증·병력·약물·주의사항은 이 카드 안에서 별도 영역으로 강조된다. */}
+        {!loading && <OnboardingSummaryCard member={member} onboarding={ob} onPatch={onMemberPatch} showToast={showToast} />}
 
-      {/* 회원 변화 — 회원 목표별 핵심 변화 3개(스크롤 없이 바로 확인). 다이어트 목표는 이 카드 다음에 기존 "최근 체중 흐름" 그래프가 그대로 이어진다(secBrief). */}
-      {!loading && <MemberChangeCard goal={ob?.goal || member.goal} sessions={sessions} bodyData={bodyData} checkins={ci} />}
+        {/* 회원 변화 — 회원 목표별 핵심 변화 3개(스크롤 없이 바로 확인). 다이어트 목표는 이 카드 다음에 기존 "최근 체중 흐름" 그래프가 그대로 이어진다(secBrief). */}
+        {!loading && <MemberChangeCard goal={ob?.goal || member.goal} sessions={sessions} bodyData={bodyData} checkins={ci} />}
+      </div>
 
       <div style={{marginBottom: showMemberAppManagement?14:0}}>
         <AdminMemberAppPanel member={member} members={allMembers} onAccountCreated={onMemberPatch} showManagement={showMemberAppManagement} hideGrid={true} hideBriefing={true} />

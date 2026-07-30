@@ -52,8 +52,9 @@ function wpScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
-// ── 홈 "수업일지 미전송": 0회차(체험 수업) 제외 판정 실제 실행 시나리오 검증 ──
+// ── 홈 "수업일지 미전송"/"수업일지 미확인": 0회차 제외·회원 확인 판정 실제 실행 시나리오 검증 ──
 // 0회차(숫자 0·문자열 "0"·"0회차")는 미전송 목록에서 제외되고, 1회차 이상과 회차 정보 없는 기록은 기존 기준 그대로 판정돼야 한다.
+// getSessionReadStatus/summarizeSessionReadStatus/buildUnreadSessionMembers(수업일지 "회원 확인")도 같은 스코프에서 함께 검증한다.
 let unsentSessionLib = null;
 try {
   const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
@@ -61,7 +62,8 @@ try {
   const sliceOwner = app.slice(app.indexOf('const isOwner = (m)'), app.indexOf('function isExcludedAdminMember'));
   const sliceExcluded = app.slice(app.indexOf('function isExcludedAdminMember'), app.indexOf('const isRegularAdminMember'));
   const sliceUnsent = app.slice(app.indexOf('const UNSENT_SESSION_START_DATE'), app.indexOf('function buildReviewPendingList'));
-  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE };`)();
+  const sliceSessionRead = app.slice(app.indexOf('function getSessionReadStatus'), app.indexOf('function SessionReadBadge'));
+  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceSessionRead}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE, getSessionReadStatus, formatSessionReadTime, summarizeSessionReadStatus, buildUnreadSessionMembers, UNREAD_SESSION_WINDOW_DAYS };`)();
 } catch (e) {
   console.error('[regression] 수업일지 미전송 헬퍼 추출 실패:', e.message);
 }
@@ -117,6 +119,56 @@ const checks = [
       };
       return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 2;
     }],
+    ['수업일지 회원 확인: 읽음 기록이 없으면 getSessionReadStatus가 isRead:false를 반환', lib => {
+      return lib.getSessionReadStatus('s1', {}).isRead === false;
+    }],
+    ['수업일지 회원 확인: firstReadAt이 있는 readMap 항목은 isRead:true + readCount 유지', lib => {
+      const status = lib.getSessionReadStatus('s1', { s1: { firstReadAt: '2026-07-30', lastReadAt: '2026-07-31', readCount: 3 } });
+      return status.isRead === true && status.readCount === 3 && status.firstReadAt === '2026-07-30';
+    }],
+    ['수업일지 회원 확인: formatSessionReadTime이 같은 해는 "M월 D일 HH:mm"으로 표시', lib => {
+      const sameYear = new Date(new Date().getFullYear(), 6, 30, 13, 12);
+      return /^7월 30일 13:12$/.test(lib.formatSessionReadTime(sameYear));
+    }],
+    ['수업일지 회원 확인: formatSessionReadTime이 다른 해는 "YYYY.MM.DD HH:mm"으로 표시', lib => {
+      return /^\d{4}\.07\.30 13:12$/.test(lib.formatSessionReadTime(new Date(2020, 6, 30, 13, 12))) && !lib.formatSessionReadTime(new Date(2020, 6, 30, 13, 12)).startsWith(String(new Date().getFullYear()));
+    }],
+    ['수업일지 회원 확인: summarizeSessionReadStatus가 공개 세션만·최근 n건만 집계(비공개 제외)', lib => {
+      const sessions = [
+        { id: 'a', date: '2026-07-01', isPublished: true }, { id: 'b', date: '2026-07-02', isPublished: true },
+        { id: 'c', date: '2026-07-03', isPublished: true }, { id: 'd', date: '2026-07-04', isPublished: false },
+        { id: 'e', date: '2026-07-05', isPublished: true },
+      ];
+      const readMap = { a: { firstReadAt: '2026-07-01' }, c: { firstReadAt: '2026-07-03' } };
+      const summary = lib.summarizeSessionReadStatus(sessions, readMap, 5);
+      return summary.total === 4 && summary.readCount === 2 && summary.unreadCount === 2;
+    }],
+    ['수업일지 미확인(홈): 공개+최근 14일 이내+미확인 → 목록에 포함', lib => {
+      const members = [unsentMockMember('unread1')];
+      const sessionsMap = { unread1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 1;
+    }],
+    ['수업일지 미확인(홈): 이미 확인한 기록은 목록에서 제외', lib => {
+      const members = [unsentMockMember('read1')];
+      const sessionsMap = { read1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      const readsByMember = { read1: { s1: { firstReadAt: unsentMockDate } } };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, readsByMember, unsentToday).length === 0;
+    }],
+    ['수업일지 미확인(홈): 비공개 기록은 미확인 통계 대상이 아님(미전송 영역)', lib => {
+      const members = [unsentMockMember('unpub1')];
+      const sessionsMap = { unpub1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: false }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
+    }],
+    ['수업일지 미확인(홈): 14일보다 오래된 공개·미확인 기록은 홈 알림 대상에서 제외', lib => {
+      const members = [unsentMockMember('old1')];
+      const sessionsMap = { old1: [{ id: 's1', sessionNo: 3, date: daysAgoStr(20), isPublished: true }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
+    }],
+    ['수업일지 미확인(홈): 테스트 회원/대표(TEO) 개인 기록은 제외', lib => {
+      const members = [{ id: 'test1', name: 'test1', status: 'active', isTestMember: true }];
+      const sessionsMap = { test1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
+    }],
   ].map(([name, fn]) => usScenario(name, fn)),
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
   ['대표 운동기록 저장', app.includes('isOwner') && app.includes('OWNER_LEGACY_NAME') && app.includes('대표님')],
@@ -135,6 +187,40 @@ const checks = [
   ['createMemberAppIndexForMember Cloud Function 제거', !functionsIndex.includes('exports.createMemberAppIndexForMember') && !functionsIndex.includes('memberAppIndex/{')],
   ['공지 대상 회원 엄격 필터 제거', app.includes('function isNoticeEligibleMember(m)') && !app.includes('m.remainingSessions==null') && !app.includes('status!=="active"') && app.includes('["deleted","archived","inactive"].includes(noticeMemberStatus(m))')],
   ['개별 공지 저장/회원앱 조회', db.includes('targetType=data.targetType==="member"?"member":"all"') && db.includes('targetMemberId=targetType==="member"') && db.includes('targetMemberName=targetType==="member"') && db.includes('where("targetType","==","member"),where("targetMemberId","==",memberId)')],
+
+  // ── 수업일지 "회원 확인"(상세 열람) ──
+  // 목록 노출만으로 마킹되는 기존 readSessions(배지 전용)와 별개로 members/{id}/sessionReads/{sessionId}에 firstReadAt/lastReadAt/readCount를 기록한다.
+  ['수업일지 회원 확인: markSessionDetailRead가 firstReadAt은 최초 1회만, 이후엔 lastReadAt/readCount만 갱신',
+    db.includes('export async function markSessionDetailRead(memberId, sessionId, source)') &&
+    db.includes('"members", memberId, "sessionReads", sessionId') &&
+    db.includes('firstReadAt: now, lastReadAt: now,') &&
+    db.includes('readCount: prevCount + 1,')
+  ],
+  ['수업일지 회원 확인: getSessionReadMap이 관리자앱 표시용으로 회원별 확인 상태를 일괄 조회', db.includes('export async function getSessionReadMap(memberId)') && db.includes('collection(db, "members", memberId, "sessionReads")')],
+  ['수업일지 회원 확인: 회원앱 수업 탭 "목록 노출"만으로는 호출되지 않고, 실제 펼침 시점(자동펼침/카드펼침/몸상태펼침)에서만 호출',
+    app.includes('markSessionDetailRead(latestId,"auto_expanded_recent_session")') &&
+    app.includes('if(s.id&&!wasOpen&&markSessionDetailRead)markSessionDetailRead(s.id,"session_content_open")') &&
+    app.includes('if(next&&!expandedFeedbackIds.has(s.id)&&markSessionDetailRead)markSessionDetailRead(s.id,"body_status_open")')
+  ],
+  ['수업일지 회원 확인: 관리자앱 "회원앱 미리보기" 모달은 MemberJournal/MemberFeedbackForm을 재사용하지 않는 별도 컴포넌트라 확인 처리를 호출하지 않음',
+    (() => {
+      const start = app.indexOf('회원앱 미리보기 모달');
+      const end = app.indexOf('function ', start);
+      const modalBody = start !== -1 && end !== -1 ? app.slice(start, end) : '';
+      return !!modalBody && !modalBody.includes('markSessionDetailRead');
+    })()
+  ],
+  ['Firestore Rules sessionReads: 회원 본인만 공개(isPublished) 세션에 한해 기록 + firstReadAt/firstReadSource 이후 변경 불가',
+    firestoreRules.includes('match /sessionReads/{sessionId}') &&
+    firestoreRules.includes('get(/databases/$(database)/documents/members/$(memberId)/sessions/$(sessionId)).data.isPublished == true') &&
+    firestoreRules.includes('request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastReadAt", "lastReadSource", "readCount"])')
+  ],
+  ['관리자앱: 히스토리 카드 회원 확인 배지 + 회원 상세 요약 + 홈 "수업일지 미확인"이 모두 공통 헬퍼(getSessionReadStatus 등) 재사용, 각자 재구현하지 않음',
+    app.includes('function SessionReadBadge({ session, readMap, compact=false })') &&
+    app.includes('<SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} />') &&
+    app.includes('const sessionReadSummary = !isOwner(member) ? summarizeSessionReadStatus(sessions, sessionReadsMap, 5) : null;') &&
+    app.includes('function buildUnreadSessionMembers(members, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST)')
+  ],
 
   // ── 보안 체크 ──
   ['회원 자기수정 금지 필드(isOwner·role·memberUid·trainerUid)',
@@ -911,13 +997,13 @@ const checks = [
     !app.includes('teogym_journal_expandedFeedbackIds')
   ],
   ['수업 후 상태: MemberFeedbackForm의 open prop이 "최신 수업이라서/openId가 null이라서/피드백 미입력이라서" 등 자동 펼침 조건 없이 오직 expandedFeedbackIds(사용자가 직접 연 id 집합) 포함 여부로만 결정됨',
-    app.includes('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>setFeedbackOpen(s.id,next)}/>')
+    app.includes('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>{')
   ],
   ['수업일지: 상위 "수업 카드"(MemberJournal) 펼침 판정(isExp)이 배열 인덱스가 아니라 실제 session.id(latestId) 비교로만 이루어짐 — 저장 후 재조회로 목록이 다시 그려져 인덱스가 흔들려도 펼침 카드가 바뀌지 않음',
     app.includes('const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;')
   ],
   ['수업일지: 사용자가 "접기"를 눌렀을 때만 openId가 "__none__"(자동 재펼침 금지)으로 바뀌고, saveFeedback/load() 흐름에는 setOpenId/setExpandedFeedbackIds/setFeedbackOpen 호출이 전혀 없어 저장으로 인한 재조회가 두 펼침 상태 모두 건드리지 않음',
-    app.includes('const toggleSess=(s)=>{setOpenId(prev=>(isExp(s)&&!lq)?"__none__":s.id);') &&
+    app.includes('const toggleSess=(s)=>{ const wasOpen=isExp(s); setOpenId(prev=>(wasOpen&&!lq)?"__none__":s.id);') &&
     (() => {
       const start = app.indexOf('const saveFeedback=async(sessionId,feedback)=>{');
       const end = app.indexOf('const saveProfileInfo=async(data)=>{', start);
@@ -957,7 +1043,7 @@ const checks = [
   ['수업일지 카드 순서: 운동종목(SessionMini)이 피드백 카드(MemberFeedbackForm)보다 먼저 표시',
     (() => {
       const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>');
-      const j = app.indexOf('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>setFeedbackOpen(s.id,next)}/>');
+      const j = app.indexOf('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>{');
       return i !== -1 && j !== -1 && i < j;
     })()
   ],

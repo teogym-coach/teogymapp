@@ -272,6 +272,24 @@ service cloud.firestore {
         allow delete: if isTrainerOfMember(memberId);
       }
 
+      // 수업일지 "회원 확인"(상세 열람) — 위 readSessions(목록 노출만으로도 기록되는 배지 전용)와는 별개.
+      // 회원 본인만 자기 확인 기록을 쓸 수 있고, 공개(isPublished)된 세션에만 쓸 수 있다(비공개 세션 열람 기록 방지).
+      // firstReadAt/firstReadSource는 최초 생성 이후 절대 변경 불가 — update는 오직 lastReadAt/lastReadSource/readCount만 갱신 가능.
+      match /sessionReads/{sessionId} {
+        allow read: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);
+        allow create: if isMemberSelfActive(memberId)
+                      && get(/databases/$(database)/documents/members/$(memberId)/sessions/$(sessionId)).data.isPublished == true
+                      && request.resource.data.keys().hasOnly(["sessionId", "memberId", "firstReadAt", "lastReadAt", "readCount", "firstReadSource", "lastReadSource"])
+                      && request.resource.data.sessionId == sessionId
+                      && request.resource.data.memberId == memberId
+                      && request.resource.data.readCount == 1;
+        allow update: if isMemberSelfActive(memberId)
+                      && get(/databases/$(database)/documents/members/$(memberId)/sessions/$(sessionId)).data.isPublished == true
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastReadAt", "lastReadSource", "readCount"])
+                      && request.resource.data.readCount == resource.data.readCount + 1;
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
       match /noticeReads/{noticeId} {
         allow read: if canAccessMember(memberId);
         allow create, update: if isMemberSelfActive(memberId)

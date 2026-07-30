@@ -26,6 +26,7 @@ import {
   getPairSessions, savePairSession, deletePairSession, splitPairSession, updatePairSessionStatus,
   saveFcmToken,
   getReadSessionIds, markSessionsRead, SESSION_UNREAD_CUTOFF,
+  markSessionDetailRead as markSessionDetailReadDb, getSessionReadMap,
   saveAttendance, getAttendanceRecent, deleteAttendance,
   getCardioLogs, saveCardioLog, deleteCardioLog,
   CONSULT_STATUS_OPTIONS, getConsultations, addConsultation, updateConsultation, deleteConsultation, convertConsultationToMember,
@@ -1575,6 +1576,14 @@ function MemberApp({ onLogout }) {
   const saveFeedback=async(sessionId,feedback)=>{assertOwnMember(); await saveSessionMemberFeedback(profile.id,sessionId,feedback); const memo=String(feedback?.memo||"").trim(); if(memo){const session=sessions.find(x=>x.id===sessionId)||{}; await addMemberMessage(profile.id,{date:session.date||today,sessionId,sessionTitle:`${session.date||today} · ${formatTypes(session.selectedTypes||session.type)||"운동"}`,message:memo,memberMessage:memo,source:"memberAppSessionFeedback"});} await load();};
   const saveProfileInfo=async(data)=>{assertOwnMember(); const result=await saveMemberProfileFields(profile.id,data); const nextData={...data}; setProfile(prev=>prev?{...prev,...nextData}:prev); setOnboarding(prev=>prev?{...prev,...nextData,targetWeightKg:nextData.targetWeightKg??prev.targetWeightKg,targetPeriod:nextData.targetPeriod??prev.targetPeriod,targetPeriodCustom:nextData.targetPeriodCustom??prev.targetPeriodCustom,goal:nextData.goal??prev.goal}:prev); const nextWeight=toPositiveNumber(nextData.currentWeight); if(nextWeight){const dateKey=today; setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`profile_${dateKey}`,date:dateKey,weight:nextWeight,note:"프로필 저장 반영"})}));} await load(); return result;};
   const markSessionsAsRead=async(ids)=>{if(!ids?.length||!profile?.id)return; try{assertOwnMember();}catch{return;} const newIds=ids.filter(id=>id&&!readSessionIds.has(id)); if(!newIds.length)return; setReadSessionIds(prev=>{const next=new Set(prev); newIds.forEach(id=>next.add(id)); return next;}); markSessionsRead(profile.id,newIds).catch(()=>{}); };
+  // 수업일지 "회원 확인" — markSessionsAsRead(배지 전용, 목록 노출만으로도 호출)와는 완전히 별개의 저장.
+  // 실제로 운동 내용이 렌더링되거나(최근 수업 자동펼침·이전 수업 카드 펼침) "수업 후 몸 상태" 펼치기 버튼을 눌렀을 때만
+  // MemberJournal/MemberFeedbackForm 쪽에서 이 함수를 호출한다(호출 위치·중복 방지는 그쪽 책임). 실패해도 화면 이용을 막지 않는다.
+  const markSessionDetailRead=(sessionId,source)=>{
+    if(!sessionId||!profile?.id)return;
+    try{assertOwnMember();}catch{return;}
+    markSessionDetailReadDb(profile.id,sessionId,source).catch(()=>{});
+  };
   const saveAttendanceToday=async()=>{if(attendanceSaving||!profile?.id)return; setAttendanceSaving(true); try{assertOwnMember(); const result=await saveAttendance(profile.id,today); if(result.duplicate){alert("오늘은 이미 운동 체크가 완료되었습니다.");}else{alert("오늘 운동이 기록되었습니다."); setAttendance(prev=>[...prev,{date:today,source:"memberApp"}]);}}catch(e){console.error("[출석]",e); alert("출석 기록에 실패했습니다.");}finally{setAttendanceSaving(false);};};
   // 캘린더 날짜별 운동 완료 체크/취소 — 기존 saveAttendance/deleteAttendance 재사용(문서 ID=날짜, 중복은 duplicate로 안전 처리).
   // 정책: 미래 날짜 차단 + 최근 30일(한국시간, 오늘 포함) 내에서만 체크·취소 가능 — 소급 기록 남발로 월간 통계·연속 기록 신뢰가 깨지는 것을 방지.
@@ -1650,7 +1659,7 @@ function MemberApp({ onLogout }) {
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load();
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries};
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"수업"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
@@ -3114,7 +3123,7 @@ function MemberWorkout(p){
 // 주의: "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds)는 여기(sessionStorage/openId)와는 정책이 다르다 —
 // 기본은 항상 접힘이어야 하므로 sessionStorage로 이전 방문 상태를 복원하지 않는다. MemberApp의 state로 옮겨졌다.
 const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
   // openId: null=사용자가 아직 선택하지 않음(항상 "현재 최신 세션"을 실제 id로 비교해 자동으로 펼침) · "__none__"=사용자가 펼쳐진 카드를 직접 접음(자동 재펼침 금지) · 그 외=해당 session.id가 펼쳐짐.
   // 과거에는 배열 인덱스(openId==="__first__"&&i===0)로 "최근 수업"을 판정해 저장 후 재조회로 목록이 다시 그려지며 인덱스가 흔들리면 카드가 접히는 문제가 있었다 — 이제 latestId(실제 session.id) 비교로만 판정한다.
   const [openId,setOpenIdState]=useState(()=>{ if(journalFocusId)return journalFocusId; try{return sessionStorage.getItem(JOURNAL_OPEN_ID_KEY);}catch{return null;} });
@@ -3132,11 +3141,13 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   // MemberJournal 안(또는 MemberFeedbackForm 내부)에 두면 그 언마운트 때 펼침 state가 사라져 저장 직후 접혀 보이므로,
   // load() 동안에도 인스턴스가 유지되는 MemberApp 쪽 state를 그대로 참조해야 저장 후 펼침이 유지된다.
   // 캘린더 날짜 상세에서 "수업일지 보기"로 진입한 경우 — 해당 수업을 펼치고 읽음 처리
-  useEffect(()=>{ if(journalFocusId){ setOpenId(journalFocusId); setShowAll(true); markSessionsAsRead?.([journalFocusId]); setJournalFocusId?.(null); }
+  useEffect(()=>{ if(journalFocusId){ setOpenId(journalFocusId); setShowAll(true); markSessionsAsRead?.([journalFocusId]); markSessionDetailRead?.(journalFocusId,"session_content_open"); setJournalFocusId?.(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[journalFocusId]);
   const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);
-  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const latestId=reversed[0]?.id; const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id; const toggleSess=(s)=>{setOpenId(prev=>(isExp(s)&&!lq)?"__none__":s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]);};
+  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const latestId=reversed[0]?.id; const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;
+  // 수업일지 "회원 확인"(운동 내용 실제 노출) — 접힘→펼침으로 바뀌는 순간에만 기록한다. 접는 동작은 절대 확인으로 세지 않는다.
+  const toggleSess=(s)=>{ const wasOpen=isExp(s); setOpenId(prev=>(wasOpen&&!lq)?"__none__":s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]); if(s.id&&!wasOpen&&markSessionDetailRead)markSessionDetailRead(s.id,"session_content_open"); };
   // 사용자가 명시적으로 펼쳤던 session.id가 재조회 후 더 이상 존재하지 않을 때만 openId를 초기화(null=자동으로 최신 세션 펼침)한다 — 저장으로 인한 정상적인 재조회에서는 openId를 건드리지 않는다.
   useEffect(()=>{
     if(openId==null||openId==="__none__"||!sessions.length)return; // sessions가 아직 로딩 전(빈 배열)일 때 오탐으로 초기화하지 않도록 가드
@@ -3145,6 +3156,15 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
   useEffect(()=>{if(markedRef.current||!markSessionsAsRead)return; markedRef.current=true; const ids=displayed.map(s=>s.id).filter(Boolean); if(ids.length)markSessionsAsRead(ids);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
+  // 수업일지 "회원 확인" — 최근 수업이 사용자 조작 없이 자동으로 펼쳐진(openId==null && 검색 중이 아님) 경우,
+  // 실제 운동 내용이 화면에 렌더링된 시점을 확인으로 기록한다. sessionId별로 이 컴포넌트 인스턴스에서 1회만 호출한다.
+  const detailAutoMarkedRef=useRef(new Set());
+  useEffect(()=>{
+    if(!markSessionDetailRead||lq||openId!=null||!latestId)return;
+    if(detailAutoMarkedRef.current.has(latestId))return;
+    detailAutoMarkedRef.current.add(latestId);
+    markSessionDetailRead(latestId,"auto_expanded_recent_session");
+  },[latestId,openId,lq,markSessionDetailRead]);
   // 펼친 수업 카드 — 최근 수업이든 이전 수업이든 같은 구성(날짜/부위/요약/운동 아코디언/피드백 카드)
   const renderExpanded=(s)=>{
     const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const isPr=prInfo.prSessionIds.has(s.id); const isLatest=s.id===latestId; const growth=growthBadges.get(s.id);
@@ -3169,7 +3189,11 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
         </header>
         <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>
         {/* 오늘 수업 기록 — 같은 수업 카드 안에서 운동 목록 아래에 이어지는 흐름(별도 카드 아님) */}
-        <MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>setFeedbackOpen(s.id,next)}/>
+        <MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>{
+          // "수업 후 몸 상태" 펼치기(닫힘→열림)만 확인으로 기록 — 접기는 확인이 아니고, 이미 열린 상태에서 다시 열리는 호출도 없다(next===true는 openWithScroll 클릭에서만 옴).
+          if(next&&!expandedFeedbackIds.has(s.id)&&markSessionDetailRead)markSessionDetailRead(s.id,"body_status_open");
+          setFeedbackOpen(s.id,next);
+        }}/>
       </section>
     </div>;
   };
@@ -6093,6 +6117,10 @@ export default function App() {
   }, [screen]);
   const [members,  setMembers]  = useState([]);
   const [sessionsMap, setSessionsMap] = useState({}); // {memberId: sessions[]}
+  // 수업일지 "회원 확인" — 홈 집계용(회원별 최근 세션 확인 상태, sessionsMap과 함께 loadMembers에서 로드)
+  const [sessionReadsMapByMember, setSessionReadsMapByMember] = useState({}); // {memberId: {sessionId: {firstReadAt,...}}}
+  // 수업일지 "회원 확인" — 현재 선택된 회원의 전체 세션 확인 상태(히스토리·회원 상세 요약용, loadMemberData에서 로드)
+  const [sessionReadsMap, setSessionReadsMap] = useState({});
   // 회원 목록 카드 체중 표시용 bodyCheck 요약 — 회원 상세와 같은 원본(bodyCheck.records)을 쓰기 위해 목록 로드 시 함께 읽는다
   const [weightBodyById, setWeightBodyById] = useState({}); // {memberId: {records:[...]}}
   const [member,   setMember]   = useState(null);
@@ -6109,6 +6137,7 @@ export default function App() {
   const [trendInitialDate, setTrendInitialDate] = useState(null); // 오늘 입력 피드에서 "회원 입력 변화" 화면으로 이동할 때 자동으로 펼칠 날짜
   const [trendInitialType, setTrendInitialType] = useState(null); // 위와 동일 — 어떤 항목(RPE/근육통/체중 등) 알림이었는지
   const [membersInitialFilter, setMembersInitialFilter] = useState(null); // 홈 "수업일지 미전송" 카드에서 회원목록 진입 시 적용할 기존 필터 키(예: "unrecorded") — MembersScreen이 마운트 시 1회 소비 후 자동으로 null로 되돌림
+  const [historyInitialReadFilter, setHistoryInitialReadFilter] = useState(null); // 회원 상세 "수업일지 확인" 요약·홈 "수업일지 미확인"에서 히스토리 진입 시 적용할 확인 필터("unread") — HistoryScreen 마운트 시 1회 소비
   const [loading,  setLoading]  = useState(false);
   // 회원 목록 전용 로딩/에러 — 다른 화면들이 공유하는 전역 loading과 분리한다.
   // (전역 loading은 회원 목록 조회와 무관한 다른 비동기 작업에서도 true/false로 계속 토글되므로,
@@ -6317,6 +6346,16 @@ export default function App() {
     if (isStale()) return;
     setSessionsMap(Object.fromEntries(entries));
 
+    // 홈 "수업일지 미확인" 집계용 — 회원별 확인 상태(회원당 문서 수 적음, 회원별 개별 try/catch로 격리)
+    const readEntries = await Promise.all(
+      mbs.map(async m => {
+        try { return [m.id, await getSessionReadMap(m.id)]; }
+        catch (e) { console.warn("[TEO GYM] loadMembers — 수업일지 확인 상태 조회 실패:", m.id, e.message); return [m.id, {}]; }
+      })
+    );
+    if (isStale()) return;
+    setSessionReadsMapByMember(Object.fromEntries(readEntries));
+
     // 회원 카드 체중(현재 체중·첫 측정 대비 변화)은 회원 상세와 같은 bodyCheck/main 기록만 사용한다.
     // 회원별 문서 1건 읽기이며 실패해도 카드의 나머지 정보에는 영향을 주지 않는다(해당 회원만 null 폴백).
     const bodyEntries = await Promise.all(
@@ -6342,12 +6381,13 @@ export default function App() {
   async function loadMemberData(memberId) {
     console.log("[TEO GYM] loadMemberData:", memberId);
     try {
-      const [ss, bc, nt, priv, cl] = await Promise.all([
+      const [ss, bc, nt, priv, cl, srm] = await Promise.all([
         getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
         getMemberPrivate(memberId).catch(() => ({})),
         getCardioLogs(memberId).catch(e => { console.error("[TEO GYM] getCardioLogs error:", e); return []; }),
+        getSessionReadMap(memberId).catch(e => { console.error("[TEO GYM] getSessionReadMap error:", e); return {}; }),
       ]);
       console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
       setSessions(ss);
@@ -6355,6 +6395,7 @@ export default function App() {
       setNutritionData(nt);
       setMemberPrivateData(priv);
       setCardioLogs(cl);
+      setSessionReadsMap(srm);
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -6367,6 +6408,7 @@ export default function App() {
     // 이전 회원 데이터 즉시 초기화 (다른 회원 데이터 노출 방지)
     setMember(m);
     setSessions([]);
+    setSessionReadsMap({});
     setBodyData(null);
     setNutritionData(null);
     setMemberPrivateData(null);
@@ -6393,6 +6435,12 @@ export default function App() {
   async function handleSaveNextPairSession(memberIds, patch) {
     await withTimeout(Promise.all(memberIds.map(id => updateMember(id, patch))));
     setMembers(prev => prev.map(m => memberIds.includes(m.id) ? { ...m, ...patch } : m));
+  }
+
+  // 홈 "수업일지 미확인" 카드 → 해당 회원의 히스토리 화면으로 바로 이동 + "회원 미확인" 필터 적용
+  function openMemberUnreadHistory(m) {
+    setHistoryInitialReadFilter("unread");
+    goHub(m, { targetScreen: "history" });
   }
 
   function goHubReload() {
@@ -6424,6 +6472,8 @@ export default function App() {
     // 잠깐이라도 보이는 일이 없도록 함(관리자 화면 재검증은 verifiedAdminUid 가드가 별도로 처리).
     setMembers([]);
     setSessionsMap({});
+    setSessionReadsMapByMember({});
+    setSessionReadsMap({});
     setWeightBodyById({});
     setSessions([]);
     setBodyData(null);
@@ -7060,18 +7110,18 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} sessionReadsMapByMember={sessionReadsMapByMember} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} onOpenMemberUnreadHistory={openMemberUnreadHistory} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} weightBodyById={weightBodyById} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm prefill={memberFormPrefill} onBack={() => { setMemberFormPrefill(null); if (memberFormPrefill) { setScreen("consultations"); return; } loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
-        {screen==="history"    && <HistoryScreen sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} initialReadFilter={historyInitialReadFilter} onInitialReadFilterConsumed={()=>setHistoryInitialReadFilter(null)} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="counselReport" && member && <CounselReportScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -7863,7 +7913,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, sessionReadsMapByMember, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession, onOpenMemberUnreadHistory }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
@@ -7919,6 +7969,11 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const unsentSessionRows = useMemo(
     () => buildUnsentSessionMembers(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
     [homeMembers, liveMembersById, sessionsMap, todayKST]
+  );
+  // "수업일지 미확인" — 미전송과 달리 이미 공개는 됐지만 회원이 아직 상세를 열어보지 않은 최근 14일 이내 기록
+  const unreadSessionRows = useMemo(
+    () => buildUnreadSessionMembers(homeMembers, liveMembersById, sessionsMap || {}, sessionReadsMapByMember || {}, todayKST),
+    [homeMembers, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST]
   );
   // "후기 미작성" — reviewStatus 목표가 설정돼 있으나 아직 완료 횟수를 채우지 못한 회원(HubScreen 후기 관리 카드와 동일 필드 재사용)
   const reviewPendingList = useMemo(
@@ -8328,9 +8383,10 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
              한 줄 균등 배치하고, 태블릿 세로처럼 폭은 넓지만 세로로 긴 화면(isWide && isPortrait)은 2열로 줄인다. ═══ */}
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${3+(onboardingPendingList.length>0?1:0)+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
+          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${4+(onboardingPendingList.length>0?1:0)+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
             <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={scrollToSection("home-next-booking")} />
             <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionRows.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={scrollToSection("home-unsent-sessions")} />
+            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unreadSessionRows.length} unit="명" title="수업일지 미확인" desc="전송했지만 회원이 아직 안 봤어요" doneDesc="전송한 수업일지를 모두 확인했어요" cta="확인하기" onClick={scrollToSection("home-unread-sessions")} />
             <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
             {onboardingPendingList.length > 0 && (
               <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
@@ -8539,6 +8595,18 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
               <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 수업일지 미전송{row.count>1?` · 미전송 ${row.count}건`:""}</div>
+            </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        )} />
+
+        {/* ═══ 수업일지 미확인 — 이미 회원에게 공개됐지만 회원이 아직 상세를 열어보지 않은 최근 14일 이내 기록 (미전송과는 별개 상태) ═══ */}
+        <TodayListCard id="home-unread-sessions" isWide={isWide} title="수업일지 미확인" count={unreadSessionRows.length} unit="명" captionText="회원에게 전송했지만 아직 회원이 열어보지 않았습니다(최근 14일)." emptyText="전송한 수업일지를 모두 확인했습니다" rows={unreadSessionRows} renderRow={(row,i)=>(
+          <button key={row.member.id} onClick={()=>onOpenMemberUnreadHistory?.(row.member)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 회원 미확인{row.count>1?` · 미확인 ${row.count}건`:""}</div>
             </div>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
           </button>
@@ -8907,6 +8975,39 @@ function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayK
       if (d > latestDate) latestDate = d;
     });
     if (unsentCount > 0) rows.push({ member: lm, date: latestDate, count: unsentCount });
+  });
+  return rows.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
+  });
+}
+
+// 홈 "수업일지 미확인" — "수업일지 미전송"(관리자가 아직 공개 안 함)과는 완전히 다른 상태다.
+// 이미 회원에게 공개(isPublished)됐지만 회원이 아직 상세를 열어보지 않은 기록만 대상 — 오래된 기록이 계속 쌓이지
+// 않도록 최근 14일 이내 공개분만 홈 알림 대상으로 삼는다(전체 미확인은 회원 상세/히스토리 "회원 미확인" 필터에서 확인).
+// sessionsMap은 회원별 최근 5세션만 담고 있어 그 범위 안에서만 판별한다(buildUnsentSessionMembers와 동일한 제약).
+const UNREAD_SESSION_WINDOW_DAYS = 14;
+function buildUnreadSessionMembers(members, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST) {
+  const sinceKey = getKoreaDateString(new Date(Date.now() - (UNREAD_SESSION_WINDOW_DAYS - 1) * 86400000));
+  const rows = [];
+  (members || []).forEach(m => {
+    if (isExcludedAdminMember(m)) return; // TEO 대표 개인 기록·테스트 회원 제외
+    const live = liveMembersById[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return;
+    const ss = sessionsMap?.[lm.id] || [];
+    const readMap = sessionReadsMapByMember?.[lm.id] || {};
+    let latestDate = "";
+    let unreadCount = 0;
+    ss.forEach(s => {
+      if (!s.isPublished) return; // 비공개는 "미전송" 영역이지 "미확인" 대상이 아니다
+      const d = toUnsentCheckDateKey(s.date || s.sessionDate || s.createdAt);
+      if (!d || d < sinceKey || d > todayKST) return;
+      if (getSessionReadStatus(s.id, readMap).isRead) return;
+      unreadCount += 1;
+      if (d > latestDate) latestDate = d;
+    });
+    if (unreadCount > 0) rows.push({ member: lm, date: latestDate, count: unreadCount });
   });
   return rows.sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;
@@ -12087,7 +12188,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   );
 }
 
-function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -12653,12 +12754,25 @@ function HubScreen({ member, allMembers, sessions, bodyData, nutritionData, card
   );
 
   // ⑤ 최근 수업 — 날짜 + 부위 + 공개상태만, 펼치면 세부
+  // 수업일지 "회원 확인" 요약 — 최근 공개 5건 기준, 새 큰 카드 없이 기존 최근 수업 영역 안에 작은 한 줄로만 표시.
+  // 대표(TEO) 개인 운동기록은 회원앱 열람 개념이 없으므로 숨긴다.
+  const sessionReadSummary = !isOwner(member) ? summarizeSessionReadStatus(sessions, sessionReadsMap, 5) : null;
   const secRecent = (
-          <section className="hub-sec-recent" style={{...card, padding:"12px 8px 8px"}}>
+          <section id="hub-sec-recent" className="hub-sec-recent" style={{...card, padding:"12px 8px 8px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:4,padding:"0 8px"}}>
               <span style={cardTitle}>최근 수업</span>
               {last?.date&&<span style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font}}>최근 {last.date}</span>}
             </div>
+            {sessionReadSummary && sessionReadSummary.total>0 && (
+              <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:6,padding:"0 8px",marginBottom:8,fontFamily:DB.font,fontSize:11.5,color:DB.sub}}>
+                <span>수업일지 확인 · 최근 {sessionReadSummary.total}건 중 {sessionReadSummary.readCount}건 확인</span>
+                {sessionReadSummary.unreadCount>0 ? (
+                  <button type="button" onClick={onOpenUnreadHistory} style={{border:"none",background:"none",padding:0,cursor:"pointer",fontFamily:DB.font,fontSize:11.5,fontWeight:800,color:"#B45309",textDecoration:"underline",textUnderlineOffset:"3px"}}>
+                    미확인 {sessionReadSummary.unreadCount}건
+                  </button>
+                ) : <span style={{fontWeight:700,color:"#15803D"}}>미확인 0건</span>}
+              </div>
+            )}
             {loading ? <div style={{padding:"12px 8px"}}><Skel n={3}/></div> : recentList.length===0 ? (
               <div style={{padding:"20px 8px",textAlign:"center",fontSize:11.5,color:DB.faint}}>{t("수업 기록이 없습니다.","운동 기록이 없습니다.")}</div>
             ) : (
@@ -15406,6 +15520,67 @@ function HistNum({ children, weight=700, style }) {
   return <span style={{...HIST_NUM_FONT, fontWeight:weight, ...(style||{})}}>{children}</span>;
 }
 
+// ════════════════════════════════════════════════════
+// 수업일지 "회원 확인" 공통 헬퍼(관리자앱 전용 표시 로직) — readMap은 db.getSessionReadMap(memberId) 결과를 그대로 사용.
+// 회원앱 쓰기 경로(markSessionDetailReadDb 호출)는 MemberApp/MemberJournal에 있고, 여기는 판정·표시만 담당한다.
+// ════════════════════════════════════════════════════
+function getSessionReadStatus(sessionId, readMap) {
+  const info = (readMap && sessionId) ? readMap[sessionId] : null;
+  if (!info || !info.firstReadAt) return { isRead: false, firstReadAt: null, lastReadAt: null, readCount: 0 };
+  return {
+    isRead: true,
+    firstReadAt: info.firstReadAt,
+    lastReadAt: info.lastReadAt || info.firstReadAt,
+    readCount: Number(info.readCount) || 1,
+    firstReadSource: info.firstReadSource || null,
+    lastReadSource: info.lastReadSource || null,
+  };
+}
+// Firestore Timestamp/Date/문자열 어떤 형태로 저장돼 있어도 같은 해는 "7월 30일 13:12", 다른 해는 "2026.07.30 13:12"로 표시
+function formatSessionReadTime(value) {
+  if (!value) return "";
+  const raw = typeof value?.toDate === "function" ? value.toDate() : value;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(d.getTime())) return "";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (d.getFullYear() === new Date().getFullYear()) return `${d.getMonth() + 1}월 ${d.getDate()}일 ${hh}:${mm}`;
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${hh}:${mm}`;
+}
+// 회원 상세 "수업일지 확인" 요약 — 공개된 세션 중 최근 n건(기본 5건) 기준 확인/미확인 건수만 집계(신규 저장 없음, 비공개는 집계 대상 아님)
+function summarizeSessionReadStatus(sessions, readMap, limitCount = 5) {
+  const published = (sessions || [])
+    .filter(s => s?.isPublished)
+    .slice()
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, limitCount);
+  const readCount = published.filter(s => getSessionReadStatus(s.id, readMap).isRead).length;
+  return { total: published.length, readCount, unreadCount: published.length - readCount };
+}
+// 히스토리 카드용 회원 확인 배지 — 비공개 세션은 표시하지 않는다(공개·비공개 배지가 이미 상태를 전달하므로 중복 없음).
+// compact(모바일 등 좁은 화면)에서는 시각 없이 "회원 확인"만 표시하고, 최초 확인 시각은 title 툴팁으로 제공한다.
+function SessionReadBadge({ session, readMap, compact=false }) {
+  if (!session?.isPublished) return null;
+  const status = getSessionReadStatus(session.id, readMap);
+  if (!status.isRead) {
+    return (
+      <span style={{display:"inline-flex",alignItems:"center",fontFamily:DB.font,fontSize:11,fontWeight:700,
+        padding:"3px 10px",borderRadius:999,background:"rgba(245,158,11,.10)",color:"#92600A",
+        border:"1px solid rgba(245,158,11,.28)",whiteSpace:"nowrap"}}>
+        {compact?"미확인":"회원 미확인"}
+      </span>
+    );
+  }
+  const timeLabel = formatSessionReadTime(status.firstReadAt);
+  return (
+    <span title={timeLabel?`최초 확인 · ${timeLabel}`:undefined} style={{display:"inline-flex",alignItems:"center",gap:4,fontFamily:DB.font,fontSize:11,fontWeight:700,
+      padding:"3px 10px",borderRadius:999,background:"rgba(34,197,94,.10)",color:"#15803D",
+      border:"1px solid rgba(34,197,94,.28)",whiteSpace:"nowrap"}}>
+      {(compact||!timeLabel)?"회원 확인":`확인 · ${timeLabel}`}
+    </span>
+  );
+}
+
 // 회원 공개 배지 — 히스토리 카드에서 항상 노출(숨김·삭제 금지)
 function HistPublishBadge({ s }) {
   if (s.isPublished) {
@@ -16393,7 +16568,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioLogs=[], loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member }) {
+function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member, initialReadFilter=null, onInitialReadFilterConsumed }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   // 세션 날짜(YYYY-MM-DD) 기준으로 그날 회원이 입력한 체중/칼로리/유산소를 매칭 — 새 저장 경로 없이 기존 기록만 조회
   const weightByDate = useMemo(() => {
@@ -16417,6 +16592,14 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
   const [cardMode, setCardMode] = useState("simple");
   const [sortMode, setSortMode] = useState("no"); // 기본: 회차별 내림차순
   const [filterPart, setFilterPart] = useState(null);
+  // 회원 확인 필터(전체/회원 확인/회원 미확인) — 기존 정렬 탭(sortMode)과 독립적으로 함께 적용된다.
+  const [readFilter, setReadFilter] = useState(initialReadFilter === "unread" ? "unread" : "all");
+  useEffect(() => {
+    if (!initialReadFilter) return;
+    setReadFilter(initialReadFilter);
+    onInitialReadFilterConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialReadFilter]);
   // 히스토리 카드 모바일 레이아웃 — 오른쪽 요약 영역이 flexShrink:0로 폭을 고정 요구해 좁은 화면에서 왼쪽(날짜/부위명)이 0에 가깝게 눌려 한글이 음절 단위로 세로 줄바꿈되는 문제 방지
   const [isMobile, setIsMobile] = useState(typeof window!=="undefined" ? window.innerWidth<=768 : false);
   useEffect(() => {
@@ -16457,6 +16640,13 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
   const availableParts = sortMode === "part"
     ? [...new Set(sessions.flatMap(s=>Array.isArray(s.exercises)?s.exercises.map(e=>e&&e.muscleTop).filter(Boolean):[]))]
     : [];
+
+  // 회원 확인 필터 적용 — 비공개 수업일지는 "회원 확인/미확인" 어느 쪽에도 해당하지 않으므로 두 필터 모두에서 제외한다(전체는 그대로 노출).
+  const readFilteredSessions = readFilter === "all" ? sortedSessions : sortedSessions.filter(s => {
+    if (!s.isPublished) return false;
+    const isRead = getSessionReadStatus(s.id, sessionReadsMap).isRead;
+    return readFilter === "read" ? isRead : !isRead;
+  });
 
   // 나눠서 기록 확인 모달
   const PairConfirmModal = confirmPair ? (
@@ -16562,6 +16752,21 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
         </div>
       )}
 
+      {/* 회원 확인 필터 — 대표(TEO) 개인 운동기록은 회원앱 열람 개념이 없으므로 숨긴다 */}
+      {!isOwner(member) && (
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+          {[["all","전체"],["read","회원 확인"],["unread","회원 미확인"]].map(([m,l])=>(
+            <button key={m} onClick={()=>setReadFilter(m)}
+              style={{padding:"7px 15px",borderRadius:999,border:`1px solid ${readFilter===m?"rgba(34,197,94,.4)":DB.border}`,
+                fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font,
+                background:readFilter===m?"rgba(34,197,94,.10)":DB.card,
+                color:readFilter===m?"#15803D":DB.sub}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,marginBottom:12}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</div>
       {loading ? (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -16569,13 +16774,13 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
             <div key={i} style={{height:96,background:DB.card,border:`1px solid ${DB.border}`,borderRadius:16}}/>
           ))}
         </div>
-      ) : sortedSessions.length===0 ? (
+      ) : readFilteredSessions.length===0 ? (
         <div style={{textAlign:"center",padding:"48px 16px",fontFamily:DB.font,fontSize:13,color:DB.faint}}>
-          {isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다."}
+          {sortedSessions.length>0 ? "조건에 맞는 기록이 없습니다." : (isOwner(member)?"운동 기록이 없습니다.":"수업 기록이 없습니다.")}
         </div>
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          {sortedSessions.map((s,i) => {
+          {readFilteredSessions.map((s,i) => {
             const typeLbl = formatTypes(s.selectedTypes || s.type);
             const ic = IC[s.intensity] || "#ffd166";
             const cc = CC[s.condition] || CC["상"];
@@ -16605,6 +16810,7 @@ function HistoryScreen({ sessions: rawSessions, bodyData, nutritionData, cardioL
                         <HistNum weight={700} style={{fontSize:15}}>{s.sessionNo}</HistNum>회차
                       </span>
                       <HistPublishBadge s={s} />
+                      {!isOwner(member) && <SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} />}
                     </div>
                     <div style={{fontFamily:DB.font,fontWeight:600,fontSize:14,color:DB.mintSoft,marginBottom:14}}>{weekday}</div>
 

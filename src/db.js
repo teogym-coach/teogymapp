@@ -1101,6 +1101,53 @@ export async function markSessionsRead(memberId, sessionIds) {
 }
 
 // ════════════════════════════════════════════════════
+// 수업일지 "회원 확인" — 위 readSessions(목록 진입만으로 마킹되는 배지 전용 읽음)와는 완전히 별개.
+// 회원이 실제로 운동 내용(펼친 수업 카드) 또는 "수업 후 몸 상태" 펼치기 버튼을 눌러 상세를 연 시점에만
+// 호출된다(호출 시점 판단은 App.jsx 쪽 책임 — 여기서는 저장만 담당). 관리자앱 미리보기는 이 함수를
+// 호출하는 컴포넌트 트리 자체를 타지 않으므로 별도 플래그 없이 구조적으로 배제된다.
+// members/{memberId}/sessionReads/{sessionId} — firstReadAt은 최초 1회만 기록하고 이후에는 절대 덮어쓰지 않는다.
+export async function markSessionDetailRead(memberId, sessionId, source) {
+  if (!memberId || !sessionId) return;
+  try {
+    const ref = doc(db, "members", memberId, "sessionReads", sessionId);
+    const snap = await getDoc(ref);
+    const now = serverTimestamp();
+    const readSource = source || "unknown";
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        sessionId, memberId,
+        firstReadAt: now, lastReadAt: now,
+        readCount: 1,
+        firstReadSource: readSource, lastReadSource: readSource,
+      });
+    } else {
+      const prevCount = Number(snap.data()?.readCount) || 1;
+      await updateDoc(ref, {
+        lastReadAt: now,
+        lastReadSource: readSource,
+        readCount: prevCount + 1,
+      });
+    }
+  } catch (e) {
+    console.warn("[DB:markSessionDetailRead]", e?.code || e?.message || e);
+  }
+}
+
+// 관리자앱 — 회원 1명의 수업일지 확인 상태를 한 번에 조회(히스토리 카드 배지·회원 상세 요약용)
+export async function getSessionReadMap(memberId) {
+  if (!memberId) return {};
+  try {
+    const snap = await getDocs(collection(db, "members", memberId, "sessionReads"));
+    const map = {};
+    snap.docs.forEach(d => { map[d.id] = d.data(); });
+    return map;
+  } catch (e) {
+    console.warn("[DB:getSessionReadMap]", e?.code || e?.message || e);
+    return {};
+  }
+}
+
+// ════════════════════════════════════════════════════
 // 회원 활동 요약 (관리자앱 회원 카드/히스토리 실시간 표시용)
 // members/{id}.todayInputTypes / recentActivityLog 필드만 추가 — 기존 저장 경로는 그대로 둔다.
 // ════════════════════════════════════════════════════

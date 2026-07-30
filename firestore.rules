@@ -290,6 +290,32 @@ service cloud.firestore {
         allow delete: if isTrainerOfMember(memberId);
       }
 
+      // 회원 앱 이용 현황(관리자 전용 참고 지표) — 회원 본인은 자기 활동 데이터만 생성·갱신 가능, 읽기는 트레이너만 허용한다.
+      // (회원앱 화면에 이 값을 절대 노출하지 않는 정책과 일치 — 회원 스스로도 자기 이용 기록을 조회할 수단을 주지 않는다)
+      // firstUsedAt은 최초 생성 이후 변경 불가, memberId 위조 방지, 허용 필드 외 임의 필드 저장 방지.
+      match /appUsage/{docId} {
+        allow read: if isTrainerOfMember(memberId);
+        allow create: if isMemberSelfActive(memberId)
+                      && docId == "summary"
+                      && request.resource.data.keys().hasOnly(["memberId", "firstUsedAt", "lastActiveAt", "lastActiveTab", "updatedAt"])
+                      && request.resource.data.memberId == memberId;
+        allow update: if isMemberSelfActive(memberId)
+                      && docId == "summary"
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastActiveAt", "lastActiveTab", "updatedAt", "memberId"]);
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
+      // 회원 앱 "최근 30일 이용일 수" 계산 전용 — 문서 id(dateId)와 date 필드가 반드시 일치해야 하고, firstActiveAt/date는 생성 후 불변.
+      match /appUsageDays/{dateId} {
+        allow read: if isTrainerOfMember(memberId);
+        allow create: if isMemberSelfActive(memberId)
+                      && request.resource.data.keys().hasOnly(["date", "firstActiveAt", "lastActiveAt", "tabs"])
+                      && request.resource.data.date == dateId;
+        allow update: if isMemberSelfActive(memberId)
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastActiveAt", "tabs"]);
+        allow delete: if isTrainerOfMember(memberId);
+      }
+
       match /noticeReads/{noticeId} {
         allow read: if canAccessMember(memberId);
         allow create, update: if isMemberSelfActive(memberId)

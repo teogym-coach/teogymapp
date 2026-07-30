@@ -1148,6 +1148,67 @@ export async function getSessionReadMap(memberId) {
 }
 
 // ════════════════════════════════════════════════════
+// 회원 앱 이용 현황(관리자 전용 참고 지표) — 회원앱 화면·문구는 절대 건드리지 않는다.
+// members/{memberId}/appUsage/summary        — 최근 이용 시각 1건(문서 1개, 반복 갱신에도 read/write 비용 최소)
+// members/{memberId}/appUsageDays/{YYYY-MM-DD} — "이용일 수" 계산 전용(같은 날 중복 방문은 문서 1개로 합쳐짐, tabs는 그날 방문한 탭 목록)
+// 쓰기 호출 자체의 빈도 제한(스로틀)은 호출부(App.jsx MemberApp)의 책임 — 여기서는 저장만 담당.
+// ════════════════════════════════════════════════════
+export async function recordMemberAppUsage(memberId, tab) {
+  if (!memberId) return;
+  try {
+    const now = serverTimestamp();
+    const dateKey = koreaDateKey();
+    const summaryRef = doc(db, "members", memberId, "appUsage", "summary");
+    const dayRef = doc(db, "members", memberId, "appUsageDays", dateKey);
+    const [summarySnap, daySnap] = await Promise.all([getDoc(summaryRef), getDoc(dayRef)]);
+    const batch = writeBatch(db);
+    batch.set(summaryRef, {
+      memberId, lastActiveAt: now, lastActiveTab: tab || null, updatedAt: now,
+      ...(summarySnap.exists() ? {} : { firstUsedAt: now }),
+    }, { merge: true });
+    const prevTabs = Array.isArray(daySnap.data()?.tabs) ? daySnap.data().tabs : [];
+    batch.set(dayRef, {
+      date: dateKey, lastActiveAt: now,
+      tabs: prevTabs.includes(tab) ? prevTabs : [...prevTabs, tab || "unknown"].slice(0, 10),
+      ...(daySnap.exists() ? {} : { firstActiveAt: now }),
+    }, { merge: true });
+    await batch.commit();
+  } catch (e) {
+    console.warn("[DB:recordMemberAppUsage]", e?.code || e?.message || e);
+  }
+}
+
+// 관리자앱 회원 상세 — 이용 요약 + 최근 30일(오늘 포함) 이용일 수(appUsageDays 문서 개수, 중복 방문은 이미 날짜별 1건으로 합쳐져 있음)
+export async function getMemberAppUsage(memberId) {
+  if (!memberId) return { summary: null, activeDays30: 0 };
+  try {
+    const cutoffKey = koreaDateKey(new Date(Date.now() - 29 * 86400000));
+    const summaryRef = doc(db, "members", memberId, "appUsage", "summary");
+    const daysQuery = query(collection(db, "members", memberId, "appUsageDays"), where("date", ">=", cutoffKey));
+    const [summarySnap, daysSnap] = await Promise.all([getDoc(summaryRef), getDocs(daysQuery)]);
+    return {
+      summary: summarySnap.exists() ? summarySnap.data() : null,
+      activeDays30: daysSnap.size,
+    };
+  } catch (e) {
+    console.warn("[DB:getMemberAppUsage]", e?.code || e?.message || e);
+    return { summary: null, activeDays30: 0 };
+  }
+}
+
+// 관리자앱 홈 — 전 회원 대상 "최근 이용" 집계용 경량 버전(요약 문서 1건만 조회, appUsageDays는 상세에서만 조회)
+export async function getMemberAppUsageSummary(memberId) {
+  if (!memberId) return null;
+  try {
+    const snap = await getDoc(doc(db, "members", memberId, "appUsage", "summary"));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.warn("[DB:getMemberAppUsageSummary]", e?.code || e?.message || e);
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════
 // 회원 활동 요약 (관리자앱 회원 카드/히스토리 실시간 표시용)
 // members/{id}.todayInputTypes / recentActivityLog 필드만 추가 — 기존 저장 경로는 그대로 둔다.
 // ════════════════════════════════════════════════════

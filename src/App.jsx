@@ -27,6 +27,7 @@ import {
   saveFcmToken,
   getReadSessionIds, markSessionsRead, SESSION_UNREAD_CUTOFF,
   markSessionDetailRead as markSessionDetailReadDb, getSessionReadMap,
+  recordMemberAppUsage, getMemberAppUsage, getMemberAppUsageSummary,
   saveAttendance, getAttendanceRecent, deleteAttendance,
   getCardioLogs, saveCardioLog, deleteCardioLog,
   CONSULT_STATUS_OPTIONS, getConsultations, addConsultation, updateConsultation, deleteConsultation, convertConsultationToMember,
@@ -1500,6 +1501,9 @@ function isMemberDebugMode(){
     return false;
   }
 }
+// 회원 앱 이용 현황 쓰기 스로틀 — 동일 로그인 세션(탭)에서는 이 간격 안에서 다시 쓰지 않는다.
+const APP_USAGE_MIN_INTERVAL_MS=10*60*1000;
+const APP_USAGE_LAST_WRITE_KEY="teogym_appUsage_lastWriteAt";
 function MemberApp({ onLogout }) {
   const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [conditionSaving,setConditionSaving]=useState(false); const [painSaving,setPainSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
   const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg)),ms))]);
@@ -1553,6 +1557,21 @@ function MemberApp({ onLogout }) {
       else navigator.clearAppBadge?.().catch(()=>{});
     }catch{}
   },[badgeUnreadCount]);
+  // 회원 앱 이용 현황(관리자 전용 참고 지표, 회원앱 화면에는 절대 노출하지 않음) — home/workout/health/analysis/profile
+  // 주요 탭 진입만 활동으로 인정한다. 온보딩 진행 중(정상 탭 화면이 아직 아님)에는 기록하지 않는다.
+  // 관리자 "회원앱 미리보기"는 이 컴포넌트 트리를 타지 않으므로 별도 플래그 없이 구조적으로 배제되고(수업일지
+  // 회원 확인 기능과 동일한 방식), TEO 대표·테스트 회원 계정은 isExcludedAdminMember로 명시적으로 제외한다.
+  // sessionStorage에 마지막 저장 시각을 남겨, 저장 후 load()로 MemberApp이 재마운트돼 React state가 초기화돼도
+  // 짧은 시간 안에 중복 저장되지 않게 한다(탭 전환마다 무조건 쓰지 않고 최소 10분 간격으로 제한).
+  useEffect(()=>{
+    if(!profile?.id||profile.memberUid!==auth.currentUser?.uid||!onboardingDone||isExcludedAdminMember(profile))return;
+    let lastWriteAt=0;
+    try{ lastWriteAt=Number(sessionStorage.getItem(APP_USAGE_LAST_WRITE_KEY))||0; }catch{}
+    if(Date.now()-lastWriteAt<APP_USAGE_MIN_INTERVAL_MS)return;
+    try{ sessionStorage.setItem(APP_USAGE_LAST_WRITE_KEY,String(Date.now())); }catch{}
+    recordMemberAppUsage(profile.id,tab).catch(()=>{});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[tab,profile?.id,onboardingDone]);
   const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(p?.id){touchMemberAppLastLogin(p.id).catch(()=>{});} if(!p){ setMemberError("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요."); setMemberErrorDetails({code:"member/not-found",path:"members?where(memberUid==auth.uid)",authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:"members?where(memberUid==auth.uid)",status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); return fallback; } }; const [ss,bd,nt,ci,ms,ob,rr,dc,ns,rs,cl,csm]=await Promise.all([readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]),readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null),readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null),readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]),readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]),readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null),readStep("8","routineRecommendations",`members/${p.id}/routineRecommendations (published)`,()=>getRoutineRecommendations(p.id,{publishedOnly:true}),[]),readStep("9","dailyConditioning",`dailyConditioning + members/${p.id}/dailyConditioning (published)`,()=>getDailyConditioning({memberId:p.id,publishedOnly:true}),[]),readStep("10","notices",`notices + members/${p.id}/noticeReads`,()=>getMemberNotices(p.id),[]),readStep("11","readSessions",`members/${p.id}/readSessions`,()=>getReadSessionIds(p.id),new Set()),readStep("12","cardioLogs",`members/${p.id}/cardioLogs`,()=>getCardioLogs(p.id,60),[]),readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[])]); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); setRoutineRecommendations(rr); setDailyConditioning(dc); setNotices(ns); setReadSessionIds(rs instanceof Set?rs:new Set()); setCardioLogs(cl||[]); setCorrectionSummaries((csm||[]).filter(x=>x.visibleToMember!==false)); getAttendanceRecent(p.id,90).then(setAttendance).catch(()=>{}); const todayCheck=(ci||[]).find(c=>c.date===today||c.id===today)||{}; setForm(f=>({...f,weight:"",kcal:"",steps:"",condition:todayCheck.condition||f.condition||"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:p.memberMessage||f.memberMessage})); }catch(e){ setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ setLoading(false); }},[]); useEffect(()=>{load();},[load]);
   if(loading) return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><Spin/></div>;
   if(memberError||!profile) return <MemberAppError message={memberError||"회원 정보를 찾을 수 없습니다. 대표에게 문의해주세요."} details={memberErrorDetails} logs={accessLogs} onRetry={load} onLogout={onLogout}/>;
@@ -6121,6 +6140,10 @@ export default function App() {
   const [sessionReadsMapByMember, setSessionReadsMapByMember] = useState({}); // {memberId: {sessionId: {firstReadAt,...}}}
   // 수업일지 "회원 확인" — 현재 선택된 회원의 전체 세션 확인 상태(히스토리·회원 상세 요약용, loadMemberData에서 로드)
   const [sessionReadsMap, setSessionReadsMap] = useState({});
+  // 회원 앱 이용 현황 — 홈 "최근 이용 없음" 판정용(회원별 요약 문서만 경량 조회, loadMembers에서 로드)
+  const [appUsageSummaryByMember, setAppUsageSummaryByMember] = useState({}); // {memberId: {lastActiveAt,...}|null}
+  // 회원 앱 이용 현황 — 현재 선택된 회원의 상세(요약 + 최근 30일 이용일 수, loadMemberData에서 로드)
+  const [memberAppUsage, setMemberAppUsage] = useState({ summary: null, activeDays30: 0 });
   // 회원 목록 카드 체중 표시용 bodyCheck 요약 — 회원 상세와 같은 원본(bodyCheck.records)을 쓰기 위해 목록 로드 시 함께 읽는다
   const [weightBodyById, setWeightBodyById] = useState({}); // {memberId: {records:[...]}}
   const [member,   setMember]   = useState(null);
@@ -6356,6 +6379,16 @@ export default function App() {
     if (isStale()) return;
     setSessionReadsMapByMember(Object.fromEntries(readEntries));
 
+    // 홈 "최근 이용 없음" 집계용 — 회원별 이용 요약 문서만 경량 조회(회원당 1건, appUsageDays는 상세 진입 시에만 조회)
+    const appUsageEntries = await Promise.all(
+      mbs.map(async m => {
+        try { return [m.id, await getMemberAppUsageSummary(m.id)]; }
+        catch (e) { console.warn("[TEO GYM] loadMembers — 앱 이용 현황 조회 실패:", m.id, e.message); return [m.id, null]; }
+      })
+    );
+    if (isStale()) return;
+    setAppUsageSummaryByMember(Object.fromEntries(appUsageEntries));
+
     // 회원 카드 체중(현재 체중·첫 측정 대비 변화)은 회원 상세와 같은 bodyCheck/main 기록만 사용한다.
     // 회원별 문서 1건 읽기이며 실패해도 카드의 나머지 정보에는 영향을 주지 않는다(해당 회원만 null 폴백).
     const bodyEntries = await Promise.all(
@@ -6381,13 +6414,14 @@ export default function App() {
   async function loadMemberData(memberId) {
     console.log("[TEO GYM] loadMemberData:", memberId);
     try {
-      const [ss, bc, nt, priv, cl, srm] = await Promise.all([
+      const [ss, bc, nt, priv, cl, srm, au] = await Promise.all([
         getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
         getMemberPrivate(memberId).catch(() => ({})),
         getCardioLogs(memberId).catch(e => { console.error("[TEO GYM] getCardioLogs error:", e); return []; }),
         getSessionReadMap(memberId).catch(e => { console.error("[TEO GYM] getSessionReadMap error:", e); return {}; }),
+        getMemberAppUsage(memberId).catch(e => { console.error("[TEO GYM] getMemberAppUsage error:", e); return { summary: null, activeDays30: 0 }; }),
       ]);
       console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
       setSessions(ss);
@@ -6396,6 +6430,7 @@ export default function App() {
       setMemberPrivateData(priv);
       setCardioLogs(cl);
       setSessionReadsMap(srm);
+      setMemberAppUsage(au);
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -6409,6 +6444,7 @@ export default function App() {
     setMember(m);
     setSessions([]);
     setSessionReadsMap({});
+    setMemberAppUsage({ summary: null, activeDays30: 0 });
     setBodyData(null);
     setNutritionData(null);
     setMemberPrivateData(null);
@@ -6474,6 +6510,8 @@ export default function App() {
     setSessionsMap({});
     setSessionReadsMapByMember({});
     setSessionReadsMap({});
+    setAppUsageSummaryByMember({});
+    setMemberAppUsage({ summary: null, activeDays30: 0 });
     setWeightBodyById({});
     setSessions([]);
     setBodyData(null);
@@ -7110,13 +7148,13 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} sessionReadsMapByMember={sessionReadsMapByMember} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} onOpenMemberUnreadHistory={openMemberUnreadHistory} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} sessionReadsMapByMember={sessionReadsMapByMember} appUsageSummaryByMember={appUsageSummaryByMember} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} onOpenMemberUnreadHistory={openMemberUnreadHistory} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} weightBodyById={weightBodyById} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm prefill={memberFormPrefill} onBack={() => { setMemberFormPrefill(null); if (memberFormPrefill) { setScreen("consultations"); return; } loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -7913,7 +7951,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, sessionReadsMapByMember, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession, onOpenMemberUnreadHistory }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, sessionReadsMapByMember, appUsageSummaryByMember, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession, onOpenMemberUnreadHistory }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
@@ -7975,6 +8013,25 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     () => buildUnreadSessionMembers(homeMembers, liveMembersById, sessionsMap || {}, sessionReadsMapByMember || {}, todayKST),
     [homeMembers, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST]
   );
+  // "회원앱 확인 필요" — 점수·등급·순위 없이 객관적 행동 사실만: 최근 이용 흔적 없음 + 최근 몸 상태 입력 없음(둘 다 유예/제외 기준은 헬퍼 내부 참고)
+  const inactiveAppRows = useMemo(
+    () => getInactiveAppMembers(homeMembers, liveMembersById, appUsageSummaryByMember || {}, todayKST),
+    [homeMembers, liveMembersById, appUsageSummaryByMember, todayKST]
+  );
+  const noFeedbackRows = useMemo(
+    () => getNoFeedbackActivityMembers(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
+    [homeMembers, liveMembersById, sessionsMap, todayKST]
+  );
+  const appUsageCheckRows = useMemo(() => {
+    const byId = new Map();
+    inactiveAppRows.forEach(r => byId.set(r.member.id, { member: r.member, daysSinceActive: r.daysSinceActive, noFeedback: false }));
+    noFeedbackRows.forEach(r => {
+      const prev = byId.get(r.member.id);
+      if (prev) prev.noFeedback = true;
+      else byId.set(r.member.id, { member: r.member, daysSinceActive: null, noFeedback: true });
+    });
+    return [...byId.values()].sort((a, b) => String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko"));
+  }, [inactiveAppRows, noFeedbackRows]);
   // "후기 미작성" — reviewStatus 목표가 설정돼 있으나 아직 완료 횟수를 채우지 못한 회원(HubScreen 후기 관리 카드와 동일 필드 재사용)
   const reviewPendingList = useMemo(
     () => buildReviewPendingList(homeMembers, liveMembersById),
@@ -8383,10 +8440,11 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
              한 줄 균등 배치하고, 태블릿 세로처럼 폭은 넓지만 세로로 긴 화면(isWide && isPortrait)은 2열로 줄인다. ═══ */}
         <div style={{marginBottom:GAP}}>
           <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${4+(onboardingPendingList.length>0?1:0)+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
+          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${5+(onboardingPendingList.length>0?1:0)+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
             <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={scrollToSection("home-next-booking")} />
             <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionRows.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={scrollToSection("home-unsent-sessions")} />
             <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unreadSessionRows.length} unit="명" title="수업일지 미확인" desc="전송했지만 회원이 아직 안 봤어요" doneDesc="전송한 수업일지를 모두 확인했어요" cta="확인하기" onClick={scrollToSection("home-unread-sessions")} />
+            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={appUsageCheckRows.length} unit="명" title="회원앱 확인 필요" desc="최근 이용 흔적이나 입력이 뜸해요" doneDesc="모든 회원이 앱을 꾸준히 이용하고 있어요" cta="확인하기" onClick={scrollToSection("home-appusage-check")} />
             <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
             {onboardingPendingList.length > 0 && (
               <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
@@ -8607,6 +8665,21 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
               <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 회원 미확인{row.count>1?` · 미확인 ${row.count}건`:""}</div>
+            </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        )} />
+
+        {/* ═══ 회원앱 확인 필요 — 점수·등급·순위 없이 객관적 사실만(최근 이용 흔적 없음/몸 상태 입력 없음). 수업일지 미확인과는 별개 카드로 분리 ═══ */}
+        <TodayListCard id="home-appusage-check" isWide={isWide} title="회원앱 확인 필요" count={appUsageCheckRows.length} unit="명" captionText="최근 이용 흔적이 없거나 몸 상태 입력이 뜸한 회원입니다." emptyText="모든 회원이 앱을 꾸준히 이용하고 있습니다" rows={appUsageCheckRows} renderRow={(row,i)=>(
+          <button key={row.member.id} onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-sec-recent"})} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>
+                {row.daysSinceActive!=null ? `최근 이용 ${row.daysSinceActive}일 전` : "최근 이용 기록 없음"}
+                {row.noFeedback ? " · 최근 몸 상태 입력 없음" : ""}
+              </div>
             </div>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
           </button>
@@ -12188,7 +12261,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   );
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -12754,25 +12827,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, bodyData, nu
   );
 
   // ⑤ 최근 수업 — 날짜 + 부위 + 공개상태만, 펼치면 세부
-  // 수업일지 "회원 확인" 요약 — 최근 공개 5건 기준, 새 큰 카드 없이 기존 최근 수업 영역 안에 작은 한 줄로만 표시.
-  // 대표(TEO) 개인 운동기록은 회원앱 열람 개념이 없으므로 숨긴다.
-  const sessionReadSummary = !isOwner(member) ? summarizeSessionReadStatus(sessions, sessionReadsMap, 5) : null;
   const secRecent = (
           <section id="hub-sec-recent" className="hub-sec-recent" style={{...card, padding:"12px 8px 8px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:4,padding:"0 8px"}}>
               <span style={cardTitle}>최근 수업</span>
               {last?.date&&<span style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font}}>최근 {last.date}</span>}
             </div>
-            {sessionReadSummary && sessionReadSummary.total>0 && (
-              <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:6,padding:"0 8px",marginBottom:8,fontFamily:DB.font,fontSize:11.5,color:DB.sub}}>
-                <span>수업일지 확인 · 최근 {sessionReadSummary.total}건 중 {sessionReadSummary.readCount}건 확인</span>
-                {sessionReadSummary.unreadCount>0 ? (
-                  <button type="button" onClick={onOpenUnreadHistory} style={{border:"none",background:"none",padding:0,cursor:"pointer",fontFamily:DB.font,fontSize:11.5,fontWeight:800,color:"#B45309",textDecoration:"underline",textUnderlineOffset:"3px"}}>
-                    미확인 {sessionReadSummary.unreadCount}건
-                  </button>
-                ) : <span style={{fontWeight:700,color:"#15803D"}}>미확인 0건</span>}
-              </div>
-            )}
             {loading ? <div style={{padding:"12px 8px"}}><Skel n={3}/></div> : recentList.length===0 ? (
               <div style={{padding:"20px 8px",textAlign:"center",fontSize:11.5,color:DB.faint}}>{t("수업 기록이 없습니다.","운동 기록이 없습니다.")}</div>
             ) : (
@@ -12806,6 +12866,47 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, bodyData, nu
             <button onClick={()=>setScreen("history")} style={{display:"block",width:"calc(100% - 16px)",margin:"6px 8px 4px",padding:9,border:"none",background:DB.bg,borderRadius:12,fontSize:11.5,fontWeight:700,color:DB.sub,textAlign:"center",cursor:"pointer",fontFamily:DB.font}}>전체 수업일지 (히스토리) →</button>
           </section>
   );
+
+  // ⑤-2 회원 앱 이용 현황 — 관리자 전용 참고 정보(점수·등급·순위 없음). 회원앱 화면에는 이 값을 절대 노출하지 않는다.
+  // "수업일지 확인"은 기존 sessionReads 요약 계산(summarizeSessionReadStatus)을, "몸 상태 입력"은 getRecentFeedbackInputStats를
+  // 그대로 재사용한다 — 새 UI를 각각 따로 만들지 않고 이 카드 하나로 정리(회원 상세 화면 세로 스크롤 증가 최소화).
+  // 대표(TEO) 개인 운동기록은 회원앱 열람 개념이 없으므로 카드 자체를 표시하지 않는다.
+  const secAppUsage = isOwner(member) ? null : (() => {
+    const lastActive = getMemberLastActiveStatus(memberAppUsage);
+    const readSummary = summarizeSessionReadStatus(sessions, sessionReadsMap, 5);
+    const feedbackStats = getRecentFeedbackInputStats(sessions, 4);
+    const row = (label, valueNode) => (
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 8px",borderTop:DB.hairline}}>
+        <span style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,flexShrink:0}}>{label}</span>
+        <div style={{textAlign:"right",fontFamily:DB.font,fontSize:12.5,color:DB.text}}>{valueNode}</div>
+      </div>
+    );
+    return (
+      <section className="hub-sec-appusage" style={{...card, padding:"12px 8px 4px"}}>
+        <div style={{padding:"0 8px",marginBottom:2}}>
+          <span style={cardTitle}>회원 앱 이용 현황</span>
+        </div>
+        {row("최근 이용", <b style={{fontWeight:800}}>{lastActive.lastActiveLabel}</b>)}
+        {row("최근 30일 이용", lastActive.activeDays30>0 ? <b style={{fontWeight:800}}>{lastActive.activeDays30}일</b> : <span style={{color:DB.faint}}>기록 없음</span>)}
+        {row("수업일지 확인", readSummary.total===0 ? <span style={{color:DB.faint}}>수업일지 확인 기록 없음</span> : (
+          <span>
+            최근 {readSummary.total}건 중 {readSummary.readCount}건 확인
+            {readSummary.unreadCount>0 && (
+              <button type="button" onClick={onOpenUnreadHistory} style={{marginLeft:6,border:"none",background:"none",padding:0,cursor:"pointer",fontFamily:DB.font,fontSize:12.5,fontWeight:800,color:"#B45309",textDecoration:"underline",textUnderlineOffset:"3px"}}>
+                미확인 {readSummary.unreadCount}건
+              </button>
+            )}
+          </span>
+        ))}
+        {row("수업 후 몸 상태", feedbackStats.total===0 ? <span style={{color:DB.faint}}>몸 상태 입력 기록 없음</span> : (
+          <span>
+            최근 {feedbackStats.total}회 중 {feedbackStats.inputCount}회 입력
+            {feedbackStats.lastInputAt && <><br/><span style={{fontSize:11,color:DB.faint}}>마지막 입력 {formatMonthDayKo(getKoreaDateString(typeof feedbackStats.lastInputAt?.toDate==="function"?feedbackStats.lastInputAt.toDate():feedbackStats.lastInputAt))}</span></>}
+          </span>
+        ))}
+      </section>
+    );
+  })();
 
   // 오늘 기록이 이미 있는(작성 중 또는 전송 완료) 상태에서도 항상 노출되는 "새 기록" 진입부.
   // 기존 기록은 그대로 두고 완전히 별개의 addDoc 신규 문서를 시작하며, 동시에 존재하는 다른 작성 중(미전송)
@@ -13323,13 +13424,13 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, bodyData, nu
            기본 접힘 카드인 분석 도구·회원 관리를 좌측으로 옮겨 좌우 컬럼 높이를 맞추고 전체 스크롤을 줄인다.
            우측이 더 넓어야 할 콘텐츠(부위 버튼·전송 버튼·다음 수업 준비 그리드)가 많아 좌 0.8fr : 우 1.3fr 비율은 그대로 유지 */
         <div className="hub-2panel">
-          <div className="hub-side">{secBrief}{secAnalysis}{secManage}{secRecent}</div>
+          <div className="hub-side">{secBrief}{secAnalysis}{secManage}{secRecent}{secAppUsage}</div>
           <div className="hub-main">{secToday}{secPrep}{secReview}{secRegistration}</div>
         </div>
       ) : (
         /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 등록 관리 → 분석 → 회원관리 */
         <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",minWidth:0}}>
-          {secToday}{secBrief}{secRecent}{secPrep}{secReview}{secRegistration}{secAnalysis}{secManage}
+          {secToday}{secBrief}{secRecent}{secAppUsage}{secPrep}{secReview}{secRegistration}{secAnalysis}{secManage}
         </div>
       )}
 
@@ -15557,6 +15658,130 @@ function summarizeSessionReadStatus(sessions, readMap, limitCount = 5) {
   const readCount = published.filter(s => getSessionReadStatus(s.id, readMap).isRead).length;
   return { total: published.length, readCount, unreadCount: published.length - readCount };
 }
+// ════════════════════════════════════════════════════
+// 회원 앱 이용 현황(관리자 전용 참고 지표) — 점수·등급·순위 없이 객관적 사실(최근 이용/수업일지 확인/몸 상태 입력)만 계산한다.
+// 회원앱 화면에는 이 값을 절대 노출하지 않는다. 저장 경로(recordMemberAppUsage)는 db.js, 여기는 판정·표시만 담당.
+// ════════════════════════════════════════════════════
+function toComparableTime(value) {
+  if (!value) return 0;
+  const raw = typeof value?.toDate === "function" ? value.toDate() : value;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+// "펼치기"(수업일지 확인)와 "실제 저장"(몸 상태 입력 완료)은 구분한다 — rpe/메모/실제 근육통 값 중 하나라도 있어야 입력 완료로 인정.
+// sorenessLevel==="없음"만 저장되고 rpe·메모가 전혀 없는 경우는 기본값만 저장된 것으로 보고 완료 처리하지 않는다.
+function hasRealFeedbackInput(feedback) {
+  if (!feedback) return false;
+  if (Number.isFinite(Number(feedback.rpe))) return true;
+  if (String(feedback.memo || "").trim()) return true;
+  if (feedback.sorenessLevel && feedback.sorenessLevel !== "없음") return true;
+  if (Array.isArray(feedback.sorenessBodyParts) && feedback.sorenessBodyParts.length > 0) return true;
+  return false;
+}
+// 회원 상세 "수업 후 몸 상태" 요약 — 공개 세션 최근 n건(기본 4건) 기준, 실제 저장된 입력만 집계(펼치기만 한 건 제외)
+// sessions는 관리자앱이 이미 로드해둔 attachSessionMemberFeedback 결과(getSessions)를 그대로 사용 — 신규 읽기 없음.
+function getRecentFeedbackInputStats(sessions, limitCount = 4) {
+  const published = (sessions || [])
+    .filter(s => s?.isPublished)
+    .slice()
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, limitCount);
+  let inputCount = 0, lastInputAt = null;
+  published.forEach(s => {
+    if (!hasRealFeedbackInput(s.memberFeedback)) return;
+    inputCount += 1;
+    const at = s.memberFeedback?.updatedAt || s.memberFeedback?.createdAt;
+    if (at && toComparableTime(at) > toComparableTime(lastInputAt)) lastInputAt = at;
+  });
+  return { total: published.length, inputCount, lastInputAt };
+}
+// "오늘 오후 7:42"/"어제"/"3일 전"/"7월 28일"/"12일 전 · 7월 18일"/"이용 기록 없음" — 기존 formatWhenLabel과 같은 KST 판정이지만
+// 그쪽은 "N일 전 입력"처럼 다른 화면 전용 고정 접미사가 붙어 있어 그대로 재사용하지 않고, 30일 넘는 경우 날짜 병기까지 별도로 둔다.
+function formatRelativeActiveTime(value) {
+  if (!value) return "이용 기록 없음";
+  const raw = typeof value?.toDate === "function" ? value.toDate() : value;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(d.getTime())) return "이용 기록 없음";
+  const todayKey = getKoreaDateString();
+  const dKey = getKoreaDateString(d);
+  if (dKey === todayKey) {
+    const hh = d.getHours(); const ampm = hh < 12 ? "오전" : "오후"; const h12 = hh % 12 === 0 ? 12 : hh % 12;
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `오늘 ${ampm} ${h12}:${mm}`;
+  }
+  if (dKey === dateStrDaysAgo(1)) return "어제";
+  const diffDays = Math.max(1, Math.round((new Date(`${todayKey}T00:00:00Z`) - new Date(`${dKey}T00:00:00Z`)) / 86400000));
+  if (diffDays <= 6) return `${diffDays}일 전`;
+  const monthDay = formatMonthDayKo(dKey);
+  if (diffDays <= 30) return monthDay;
+  return `${diffDays}일 전 · ${monthDay}`;
+}
+// 회원 상세 카드 — appUsage(db.getMemberAppUsage 결과 {summary, activeDays30})를 표시용 형태로 변환
+function getMemberLastActiveStatus(appUsage) {
+  const summary = appUsage?.summary || null;
+  return {
+    hasUsage: !!summary?.lastActiveAt,
+    lastActiveAt: summary?.lastActiveAt || null,
+    lastActiveLabel: formatRelativeActiveTime(summary?.lastActiveAt),
+    activeDays30: Number(appUsage?.activeDays30) || 0,
+  };
+}
+// 홈 "최근 이용 없음" 판정 유예 기준 — 초대 직후 회원이 곧바로 미사용 경고 대상이 되지 않도록
+const APP_USAGE_INACTIVE_GRACE_DAYS = 7;
+function daysSinceKoreaDate(value, todayKST) {
+  const raw = typeof value?.toDate === "function" ? value.toDate() : value;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.round((new Date(`${todayKST}T00:00:00Z`) - new Date(`${getKoreaDateString(d)}T00:00:00Z`)) / 86400000);
+}
+// 활성 회원 중 "최근 이용 흔적 없음"(초대 후 7일 이상 경과 + lastActiveAt 없음/7일 이상 오래됨) 대상만 추린다.
+// 앱 초대 전 회원·초대 직후(그레이스 기간)·TEO·테스트·비활성(종료·휴회) 회원은 전부 제외한다.
+function getInactiveAppMembers(members, liveMembersById, appUsageSummaryByMember, todayKST) {
+  const rows = [];
+  (members || []).forEach(m => {
+    if (isExcludedAdminMember(m)) return;
+    const live = liveMembersById[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return;
+    if (getOnboardingStatusFromMember(lm) === "not_invited") return; // 앱 초대 전 — 판정 대상 아님
+    const invitedAt = lm.memberAppInviteSentAt || lm.memberUidLinkedAt || lm.memberAppPasswordResetSentAt || null;
+    const daysSinceInvite = invitedAt ? daysSinceKoreaDate(invitedAt, todayKST) : null;
+    if (daysSinceInvite != null && daysSinceInvite < APP_USAGE_INACTIVE_GRACE_DAYS) return; // 초대 직후 유예 기간
+    const lastActiveAt = appUsageSummaryByMember?.[lm.id]?.lastActiveAt || null;
+    const daysSinceActive = lastActiveAt ? daysSinceKoreaDate(lastActiveAt, todayKST) : null;
+    if (daysSinceActive != null && daysSinceActive < APP_USAGE_INACTIVE_GRACE_DAYS) return; // 최근 이용 있음
+    rows.push({ member: lm, lastActiveAt, daysSinceActive });
+  });
+  return rows.sort((a, b) => {
+    const ad = a.daysSinceActive ?? 9999, bd = b.daysSinceActive ?? 9999;
+    if (ad !== bd) return bd - ad;
+    return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
+  });
+}
+// 홈 "최근 몸 상태 입력 없음" 근사 판정 — 회원 카드 실시간 구독 데이터(recentActivityLog, 신규 Firestore 읽기 없음)에
+// soreness/rpe/memo 활동이 최근 14일 이내 있는지만 본다. 세션별 정확한 통계(회원 상세 카드)는 getRecentFeedbackInputStats가 담당.
+const APP_USAGE_FEEDBACK_LOOKBACK_DAYS = 14;
+function hasRecentFeedbackActivity(member, todayKST) {
+  const log = Array.isArray(member?.recentActivityLog) ? member.recentActivityLog : [];
+  if (!log.length) return false;
+  const cutoff = new Date(`${todayKST}T00:00:00Z`).getTime() - (APP_USAGE_FEEDBACK_LOOKBACK_DAYS - 1) * 86400000;
+  return log.some(e => ["soreness", "rpe", "memo"].includes(e?.type) && Number(e?.at) >= cutoff);
+}
+function getNoFeedbackActivityMembers(members, liveMembersById, sessionsMap, todayKST) {
+  const rows = [];
+  (members || []).forEach(m => {
+    if (isExcludedAdminMember(m)) return;
+    const live = liveMembersById[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return;
+    const ss = sessionsMap?.[lm.id] || [];
+    if (!ss.some(s => s.isPublished)) return; // 최근 공개 수업 자체가 없으면 입력할 기회가 없었으므로 판정 대상 아님
+    if (hasRecentFeedbackActivity(lm, todayKST)) return;
+    rows.push({ member: lm });
+  });
+  return rows.sort((a, b) => String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko"));
+}
+
 // 히스토리 카드용 회원 확인 배지 — 비공개 세션은 표시하지 않는다(공개·비공개 배지가 이미 상태를 전달하므로 중복 없음).
 // compact(모바일 등 좁은 화면)에서는 시각 없이 "회원 확인"만 표시하고, 최초 확인 시각은 title 툴팁으로 제공한다.
 function SessionReadBadge({ session, readMap, compact=false }) {

@@ -58,12 +58,15 @@ function wpScenario(name, fn) {
 let unsentSessionLib = null;
 try {
   const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceDaysAgo = app.slice(app.indexOf('function dateStrDaysAgo'), app.indexOf('function summarizeCardioWindow'));
+  const sliceMonthDayKo = app.slice(app.indexOf('function formatMonthDayKo'), app.indexOf('function formatWhenLabel'));
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceOwner = app.slice(app.indexOf('const isOwner = (m)'), app.indexOf('function isExcludedAdminMember'));
   const sliceExcluded = app.slice(app.indexOf('function isExcludedAdminMember'), app.indexOf('const isRegularAdminMember'));
   const sliceUnsent = app.slice(app.indexOf('const UNSENT_SESSION_START_DATE'), app.indexOf('function buildReviewPendingList'));
   const sliceSessionRead = app.slice(app.indexOf('function getSessionReadStatus'), app.indexOf('function SessionReadBadge'));
-  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceSessionRead}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE, getSessionReadStatus, formatSessionReadTime, summarizeSessionReadStatus, buildUnreadSessionMembers, UNREAD_SESSION_WINDOW_DAYS };`)();
+  const sliceOnboardingStatus = app.slice(app.indexOf('const ONBOARDING_STATUS_LABEL'), app.indexOf('const DEFAULT_ADMIN_EMAIL'));
+  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceDaysAgo}\n${sliceMonthDayKo}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceOnboardingStatus}\n${sliceSessionRead}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE, getSessionReadStatus, formatSessionReadTime, summarizeSessionReadStatus, buildUnreadSessionMembers, UNREAD_SESSION_WINDOW_DAYS, hasRealFeedbackInput, getRecentFeedbackInputStats, formatRelativeActiveTime, getMemberLastActiveStatus, getInactiveAppMembers, getNoFeedbackActivityMembers, APP_USAGE_INACTIVE_GRACE_DAYS, getOnboardingStatusFromMember };`)();
 } catch (e) {
   console.error('[regression] 수업일지 미전송 헬퍼 추출 실패:', e.message);
 }
@@ -169,6 +172,93 @@ const checks = [
       const sessionsMap = { test1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
     }],
+    // ── 회원 앱 이용 현황: hasRealFeedbackInput/getRecentFeedbackInputStats ──
+    ['앱 이용 현황: 몸 상태 미저장(undefined) → 입력 완료 아님', lib => lib.hasRealFeedbackInput(undefined) === false],
+    ['앱 이용 현황: sorenessLevel "없음"만 저장(rpe/메모 없음) → 기본값만 저장된 것으로 보고 입력 완료 아님', lib => lib.hasRealFeedbackInput({ sorenessLevel: '없음' }) === false],
+    ['앱 이용 현황: RPE만 저장돼도 입력 완료로 인정', lib => lib.hasRealFeedbackInput({ rpe: 6 }) === true],
+    ['앱 이용 현황: 메모만 저장돼도 입력 완료로 인정(공백만은 제외)', lib => lib.hasRealFeedbackInput({ memo: '괜찮았어요' }) === true && lib.hasRealFeedbackInput({ memo: '   ' }) === false],
+    ['앱 이용 현황: 실제 근육통(없음 아님)이 저장되면 입력 완료로 인정', lib => lib.hasRealFeedbackInput({ sorenessLevel: '보통', sorenessBodyParts: ['하체'] }) === true],
+    ['앱 이용 현황: getRecentFeedbackInputStats가 공개 세션 최근 n건만 집계하고 펼치기만 한 세션은 입력으로 세지 않음', lib => {
+      const sessions = [
+        { id: 'a', date: '2026-07-01', isPublished: true, memberFeedback: { rpe: 7, updatedAt: '2026-07-01T10:00:00Z' } },
+        { id: 'b', date: '2026-07-02', isPublished: true, memberFeedback: { sorenessLevel: '없음' } },
+        { id: 'c', date: '2026-07-03', isPublished: true },
+        { id: 'd', date: '2026-07-04', isPublished: false, memberFeedback: { rpe: 9 } },
+        { id: 'e', date: '2026-07-05', isPublished: true, memberFeedback: { memo: '허리가 뻐근했어요', updatedAt: '2026-07-05T10:00:00Z' } },
+      ];
+      const stats = lib.getRecentFeedbackInputStats(sessions, 4);
+      return stats.total === 4 && stats.inputCount === 2 && stats.lastInputAt === '2026-07-05T10:00:00Z';
+    }],
+    // ── 회원 앱 이용 현황: formatRelativeActiveTime/getMemberLastActiveStatus ──
+    ['앱 이용 현황: 이용 기록이 없으면 "이용 기록 없음"', lib => lib.formatRelativeActiveTime(null) === '이용 기록 없음'],
+    // T03:00:00Z(=KST 정오, 자정 경계와 무관하게 안전)로 명시적 UTC 시각을 고정해 테스트 실행 서버의 로컬 타임존과 무관하게 KST 날짜가 정확히 일치하게 한다.
+    ['앱 이용 현황: 어제 이용은 "어제"로 표시', lib => lib.formatRelativeActiveTime(new Date(`${daysAgoStr(1)}T03:00:00Z`)) === '어제'],
+    ['앱 이용 현황: 30일 넘게 지난 이용은 "N일 전 · M월 D일" 형태로 날짜 병기', lib => /^\d+일 전 · \d+월 \d+일$/.test(lib.formatRelativeActiveTime(new Date(`${daysAgoStr(40)}T03:00:00Z`)))],
+    ['앱 이용 현황: getMemberLastActiveStatus가 요약 없으면 hasUsage:false + activeDays30:0', lib => {
+      const status = lib.getMemberLastActiveStatus({ summary: null, activeDays30: 0 });
+      return status.hasUsage === false && status.activeDays30 === 0;
+    }],
+    // ── 회원 앱 이용 현황: getInactiveAppMembers(홈 "최근 이용 없음") ──
+    ['앱 이용 현황(홈): 앱 초대 전 회원은 미사용 경고 대상에서 제외', lib => {
+      const members = [{ id: 'notinvited1', name: 'a', status: 'active' }];
+      return lib.getInactiveAppMembers(members, {}, {}, unsentToday).length === 0;
+    }],
+    ['앱 이용 현황(홈): 초대 후 7일 이내(그레이스 기간)는 이용 기록이 없어도 제외', lib => {
+      const members = [{ id: 'invited1', name: 'a', status: 'active', memberAppInviteSentAt: daysAgoStr(3) }];
+      return lib.getInactiveAppMembers(members, {}, {}, unsentToday).length === 0;
+    }],
+    ['앱 이용 현황(홈): 초대 후 7일 이상 지났는데 이용 기록이 전혀 없으면 대상에 포함', lib => {
+      const members = [{ id: 'invited2', name: 'a', status: 'active', memberAppInviteSentAt: daysAgoStr(10) }];
+      return lib.getInactiveAppMembers(members, {}, {}, unsentToday).length === 1;
+    }],
+    ['앱 이용 현황(홈): 최근 7일 이내 이용 기록이 있으면 제외', lib => {
+      const members = [{ id: 'active1', name: 'a', status: 'active', memberAppInviteSentAt: daysAgoStr(30) }];
+      const summaryMap = { active1: { lastActiveAt: daysAgoStr(2) } };
+      return lib.getInactiveAppMembers(members, {}, summaryMap, unsentToday).length === 0;
+    }],
+    ['앱 이용 현황(홈): 마지막 이용이 7일 이상 지났으면 대상에 포함 + daysSinceActive 정확히 계산', lib => {
+      const members = [{ id: 'old1', name: 'a', status: 'active', memberAppInviteSentAt: daysAgoStr(30) }];
+      const summaryMap = { old1: { lastActiveAt: daysAgoStr(10) } };
+      const rows = lib.getInactiveAppMembers(members, {}, summaryMap, unsentToday);
+      return rows.length === 1 && rows[0].daysSinceActive === 10;
+    }],
+    ['앱 이용 현황(홈): TEO 대표·테스트 회원은 제외', lib => {
+      const members = [
+        { id: 'teo1', name: 'teo1', status: 'active', isOwner: true, memberAppInviteSentAt: daysAgoStr(30) },
+        { id: 'test2', name: 'test2', status: 'active', isTestMember: true, memberAppInviteSentAt: daysAgoStr(30) },
+      ];
+      return lib.getInactiveAppMembers(members, {}, {}, unsentToday).length === 0;
+    }],
+    ['앱 이용 현황(홈): 종료·휴회 등 비활성 회원은 제외', lib => {
+      const members = [{ id: 'ended1', name: 'a', status: 'ended', memberAppInviteSentAt: daysAgoStr(30) }];
+      return lib.getInactiveAppMembers(members, {}, {}, unsentToday).length === 0;
+    }],
+    // ── 회원 앱 이용 현황: getNoFeedbackActivityMembers(홈 "최근 몸 상태 입력 없음") ──
+    ['앱 이용 현황(홈): 최근 공개 수업 자체가 없으면 몸 상태 미입력 대상이 아님', lib => {
+      const members = [{ id: 'nopub1', name: 'a', status: 'active' }];
+      const sessionsMap = { nopub1: [{ id: 's1', isPublished: false }] };
+      return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['앱 이용 현황(홈): 공개 수업은 있지만 최근 14일 내 근육통/RPE/메모 활동이 전혀 없으면 대상에 포함', lib => {
+      const members = [{ id: 'nofb1', name: 'a', status: 'active' }];
+      const sessionsMap = { nofb1: [{ id: 's1', isPublished: true }] };
+      return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
+    ['앱 이용 현황(홈): 최근 14일 내 RPE 활동 기록이 있으면 제외', lib => {
+      const members = [{ id: 'fb1', name: 'a', status: 'active', recentActivityLog: [{ type: 'rpe', at: Date.now() - 2 * 86400000 }] }];
+      const sessionsMap = { fb1: [{ id: 's1', isPublished: true }] };
+      return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['앱 이용 현황(홈): 14일보다 오래된 활동 기록은 인정하지 않고 대상에 포함', lib => {
+      const members = [{ id: 'oldfb1', name: 'a', status: 'active', recentActivityLog: [{ type: 'memo', at: Date.now() - 20 * 86400000 }] }];
+      const sessionsMap = { oldfb1: [{ id: 's1', isPublished: true }] };
+      return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
+    ['앱 이용 현황(홈): soreness/rpe/memo 이외 타입(예: weight) 활동은 몸 상태 입력으로 인정하지 않음', lib => {
+      const members = [{ id: 'wfb1', name: 'a', status: 'active', recentActivityLog: [{ type: 'weight', at: Date.now() - 1 * 86400000 }] }];
+      const sessionsMap = { wfb1: [{ id: 's1', isPublished: true }] };
+      return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
   ].map(([name, fn]) => usScenario(name, fn)),
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
   ['대표 운동기록 저장', app.includes('isOwner') && app.includes('OWNER_LEGACY_NAME') && app.includes('대표님')],
@@ -218,8 +308,38 @@ const checks = [
   ['관리자앱: 히스토리 카드 회원 확인 배지 + 회원 상세 요약 + 홈 "수업일지 미확인"이 모두 공통 헬퍼(getSessionReadStatus 등) 재사용, 각자 재구현하지 않음',
     app.includes('function SessionReadBadge({ session, readMap, compact=false })') &&
     app.includes('<SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} />') &&
-    app.includes('const sessionReadSummary = !isOwner(member) ? summarizeSessionReadStatus(sessions, sessionReadsMap, 5) : null;') &&
+    app.includes('const readSummary = summarizeSessionReadStatus(sessions, sessionReadsMap, 5);') &&
     app.includes('function buildUnreadSessionMembers(members, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST)')
+  ],
+
+  // ── 회원 앱 이용 현황(관리자 전용 참고 지표) ──
+  ['회원 앱 이용 현황: recordMemberAppUsage가 firstUsedAt/firstActiveAt은 최초 1회만 기록(summary+appUsageDays 배치 저장)',
+    db.includes('export async function recordMemberAppUsage(memberId, tab)') &&
+    db.includes('"members", memberId, "appUsage", "summary"') &&
+    db.includes('"members", memberId, "appUsageDays", dateKey') &&
+    db.includes('...(summarySnap.exists() ? {} : { firstUsedAt: now }),') &&
+    db.includes('...(daySnap.exists() ? {} : { firstActiveAt: now }),')
+  ],
+  ['회원 앱 이용 현황: getMemberAppUsage(상세)가 최근 30일 이용일 수를 date>=cutoff 단일 where로 계산(복합 인덱스 불필요) + getMemberAppUsageSummary(홈 집계용 경량 조회)가 별도로 존재',
+    db.includes('export async function getMemberAppUsage(memberId)') &&
+    db.includes('query(collection(db, "members", memberId, "appUsageDays"), where("date", ">=", cutoffKey))') &&
+    db.includes('export async function getMemberAppUsageSummary(memberId)')
+  ],
+  ['회원 앱 이용 현황: 회원앱은 home/workout/health/analysis/profile 탭 진입 시에만 기록하고 세션당 최소 10분 간격(sessionStorage)으로 스로틀 — 온보딩 중·TEO·테스트 회원은 제외',
+    app.includes('const APP_USAGE_MIN_INTERVAL_MS=10*60*1000;') &&
+    app.includes('if(!profile?.id||profile.memberUid!==auth.currentUser?.uid||!onboardingDone||isExcludedAdminMember(profile))return;') &&
+    app.includes('recordMemberAppUsage(profile.id,tab).catch(()=>{});')
+  ],
+  ['회원 앱 이용 현황: 관리자앱 회원 상세 카드가 최근 이용/최근 30일 이용/수업일지 확인/몸 상태 입력을 모두 기존 계산 함수 재사용으로 표시(회원앱에는 노출 안 함)',
+    app.includes('const secAppUsage = isOwner(member) ? null : (() => {') &&
+    app.includes('const lastActive = getMemberLastActiveStatus(memberAppUsage);') &&
+    app.includes('const feedbackStats = getRecentFeedbackInputStats(sessions, 4);')
+  ],
+  ['Firestore Rules appUsage/appUsageDays: 회원 본인만 자기 데이터 생성·갱신 가능, 읽기는 트레이너 전용(회원앱에 노출하지 않는 정책과 일치) + firstUsedAt/date 불변',
+    firestoreRules.includes('match /appUsage/{docId}') &&
+    firestoreRules.includes('allow read: if isTrainerOfMember(memberId);') &&
+    firestoreRules.includes('match /appUsageDays/{dateId}') &&
+    firestoreRules.includes('request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastActiveAt", "tabs"])')
   ],
 
   // ── 보안 체크 ──

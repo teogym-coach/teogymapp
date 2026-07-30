@@ -95,7 +95,7 @@ try {
   const slicePersonal = app.slice(app.indexOf('const PERSONAL_WORKOUT_PART_OPTIONS'), app.indexOf('function MemberPersonalWorkoutCard'));
   personalWorkoutLib = new Function(
     `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
-    'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete };'
+    'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete };'
   )();
 } catch (e) {
   console.error('[regression] 개인운동 헬퍼 추출 실패:', e.message);
@@ -2492,15 +2492,50 @@ const checks = [
       return fn.includes('exVol(') && !fn.includes('parseFloat');
     })()
   ],
-  ['개인운동 부위 옵션: 새 한국어 enum을 만들지 않고 기존 저장값(SESSION_TYPE_OPTIONS / MUSCLE_MAP 키)만 사용',
+  ['개인운동 부위 옵션: 새 한국어 enum을 만들지 않고 기존 저장값(SESSION_TYPE_OPTIONS / MUSCLE_MAP 키)만 사용, 이두·삼두 분리 + 팔 신규 옵션 제거',
     (() => {
       const m = app.match(/const PERSONAL_WORKOUT_PART_OPTIONS = \[([^\]]+)\]/);
       if (!m) return false;
       const parts = m[1].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
       const sessionTypes = (app.match(/const SESSION_TYPE_OPTIONS = \[([\s\S]*?)\];/) || [])[1] || '';
       const muscleMap = (app.match(/const MUSCLE_MAP\s+= \{([\s\S]*?)\n\};/) || [])[1] || '';
-      return parts.length === 8 && parts.every(p => sessionTypes.includes(`"${p}"`) || muscleMap.includes(`"${p}"`));
+      return parts.length === 9 && parts.includes('이두') && parts.includes('삼두') && !parts.includes('팔') &&
+        parts.every(p => sessionTypes.includes(`"${p}"`) || muscleMap.includes(`"${p}"`));
     })()
+  ],
+  ['개인운동 부위 레거시 호환: "팔" 값이 있는 기존 문서는 자동 변환 없이 칩 목록에 그대로 노출되어 확인·해제 가능',
+    app.includes('function getPersonalWorkoutPartChipOptions(currentParts=[]){') &&
+    app.includes('getPersonalWorkoutPartChipOptions(parts).map(part=>(') &&
+    !app.includes('PERSONAL_WORKOUT_PART_OPTIONS.map(part=>(') &&
+    pwScenario('레거시 팔 칩 호환', lib => {
+      const withLegacy = lib.getPersonalWorkoutPartChipOptions(['가슴', '팔']);
+      const withoutLegacy = lib.getPersonalWorkoutPartChipOptions(['가슴', '이두']);
+      return withLegacy.includes('팔') && withLegacy.includes('이두') && withLegacy.includes('삼두') &&
+        !withoutLegacy.includes('팔') && withoutLegacy.length === lib.PERSONAL_WORKOUT_PART_OPTIONS.length;
+    })[1]
+  ],
+  ['개인운동 무한 로딩 방지: 시작·완료·삭제·진행저장이 모두 withTimeout으로 보호되고, 화면 전환은 재조회(reloadPersonalWorkouts) 완료를 기다리지 않음',
+    (() => {
+      const startFn = app.slice(app.indexOf('const startPersonalWorkout=async(parts)=>{'), app.indexOf('const savePersonalWorkoutProgress=async(workoutId,patch)=>{'));
+      const saveFn = app.slice(app.indexOf('const savePersonalWorkoutProgress=async(workoutId,patch)=>{'), app.indexOf('const completePersonalWorkoutRecord=async(workoutId,payload)=>{'));
+      const completeFn = app.slice(app.indexOf('const completePersonalWorkoutRecord=async(workoutId,payload)=>{'), app.indexOf('const removePersonalWorkout=async(workout)=>{'));
+      const removeFn = app.slice(app.indexOf('const removePersonalWorkout=async(workout)=>{'), app.indexOf('// 운동 종목 후보'));
+      const reloadFn = app.slice(app.indexOf('const reloadPersonalWorkouts=async()=>{'), app.indexOf('const openPersonalWorkoutStart=()=>{'));
+      const allWrapped = [startFn, saveFn, completeFn, removeFn, reloadFn].every(fn => fn.includes('withTimeout(') && fn.includes('PERSONAL_WORKOUT_TIMEOUT_MS'));
+      // 성공 경로에서 setPersonalRecordTarget(화면 전환)이 reloadPersonalWorkouts 호출보다 먼저 실행돼야
+      // "재조회를 기다려야만 화면이 열리는" 구조로 되돌아가지 않는다.
+      const startOrderOk = startFn.indexOf('setPersonalRecordTarget({workoutId:created.id') < startFn.indexOf('reloadPersonalWorkouts();');
+      const completeOrderOk = completeFn.indexOf('setPersonalRecordTarget(null);') < completeFn.lastIndexOf('reloadPersonalWorkouts();');
+      // 실패 시에도 reloadPersonalWorkouts를 await하지 않아야 catch 이후 finally(로딩 해제)가 즉시 실행된다
+      const startCatchNoAwait = !/catch\(e\)\{[\s\S]*?await reloadPersonalWorkouts\(\)[\s\S]*?\}\s*finally/.test(startFn);
+      return allWrapped && startOrderOk && completeOrderOk && startCatchNoAwait &&
+        startFn.includes('finally{ setPersonalBusy(false); }');
+    })()
+  ],
+  ['개인운동 시작: 생성 성공 시 로컬 in_progress 상태를 즉시 구성해 재조회 없이 기록 화면 진입',
+    app.includes('const localWorkout=normalizePersonalWorkout({') &&
+    app.includes('status:"in_progress", source:"memberApp",') &&
+    app.includes('setPersonalInProgress(prev=>[localWorkout,...prev.filter(w=>w.id!==localWorkout.id)]);')
   ],
   ['개인운동 운동 종목: 별도 운동 사전을 신설하지 않고 본인 PT 기록·개인운동·기존 분류 상수만 후보로 사용',
     (() => {

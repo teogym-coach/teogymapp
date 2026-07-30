@@ -1691,12 +1691,20 @@ function MemberApp({ onLogout }) {
     await load();
   };
   // ── 개인운동 기록 ─────────────────────────────────────────────────────────
-  // 목록 갱신은 load()(전체 재조회 + 화면 전체 Spin)를 쓰지 않고 개인운동 2개 쿼리만 다시 읽는다 —
-  // 기록 화면에서 저장할 때마다 화면이 통째로 리마운트되면 입력 흐름이 끊기고 Firestore 읽기도 불필요하게 늘어난다.
+  // 화면 전환·로딩 해제는 Firestore 재조회 왕복을 기다리지 않는다 —
+  // "생성/완료/삭제 성공 → 재조회로 목록을 다시 읽어야만 화면이 넘어가는 구조"였던 이전 버전은 네트워크가
+  // 느리거나(드물게는 응답 자체가 지연되는 상황) 재조회가 오래 걸리면 성공한 뒤에도 화면이 멈춘 것처럼 보였다.
+  // 이제는 각 동작이 자기 자신의 Firestore 쓰기(withTimeout으로 보호)만 기다리고, 그 결과로 로컬 state를
+  // 즉시 구성해 화면을 넘긴 다음, 목록 재조회(reloadPersonalWorkouts)는 항상 결과를 기다리지 않는(fire-and-forget)
+  // 백그라운드 보정으로만 돌린다 — 재조회가 실패하거나 늦어도 이미 전환된 화면 흐름을 막지 않는다.
   const reloadPersonalWorkouts=async()=>{
     if(!profile?.id) return;
     try{
-      const [list,ip]=await Promise.all([getPersonalWorkouts(profile.id,30),getInProgressPersonalWorkouts(profile.id)]);
+      const [list,ip]=await withTimeout(
+        Promise.all([getPersonalWorkouts(profile.id,30),getInProgressPersonalWorkouts(profile.id)]),
+        PERSONAL_WORKOUT_TIMEOUT_MS,
+        "개인운동 목록 재조회가 지연되고 있습니다."
+      );
       setPersonalWorkouts((list||[]).map(normalizePersonalWorkout).filter(Boolean));
       setPersonalInProgress((ip||[]).map(normalizePersonalWorkout).filter(Boolean).sort((a,b)=>String(b.workoutDate||"").localeCompare(String(a.workoutDate||""))));
     }catch(e){ console.error("[개인운동] 목록 재조회 실패",e); }
@@ -1718,25 +1726,48 @@ function MemberApp({ onLogout }) {
   const closePersonalWorkoutRecord=()=>{
     setPersonalRecordTarget(null);
     resetMemberScroll();
-    reloadPersonalWorkouts();
+    reloadPersonalWorkouts();     // fire-and-forget — 목록 화면은 이미 반환된 로컬 state로 정상 렌더된다
   };
   const startPersonalWorkout=async(parts)=>{
     if(personalBusy) return;
     if(!parts?.length){ alert("운동 부위를 1개 이상 선택해주세요."); return; }
+    if(personalInProgress.length>0){ alert("진행 중인 개인운동이 있어요. 기존 기록을 이어서 작성해주세요."); return; }
     setPersonalBusy(true);
     try{
       assertOwnMember();
-      if(personalInProgress.length>0){ alert("진행 중인 개인운동이 있어요. 기존 기록을 이어서 작성해주세요."); return; }
-      const created=await createPersonalWorkout(profile.id,{workoutDate:getKoreaDateString(),workoutParts:parts});
-      await reloadPersonalWorkouts();
+      const created=await withTimeout(
+        createPersonalWorkout(profile.id,{workoutDate:getKoreaDateString(),workoutParts:parts}),
+        PERSONAL_WORKOUT_TIMEOUT_MS,
+        "개인운동을 시작하지 못했습니다. 네트워크 상태를 확인하고 다시 시도해주세요."
+      );
+      // 재조회를 기다리지 않고 방금 생성한 값 그대로 로컬 in_progress 상태를 만들어 즉시 기록 화면으로 전환한다.
+      // startedAt은 서버 확정 전 화면 표시용 클라이언트 시각이며, 아래 백그라운드 재조회가 서버 값으로 병합한다.
+      const localWorkout=normalizePersonalWorkout({
+        id:created.id, memberId:profile.id, workoutDate:created.workoutDate, workoutParts:created.workoutParts,
+        exercises:[], exerciseKeys:[], memo:"", totalExercises:0, totalSets:0, totalVolume:0,
+        status:"in_progress", source:"memberApp",
+        startedAt:new Date(), createdAt:new Date(), updatedAt:new Date(),
+      });
+      setPersonalInProgress(prev=>[localWorkout,...prev.filter(w=>w.id!==localWorkout.id)]);
       setPersonalRecordTarget({workoutId:created.id,openSummary:false});
       resetMemberScroll();
-    }catch(e){ console.error("[개인운동] 시작 실패",e); alert(e?.message||"개인운동을 시작하지 못했습니다."); }
+      reloadPersonalWorkouts();
+    }catch(e){
+      console.error("[개인운동] 시작 실패",e);
+      alert(e?.message||"개인운동을 시작하지 못했습니다.");
+      // 타임아웃으로 실패 처리됐어도 실제로는 문서가 생성됐을 수 있다 — 다음 시도 전에 최신 상태를 반영해
+      // personalInProgress 중복 검사가 낡은 값을 보고 같은 운동을 두 번 생성하지 않게 한다(fire-and-forget).
+      reloadPersonalWorkouts();
+    }
     finally{ setPersonalBusy(false); }
   };
   const savePersonalWorkoutProgress=async(workoutId,patch)=>{
     assertOwnMember();
-    await updatePersonalWorkoutProgress(profile.id,workoutId,patch);
+    await withTimeout(
+      updatePersonalWorkoutProgress(profile.id,workoutId,patch),
+      PERSONAL_WORKOUT_TIMEOUT_MS,
+      "진행 중 저장이 지연되고 있습니다. 네트워크 상태를 확인해주세요."
+    );
     // 로컬 상태만 즉시 반영 — 저장마다 Firestore를 다시 읽지 않는다(진행 중 문서 복원은 재진입/새로고침 때 수행).
     const applyPatch=w=>w.id===workoutId?normalizePersonalWorkout({...w,...patch}):w;
     setPersonalWorkouts(prev=>prev.map(applyPatch));
@@ -1744,11 +1775,19 @@ function MemberApp({ onLogout }) {
   };
   const completePersonalWorkoutRecord=async(workoutId,payload)=>{
     assertOwnMember();
-    await completePersonalWorkout(profile.id,workoutId,payload);
+    await withTimeout(
+      completePersonalWorkout(profile.id,workoutId,payload),
+      PERSONAL_WORKOUT_TIMEOUT_MS,
+      "개인운동 저장에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요."
+    );
+    // 완료 결과를 재조회 없이 로컬 state에 바로 반영해 요약 화면을 즉시 닫는다.
+    const completedLocal=normalizePersonalWorkout({...payload,id:workoutId,memberId:profile.id,status:"completed",endedAt:new Date(),completedAt:new Date(),updatedAt:new Date()});
+    setPersonalWorkouts(prev=>[completedLocal,...prev.filter(w=>w.id!==workoutId)]);
+    setPersonalInProgress(prev=>prev.filter(w=>w.id!==workoutId));
     setPersonalRecordTarget(null);
     resetMemberScroll();
-    await reloadPersonalWorkouts();
     alert("개인운동이 저장됐어요.");
+    reloadPersonalWorkouts();
   };
   const removePersonalWorkout=async(workout)=>{
     if(!workout?.id) return;
@@ -1756,9 +1795,15 @@ function MemberApp({ onLogout }) {
     if(!window.confirm(label)) return;
     try{
       assertOwnMember();
-      await deletePersonalWorkout(profile.id,workout.id);
+      await withTimeout(
+        deletePersonalWorkout(profile.id,workout.id),
+        PERSONAL_WORKOUT_TIMEOUT_MS,
+        "개인운동 기록 삭제에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요."
+      );
+      setPersonalWorkouts(prev=>prev.filter(w=>w.id!==workout.id));
+      setPersonalInProgress(prev=>prev.filter(w=>w.id!==workout.id));
       setPersonalRecordTarget(prev=>prev?.workoutId===workout.id?null:prev);
-      await reloadPersonalWorkouts();
+      reloadPersonalWorkouts();
     }catch(e){ console.error("[개인운동] 삭제 실패",e); alert(e?.message||"개인운동 기록 삭제에 실패했습니다."); }
   };
   // 운동 종목 후보 — 본인 PT 수업일지 + 본인 개인운동 + 코드 내장 분류 상수(별도 운동 사전 신설 없음)
@@ -3413,8 +3458,21 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
 // ════════════════════════════════════════════════════
 
 // 개인운동 부위 선택 항목 — 새 한국어 enum을 만들지 않고 기존 저장값과 문자열이 정확히 일치하는 값만 사용한다.
-// "가슴·등·하체·어깨·팔·유산소·기타"는 기존 SESSION_TYPE_OPTIONS(수업 유형)의 값, "코어"는 기존 MUSCLE_MAP의 키다.
-const PERSONAL_WORKOUT_PART_OPTIONS = ["가슴","등","하체","어깨","팔","코어","유산소","기타"];
+// "가슴·등·하체·어깨·이두·삼두·유산소·기타"는 기존 SESSION_TYPE_OPTIONS(수업 유형)의 값, "코어"는 기존 MUSCLE_MAP의 키다.
+// "이두"/"삼두"는 세션 "오늘의 운동 부위"(selectedTypes)와 동일한 값 공간이다 — 운동 카드의 muscleTop(MUSCLE_MAP 키인
+// "팔-이두근"/"팔-삼두근")과는 다른 개념이므로 혼동해 하이픈 표기로 저장하지 않는다.
+// "팔"은 더 이상 신규 선택 옵션이 아니지만, 이미 저장된 문서의 "팔" 값은 계속 정상 표시된다(레거시 호환, 아래 참고).
+const PERSONAL_WORKOUT_PART_OPTIONS = ["가슴","등","하체","어깨","이두","삼두","코어","유산소","기타"];
+// 기존 "팔" 레거시 데이터 호환 — 자동으로 이두/삼두 중 하나로 추정 변환하지 않는다.
+// 현재 선택된 부위(parts)에 신규 옵션에 없는 값(예: 과거에 저장된 "팔")이 남아 있으면, 칩 목록 끝에 그대로 노출해
+// 값이 사라지거나 안 보이는 일 없이 확인·해제할 수 있게 한다. 신규 항목을 추가로 발명하지 않는다.
+function getPersonalWorkoutPartChipOptions(currentParts=[]){
+  const legacy=(currentParts||[]).filter(p=>p&&!PERSONAL_WORKOUT_PART_OPTIONS.includes(p));
+  return legacy.length?[...PERSONAL_WORKOUT_PART_OPTIONS,...legacy]:PERSONAL_WORKOUT_PART_OPTIONS;
+}
+// 개인운동 Firestore 쓰기/재조회에 공통으로 쓰는 타임아웃 — MemberApp의 기존 withTimeout(Promise.race 기반)과 함께 사용한다.
+// 응답이 이 시간 안에 오지 않으면 "무한 로딩"이 아니라 명확한 실패로 처리해 로딩 상태를 반드시 해제한다.
+const PERSONAL_WORKOUT_TIMEOUT_MS=15000;
 
 // Firestore Timestamp / ISO 문자열 / Date 어느 형태로 와도 Date로 변환 (기존 formatWhenLabel과 같은 방식)
 function toPersonalWorkoutDate(value){
@@ -3900,7 +3958,7 @@ function MemberPersonalWorkoutScreen({
       <section className="pw-block">
         <span className="pw-block-title">운동 부위</span>
         <div className="pw-part-chips">
-          {PERSONAL_WORKOUT_PART_OPTIONS.map(part=>(
+          {getPersonalWorkoutPartChipOptions(parts).map(part=>(
             <button key={part} type="button" className={parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>
           ))}
         </div>
@@ -4037,7 +4095,7 @@ function MemberPersonalWorkoutScreen({
     <section className="pw-block">
       <span className="pw-block-title">운동 부위</span>
       <div className="pw-part-chips">
-        {PERSONAL_WORKOUT_PART_OPTIONS.map(part=>(
+        {getPersonalWorkoutPartChipOptions(parts).map(part=>(
           <button key={part} type="button" className={parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>
         ))}
       </div>

@@ -9,6 +9,7 @@
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
 //    /members/{id}/counselNotes/main      ← 상담 리포트: 대표 상담 메모(트레이너 전용)
 //    /members/{id}/memberOnboarding/main  ← 회원앱 온보딩 답변(v2 맵 포함) — 사전 문진의 단일 원본
+//    /members/{id}/personalWorkouts/{id}  ← 개인운동 기록(회원이 직접 작성, 트레이너는 읽기만)
 //    /consultations/{id}                  ← 상담 고객(리드). 정식 회원 전환 전까지 members를 만들지 않는다
 //    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
 //    /exerciseClassifications/{trainerUid} ← 센터 공통 운동 라이브러리(운동명→기구/부위/세부부위 마스터 데이터)
@@ -2531,4 +2532,135 @@ export async function requestOnboardingUpdate(memberId, message = "") {
     console.warn("[DB:requestOnboardingUpdate] notification failed", e?.code || e?.message || e);
   }
   return { updateRequestedAt: now };
+}
+
+// ════════════════════════════════════════════════════
+// 개인운동 기록 — members/{memberId}/personalWorkouts/{workoutId}
+//
+// 왜 sessions가 아니라 별도 서브컬렉션인가:
+//   sessions는 "트레이너가 작성하고 회원에게 공개(isPublished)하는 PT 수업일지"다.
+//   Rules에서도 create/delete가 트레이너 전용이고, 회원 update는 sorenessReport 2개 필드만 허용한다.
+//   개인운동은 반대로 "회원이 직접 쓰고 트레이너가 읽는" 기록이라 권한 방향이 정반대여서, sessions에 섞으면
+//   회원 쓰기를 열어주는 순간 수업일지 위조 경로가 생긴다. 그래서 경로를 완전히 분리한다.
+//
+// 필드는 기존 수업일지의 운동 구조(exercises[].name / sets[].weight/reps/volume/recordType)를 그대로 따라가
+// exVol·getFilledSets 같은 기존 계산 헬퍼를 양쪽에서 공유할 수 있게 한다(중복 구현 없음).
+//
+// 진행 중(in_progress) / 완료(completed) 2가지 status만 사용한다.
+//   - 시작:  createPersonalWorkout    → status:"in_progress", startedAt(서버 시각)
+//   - 진행:  updatePersonalWorkoutProgress → exercises/memo/workoutParts만 갱신(status·startedAt 불변)
+//   - 종료:  completePersonalWorkout  → status:"completed", endedAt/completedAt(서버 시각) 1회 확정
+// 쓰기 빈도 제한(디바운스)은 호출부(App.jsx)의 책임 — 여기서는 저장만 담당한다(appUsage와 동일한 분담).
+// ════════════════════════════════════════════════════
+
+// UI·Rules가 공유하는 상한값 — 문서 크기가 Firestore 1MiB 제한에 근접하지 않도록 한 곳에서만 정의한다.
+export const PERSONAL_WORKOUT_LIMITS = {
+  maxParts: 4,
+  maxExercises: 20,
+  maxSetsPerExercise: 20,
+  maxMemoLength: 1000,
+  maxWeight: 500,   // kg
+  maxReps: 200,
+};
+
+export async function getPersonalWorkouts(memberId, max = 30) {
+  requireUid();
+  const path = `members/${memberId}/personalWorkouts`;
+  dbLog("getPersonalWorkouts", "읽기 시작:", path);
+  try {
+    // 단일 필드 orderBy + limit — 복합 인덱스 없이 자동 인덱스로 동작한다(전체 조회 금지, 최근 기록 우선).
+    const snap = await getDocs(query(collection(db, "members", memberId, "personalWorkouts"), orderBy("workoutDate", "desc"), limit(max)));
+    dbLog("getPersonalWorkouts", `성공: ${snap.docs.length}건`);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error("[DB:getPersonalWorkouts] read failed:", { path, collection: "personalWorkouts", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
+}
+
+// 진행 중 기록 복원용 — where 단일 필드만 사용해 복합 인덱스가 필요 없다.
+// 정상 상태에서는 0~1건이지만, 이상 상황으로 여러 건이 남아도 호출부가 모두 받아 정리할 수 있게 배열로 반환한다.
+export async function getInProgressPersonalWorkouts(memberId) {
+  requireUid();
+  try {
+    const snap = await getDocs(query(collection(db, "members", memberId, "personalWorkouts"), where("status", "==", "in_progress"), limit(10)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error("[DB:getInProgressPersonalWorkouts] read failed:", { path: `members/${memberId}/personalWorkouts`, ...describeFirestoreError(e), memberId });
+    throw e;
+  }
+}
+
+export async function createPersonalWorkout(memberId, { workoutDate, workoutParts = [] } = {}) {
+  requireUid();
+  const payload = clean({
+    memberId,
+    workoutDate: String(workoutDate || koreaDateKey()).slice(0, 10),
+    workoutParts: workoutParts.slice(0, PERSONAL_WORKOUT_LIMITS.maxParts),
+    exercises: [],
+    memo: "",
+    totalExercises: 0, totalSets: 0, totalVolume: 0,
+    exerciseKeys: [],
+    status: "in_progress",
+    source: "memberApp",
+  });
+  const ref = await addDoc(collection(db, "members", memberId, "personalWorkouts"), {
+    ...payload,
+    startedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return { id: ref.id, ...payload };
+}
+
+// 진행 중 기록의 내용만 갱신 — status/startedAt/createdAt/completedAt은 여기서 절대 건드리지 않는다(Rules에서도 차단).
+export async function updatePersonalWorkoutProgress(memberId, workoutId, patch = {}) {
+  requireUid();
+  const allowed = {};
+  if (Array.isArray(patch.workoutParts)) allowed.workoutParts = patch.workoutParts.slice(0, PERSONAL_WORKOUT_LIMITS.maxParts);
+  if (Array.isArray(patch.exercises)) allowed.exercises = patch.exercises;
+  if (Array.isArray(patch.exerciseKeys)) allowed.exerciseKeys = patch.exerciseKeys;
+  if (patch.memo !== undefined) allowed.memo = String(patch.memo || "").slice(0, PERSONAL_WORKOUT_LIMITS.maxMemoLength);
+  ["totalExercises", "totalSets", "totalVolume"].forEach(k => { if (patch[k] !== undefined) allowed[k] = Number(patch[k]) || 0; });
+  if (!Object.keys(allowed).length) return { id: workoutId };
+  await updateDoc(doc(db, "members", memberId, "personalWorkouts", workoutId), {
+    ...clean(allowed),
+    updatedAt: serverTimestamp(),
+  });
+  return { id: workoutId, ...allowed };
+}
+
+// 운동 종료 확정 — endedAt/completedAt은 이 호출에서만 서버 시각으로 1회 기록되어 이후 변경되지 않는다.
+export async function completePersonalWorkout(memberId, workoutId, payload = {}) {
+  requireUid();
+  const body = clean({
+    workoutParts: (payload.workoutParts || []).slice(0, PERSONAL_WORKOUT_LIMITS.maxParts),
+    exercises: payload.exercises || [],
+    exerciseKeys: payload.exerciseKeys || [],
+    memo: String(payload.memo || "").slice(0, PERSONAL_WORKOUT_LIMITS.maxMemoLength),
+    totalExercises: Number(payload.totalExercises) || 0,
+    totalSets: Number(payload.totalSets) || 0,
+    totalVolume: Number(payload.totalVolume) || 0,
+    durationMinutes: Number(payload.durationMinutes) || 0,
+    status: "completed",
+  });
+  await updateDoc(doc(db, "members", memberId, "personalWorkouts", workoutId), {
+    ...body,
+    endedAt: serverTimestamp(),
+    completedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  // 관리자 "오늘 회원 입력" 피드 — 완료 시점 1회만 기록한다(유산소 saveCardioLog와 동일한 기존 경로 재사용).
+  // 진행 중 자동 저장에서는 호출하지 않아 Firestore 쓰기가 늘지 않는다.
+  await touchMemberActivities(memberId, [{
+    type: "personalWorkout", label: "개인운동",
+    value: body.totalExercises ? `${body.totalExercises}종목 · ${body.totalSets}세트` : "기록됨",
+    dateKey: String(payload.workoutDate || koreaDateKey()).slice(0, 10),
+  }]);
+  return { id: workoutId, ...body };
+}
+
+export async function deletePersonalWorkout(memberId, workoutId) {
+  requireUid();
+  await deleteDoc(doc(db, "members", memberId, "personalWorkouts", workoutId));
 }

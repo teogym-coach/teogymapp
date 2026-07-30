@@ -9,6 +9,7 @@ rules_version = '2';
 //               이면서 status == "active" (진행중) 인 회원만 접근 허용
 //    - 휴식중(paused) / 종료(ended) / 상태값 없음 / 알 수 없는 상태 → 회원 self-access 차단
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
+//    - 개인운동(personalWorkouts)은 방향이 반대다: 회원이 쓰고 트레이너는 읽기만 한다(§personalWorkouts)
 //
 //  검증은 반드시 request.auth.uid 기준(uid()) — 클라이언트가 보낸 memberId/이메일 값은
 //  절대 신뢰하지 않고, 항상 memberDoc(memberId).memberUid == uid() 형태로 서버측 데이터와 대조한다.
@@ -191,6 +192,16 @@ service cloud.firestore {
       ]);
     }
 
+    // 개인운동 파생 합계 검증 — 숫자 타입 + 비음수 + 상한(운동 20종목 × 세트 20개 기준으로도 넘을 수 없는 값).
+    // 개별 세트의 중량·횟수는 Rules에서 배열 순회가 불가능해 검증할 수 없으므로, 합계 범위로 비정상 문서를 막는다.
+    function personalWorkoutTotalsValid(data) {
+      return data.totalExercises is number && data.totalExercises >= 0 && data.totalExercises <= 20
+          && data.totalSets is number && data.totalSets >= 0 && data.totalSets <= 400
+          && data.totalVolume is number && data.totalVolume >= 0 && data.totalVolume <= 4000000
+          && (!("durationMinutes" in data) || (data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 1440))
+          && (!("exerciseKeys" in data) || (data.exerciseKeys is list && data.exerciseKeys.size() <= 20));
+    }
+
     function isTargetMemberSelf(targetMemberId) {
       return exists(/databases/$(database)/documents/members/$(targetMemberId))
         && get(/databases/$(database)/documents/members/$(targetMemberId)).data.memberUid == uid();
@@ -247,6 +258,68 @@ service cloud.firestore {
       match /cardioLogs/{logId} {
         allow read, create, update: if canAccessMember(memberId);
         allow delete: if canAccessMember(memberId);
+      }
+
+      // 개인운동 기록 — 회원이 직접 작성하고 트레이너는 읽기만 한다(1차 범위: 관리자 수정·삭제 없음).
+      // 권한 방향이 sessions(트레이너 작성 → 회원 열람)와 정반대라 반드시 별도 컬렉션으로 분리되어 있다.
+      //
+      // 회원 쓰기 방어선:
+      //   - isMemberSelfActive(memberId): memberUid == auth.uid 인 진행중 회원 본인만 (경로·memberId 위조 차단)
+      //   - memberId 필드 == 경로 memberId (다른 회원 id 위조 저장 차단)
+      //   - 생성 시 status는 반드시 "in_progress" (완료 기록을 우회 생성해 관리자 화면에 꽂는 것 차단)
+      //   - 허용 필드 화이트리스트 + 타입 검증(배열/문자열/숫자)
+      //   - exercises 배열 최대 20개, memo 최대 1000자, workoutParts 최대 4개
+      //   - startedAt/createdAt/memberId/workoutDate는 생성 이후 변경 불가
+      //   - completedAt/endedAt은 완료 전환(1회)에서만 새로 생기고, 이미 완료된 기록에서는 재변경 불가
+      //   - 완료된 기록은 내용 수정 불가(삭제만 가능) — 1차 정책
+      // 주의: Firestore Rules에는 배열 순회가 없어 exercises[] 각 원소 내부(중량·횟수) 검증은 불가능하다.
+      //       세트 단위 숫자 범위 검증은 클라이언트(normalizePersonalWorkoutExercise)에서 하고,
+      //       Rules는 배열 크기 + 파생 합계(totalSets/totalVolume) 범위로 비정상 문서를 막는다.
+      match /personalWorkouts/{workoutId} {
+        allow read: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);
+
+        allow create: if isMemberSelfActive(memberId)
+                      && request.resource.data.memberId == memberId
+                      && request.resource.data.status == "in_progress"
+                      && request.resource.data.keys().hasOnly([
+                           "memberId", "workoutDate", "workoutParts", "exercises", "exerciseKeys",
+                           "memo", "totalExercises", "totalSets", "totalVolume",
+                           "status", "source", "startedAt", "createdAt", "updatedAt"
+                         ])
+                      && request.resource.data.workoutDate is string
+                      && request.resource.data.workoutDate.size() == 10
+                      && request.resource.data.workoutParts is list
+                      && request.resource.data.workoutParts.size() <= 4
+                      && request.resource.data.exercises is list
+                      && request.resource.data.exercises.size() <= 20
+                      && request.resource.data.memo is string
+                      && request.resource.data.memo.size() <= 1000
+                      && personalWorkoutTotalsValid(request.resource.data);
+
+        // 진행 중 기록의 내용 갱신 — 허용 필드만, status는 in_progress 유지 또는 completed로 1회 전환
+        allow update: if isMemberSelfActive(memberId)
+                      && resource.data.memberId == memberId
+                      && resource.data.status == "in_progress"
+                      && request.resource.data.memberId == memberId
+                      && request.resource.data.workoutDate == resource.data.workoutDate
+                      && request.resource.data.startedAt == resource.data.startedAt
+                      && request.resource.data.createdAt == resource.data.createdAt
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                           "workoutParts", "exercises", "exerciseKeys", "memo",
+                           "totalExercises", "totalSets", "totalVolume", "durationMinutes",
+                           "status", "endedAt", "completedAt", "updatedAt"
+                         ])
+                      && (request.resource.data.status == "in_progress" || request.resource.data.status == "completed")
+                      && request.resource.data.workoutParts is list
+                      && request.resource.data.workoutParts.size() <= 4
+                      && request.resource.data.exercises is list
+                      && request.resource.data.exercises.size() <= 20
+                      && request.resource.data.memo is string
+                      && request.resource.data.memo.size() <= 1000
+                      && personalWorkoutTotalsValid(request.resource.data);
+
+        // 회원 본인은 자기 기록만 삭제 가능(진행 중 폐기 + 완료 기록 삭제) · 트레이너도 정리 목적으로 삭제 허용
+        allow delete: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);
       }
 
       match /memberMessages/{messageId} {

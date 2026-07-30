@@ -678,6 +678,139 @@ describe("TEO GYM Firestore Rules v8", function () {
     });
   });
 
+  describe("6-3. personalWorkouts (개인운동 — 회원이 쓰고 트레이너는 읽기만)", () => {
+    const inProgressDoc = (memberId = "member_a") => ({
+      memberId, workoutDate: "2026-07-30", workoutParts: ["가슴"], exercises: [], exerciseKeys: [],
+      memo: "", totalExercises: 0, totalSets: 0, totalVolume: 0, status: "in_progress", source: "memberApp",
+      startedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+    });
+
+    beforeEach(async () => {
+      await seedMembers({ "member_a": memberActive, "member_b": memberB, "member_paused": memberPaused });
+      await seedSubcollection("member_a", "personalWorkouts", "pw1", inProgressDoc());
+    });
+
+    it("[관리자] 회원 개인운동 read 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").get());
+    });
+
+    it("[진행중 회원] 본인 개인운동 read + in_progress 생성 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").get());
+      await assertSucceeds(db.collection("members").doc("member_a").collection("personalWorkouts").add(inProgressDoc()));
+    });
+
+    it("[진행중 회원] 진행 중 기록의 세트·메모 갱신 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").update({
+          exercises: [{ name: "바벨 벤치프레스", exerciseKey: "바벨벤치프레스", sets: [{ setNumber: 1, weight: 20, reps: 15, volume: 300 }] }],
+          exerciseKeys: ["바벨벤치프레스"],
+          memo: "가슴 자극 좋았음", totalExercises: 1, totalSets: 1, totalVolume: 300, updatedAt: new Date(),
+        })
+      );
+    });
+
+    it("[진행중 회원] 진행 중 → 완료 전환 허용 + 완료된 기록 재수정 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      await assertSucceeds(ref.update({
+        status: "completed", endedAt: new Date(), completedAt: new Date(), durationMinutes: 52,
+        exercises: [{ name: "바벨 벤치프레스", sets: [{ setNumber: 1, weight: 20, reps: 15, volume: 300 }] }],
+        totalExercises: 1, totalSets: 1, totalVolume: 300, updatedAt: new Date(),
+      }));
+      // 완료된 기록은 내용 수정 불가(1차 정책) — 삭제만 가능
+      await assertFails(ref.update({ memo: "완료 후 수정 시도", updatedAt: new Date() }));
+    });
+
+    it("[진행중 회원] completed 상태로 바로 생성 차단(관리자 화면 우회 기록 방지)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkouts").add({ ...inProgressDoc(), status: "completed" })
+      );
+    });
+
+    it("[진행중 회원] memberId 위조 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkouts").add({ ...inProgressDoc("member_b") })
+      );
+    });
+
+    it("[진행중 회원] 허용되지 않은 필드 저장 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkouts").add({ ...inProgressDoc(), trainerUid: MEMBER_A_UID })
+      );
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").update({ isPublished: true })
+      );
+    });
+
+    it("[진행중 회원] startedAt/createdAt/workoutDate 변조 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      await assertFails(ref.update({ startedAt: new Date("2020-01-01"), updatedAt: new Date() }));
+      await assertFails(ref.update({ createdAt: new Date("2020-01-01"), updatedAt: new Date() }));
+      await assertFails(ref.update({ workoutDate: "2020-01-01", updatedAt: new Date() }));
+    });
+
+    it("[진행중 회원] 과도한 종목·세트·부위·메모 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const col = db.collection("members").doc("member_a").collection("personalWorkouts");
+      await assertFails(col.add({ ...inProgressDoc(), exercises: Array.from({ length: 21 }, (_, i) => ({ name: `운동${i}`, sets: [] })), totalExercises: 21 }));
+      await assertFails(col.add({ ...inProgressDoc(), workoutParts: ["가슴", "등", "하체", "어깨", "팔"] }));
+      await assertFails(col.add({ ...inProgressDoc(), memo: "가".repeat(1001) }));
+      // 파생 합계 상한 초과(비정상 중량·횟수로만 만들 수 있는 값)
+      await assertFails(col.add({ ...inProgressDoc(), totalSets: 401 }));
+      await assertFails(col.add({ ...inProgressDoc(), totalVolume: 4000001 }));
+    });
+
+    it("[진행중 회원] 잘못된 타입(문자 합계·문자 배열 아님) 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const col = db.collection("members").doc("member_a").collection("personalWorkouts");
+      await assertFails(col.add({ ...inProgressDoc(), totalSets: "10" }));
+      await assertFails(col.add({ ...inProgressDoc(), totalVolume: "300" }));
+      await assertFails(col.add({ ...inProgressDoc(), exercises: "not-a-list" }));
+      await assertFails(col.add({ ...inProgressDoc(), workoutParts: "가슴" }));
+      await assertFails(col.add({ ...inProgressDoc(), memo: 123 }));
+      await assertFails(col.add({ ...inProgressDoc(), durationMinutes: "52" }));
+    });
+
+    it("[회원 A] 회원 B 개인운동 read 차단", async () => {
+      await seedSubcollection("member_b", "personalWorkouts", "pwB", inProgressDoc("member_b"));
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkouts").doc("pwB").get());
+    });
+
+    it("[회원 A] 회원 B 경로에 개인운동 write 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkouts").add(inProgressDoc("member_b")));
+      await seedSubcollection("member_b", "personalWorkouts", "pwB", inProgressDoc("member_b"));
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkouts").doc("pwB").update({ memo: "침입" }));
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkouts").doc("pwB").delete());
+    });
+
+    it("[진행중 회원] 본인 개인운동 delete 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").delete());
+    });
+
+    it("[휴식중 회원] 개인운동 read/write 차단", async () => {
+      await seedSubcollection("member_paused", "personalWorkouts", "pwP", inProgressDoc("member_paused"));
+      const db = asUser(testEnv, "paused_uid");
+      await assertFails(db.collection("members").doc("member_paused").collection("personalWorkouts").doc("pwP").get());
+      await assertFails(db.collection("members").doc("member_paused").collection("personalWorkouts").add(inProgressDoc("member_paused")));
+    });
+
+    it("[비로그인] 개인운동 read/write 차단", async () => {
+      const db = asAnon(testEnv);
+      await assertFails(db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").get());
+      await assertFails(db.collection("members").doc("member_a").collection("personalWorkouts").add(inProgressDoc()));
+    });
+  });
+
   // ════════════════════════════════════════════════════
   // 7. attendance 컬렉션
   // ════════════════════════════════════════════════════

@@ -30,6 +30,8 @@ import {
   recordMemberAppUsage, getMemberAppUsage, getMemberAppUsageSummary,
   saveAttendance, getAttendanceRecent, deleteAttendance,
   getCardioLogs, saveCardioLog, deleteCardioLog,
+  PERSONAL_WORKOUT_LIMITS, getPersonalWorkouts, getInProgressPersonalWorkouts,
+  createPersonalWorkout, updatePersonalWorkoutProgress, completePersonalWorkout, deletePersonalWorkout,
   CONSULT_STATUS_OPTIONS, getConsultations, addConsultation, updateConsultation, deleteConsultation, convertConsultationToMember,
   ONBOARDING_VERSION, saveMemberOnboardingDraft, syncOnboardingStatusToMember, markOnboardingReviewed, requestOnboardingUpdate,
   subscribeToMembers,
@@ -1506,6 +1508,11 @@ const APP_USAGE_MIN_INTERVAL_MS=10*60*1000;
 const APP_USAGE_LAST_WRITE_KEY="teogym_appUsage_lastWriteAt";
 function MemberApp({ onLogout }) {
   const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [conditionSaving,setConditionSaving]=useState(false); const [painSaving,setPainSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
+  // ── 개인운동 기록 ──
+  // personalWorkouts: 최근 완료+진행중 기록(limit 30, 최신 우선) / personalInProgress: 진행 중 기록만 별도 조회해 오래된 기록도 놓치지 않는다.
+  const [personalWorkouts,setPersonalWorkouts]=useState([]);
+  const [personalInProgress,setPersonalInProgress]=useState([]);
+  const [personalBusy,setPersonalBusy]=useState(false);
   const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg)),ms))]);
   const resetMemberScroll=useCallback(()=>scrollMemberAppToTop(pageRef),[]);
   const goMemberTab=useCallback(nextTab=>{setTab(nextTab); resetMemberScroll();},[resetMemberScroll]);
@@ -1513,6 +1520,11 @@ function MemberApp({ onLogout }) {
   // ── V2 네비게이션 상태 ──
   const [workoutView,setWorkoutView]=useState("journal");      // 수업 탭 세그먼트: journal(수업일지) | calendar(운동 캘린더)
   const [journalFocusId,setJournalFocusId]=useState(null);     // 캘린더 날짜 상세 → 해당 수업일지 바로 열기
+  // 개인운동 기록 화면 진입 상태 — null이면 운동 탭 목록, 값이 있으면 기록 화면.
+  // workoutId=null이면 "부위 선택 + 운동 시작" 화면, 값이 있으면 그 진행 중 문서를 이어서 기록한다.
+  // 하단 내비게이션은 그대로 유지되며(탭은 계속 workout), 탭을 옮기면 목록으로 자동 복귀한다.
+  const [personalRecordTarget,setPersonalRecordTarget]=useState(null);
+  useEffect(()=>{ if(tab!=="workout") setPersonalRecordTarget(null); },[tab]);
   // 수업일지 "수업 후 몸 상태" 피드백 카드 펼침 상태 — 세션 id 기준 Set, 항상 new Set()(전체 접힘)에서 시작.
   // MemberJournal이 아니라 여기(MemberApp)에 두는 이유: RPE/근육통/메모 저장(saveFeedback)은 항상 load()를 거치고,
   // load()는 setLoading(true)로 화면 전체를 잠깐 Spin으로 바꿨다 되돌리므로 그 사이 하위 트리(MemberJournal 포함)가
@@ -1572,7 +1584,7 @@ function MemberApp({ onLogout }) {
     recordMemberAppUsage(profile.id,tab).catch(()=>{});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[tab,profile?.id,onboardingDone]);
-  const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(p?.id){touchMemberAppLastLogin(p.id).catch(()=>{});} if(!p){ setMemberError("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요."); setMemberErrorDetails({code:"member/not-found",path:"members?where(memberUid==auth.uid)",authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:"members?where(memberUid==auth.uid)",status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); return fallback; } }; const [ss,bd,nt,ci,ms,ob,rr,dc,ns,rs,cl,csm]=await Promise.all([readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]),readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null),readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null),readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]),readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]),readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null),readStep("8","routineRecommendations",`members/${p.id}/routineRecommendations (published)`,()=>getRoutineRecommendations(p.id,{publishedOnly:true}),[]),readStep("9","dailyConditioning",`dailyConditioning + members/${p.id}/dailyConditioning (published)`,()=>getDailyConditioning({memberId:p.id,publishedOnly:true}),[]),readStep("10","notices",`notices + members/${p.id}/noticeReads`,()=>getMemberNotices(p.id),[]),readStep("11","readSessions",`members/${p.id}/readSessions`,()=>getReadSessionIds(p.id),new Set()),readStep("12","cardioLogs",`members/${p.id}/cardioLogs`,()=>getCardioLogs(p.id,60),[]),readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[])]); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); setRoutineRecommendations(rr); setDailyConditioning(dc); setNotices(ns); setReadSessionIds(rs instanceof Set?rs:new Set()); setCardioLogs(cl||[]); setCorrectionSummaries((csm||[]).filter(x=>x.visibleToMember!==false)); getAttendanceRecent(p.id,90).then(setAttendance).catch(()=>{}); const todayCheck=(ci||[]).find(c=>c.date===today||c.id===today)||{}; setForm(f=>({...f,weight:"",kcal:"",steps:"",condition:todayCheck.condition||f.condition||"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:p.memberMessage||f.memberMessage})); }catch(e){ setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ setLoading(false); }},[]); useEffect(()=>{load();},[load]);
+  const load=useCallback(async()=>{setLoading(true); setMemberError(""); setMemberErrorDetails(null); setAccessLogs([]); setAccessErrors({}); const nextLogs=[]; const pushLog=(entry)=>{nextLogs.push({...entry,at:new Date().toISOString()}); setAccessLogs([...nextLogs]);}; try{ const authUid=auth.currentUser?.uid||null; const authEmail=auth.currentUser?.email||null; pushLog({step:0,label:"Firebase Auth",path:"auth.currentUser",status:"ok",authUid,authEmail}); const p=await withTimeout(getMemberAppProfile(),5000,"로그인 후 회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 대표에게 문의해주세요."); setProfile(p); if(p?.id){touchMemberAppLastLogin(p.id).catch(()=>{});} if(!p){ setMemberError("회원 정보를 불러오지 못했습니다. 대표에게 문의해주세요."); setMemberErrorDetails({code:"member/not-found",path:"members?where(memberUid==auth.uid)",authUid,authEmail}); pushLog({step:1,label:"members 프로필",path:"members?where(memberUid==auth.uid)",status:"failed",code:"member/not-found",authUid,authEmail}); return; } setMemberErrorDetails(p._diagnostics||null); const uidMatch=p.memberUid===authUid; pushLog({step:1,label:"members 프로필",path:`members/${p.id}`,status:"ok",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,matchedBy:p._diagnostics?.matchedBy||p._matchedBy||null,uidMatch}); const errors={}; const readStep=async(label,collectionName,path,fn,fallback)=>{ pushLog({step:Number(label),label:collectionName,path,status:"reading",authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}); try{ const data=await withTimeout(fn(),5000,`${path} 읽기 시간이 초과됐습니다.`); pushLog({step:Number(label),label:collectionName,path,status:"ok",count:Array.isArray(data)?data.length:(data?1:0),authUid,authEmail,memberUid:p.memberUid||null,uidMatch}); return data; }catch(e){ const details={collection:collectionName,path,code:e?.code||"unknown",message:e?.message||String(e),authUid,authEmail,memberUid:p.memberUid||null,memberEmail:p.email||null,uidMatch}; errors[collectionName]=details; pushLog({step:Number(label),label:collectionName,path,status:"failed",...details}); return fallback; } }; const [ss,bd,nt,ci,ms,ob,rr,dc,ns,rs,cl,csm,pw,pwip]=await Promise.all([readStep("2","sessions",`members/${p.id}/sessions (isPublished == true)`,()=>getPublishedSessions(p.id),[]),readStep("3","bodyCheck",`members/${p.id}/bodyCheck/main`,()=>getBodyCheck(p.id),null),readStep("4","nutrition",`members/${p.id}/nutrition`,()=>getNutrition(p.id),null),readStep("5","memberCheckins",`members/${p.id}/memberCheckins`,()=>getMemberCheckins(p.id),[]),readStep("6","memberMessages",`members/${p.id}/memberMessages`,()=>getMemberMessages(p.id),[]),readStep("7","memberOnboarding",`members/${p.id}/memberOnboarding/main`,()=>getMemberOnboarding(p.id),null),readStep("8","routineRecommendations",`members/${p.id}/routineRecommendations (published)`,()=>getRoutineRecommendations(p.id,{publishedOnly:true}),[]),readStep("9","dailyConditioning",`dailyConditioning + members/${p.id}/dailyConditioning (published)`,()=>getDailyConditioning({memberId:p.id,publishedOnly:true}),[]),readStep("10","notices",`notices + members/${p.id}/noticeReads`,()=>getMemberNotices(p.id),[]),readStep("11","readSessions",`members/${p.id}/readSessions`,()=>getReadSessionIds(p.id),new Set()),readStep("12","cardioLogs",`members/${p.id}/cardioLogs`,()=>getCardioLogs(p.id,60),[]),readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[]),readStep("14","personalWorkouts",`members/${p.id}/personalWorkouts (최근 30건)`,()=>getPersonalWorkouts(p.id,30),[]),readStep("15","personalWorkoutsInProgress",`members/${p.id}/personalWorkouts (status == in_progress)`,()=>getInProgressPersonalWorkouts(p.id),[])]); setAccessErrors(errors); setSessions(ss); setBody(bd); setNutrition(nt); setCheckins(ci); setMessages(ms); setOnboarding(ob); setRoutineRecommendations(rr); setDailyConditioning(dc); setNotices(ns); setReadSessionIds(rs instanceof Set?rs:new Set()); setCardioLogs(cl||[]); setCorrectionSummaries((csm||[]).filter(x=>x.visibleToMember!==false)); setPersonalWorkouts((pw||[]).map(normalizePersonalWorkout).filter(Boolean)); setPersonalInProgress((pwip||[]).map(normalizePersonalWorkout).filter(Boolean).sort((a,b)=>String(b.workoutDate||"").localeCompare(String(a.workoutDate||"")))); getAttendanceRecent(p.id,90).then(setAttendance).catch(()=>{}); const todayCheck=(ci||[]).find(c=>c.date===today||c.id===today)||{}; setForm(f=>({...f,weight:"",kcal:"",steps:"",condition:todayCheck.condition||f.condition||"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:p.memberMessage||f.memberMessage})); }catch(e){ setMemberError(e.message||"회원앱 정보를 불러오지 못했습니다."); setMemberErrorDetails(e.memberAppDetails||{code:e?.code||"unknown",message:e?.message||String(e),authUid:auth.currentUser?.uid||null,authEmail:auth.currentUser?.email||null}); }finally{ setLoading(false); }},[]); useEffect(()=>{load();},[load]);
   if(loading) return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><Spin/></div>;
   if(memberError||!profile) return <MemberAppError message={memberError||"회원 정보를 찾을 수 없습니다. 대표에게 문의해주세요."} details={memberErrorDetails} logs={accessLogs} onRetry={load} onLogout={onLogout}/>;
   const onboardingReadFailed=!!accessErrors.memberOnboarding; const effectiveOnboarding=onboarding||{goal:"온보딩 정보 확인 필요",weeklyWorkoutCount:"-",focusAreas:[]};
@@ -1678,8 +1690,86 @@ function MemberApp({ onLogout }) {
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load();
   };
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries};
-  return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"수업"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
+  // ── 개인운동 기록 ─────────────────────────────────────────────────────────
+  // 목록 갱신은 load()(전체 재조회 + 화면 전체 Spin)를 쓰지 않고 개인운동 2개 쿼리만 다시 읽는다 —
+  // 기록 화면에서 저장할 때마다 화면이 통째로 리마운트되면 입력 흐름이 끊기고 Firestore 읽기도 불필요하게 늘어난다.
+  const reloadPersonalWorkouts=async()=>{
+    if(!profile?.id) return;
+    try{
+      const [list,ip]=await Promise.all([getPersonalWorkouts(profile.id,30),getInProgressPersonalWorkouts(profile.id)]);
+      setPersonalWorkouts((list||[]).map(normalizePersonalWorkout).filter(Boolean));
+      setPersonalInProgress((ip||[]).map(normalizePersonalWorkout).filter(Boolean).sort((a,b)=>String(b.workoutDate||"").localeCompare(String(a.workoutDate||""))));
+    }catch(e){ console.error("[개인운동] 목록 재조회 실패",e); }
+  };
+  const openPersonalWorkoutStart=()=>{
+    // 동시에 여러 개의 진행 중 운동을 만들지 않는다 — 이미 있으면 기존 기록을 이어가게 안내한다.
+    if(personalInProgress.length>0){
+      alert("진행 중인 개인운동이 있어요. 기존 기록을 이어서 작성하거나 종료해주세요.");
+      return;
+    }
+    setPersonalRecordTarget({workoutId:null,openSummary:false});
+    resetMemberScroll();
+  };
+  const resumePersonalWorkout=(workout,opts={})=>{
+    if(!workout?.id) return;
+    setPersonalRecordTarget({workoutId:workout.id,openSummary:!!opts.openSummary});
+    resetMemberScroll();
+  };
+  const closePersonalWorkoutRecord=()=>{
+    setPersonalRecordTarget(null);
+    resetMemberScroll();
+    reloadPersonalWorkouts();
+  };
+  const startPersonalWorkout=async(parts)=>{
+    if(personalBusy) return;
+    if(!parts?.length){ alert("운동 부위를 1개 이상 선택해주세요."); return; }
+    setPersonalBusy(true);
+    try{
+      assertOwnMember();
+      if(personalInProgress.length>0){ alert("진행 중인 개인운동이 있어요. 기존 기록을 이어서 작성해주세요."); return; }
+      const created=await createPersonalWorkout(profile.id,{workoutDate:getKoreaDateString(),workoutParts:parts});
+      await reloadPersonalWorkouts();
+      setPersonalRecordTarget({workoutId:created.id,openSummary:false});
+      resetMemberScroll();
+    }catch(e){ console.error("[개인운동] 시작 실패",e); alert(e?.message||"개인운동을 시작하지 못했습니다."); }
+    finally{ setPersonalBusy(false); }
+  };
+  const savePersonalWorkoutProgress=async(workoutId,patch)=>{
+    assertOwnMember();
+    await updatePersonalWorkoutProgress(profile.id,workoutId,patch);
+    // 로컬 상태만 즉시 반영 — 저장마다 Firestore를 다시 읽지 않는다(진행 중 문서 복원은 재진입/새로고침 때 수행).
+    const applyPatch=w=>w.id===workoutId?normalizePersonalWorkout({...w,...patch}):w;
+    setPersonalWorkouts(prev=>prev.map(applyPatch));
+    setPersonalInProgress(prev=>prev.map(applyPatch));
+  };
+  const completePersonalWorkoutRecord=async(workoutId,payload)=>{
+    assertOwnMember();
+    await completePersonalWorkout(profile.id,workoutId,payload);
+    setPersonalRecordTarget(null);
+    resetMemberScroll();
+    await reloadPersonalWorkouts();
+    alert("개인운동이 저장됐어요.");
+  };
+  const removePersonalWorkout=async(workout)=>{
+    if(!workout?.id) return;
+    const label=workout.status==="completed"?`${formatKoreanDateLabel(workout.workoutDate)} 개인운동 기록을 삭제할까요?`:"진행 중인 개인운동 기록을 삭제할까요? 입력한 내용은 복구할 수 없어요.";
+    if(!window.confirm(label)) return;
+    try{
+      assertOwnMember();
+      await deletePersonalWorkout(profile.id,workout.id);
+      setPersonalRecordTarget(prev=>prev?.workoutId===workout.id?null:prev);
+      await reloadPersonalWorkouts();
+    }catch(e){ console.error("[개인운동] 삭제 실패",e); alert(e?.message||"개인운동 기록 삭제에 실패했습니다."); }
+  };
+  // 운동 종목 후보 — 본인 PT 수업일지 + 본인 개인운동 + 코드 내장 분류 상수(별도 운동 사전 신설 없음)
+  const personalExerciseCandidates=buildPersonalExerciseCandidates({sessions,personalWorkouts});
+  const completedPersonalWorkouts=personalWorkouts.filter(w=>w.status==="completed");
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
+    personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
+    personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
+    startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout};
+  return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{/* 하단 탭 표시 문구만 "수업"→"운동"으로 변경 — 내부 라우팅 key(workout), 딥링크, 앱 이용 현황(appUsage) 기록은 그대로 유지한다. */}
+    {[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"운동"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
 
 function CopyValueButton({value,label="복사"}){const [done,setDone]=useState(false); if(!value)return null; return <button onClick={async()=>{try{await navigator.clipboard?.writeText(value);setDone(true);setTimeout(()=>setDone(false),1500);}catch{}}} style={{marginLeft:6,padding:"2px 6px",borderRadius:5,border:"1px solid rgba(47,115,246,.25)",background:"rgba(47,115,246,.08)",color:"#2f73f6",fontSize:10}}>{done?"복사됨":label}</button>}
@@ -3124,14 +3214,44 @@ function rpeDescription(v){const n=Number(v); if(!Number.isFinite(n))return ""; 
 function MemberWorkout(p){
   const view=p.workoutView||"journal";
   const doneCount=(p.sessions||[]).length;
+  // 개인운동 기록 화면 — 운동 탭 안의 전체 화면(탭 제목·세그먼트 없이 자체 헤더 사용). 하단 내비게이션은 그대로 유지된다.
+  const target=p.personalRecordTarget;
+  if(target){
+    const workout=target.workoutId
+      ? ((p.personalInProgress||[]).find(w=>w.id===target.workoutId)||(p.allPersonalWorkouts||[]).find(w=>w.id===target.workoutId)||null)
+      : null;
+    // 진행 중 문서를 찾지 못하면(삭제·재조회 지연) 목록으로 안전하게 되돌린다 — 잘못된 문서에 쓰지 않는다.
+    if(target.workoutId&&!workout) return <div className="pw-screen"><p className="pw-empty-line">진행 중인 개인운동을 찾을 수 없어요.</p><button type="button" className="pw-btn ghost block" onClick={p.closePersonalWorkoutRecord}>운동 탭으로 돌아가기</button></div>;
+    return <MemberPersonalWorkoutScreen
+      workout={workout}
+      personalWorkouts={p.personalWorkouts||[]}
+      candidates={p.personalExerciseCandidates||[]}
+      initialSummaryOpen={!!target.openSummary}
+      starting={p.personalBusy}
+      onStart={p.startPersonalWorkout}
+      onSaveProgress={p.savePersonalWorkoutProgress}
+      onComplete={p.completePersonalWorkoutRecord}
+      onDelete={p.removePersonalWorkout}
+      onBack={p.closePersonalWorkoutRecord}
+    />;
+  }
   return <>
     <div className="sj-page-head">
-      <h1 className="sj-page-title">수업</h1>
+      <h1 className="sj-page-title">운동</h1>
       {doneCount>0&&<span className="sj-page-meta">{doneCount}회 진행{p.remaining!=="-"&&p.remaining!=null?` · ${p.remaining}회 남음`:""}</span>}
     </div>
-    <p className="sub sj-page-sub">{view==="journal"?"대표님과 진행한 운동 기록을 확인해보세요.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
-    <MemberSegment ariaLabel="수업 보기 전환" options={[["journal","수업일지"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
-    {view==="calendar"?<MemberCalendar {...p}/>:<MemberJournal {...p}/>}
+    <p className="sub sj-page-sub">{view==="journal"?"대표님과 진행한 수업과 직접 기록한 개인운동을 확인해보세요.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
+    <MemberSegment ariaLabel="운동 보기 전환" options={[["journal","운동 기록"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
+    {view==="calendar"?<MemberCalendar {...p}/>:<>
+      <MemberPersonalWorkoutEntry
+        inProgress={p.personalInProgress||[]}
+        busy={p.personalBusy}
+        onStart={p.openPersonalWorkoutStart}
+        onResume={p.resumePersonalWorkout}
+        onDelete={p.removePersonalWorkout}
+      />
+      <MemberJournal {...p}/>
+    </>}
   </>;
 }
 // 수업일지 상위 세션 카드 펼침 상태(openId)는 sessionStorage에도 저장한다 —
@@ -3142,7 +3262,10 @@ function MemberWorkout(p){
 // 주의: "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds)는 여기(sessionStorage/openId)와는 정책이 다르다 —
 // 기본은 항상 접힘이어야 하므로 sessionStorage로 이전 방문 상태를 복원하지 않는다. MemberApp의 state로 옮겨졌다.
 const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,personalWorkouts=[],removePersonalWorkout}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+  // 개인운동 카드 펼침 상태 — PT 수업일지의 openId(sessionStorage 복원 + 최신 자동 펼침)와 완전히 별개로 관리한다.
+  // 개인운동은 sessionReads(수업일지 회원 확인) 개념이 없으므로 펼쳐도 어떤 확인 기록도 남기지 않는다.
+  const [openPersonalId,setOpenPersonalId]=useState(null);
   // openId: null=사용자가 아직 선택하지 않음(항상 "현재 최신 세션"을 실제 id로 비교해 자동으로 펼침) · "__none__"=사용자가 펼쳐진 카드를 직접 접음(자동 재펼침 금지) · 그 외=해당 session.id가 펼쳐짐.
   // 과거에는 배열 인덱스(openId==="__first__"&&i===0)로 "최근 수업"을 판정해 저장 후 재조회로 목록이 다시 그려지며 인덱스가 흔들리면 카드가 접히는 문제가 있었다 — 이제 latestId(실제 session.id) 비교로만 판정한다.
   const [openId,setOpenIdState]=useState(()=>{ if(journalFocusId)return journalFocusId; try{return sessionStorage.getItem(JOURNAL_OPEN_ID_KEY);}catch{return null;} });
@@ -3164,7 +3287,21 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[journalFocusId]);
   const markedRef=useRef(false); const toggleOpen=useCallback(key=>{setOpenKeys(prev=>{const next=new Set(prev); if(next.has(key))next.delete(key); else next.add(key); return next;});},[]);
-  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const latestId=reversed[0]?.id; const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const displayed=(!lq&&!showAll)?searched.slice(0,5):searched; const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;
+  const lq=q.trim().toLowerCase(); const reversed=sessions.slice().reverse(); const latestId=reversed[0]?.id; const searched=reversed.filter(s=>!lq||(s.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))); const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;
+  // ── PT 수업 + 개인운동 통합 목록 ──
+  // 최신 PT 수업의 자동 펼침(hero)과 sessionReads 기록 로직은 기존 그대로 두고, 그 아래 목록에서만 두 기록을 날짜순으로 병합한다.
+  // 개인운동이 하나도 없는 회원에게는 병합 대상이 없어 화면이 기존 수업 탭과 동일하게 보인다.
+  const personalSearched=(personalWorkouts||[]).filter(w=>w&&w.status==="completed"&&(!lq||(w.exercises||[]).some(e=>(e.name||"").toLowerCase().includes(lq))));
+  const hasPersonal=(personalWorkouts||[]).some(w=>w&&w.status==="completed");
+  const heroSession=!lq?searched[0]:null;
+  const restSessions=heroSession?searched.slice(1):searched;
+  const mergedRows=[
+    ...restSessions.map(s=>({kind:"session",key:`s_${s.id}`,date:String(s.date||"").slice(0,10),s})),
+    ...personalSearched.map(w=>({kind:"personal",key:`p_${w.id}`,date:String(w.workoutDate||"").slice(0,10),w})),
+  ].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const visibleRows=(!lq&&!showAll)?mergedRows.slice(0,5):mergedRows;
+  // 배지 전용 읽음 처리(markSessionsAsRead)는 기존과 동일하게 "화면에 노출된 PT 수업"만 대상으로 한다 — 개인운동은 대상이 아니다.
+  const displayed=[...(heroSession?[heroSession]:[]),...visibleRows.filter(r=>r.kind==="session").map(r=>r.s)];
   // 수업일지 "회원 확인"(운동 내용 실제 노출) — 접힘→펼침으로 바뀌는 순간에만 기록한다. 접는 동작은 절대 확인으로 세지 않는다.
   const toggleSess=(s)=>{ const wasOpen=isExp(s); setOpenId(prev=>(wasOpen&&!lq)?"__none__":s.id); if(s.id&&markSessionsAsRead)markSessionsAsRead([s.id]); if(s.id&&!wasOpen&&markSessionDetailRead)markSessionDetailRead(s.id,"session_content_open"); };
   // 사용자가 명시적으로 펼쳤던 session.id가 재조회 후 더 이상 존재하지 않을 때만 openId를 초기화(null=자동으로 최신 세션 펼침)한다 — 저장으로 인한 정상적인 재조회에서는 openId를 건드리지 않는다.
@@ -3221,6 +3358,8 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     const typeName=formatTypes(s.selectedTypes||s.type)||"운동"; const exs=(s.exercises||[]).filter(e=>e.name); const fb=s.memberFeedback||{}; const growth=growthBadges.get(s.id);
     return <button key={s.id} type="button" className="sj-prev-card" onClick={()=>toggleSess(s)}>
       <span className="sj-prev-main">
+        {/* 개인운동 기록이 함께 표시될 때만 "PT 수업" 배지를 붙여 두 기록을 명확히 구분한다(개인운동이 없는 회원은 기존 화면 그대로). */}
+        {hasPersonal&&<span className="pw-kind pt">PT 수업</span>}
         <span className="sj-prev-date-row"><b>{formatKoreanDateLabel(s.date)}</b>{growth&&<em className="sj-growth-badge sm">{growth.label}</em>}</span>
         <span><i className="sj-part">{typeName}</i> · {exs.length}종목</span>
       </span>
@@ -3230,24 +3369,778 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
       </span>
     </button>;
   };
+  // 개인운동 카드 — sessionReads/markSessionsAsRead를 절대 호출하지 않는다(수업일지 확인 기록과 무관).
+  const renderPersonal=(w)=>(
+    <MemberPersonalWorkoutCard key={`p_${w.id}`} workout={w} showKindBadge={true}
+      open={openPersonalId===w.id}
+      onToggle={()=>setOpenPersonalId(prev=>prev===w.id?null:w.id)}
+      onDelete={removePersonalWorkout}/>
+  );
   const heroItems=[]; const prevItems=[];
   // "최근 수업 · 부위 · PR" 표시는 카드 밖 별도 라벨이 아니라 카드 내부 최상단 통합 메타(sj-card-meta, renderExpanded 참고)로 표시한다.
-  displayed.forEach((s,i)=>{ const node=isExp(s)?renderExpanded(s):renderCollapsed(s); if(!lq&&i===0)heroItems.push(node); else prevItems.push(node); });
+  if(heroSession) heroItems.push(isExp(heroSession)?renderExpanded(heroSession):renderCollapsed(heroSession));
+  visibleRows.forEach(row=>{
+    if(row.kind==="session") prevItems.push(isExp(row.s)?renderExpanded(row.s):renderCollapsed(row.s));
+    else prevItems.push(renderPersonal(row.w));
+  });
+  const totalRowCount=(heroSession?1:0)+mergedRows.length;
   return <>
     <div className="ex-search-wrap sj-search-wrap">
       <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
       <input type="search" className="ex-search sj-search" placeholder="운동 이름으로 기록 찾기" value={q} onChange={e=>setQ(e.target.value)} aria-label="운동 검색"/>
       {q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")} aria-label="검색어 지우기"><SjIcon paths={SJ_PATHS.x} size={16}/></button>}
     </div>
-    {displayed.length?<>
+    {(heroItems.length||prevItems.length)?<>
       {heroItems}
-      {prevItems.length>0&&!lq&&<h2 className="sj-section-label">이전 수업</h2>}
+      {prevItems.length>0&&!lq&&<h2 className="sj-section-label">{hasPersonal?"최근 운동":"이전 수업"}</h2>}
       {prevItems.length>0&&<div className="sj-prev-list">{prevItems}</div>}
     </>:(lq
-      ?<div className="sj-empty"><b>"{q}" 운동이 포함된 수업이 없어요.</b><span>다른 운동 이름으로 검색해보세요.</span></div>
-      :<div className="sj-empty"><b>아직 공개된 수업 기록이 없어요.</b><span>수업이 공개되면 여기에서 확인할 수 있어요.</span></div>)}
-    {!lq&&!showAll&&searched.length>5&&<button type="button" className="sj-show-all" onClick={()=>setShowAll(true)}><span className="sj-show-all-txt">전체 수업 기록 보기<small>총 {searched.length}회</small></span><i className="sj-show-all-arrow"><SjIcon paths={SJ_PATHS.arrowRight} size={19}/></i></button>}
+      ?<div className="sj-empty"><b>"{q}" 운동이 포함된 기록이 없어요.</b><span>다른 운동 이름으로 검색해보세요.</span></div>
+      :<div className="sj-empty"><b>아직 운동 기록이 없어요.</b><span>수업이 공개되거나 개인운동을 기록하면 여기에서 확인할 수 있어요.</span></div>)}
+    {!lq&&!showAll&&mergedRows.length>5&&<button type="button" className="sj-show-all" onClick={()=>setShowAll(true)}><span className="sj-show-all-txt">{hasPersonal?"전체 운동 기록 보기":"전체 수업 기록 보기"}<small>총 {totalRowCount}건</small></span><i className="sj-show-all-arrow"><SjIcon paths={SJ_PATHS.arrowRight} size={19}/></i></button>}
   </>}
+// ════════════════════════════════════════════════════
+// 개인운동 기록 — 공통 계산 헬퍼
+//
+// 회원앱(기록 화면·목록·상세)과 관리자앱(회원 상세 "최근 개인운동")이 전부 이 함수들만 사용한다.
+// 화면마다 볼륨·세트 수·운동 시간을 다시 계산하지 않는다.
+//
+// 저장 형태는 기존 수업일지 운동 구조를 그대로 따른다 — exercises[].name / sets[].{weight,reps,volume,recordType}.
+// 덕분에 볼륨 계산은 기존 exVol()을, 세트 필터는 기존 getFilledSets()를 그대로 재사용할 수 있다.
+// 운동 식별자는 기존 canonicalExerciseKey()(정규화 운동명 키)를 그대로 쓴다 — 앱 전체에 안정적인 숫자/문자
+// exerciseId 체계가 존재하지 않으므로 새 ID 체계를 임의로 만들지 않고, PT 기록·추천·통계가 이미 공유하는
+// 이 키를 저장해 2차 확장(PT 기록과의 비교)에서 동일 기준으로 매칭할 수 있게 한다.
+// ════════════════════════════════════════════════════
+
+// 개인운동 부위 선택 항목 — 새 한국어 enum을 만들지 않고 기존 저장값과 문자열이 정확히 일치하는 값만 사용한다.
+// "가슴·등·하체·어깨·팔·유산소·기타"는 기존 SESSION_TYPE_OPTIONS(수업 유형)의 값, "코어"는 기존 MUSCLE_MAP의 키다.
+const PERSONAL_WORKOUT_PART_OPTIONS = ["가슴","등","하체","어깨","팔","코어","유산소","기타"];
+
+// Firestore Timestamp / ISO 문자열 / Date 어느 형태로 와도 Date로 변환 (기존 formatWhenLabel과 같은 방식)
+function toPersonalWorkoutDate(value){
+  if(!value) return null;
+  const raw=typeof value?.toDate==="function"?value.toDate():value;
+  const d=raw instanceof Date?raw:new Date(raw);
+  return Number.isNaN(d.getTime())?null:d;
+}
+
+// 개인운동 운동 시간(분) — 저장된 durationMinutes를 우선 사용하고, 없으면 startedAt~endedAt 차이로 계산한다.
+// 진행 중 기록은 endedAt이 없으므로 nowMs(화면 현재 시각)로 경과 시간을 계산한다(Firestore에 매초 쓰지 않는다).
+function getPersonalWorkoutDurationMinutes(workout, nowMs=null){
+  const stored=Number(workout?.durationMinutes);
+  if(Number.isFinite(stored)&&stored>0&&workout?.status==="completed") return Math.round(stored);
+  const start=toPersonalWorkoutDate(workout?.startedAt);
+  if(!start) return null;
+  const end=toPersonalWorkoutDate(workout?.endedAt)||(nowMs?new Date(nowMs):null);
+  if(!end) return null;
+  const min=Math.round((end.getTime()-start.getTime())/60000);
+  return min>=0?min:null;
+}
+
+// "52분" / "1시간 12분" — 0분도 "0분"으로 표시(운동 시간 자체가 유효한 값)
+function formatPersonalWorkoutDuration(minutes){
+  if(minutes==null||!Number.isFinite(Number(minutes))) return null;
+  const m=Math.max(0,Math.round(Number(minutes)));
+  if(m<60) return `${m}분`;
+  const h=Math.floor(m/60), rest=m%60;
+  return rest?`${h}시간 ${rest}분`:`${h}시간`;
+}
+
+// 세트 1개 정규화 — 저장 필드명·타입은 기존 수업일지 sets와 동일(weight/reps/volume/recordType:"weightReps").
+// 중량은 소수 허용(2.5 / 7.5 / 22.5), 횟수는 정수. 음수·비정상 값은 저장되지 않도록 여기서 잘라낸다.
+// 맨몸 운동처럼 중량이 없을 수 있어 weight는 null을 허용하고, 그때 볼륨은 0으로 일관 처리한다.
+function normalizePersonalWorkoutSet(set, index){
+  const rawW=String(set?.weight??"").trim();
+  const rawR=String(set?.reps??"").trim();
+  const numW=rawW===""?null:Number(rawW);
+  const numR=rawR===""?null:Number(rawR);
+  const weight=(numW!=null&&Number.isFinite(numW)&&numW>0)
+    ? Math.min(PERSONAL_WORKOUT_LIMITS.maxWeight, Math.round(numW*100)/100)
+    : null;
+  const reps=(numR!=null&&Number.isFinite(numR)&&numR>0)
+    ? Math.min(PERSONAL_WORKOUT_LIMITS.maxReps, Math.floor(numR))
+    : null;
+  const volume=(weight&&reps)?Math.round(weight*reps*10)/10:0;
+  return { setNumber:index+1, weight, reps, volume, recordType:"weightReps" };
+}
+
+// 유효한 세트 = 횟수가 1회 이상인 세트. 중량 없는 맨몸 운동도 유효한 기록으로 인정한다.
+function getPersonalWorkoutValidSets(exercise){
+  return (exercise?.sets||[]).filter(s=>Number(s?.reps)>0);
+}
+
+// 종목 1개의 볼륨 — 기존 exVol()을 그대로 재사용한다(회원 체중 인자를 넘기지 않아 순수 중량×횟수 합산).
+// 개인운동 종목은 저장 시 equipment/muscleTop에서 "기능"을 제거하므로 exVol의 기능운동(시간 기반) 분기를 타지 않는다.
+function calculatePersonalExerciseVolume(exercise){
+  return Math.round(exVol({ ...exercise, sets:getPersonalWorkoutValidSets(exercise) })*10)/10;
+}
+
+// 종목 1개 정규화 — 운동명/식별키/부위/기구/세트/파생합계를 확정한다. 저장 직전과 화면 표시에 공통 사용.
+// keepEmptySets=true(진행 중 자동 저장)는 아직 입력이 끝나지 않은 세트 줄도 그대로 보존해, 새로고침 후에도
+// 회원이 보던 세트 줄이 그대로 복원되게 한다. 최종 완료 저장에서는 false로 호출해 빈 세트를 정리한다.
+function normalizePersonalWorkoutExercise(exercise, order=0, {keepEmptySets=false}={}){
+  const name=String(exercise?.name||"").trim().slice(0,60);
+  const guessed=name?suggestMuscle(name,{}):null;
+  const muscleTopRaw=exercise?.muscleTop||guessed?.top||"";
+  // 개인운동은 "중량×횟수" 단일 기록 방식이므로 기능운동(시간 기반) 분류값은 저장하지 않는다 — 볼륨 계산 규칙을 하나로 유지.
+  const muscleTop=muscleTopRaw==="기능"?"기타":muscleTopRaw;
+  const muscleSub=exercise?.muscleSub||(muscleTop?(guessed?.sub||mSubs(muscleTop)[0]||""):"");
+  const equipmentRaw=exercise?.equipment||(name?suggestEquipment(name,{}):"")||"";
+  const equipment=equipmentRaw==="기능"?"":equipmentRaw;
+  const sets=(exercise?.sets||[])
+    .slice(0,PERSONAL_WORKOUT_LIMITS.maxSetsPerExercise)
+    .map(normalizePersonalWorkoutSet)
+    .filter(s=>keepEmptySets||s.reps>0);   // 완료 저장에서는 빈 세트를 남기지 않는다
+  const normalized={
+    exerciseKey:canonicalExerciseKey(name)||"",
+    name, muscleTop, muscleSub, equipment,
+    order,
+    sets: sets.map((s,i)=>({ ...s, setNumber:i+1 })),
+    totalSets: sets.length,
+    totalVolume: 0,
+  };
+  normalized.totalVolume=calculatePersonalExerciseVolume(normalized);
+  return normalized;
+}
+
+// 개인운동 전체 파생 합계 — 종목 수·총 세트·총 볼륨. 저장값과 화면 표시가 어긋나지 않도록 이 함수 하나만 쓴다.
+function calculatePersonalWorkoutTotals(exercises=[]){
+  const valid=exercises.filter(e=>String(e?.name||"").trim()&&getPersonalWorkoutValidSets(e).length>0);
+  return {
+    totalExercises: valid.length,
+    totalSets: valid.reduce((s,e)=>s+getPersonalWorkoutValidSets(e).length,0),
+    totalVolume: Math.round(valid.reduce((s,e)=>s+calculatePersonalExerciseVolume(e),0)*10)/10,
+  };
+}
+
+// array-contains 조회(2차 확장 지점)와 "마지막 동일 운동" 판정에 쓰는 정규화 운동명 키 목록
+function collectPersonalWorkoutExerciseKeys(exercises=[]){
+  return [...new Set(exercises.map(e=>e?.exerciseKey||canonicalExerciseKey(e?.name)).filter(Boolean))].slice(0,PERSONAL_WORKOUT_LIMITS.maxExercises);
+}
+
+// Firestore에서 읽은 문서를 화면에서 안전하게 쓸 수 있는 형태로 정규화(필드 누락·구버전 데이터 방어)
+function normalizePersonalWorkout(raw){
+  if(!raw) return null;
+  const exercises=(raw.exercises||[]).map((e,i)=>({
+    ...e,
+    name:String(e?.name||"").trim(),
+    exerciseKey:e?.exerciseKey||canonicalExerciseKey(e?.name)||"",
+    order:Number.isFinite(Number(e?.order))?Number(e.order):i,
+    sets:(e?.sets||[]).map((s,si)=>({
+      setNumber:Number(s?.setNumber)||si+1,
+      weight:Number.isFinite(Number(s?.weight))&&Number(s?.weight)>0?Number(s.weight):null,
+      reps:Number.isFinite(Number(s?.reps))&&Number(s?.reps)>0?Number(s.reps):null,
+      volume:Number(s?.volume)||0,
+      recordType:s?.recordType||"weightReps",
+    })),
+  })).sort((a,b)=>a.order-b.order);
+  const totals=calculatePersonalWorkoutTotals(exercises);
+  return {
+    ...raw,
+    workoutDate:String(raw.workoutDate||"").slice(0,10),
+    workoutParts:Array.isArray(raw.workoutParts)?raw.workoutParts.filter(Boolean):[],
+    exercises,
+    memo:String(raw.memo||""),
+    status:raw.status==="completed"?"completed":"in_progress",
+    totalExercises:Number(raw.totalExercises)||totals.totalExercises,
+    totalSets:Number(raw.totalSets)||totals.totalSets,
+    totalVolume:Number(raw.totalVolume)||totals.totalVolume,
+  };
+}
+
+// 종목 1개 요약 — 세트가 모두 같으면 "20kg × 15회 × 5세트" 한 줄, 다르면 세트별 줄 배열을 함께 돌려준다.
+// 관리자 화면에서 서로 다른 세트를 한 줄로 왜곡하지 않도록 uniform 플래그로 구분한다.
+function summarizePersonalWorkoutExercise(exercise){
+  const sets=getPersonalWorkoutValidSets(exercise);
+  if(!sets.length) return { uniform:true, text:"기록 없음", lines:[], setCount:0, volume:0 };
+  const line=s=>`${s.weight?`${formatWeightValue(s.weight)} × `:""}${s.reps}회`;
+  const first=sets[0];
+  const uniform=sets.every(s=>(s.weight??null)===(first.weight??null)&&s.reps===first.reps);
+  const volume=calculatePersonalExerciseVolume(exercise);
+  return {
+    uniform,
+    text: uniform ? `${line(first)} × ${sets.length}세트` : `${sets.length}세트`,
+    lines: sets.map(line),
+    setCount: sets.length,
+    volume,
+  };
+}
+
+// "가슴·삼두" — 저장된 workoutParts를 그대로 쓰고, 비어 있으면 종목의 muscleTop을 회원 표기(이두/삼두)로 변환해 보완한다.
+function formatPersonalWorkoutPartsLabel(workout){
+  const parts=(workout?.workoutParts||[]).filter(Boolean);
+  if(parts.length) return parts.join("·");
+  const tops=[...new Set((workout?.exercises||[]).map(e=>e?.muscleTop).filter(v=>v&&v!=="기능"))];
+  return tops.map(muscleTopBadgeLabel).join("·")||"기타";
+}
+
+// 목록 카드 1장에 필요한 표시값 — 회원앱 목록·상세와 관리자 카드가 같은 문구를 쓰도록 한 곳에서 만든다.
+function buildPersonalWorkoutCardSummary(workout, nowMs=null){
+  const w=workout||{};
+  const totals=calculatePersonalWorkoutTotals(w.exercises||[]);
+  const minutes=getPersonalWorkoutDurationMinutes(w,nowMs);
+  return {
+    dateLabel: formatKoreanDateLabel(w.workoutDate),
+    partsLabel: formatPersonalWorkoutPartsLabel(w),
+    durationLabel: formatPersonalWorkoutDuration(minutes),
+    totalExercises: totals.totalExercises,
+    totalSets: totals.totalSets,
+    totalVolume: totals.totalVolume,
+    metaLabel: totals.totalExercises ? `운동 ${totals.totalExercises}종목 · 총 ${totals.totalSets}세트` : "기록된 운동 없음",
+    volumeLabel: totals.totalVolume>0 ? `총 ${Math.round(totals.totalVolume).toLocaleString()}kg` : null,
+  };
+}
+
+// "지난 개인운동" 조회 — 이번 1차 범위는 "본인의 완료된 개인운동"만이다.
+//   · workouts는 항상 로그인한 회원 본인 경로(members/{본인}/personalWorkouts)에서 읽은 목록만 넘어온다 → 타 회원 조회 구조적 불가
+//   · status !== "completed"(진행 중) 기록과 현재 작성 중 문서(excludeWorkoutId)는 제외
+//   · PT 수업일지(sessions)는 1차 자동 불러오기 대상이 아니다
+//   · 운동명 문자열 부분 일치가 아니라 canonicalExerciseKey 완전 일치로만 판정
+function getLastCompletedPersonalExerciseRecord(workouts=[], exerciseKey="", excludeWorkoutId=null){
+  const key=String(exerciseKey||"");
+  if(!key) return null;
+  const candidates=workouts
+    .filter(w=>w&&w.status==="completed"&&w.id!==excludeWorkoutId)
+    .sort((a,b)=>String(b.workoutDate||"").localeCompare(String(a.workoutDate||"")));
+  for(const w of candidates){
+    const hit=(w.exercises||[]).find(e=>(e?.exerciseKey||canonicalExerciseKey(e?.name))===key&&getPersonalWorkoutValidSets(e).length>0);
+    if(hit) return { workoutId:w.id, workoutDate:w.workoutDate, exercise:hit, summary:summarizePersonalWorkoutExercise(hit) };
+  }
+  return null;
+}
+
+// 운동 종목 후보 목록 — 회원용 별도 운동 사전을 새로 만들지 않고 기존 데이터·상수만 재사용한다.
+//   ① 회원 본인의 PT 수업일지에 트레이너가 실제로 기록한 운동명 (가장 정확 · 최우선 노출)
+//   ② 회원 본인의 지난 개인운동 운동명
+//   ③ 코드 내장 기본 분류 상수(EXERCISE_LIBRARY 대표명 + EX_MUSCLE_SUGGEST 첫 키워드)
+// 중복은 canonicalExerciseKey로 제거한다. 센터 공통 라이브러리(exerciseClassifications)는 트레이너 uid 문서라
+// 회원 계정이 읽을 수 없어(Rules) 후보에 포함하지 않는다.
+function buildPersonalExerciseCandidates({sessions=[], personalWorkouts=[]}={}){
+  const seen=new Map();
+  const push=(name,source)=>{
+    const label=String(name||"").trim();
+    if(label.length<2) return;
+    const key=canonicalExerciseKey(label);
+    if(!key||seen.has(key)) return;
+    const guessed=suggestMuscle(label,{});
+    seen.set(key,{ key, name:label, source, muscleTop:guessed?.top==="기능"?"기타":(guessed?.top||""), muscleSub:guessed?.sub||"" });
+  };
+  [...sessions].reverse().forEach(s=>(s?.exercises||[]).forEach(e=>push(e?.name,"session")));
+  [...personalWorkouts].forEach(w=>(w?.exercises||[]).forEach(e=>push(e?.name,"personal")));
+  EXERCISE_LIBRARY.forEach(entry=>push(entry.names[0],"library"));
+  // EX_MUSCLE_SUGGEST의 첫 키워드는 대부분 실제 운동명("랫풀다운","힙쓰러스트")이다.
+  // 부위 이름 자체이거나 2자 이하인 항목("컬","복부","윗가슴")은 운동명이 아니므로 제외한다.
+  const notExerciseName=new Set([...MUSCLE_LIST, ...Object.values(MUSCLE_MAP).flat()]);
+  EX_MUSCLE_SUGGEST.forEach(rule=>{
+    const first=String(rule.keys[0]||"").trim();
+    if(first.length<3||notExerciseName.has(first)) return;
+    push(first,"library");
+  });
+  return [...seen.values()];
+}
+
+// 운동 종료(최종 저장) 전 검증 — 부위/시작 시각/종료 시각/유효 종목/유효 세트를 모두 확인한다.
+// 실패 시 회원에게 그대로 보여줄 한국어 메시지를 돌려준다.
+function validatePersonalWorkoutForComplete({workoutParts=[], exercises=[], startedAt=null, endedAtMs=null, memo=""}={}){
+  if(!(workoutParts||[]).filter(Boolean).length) return { ok:false, message:"운동 부위를 1개 이상 선택해주세요." };
+  const start=toPersonalWorkoutDate(startedAt);
+  if(!start) return { ok:false, message:"운동 시작 시각을 확인할 수 없어요. 새로고침 후 다시 시도해주세요." };
+  const endMs=Number(endedAtMs)||Date.now();
+  if(endMs<start.getTime()) return { ok:false, message:"종료 시각이 시작 시각보다 빠릅니다. 잠시 후 다시 시도해주세요." };
+  const named=exercises.filter(e=>String(e?.name||"").trim());
+  if(!named.length) return { ok:false, message:"운동 종목을 1개 이상 추가해주세요." };
+  const withSets=named.filter(e=>getPersonalWorkoutValidSets(e).length>0);
+  if(!withSets.length) return { ok:false, message:"각 운동에 횟수를 1회 이상 입력해주세요." };
+  const missing=named.find(e=>getPersonalWorkoutValidSets(e).length===0);
+  if(missing) return { ok:false, message:`"${missing.name}"에 세트 기록이 없어요. 횟수를 입력하거나 종목을 삭제해주세요.` };
+  if(named.length>PERSONAL_WORKOUT_LIMITS.maxExercises) return { ok:false, message:`운동 종목은 최대 ${PERSONAL_WORKOUT_LIMITS.maxExercises}개까지 기록할 수 있어요.` };
+  if(String(memo||"").length>PERSONAL_WORKOUT_LIMITS.maxMemoLength) return { ok:false, message:`메모는 최대 ${PERSONAL_WORKOUT_LIMITS.maxMemoLength}자까지 입력할 수 있어요.` };
+  return { ok:true, message:"", durationMinutes:Math.max(0,Math.round((endMs-start.getTime())/60000)) };
+}
+
+// ── 개인운동 UI (회원앱) ──────────────────────────────────────────────────────
+// 기존 수업 탭 디자인(sj-*)과 회원앱 공통 시트(MemberBottomSheet)를 그대로 재사용한다.
+// 개인운동 카드는 sessionReads(수업일지 회원 확인)를 절대 호출하지 않는다 — 확인 기록은 PT 수업일지 전용 개념이다.
+
+// 목록 카드 — 접힘/펼침 한 컴포넌트. 펼침 상태는 상위(MemberJournal)가 관리한다.
+function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete}){
+  const sum=buildPersonalWorkoutCardSummary(workout);
+  const exercises=(workout?.exercises||[]).filter(e=>String(e?.name||"").trim());
+  const startedLabel=formatLastSavedLabel(workout?.startedAt);
+  const endedLabel=formatLastSavedLabel(workout?.endedAt);
+  if(!open){
+    return <button type="button" className="sj-prev-card pw-card" onClick={onToggle}>
+      <span className="sj-prev-main">
+        {showKindBadge&&<span className="pw-kind personal">개인운동</span>}
+        <span className="sj-prev-date-row"><b>{sum.dateLabel}</b></span>
+        <span><i className="sj-part">{sum.partsLabel}</i>{sum.durationLabel?` · ${sum.durationLabel}`:""}</span>
+        <span className="pw-card-meta">{sum.metaLabel}</span>
+      </span>
+      <span className="sj-prev-side"><i className="sj-chev"><SjIcon paths={SJ_PATHS.chevronDown} size={15}/></i></span>
+    </button>;
+  }
+  return <section className="sj-session-card pw-detail">
+    <header className="sj-sess-head">
+      <div className="sj-sess-title">
+        {showKindBadge&&<span className="pw-kind personal">개인운동</span>}
+        <h2 className="sj-date-line"><span className="sj-date-text">{sum.dateLabel}</span></h2>
+        <p><i className="sj-part">{sum.partsLabel}</i>{sum.durationLabel?` · ${sum.durationLabel}`:""}</p>
+      </div>
+      <button type="button" className="sj-collapse-btn" onClick={onToggle} aria-label="개인운동 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
+    </header>
+    {(startedLabel||endedLabel)&&<p className="pw-detail-time">{startedLabel?`시작 ${startedLabel}`:""}{startedLabel&&endedLabel?" · ":""}{endedLabel?`종료 ${endedLabel}`:""}</p>}
+    <div className="pw-detail-stats">
+      <span><b>{sum.totalExercises}</b>종목</span>
+      <span><b>{sum.totalSets}</b>세트</span>
+      {sum.volumeLabel&&<span>{sum.volumeLabel}</span>}
+    </div>
+    {exercises.length===0
+      ? <p className="pw-empty-line">기록된 운동이 없어요.</p>
+      : <ul className="pw-ex-list">{exercises.map((e,i)=>{
+          const s=summarizePersonalWorkoutExercise(e);
+          return <li key={i} className="pw-ex-item">
+            <div className="pw-ex-head">
+              <b>{e.name}</b>
+              {e.muscleTop&&<em className="pw-ex-tag">{muscleTopBadgeLabel(e.muscleTop)}</em>}
+              {e.equipment&&<em className="pw-ex-tag equip">{e.equipment}</em>}
+            </div>
+            {s.uniform
+              ? <span className="pw-ex-sum">{s.text}</span>
+              : <div className="pw-ex-lines">{s.lines.map((line,li)=><span key={li}>{li+1}세트 {line}</span>)}</div>}
+          </li>;
+        })}</ul>}
+    {String(workout?.memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{workout.memo}</p></div>}
+    {onDelete&&<button type="button" className="pw-danger-link" onClick={()=>onDelete(workout)}>이 개인운동 기록 삭제</button>}
+  </section>;
+}
+
+// 운동 탭 상단 — 진행 중 기록이 없으면 "개인운동 시작", 있으면 이어서 기록/종료/삭제 안내.
+// 같은 회원이 동시에 여러 진행 중 기록을 만들지 못하도록, 진행 중이 있으면 시작 버튼 자체를 노출하지 않는다.
+function MemberPersonalWorkoutEntry({inProgress=[],onStart,onResume,onDelete,busy}){
+  if(inProgress.length>0){
+    return <>{inProgress.map(w=>{
+      const startedLabel=formatLastSavedLabel(w.startedAt)||"시작 시각 확인 필요";
+      const isToday=String(w.workoutDate||"")===getKoreaDateString();
+      return <section key={w.id} className="pw-progress-banner">
+        <div className="pw-progress-head">
+          <span className="pw-live-dot" aria-hidden="true"/>
+          <b>{isToday?"진행 중인 개인운동이 있습니다":"지난 개인운동이 진행 중입니다"}</b>
+        </div>
+        <p>{startedLabel} 시작{!isToday?` · ${formatKoreanDateLabel(w.workoutDate)}`:""}</p>
+        <div className="pw-progress-actions">
+          <button type="button" className="pw-btn primary" onClick={()=>onResume(w,{openSummary:false})} disabled={busy}>이어서 기록</button>
+          <button type="button" className="pw-btn ghost" onClick={()=>onResume(w,{openSummary:true})} disabled={busy}>운동 종료</button>
+          <button type="button" className="pw-btn danger" onClick={()=>onDelete(w)} disabled={busy}>기록 삭제</button>
+        </div>
+      </section>;
+    })}</>;
+  }
+  return <button type="button" className="pw-start-btn" onClick={onStart} disabled={busy}>
+    <span className="pw-start-icon"><SjIcon paths={SJ_PATHS.dumbbell} size={20}/></span>
+    <span className="pw-start-text"><b>개인운동 시작</b><small>혼자 한 운동을 기록하면 대표님이 다음 수업에 반영해요</small></span>
+    <i className="pw-start-arrow"><SjIcon paths={SJ_PATHS.arrowRight} size={18}/></i>
+  </button>;
+}
+
+// 운동 종목 선택 시트 — 기존 데이터·상수에서 만든 후보 목록(buildPersonalExerciseCandidates)을 검색/선택한다.
+// 후보에 없는 운동은 "직접 입력"으로만 추가할 수 있고(관리자 수업 기록과 동일하게 자동 분류가 붙는다),
+// 센터 공통 운동 라이브러리에 새 마스터 운동을 만들지는 않는다.
+function MemberPersonalExercisePicker({open,onClose,candidates=[],onPick}){
+  const [q,setQ]=useState("");
+  useEffect(()=>{ if(open) setQ(""); },[open]);
+  const query=q.trim();
+  const filtered=useMemo(()=>{
+    const base=query?candidates.filter(c=>matchSearch(c.name,query)):candidates;
+    return base.slice(0,60);
+  },[candidates,query]);
+  const exactExists=filtered.some(c=>canonicalExerciseKey(c.name)===canonicalExerciseKey(query));
+  return <MemberBottomSheet open={open} onClose={onClose} title="운동 종목 추가">
+    <div className="ex-search-wrap sj-search-wrap pw-picker-search">
+      <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
+      <input type="search" className="ex-search sj-search" placeholder="운동 이름 검색 (예: 벤치)" value={q} onChange={e=>setQ(e.target.value)} aria-label="운동 이름 검색"/>
+      {q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")} aria-label="검색어 지우기"><SjIcon paths={SJ_PATHS.x} size={16}/></button>}
+    </div>
+    {query.length>=2&&!exactExists&&(
+      <button type="button" className="pw-picker-custom" onClick={()=>onPick({name:query,source:"custom"})}>
+        <b>"{query}" 직접 추가</b><small>목록에 없는 운동은 이렇게 추가할 수 있어요</small>
+      </button>
+    )}
+    {filtered.length===0
+      ? <p className="pw-picker-empty">{query?"검색 결과가 없어요. 위 버튼으로 직접 추가할 수 있어요.":"운동 이름을 입력해 검색해보세요."}</p>
+      : <ul className="pw-picker-list">{filtered.map(c=>(
+          <li key={c.key}>
+            <button type="button" onClick={()=>onPick(c)}>
+              <span className="pw-picker-name">{c.name}</span>
+              <span className="pw-picker-tags">
+                {c.muscleTop&&<em>{muscleTopBadgeLabel(c.muscleTop)}</em>}
+                {c.source==="session"&&<em className="src">수업 기록</em>}
+                {c.source==="personal"&&<em className="src">지난 개인운동</em>}
+              </span>
+            </button>
+          </li>
+        ))}</ul>}
+  </MemberBottomSheet>;
+}
+
+// 개인운동 기록 화면 — 시작(부위 선택) → 진행(종목·세트 입력) → 종료 요약 → 저장.
+//
+// 저장 전략(Firestore 쓰기 최소화):
+//   · 세트/종목 추가·삭제, 지난 기록 불러오기, 부위 변경 → 즉시 저장(구조 변경이라 유실되면 복구가 어렵다)
+//   · 중량·횟수·메모 입력 → 1.5초 디바운스 저장 (매 키 입력마다 쓰지 않는다)
+//   · 탭 이동/화면 이탈/앱 백그라운드 전환 → 남아 있는 변경을 즉시 flush
+//   · 경과 시간은 화면에서 startedAt과 현재 시각 차이로만 계산 — Firestore에 매초 쓰지 않는다
+//
+// "운동 종료"는 Firestore를 건드리지 않고 요약 시트만 띄운다(status는 그대로 in_progress).
+// 실제 완료 전환(status/endedAt/completedAt)은 "운동 저장" 1회 호출에서만 일어나 상태가 꼬이지 않는다.
+function MemberPersonalWorkoutScreen({
+  workout, personalWorkouts=[], candidates=[],
+  onStart, onSaveProgress, onComplete, onDelete, onBack,
+  initialSummaryOpen=false, starting=false,
+}){
+  const isRecording=!!workout?.id;
+  const [parts,setParts]=useState(()=>workout?.workoutParts?.filter(Boolean)||[]);
+  const [exercises,setExercises]=useState(()=>toEditablePersonalExercises(workout?.exercises));
+  const [memo,setMemo]=useState(()=>String(workout?.memo||""));
+  const [pickerOpen,setPickerOpen]=useState(false);
+  const [summaryOpen,setSummaryOpen]=useState(false);
+  const [errorMsg,setErrorMsg]=useState("");
+  const [saveState,setSaveState]=useState("");      // "" | "saving" | "saved" | "failed"
+  const [completing,setCompleting]=useState(false);
+  const [nowMs,setNowMs]=useState(()=>Date.now());
+  const uidRef=useRef(1);
+  const nextUid=()=>`ex${uidRef.current++}`;
+
+  // 화면에서만 경과 시간을 갱신 (30초 간격 — 분 단위 표시에 충분하고 배터리 부담이 없다)
+  useEffect(()=>{
+    if(!isRecording) return;
+    const t=setInterval(()=>setNowMs(Date.now()),30000);
+    return ()=>clearInterval(t);
+  },[isRecording]);
+
+  // 진행 중 문서가 바뀌면(복원/재조회) 로컬 편집 상태를 그 문서로 다시 맞춘다
+  const workoutId=workout?.id||null;
+  useEffect(()=>{
+    setParts(workout?.workoutParts?.filter(Boolean)||[]);
+    setExercises(toEditablePersonalExercises(workout?.exercises));
+    setMemo(String(workout?.memo||""));
+    setErrorMsg("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[workoutId]);
+  useEffect(()=>{ if(initialSummaryOpen&&isRecording) setSummaryOpen(true); },[initialSummaryOpen,isRecording]);
+
+  const stateRef=useRef({parts,exercises,memo});
+  stateRef.current={parts,exercises,memo};
+  const pendingRef=useRef(false);
+  const timerRef=useRef(null);
+
+  const flush=useCallback(async()=>{
+    if(timerRef.current){ clearTimeout(timerRef.current); timerRef.current=null; }
+    if(!workoutId||!pendingRef.current) return;
+    pendingRef.current=false;
+    const cur=stateRef.current;
+    const normalized=cur.exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i,{keepEmptySets:true}));
+    const totals=calculatePersonalWorkoutTotals(normalized);
+    setSaveState("saving");
+    try{
+      await onSaveProgress(workoutId,{
+        workoutParts:cur.parts, exercises:normalized, memo:cur.memo,
+        exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized), ...totals,
+      });
+      setSaveState("saved");
+    }catch(e){
+      console.error("[개인운동] 진행 중 저장 실패",e);
+      pendingRef.current=true;      // 다음 기회에 다시 시도
+      setSaveState("failed");
+    }
+  },[workoutId,onSaveProgress]);
+
+  const markDirty=useCallback((immediate=false)=>{
+    pendingRef.current=true;
+    if(timerRef.current){ clearTimeout(timerRef.current); timerRef.current=null; }
+    if(immediate) flush();
+    else timerRef.current=setTimeout(()=>flush(),1500);
+  },[flush]);
+
+  // 화면 이탈·앱 백그라운드 전환 시 남은 변경을 즉시 저장
+  const flushRef=useRef(flush);
+  flushRef.current=flush;
+  useEffect(()=>{
+    const onHide=()=>{ flushRef.current(); };
+    const onVisibility=()=>{ if(document.visibilityState==="hidden") flushRef.current(); };
+    window.addEventListener("pagehide",onHide);
+    document.addEventListener("visibilitychange",onVisibility);
+    return ()=>{
+      window.removeEventListener("pagehide",onHide);
+      document.removeEventListener("visibilitychange",onVisibility);
+      flushRef.current();
+    };
+  },[]);
+
+  const togglePart=(part)=>{
+    setParts(prev=>{
+      const next=prev.includes(part)?prev.filter(x=>x!==part):[...prev,part];
+      if(next.length>PERSONAL_WORKOUT_LIMITS.maxParts){
+        setErrorMsg(`운동 부위는 최대 ${PERSONAL_WORKOUT_LIMITS.maxParts}개까지 선택할 수 있어요.`);
+        return prev;
+      }
+      setErrorMsg("");
+      return next;
+    });
+    if(isRecording) markDirty(true);
+  };
+
+  // ── 시작 화면 ──
+  if(!isRecording){
+    return <div className="pw-screen">
+      <div className="pw-screen-head">
+        <button type="button" className="pw-back" onClick={onBack} aria-label="뒤로">← 운동</button>
+        <h1>개인운동 시작</h1>
+        <p>오늘 어떤 부위를 운동하시나요? 여러 개 선택할 수 있어요.</p>
+      </div>
+      <section className="pw-block">
+        <span className="pw-block-title">운동 부위</span>
+        <div className="pw-part-chips">
+          {PERSONAL_WORKOUT_PART_OPTIONS.map(part=>(
+            <button key={part} type="button" className={parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>
+          ))}
+        </div>
+        <small className="pw-hint">최대 {PERSONAL_WORKOUT_LIMITS.maxParts}개까지 선택할 수 있어요.</small>
+      </section>
+      {errorMsg&&<p className="pw-error">{errorMsg}</p>}
+      <div className="pw-sticky-bar">
+        <button type="button" className="pw-btn primary block" disabled={starting} onClick={()=>{
+          if(!parts.length){ setErrorMsg("운동 부위를 1개 이상 선택해주세요. 부위를 선택하면 운동을 시작할 수 있어요."); return; }
+          setErrorMsg("");
+          onStart(parts);
+        }}>{starting?"시작 중...":"운동 시작"}</button>
+      </div>
+    </div>;
+  }
+
+  // ── 진행 중 화면 ──
+  const startedLabel=formatLastSavedLabel(workout.startedAt);
+  const elapsed=formatPersonalWorkoutDuration(getPersonalWorkoutDurationMinutes(workout,nowMs));
+  const liveTotals=calculatePersonalWorkoutTotals(exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i,{keepEmptySets:true})));
+
+  const addExercise=(candidate)=>{
+    setPickerOpen(false);
+    if(exercises.length>=PERSONAL_WORKOUT_LIMITS.maxExercises){
+      setErrorMsg(`운동 종목은 최대 ${PERSONAL_WORKOUT_LIMITS.maxExercises}개까지 추가할 수 있어요.`);
+      return;
+    }
+    const name=String(candidate?.name||"").trim();
+    if(!name) return;
+    const guessed=suggestMuscle(name,{});
+    setErrorMsg("");
+    setExercises(prev=>[...prev,{
+      uid:nextUid(), name,
+      exerciseKey:canonicalExerciseKey(name)||"",
+      muscleTop:(candidate?.muscleTop||guessed?.top||"")==="기능"?"기타":(candidate?.muscleTop||guessed?.top||""),
+      muscleSub:candidate?.muscleSub||guessed?.sub||"",
+      equipment:(suggestEquipment(name,{})||"")==="기능"?"":(suggestEquipment(name,{})||""),
+      sets:[{weight:"",reps:""}],
+    }]);
+    markDirty(true);
+  };
+  const removeExercise=(uid)=>{
+    const target=exercises.find(e=>e.uid===uid);
+    if(target&&!window.confirm(`"${target.name}" 종목을 삭제할까요? 입력한 세트도 함께 삭제돼요.`)) return;
+    setExercises(prev=>prev.filter(e=>e.uid!==uid));
+    markDirty(true);
+  };
+  const addSet=(uid)=>{
+    setExercises(prev=>prev.map(e=>{
+      if(e.uid!==uid) return e;
+      if(e.sets.length>=PERSONAL_WORKOUT_LIMITS.maxSetsPerExercise){
+        setErrorMsg(`한 종목의 세트는 최대 ${PERSONAL_WORKOUT_LIMITS.maxSetsPerExercise}개까지 기록할 수 있어요.`);
+        return e;
+      }
+      // 직전 세트의 중량·횟수를 기본값으로 복사 — 회원은 복사된 값을 그대로 수정할 수 있다
+      const lastSet=e.sets[e.sets.length-1]||{weight:"",reps:""};
+      return {...e,sets:[...e.sets,{weight:lastSet.weight||"",reps:lastSet.reps||""}]};
+    }));
+    markDirty(true);
+  };
+  const removeSet=(uid,idx)=>{
+    setExercises(prev=>prev.map(e=>e.uid===uid?{...e,sets:e.sets.filter((_,i)=>i!==idx)}:e));
+    markDirty(true);
+  };
+  const editSet=(uid,idx,field,value)=>{
+    // 중량은 소수 1자리까지, 횟수는 정수만 허용 — 음수·문자는 입력 단계에서 제거한다
+    const cleaned=field==="weight"
+      ? String(value).replace(/[^0-9.]/g,"").replace(/(\..*)\./g,"$1").slice(0,6)
+      : String(value).replace(/[^0-9]/g,"").slice(0,3);
+    setExercises(prev=>prev.map(e=>e.uid===uid?{...e,sets:e.sets.map((s,i)=>i===idx?{...s,[field]:cleaned}:s)}:e));
+    markDirty(false);
+  };
+  const loadLastRecord = (ex, last) => {
+    const hasInput=ex.sets.some(s=>String(s.weight||"").trim()||String(s.reps||"").trim());
+    if(hasInput&&!window.confirm("현재 입력한 세트를 지난 기록으로 바꿀까요?")) return;
+    const copied=getPersonalWorkoutValidSets(last.exercise).map(s=>({
+      weight:s.weight!=null?String(s.weight):"",
+      reps:s.reps!=null?String(s.reps):"",
+    }));
+    if(!copied.length) return;
+    setExercises(prev=>prev.map(e=>e.uid===ex.uid?{...e,sets:copied}:e));
+    markDirty(true);
+  };
+
+  const openSummary=()=>{
+    const normalized=exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i));
+    const check=validatePersonalWorkoutForComplete({workoutParts:parts,exercises:normalized,startedAt:workout.startedAt,endedAtMs:Date.now(),memo});
+    if(!check.ok){ setErrorMsg(check.message); return; }
+    setErrorMsg("");
+    setSummaryOpen(true);
+  };
+  const saveCompleted=async()=>{
+    if(completing) return;
+    const normalized=exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i));
+    const endedAtMs=Date.now();
+    const check=validatePersonalWorkoutForComplete({workoutParts:parts,exercises:normalized,startedAt:workout.startedAt,endedAtMs,memo});
+    if(!check.ok){ setErrorMsg(check.message); setSummaryOpen(false); return; }
+    const totals=calculatePersonalWorkoutTotals(normalized);
+    setCompleting(true);
+    // 디바운스 대기 중인 자동 저장이 완료 저장 뒤에 덮어쓰지 않도록 예약을 취소한다
+    pendingRef.current=false;
+    if(timerRef.current){ clearTimeout(timerRef.current); timerRef.current=null; }
+    try{
+      await onComplete(workout.id,{
+        workoutDate:workout.workoutDate, workoutParts:parts, exercises:normalized, memo,
+        exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized),
+        durationMinutes:check.durationMinutes, ...totals,
+      });
+      setSummaryOpen(false);
+    }catch(e){
+      console.error("[개인운동] 완료 저장 실패",e);
+      setErrorMsg(e?.message||"개인운동 저장에 실패했습니다. 잠시 후 다시 시도해주세요.");
+      setSummaryOpen(false);
+    }finally{ setCompleting(false); }
+  };
+
+  const summaryPreview=buildPersonalWorkoutCardSummary({...workout,workoutParts:parts,exercises:exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i)),memo},Date.now());
+
+  return <div className="pw-screen">
+    <div className="pw-live-head">
+      <div className="pw-live-left">
+        <span className="pw-live-dot" aria-hidden="true"/>
+        <div>
+          <b>운동 중</b>
+          <small>{startedLabel?`${startedLabel} 시작`:"시작 시각 확인 중"}{elapsed?` · ${elapsed} 경과`:""}</small>
+        </div>
+      </div>
+      <button type="button" className="pw-back sm" onClick={onBack}>운동 탭</button>
+    </div>
+    <p className="pw-save-state">
+      {saveState==="saving"?"자동 저장 중...":saveState==="failed"?"저장 실패 — 네트워크 확인 후 다시 입력해주세요":saveState==="saved"?"자동 저장됨":"입력하면 자동으로 저장돼요"}
+    </p>
+
+    <section className="pw-block">
+      <span className="pw-block-title">운동 부위</span>
+      <div className="pw-part-chips">
+        {PERSONAL_WORKOUT_PART_OPTIONS.map(part=>(
+          <button key={part} type="button" className={parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>
+        ))}
+      </div>
+    </section>
+
+    <section className="pw-block">
+      <div className="pw-block-head">
+        <span className="pw-block-title">운동 종목</span>
+        <span className="pw-block-meta">{liveTotals.totalExercises}종목 · {liveTotals.totalSets}세트</span>
+      </div>
+      {exercises.length===0&&<p className="pw-empty-line">아래 버튼으로 오늘 한 운동을 추가해주세요.</p>}
+      {exercises.map(ex=>{
+        const last=getLastCompletedPersonalExerciseRecord(personalWorkouts,ex.exerciseKey||canonicalExerciseKey(ex.name),workout.id);
+        return <div key={ex.uid} className="pw-ex-card">
+          <div className="pw-ex-card-head">
+            <div className="pw-ex-card-title">
+              <b>{ex.name}</b>
+              <span>{[ex.muscleTop?muscleTopBadgeLabel(ex.muscleTop):null,ex.equipment||null].filter(Boolean).join(" · ")||"기타"}</span>
+            </div>
+            <button type="button" className="pw-ex-remove" onClick={()=>removeExercise(ex.uid)} aria-label={`${ex.name} 종목 삭제`}><SjIcon paths={SJ_PATHS.x} size={15}/></button>
+          </div>
+          {last&&<div className="pw-last-record">
+            <div>
+              <span>지난 개인운동</span>
+              <b>{formatKoreanDateLabel(last.workoutDate)}</b>
+              <small>{last.summary.uniform?last.summary.text:last.summary.lines.join(" / ")}</small>
+            </div>
+            <button type="button" onClick={()=>loadLastRecord(ex,last)}>지난 기록 불러오기</button>
+          </div>}
+          <div className="pw-set-table">
+            <div className="pw-set-row head"><span>세트</span><span>중량(kg)</span><span>횟수</span><span/></div>
+            {ex.sets.map((s,i)=>(
+              <div key={i} className="pw-set-row">
+                <span className="pw-set-no">{i+1}</span>
+                <input type="text" inputMode="decimal" value={s.weight} placeholder="-" onChange={e=>editSet(ex.uid,i,"weight",e.target.value)} onBlur={()=>markDirty(true)} aria-label={`${i+1}세트 중량`}/>
+                <input type="text" inputMode="numeric" value={s.reps} placeholder="0" onChange={e=>editSet(ex.uid,i,"reps",e.target.value)} onBlur={()=>markDirty(true)} aria-label={`${i+1}세트 횟수`}/>
+                <button type="button" className="pw-set-remove" onClick={()=>removeSet(ex.uid,i)} aria-label={`${i+1}세트 삭제`} disabled={ex.sets.length<=1}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="pw-add-set" onClick={()=>addSet(ex.uid)}>+ 세트 추가</button>
+        </div>;
+      })}
+      <button type="button" className="pw-add-ex" onClick={()=>setPickerOpen(true)}>+ 운동 종목 추가</button>
+    </section>
+
+    <section className="pw-block">
+      <span className="pw-block-title">메모 <em>(선택)</em></span>
+      <textarea className="pw-memo" rows={3} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength}
+        placeholder="오늘 운동하면서 느낀 점을 적어주세요"
+        value={memo} onChange={e=>{setMemo(e.target.value); markDirty(false);}} onBlur={()=>markDirty(true)}/>
+      <small className="pw-hint">{memo.length}/{PERSONAL_WORKOUT_LIMITS.maxMemoLength}자</small>
+    </section>
+
+    {errorMsg&&<p className="pw-error">{errorMsg}</p>}
+
+    <div className="pw-sticky-bar">
+      <button type="button" className="pw-btn danger" onClick={()=>onDelete(workout)}>기록 삭제</button>
+      <button type="button" className="pw-btn primary grow" onClick={openSummary}>운동 종료</button>
+    </div>
+
+    <MemberPersonalExercisePicker open={pickerOpen} onClose={()=>setPickerOpen(false)} candidates={candidates} onPick={addExercise}/>
+
+    <MemberBottomSheet open={summaryOpen} onClose={()=>setSummaryOpen(false)} title="오늘 개인운동">
+      <div className="pw-summary-head">
+        <b>{summaryPreview.partsLabel}</b>
+        <span>{[summaryPreview.durationLabel,`운동 ${summaryPreview.totalExercises}종목`,`총 ${summaryPreview.totalSets}세트`].filter(Boolean).join(" · ")}</span>
+      </div>
+      <ul className="pw-ex-list">{exercises.map((e,i)=>{
+        const norm=normalizePersonalWorkoutExercise(e,i);
+        const s=summarizePersonalWorkoutExercise(norm);
+        if(!s.setCount) return null;
+        return <li key={e.uid} className="pw-ex-item">
+          <div className="pw-ex-head"><b>{norm.name}</b></div>
+          {s.uniform?<span className="pw-ex-sum">{s.text}</span>
+            :<div className="pw-ex-lines">{s.lines.map((line,li)=><span key={li}>{li+1}세트 {line}</span>)}</div>}
+        </li>;
+      })}</ul>
+      {String(memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{memo}</p></div>}
+      <button type="button" className="pw-btn primary block" disabled={completing} onClick={saveCompleted}>{completing?"저장 중...":"운동 저장"}</button>
+      <button type="button" className="pw-btn ghost block" onClick={()=>setSummaryOpen(false)}>계속 기록하기</button>
+    </MemberBottomSheet>
+  </div>;
+}
+
+// Firestore에 저장된 세트(숫자)를 입력창에서 다룰 수 있는 문자열 형태로 변환.
+// 세트가 하나도 없는 종목은 빈 세트 1줄로 시작해 바로 입력할 수 있게 한다.
+function toEditablePersonalExercises(exercises){
+  let seq=0;
+  return (exercises||[]).map(e=>({
+    uid:`saved${seq++}`,
+    name:String(e?.name||"").trim(),
+    exerciseKey:e?.exerciseKey||canonicalExerciseKey(e?.name)||"",
+    muscleTop:e?.muscleTop||"",
+    muscleSub:e?.muscleSub||"",
+    equipment:e?.equipment||"",
+    sets:((e?.sets||[]).length?e.sets:[{}]).map(s=>({
+      weight:s?.weight!=null&&s.weight!==""?String(s.weight):"",
+      reps:s?.reps!=null&&s.reps!==""?String(s.reps):"",
+    })),
+  })).filter(e=>e.name);
+}
+
 // ════════════════════════════════════════════════════
 // 건강 탭 대시보드 — 동기부여 지표 계산 (기존 데이터만 사용, 신규 저장 없음)
 // ════════════════════════════════════════════════════
@@ -5893,6 +6786,116 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
   .sj-session-card{padding:18px 20px 14px}
   .sj-fb-edit{grid-template-columns:1fr}
 }
+/* ── 개인운동(pw-*) — 기존 수업 탭(sj-*) 톤·라운드·섀도를 그대로 따르고 색만 구분한다 ── */
+.pw-kind{align-self:flex-start;font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px;letter-spacing:0}
+.pw-kind.personal{background:#EEF5FF;color:#2F73F6;border:1px solid #D9E7FF}
+.pw-kind.pt{background:#E3F8F4;color:#0F9488;border:1px solid #BFEEE4}
+.pw-card-meta{font-size:12.5px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums}
+.pw-detail-time{margin:2px 0 10px;font-size:12px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums}
+.pw-detail-stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.pw-detail-stats span{background:#F6F7F9;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:700;color:#66717C;font-variant-numeric:tabular-nums}
+.pw-detail-stats b{color:#20242A;font-weight:800;margin-right:2px}
+.pw-ex-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.pw-ex-item{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:16px;padding:12px 14px}
+.pw-ex-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pw-ex-head b{font-size:14.5px;font-weight:800;color:#1D2430;letter-spacing:-.2px}
+.pw-ex-tag{font-style:normal;font-size:11px;font-weight:800;color:#0F9488;background:#E3F8F4;border-radius:999px;padding:2px 8px}
+.pw-ex-tag.equip{color:#66717C;background:#ECEFF3}
+.pw-ex-sum{display:block;margin-top:6px;font-size:13.5px;font-weight:700;color:#475569;font-variant-numeric:tabular-nums}
+.pw-ex-lines{display:grid;gap:3px;margin-top:6px}
+.pw-ex-lines span{font-size:13px;font-weight:700;color:#475569;font-variant-numeric:tabular-nums}
+.pw-memo-view{margin-top:12px;background:#FBFCFE;border:1px dashed #D9E1EA;border-radius:14px;padding:12px 14px}
+.pw-memo-view span{display:block;font-size:11.5px;font-weight:800;color:#8B949E;margin-bottom:5px}
+.pw-memo-view p{margin:0;font-size:13.5px;font-weight:700;color:#334155;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.pw-empty-line{margin:10px 0;font-size:13px;font-weight:700;color:#8B949E}
+.pw-danger-link{margin-top:12px;border:0;background:none;padding:0;color:#FF5A5F;font-size:12.5px;font-weight:800;text-decoration:underline;text-underline-offset:3px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* 운동 탭 상단 진입 버튼 */
+.pw-start-btn{width:100%;display:flex;align-items:center;gap:13px;border:1px solid #D9E7FF;background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border-radius:20px;padding:15px 16px;margin:0 0 14px;text-align:left;cursor:pointer;box-shadow:0 2px 12px rgba(47,115,246,.08);-webkit-tap-highlight-color:transparent;transition:transform .15s ease}
+.pw-start-btn:active{transform:scale(.985)}
+.pw-start-icon{display:flex;align-items:center;justify-content:center;width:42px;height:42px;flex-shrink:0;border-radius:14px;background:#2F73F6;color:#fff}
+.pw-start-text{flex:1;min-width:0;display:grid;gap:3px}
+.pw-start-text b{font-size:15.5px;font-weight:800;color:#1D2430;letter-spacing:-.2px}
+.pw-start-text small{font-size:12px;font-weight:700;color:#66717C;line-height:1.4}
+.pw-start-arrow{display:flex;color:#2F73F6;font-style:normal;flex-shrink:0}
+/* 진행 중 안내 배너 */
+.pw-progress-banner{background:#fff;border:1px solid #FFD9A8;border-radius:20px;padding:15px 16px;margin:0 0 14px;box-shadow:0 2px 12px rgba(249,115,22,.07)}
+.pw-progress-head{display:flex;align-items:center;gap:8px}
+.pw-progress-head b{font-size:15px;font-weight:800;color:#1D2430;letter-spacing:-.2px}
+.pw-progress-banner p{margin:6px 0 12px;font-size:12.5px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums}
+.pw-progress-actions{display:flex;gap:7px;flex-wrap:wrap}
+.pw-live-dot{width:9px;height:9px;border-radius:999px;background:#F97316;flex-shrink:0;animation:pwPulse 1.6s ease-in-out infinite}
+@keyframes pwPulse{0%,100%{opacity:1}50%{opacity:.35}}
+/* 공용 버튼 */
+.pw-btn{min-height:46px;border-radius:14px;padding:11px 16px;font-size:14px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;border:1px solid transparent;transition:transform .15s ease,opacity .15s ease}
+.pw-btn:active{transform:scale(.98)}
+.pw-btn:disabled{opacity:.55;cursor:default}
+.pw-btn.primary{background:#2F73F6;color:#fff;box-shadow:0 6px 16px rgba(47,115,246,.22)}
+.pw-btn.ghost{background:#fff;color:#334155;border-color:#E8ECF1}
+.pw-btn.danger{background:#fff;color:#FF5A5F;border-color:#FFD5D6}
+.pw-btn.block{display:block;width:100%;margin-top:10px}
+.pw-btn.grow{flex:1}
+/* 기록 화면 */
+.pw-screen{display:grid;gap:14px;padding-bottom:96px}
+.pw-screen-head h1{margin:8px 0 0;font-size:28px;font-weight:700;letter-spacing:-.6px;color:#20242A}
+.pw-screen-head p{margin:8px 0 0;font-size:14.5px;font-weight:500;color:#8B949E;line-height:1.5}
+.pw-back{border:1px solid #E8ECF1;background:#fff;border-radius:999px;padding:7px 13px;font-size:12.5px;font-weight:800;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-back.sm{padding:6px 11px;font-size:12px}
+.pw-live-head{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px;background:#fff;border:1px solid #FFD9A8;border-radius:18px;padding:12px 14px;box-shadow:0 4px 16px rgba(15,23,42,.06)}
+.pw-live-left{display:flex;align-items:center;gap:9px;min-width:0}
+.pw-live-left b{display:block;font-size:14.5px;font-weight:800;color:#1D2430}
+.pw-live-left small{display:block;margin-top:2px;font-size:12px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums}
+.pw-save-state{margin:0 2px;font-size:11.5px;font-weight:700;color:#8B949E}
+.pw-block{background:#fff;border:1px solid #EEF1F4;border-radius:22px;padding:16px;box-shadow:0 2px 14px rgba(15,23,42,.05)}
+.pw-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.pw-block-title{display:block;font-size:14.5px;font-weight:800;color:#20242A;margin-bottom:10px}
+.pw-block-title em{font-style:normal;font-size:12px;font-weight:700;color:#8B949E}
+.pw-block-meta{font-size:12.5px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums}
+.pw-part-chips{display:flex;flex-wrap:wrap;gap:7px}
+.pw-part-chips button{border:1px solid #E8ECF1;background:#F6F7F9;color:#66717C;border-radius:999px;padding:10px 15px;font-size:13.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,color .15s ease}
+.pw-part-chips button.active{background:#2F73F6;color:#fff;border-color:#2F73F6}
+.pw-hint{display:block;margin-top:9px;font-size:11.5px;font-weight:700;color:#8B949E}
+.pw-error{margin:0 2px;padding:11px 14px;background:#FFF1F2;border:1px solid #FFD5D6;border-radius:14px;font-size:13px;font-weight:800;color:#DC2626;line-height:1.5}
+.pw-ex-card{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:18px;padding:14px;margin-bottom:10px}
+.pw-ex-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.pw-ex-card-title{min-width:0}
+.pw-ex-card-title b{display:block;font-size:15px;font-weight:800;color:#1D2430;letter-spacing:-.2px;word-break:keep-all}
+.pw-ex-card-title span{display:block;margin-top:3px;font-size:11.5px;font-weight:700;color:#8B949E}
+.pw-ex-remove{border:1px solid #E8ECF1;background:#fff;color:#8B949E;width:30px;height:30px;border-radius:999px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-last-record{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:11px;padding:11px 13px;background:#EEF5FF;border:1px solid #D9E7FF;border-radius:14px}
+.pw-last-record span{display:block;font-size:11px;font-weight:800;color:#2F73F6}
+.pw-last-record b{display:block;margin-top:3px;font-size:13px;font-weight:800;color:#1D2430;font-variant-numeric:tabular-nums}
+.pw-last-record small{display:block;margin-top:2px;font-size:12px;font-weight:700;color:#475569;font-variant-numeric:tabular-nums}
+.pw-last-record button{border:1px solid #2F73F6;background:#fff;color:#2F73F6;border-radius:12px;padding:9px 13px;font-size:12.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap}
+.pw-set-table{margin-top:12px;display:grid;gap:6px}
+.pw-set-row{display:grid;grid-template-columns:42px minmax(0,1fr) minmax(0,1fr) 34px;gap:7px;align-items:center}
+.pw-set-row.head span{font-size:11px;font-weight:800;color:#8B949E;text-align:center}
+.pw-set-no{font-size:13px;font-weight:800;color:#66717C;text-align:center;font-variant-numeric:tabular-nums}
+.pw-set-row input{height:46px;border:1px solid #E8ECF1;border-radius:12px;background:#fff;color:#20242A;font-size:16px;font-weight:800;text-align:center;padding:0 8px;width:100%;font-variant-numeric:tabular-nums}
+.pw-set-remove{border:0;background:#F1F3F6;color:#8B949E;width:30px;height:30px;border-radius:999px;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-set-remove:disabled{opacity:.35;cursor:default}
+.pw-add-set{width:100%;margin-top:10px;height:44px;border:1px dashed #C7D2E0;border-radius:13px;background:#fff;color:#2F73F6;font-size:13.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-add-ex{width:100%;height:52px;border:1px dashed #2F73F6;border-radius:16px;background:#EEF5FF;color:#2F73F6;font-size:14.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-memo{width:100%;min-height:88px;border:1px solid #E8ECF1;border-radius:14px;background:#fff;color:#20242A;font-size:15px;font-weight:600;line-height:1.6;padding:13px;resize:vertical}
+.pw-sticky-bar{position:sticky;bottom:calc(var(--mb-h-tab, 60px) + env(safe-area-inset-bottom, 0px) + 8px);display:flex;gap:8px;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-radius:18px;padding:8px;box-shadow:0 -4px 18px rgba(15,23,42,.08)}
+.pw-sticky-bar .pw-btn.block{margin-top:0}
+/* 종목 선택 시트 */
+.pw-picker-search{margin-bottom:12px}
+.pw-picker-custom{width:100%;display:grid;gap:3px;text-align:left;border:1px solid #2F73F6;background:#EEF5FF;border-radius:14px;padding:12px 14px;margin-bottom:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-picker-custom b{font-size:14px;font-weight:800;color:#2F73F6}
+.pw-picker-custom small{font-size:11.5px;font-weight:700;color:#66717C}
+.pw-picker-empty{margin:16px 2px;font-size:13px;font-weight:700;color:#8B949E;line-height:1.6}
+.pw-picker-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.pw-picker-list button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #EEF1F4;background:#fff;border-radius:14px;padding:13px 14px;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-picker-name{font-size:14.5px;font-weight:800;color:#1D2430;letter-spacing:-.2px;min-width:0;word-break:keep-all}
+.pw-picker-tags{display:flex;gap:5px;flex-shrink:0}
+.pw-picker-tags em{font-style:normal;font-size:10.5px;font-weight:800;color:#0F9488;background:#E3F8F4;border-radius:999px;padding:3px 8px;white-space:nowrap}
+.pw-picker-tags em.src{color:#2F73F6;background:#EEF5FF}
+.pw-summary-head{margin-bottom:14px;padding:14px;background:#F6F8FB;border-radius:16px}
+.pw-summary-head b{display:block;font-size:19px;font-weight:800;color:#20242A;letter-spacing:-.3px}
+.pw-summary-head span{display:block;margin-top:5px;font-size:13px;font-weight:700;color:#66717C;font-variant-numeric:tabular-nums}
+@media(min-width:700px){
+  .pw-set-row{grid-template-columns:56px minmax(0,1fr) minmax(0,1fr) 40px}
+}
 /* ── 부위별 운동 볼륨 변화(pv-multi-*) — 부위 선택 없이 5개 부위를 한 카드에서 동시에 비교 ── */
 .pv-multi-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:4px}
 .pv-multi-head h2{font-size:17px;margin:0;flex:1;min-width:140px}
@@ -6152,6 +7155,7 @@ export default function App() {
   const [bodyData,  setBodyData]  = useState(null);
   const [nutritionData, setNutritionData] = useState(null);
   const [cardioLogs, setCardioLogs] = useState([]);
+  const [memberPersonalWorkouts, setMemberPersonalWorkouts] = useState([]); // 회원 개인운동(조회 전용) — 회원 상세 "최근 개인운동" 카드
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
   const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
@@ -6414,7 +7418,7 @@ export default function App() {
   async function loadMemberData(memberId) {
     console.log("[TEO GYM] loadMemberData:", memberId);
     try {
-      const [ss, bc, nt, priv, cl, srm, au] = await Promise.all([
+      const [ss, bc, nt, priv, cl, srm, au, pw] = await Promise.all([
         getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
@@ -6422,6 +7426,8 @@ export default function App() {
         getCardioLogs(memberId).catch(e => { console.error("[TEO GYM] getCardioLogs error:", e); return []; }),
         getSessionReadMap(memberId).catch(e => { console.error("[TEO GYM] getSessionReadMap error:", e); return {}; }),
         getMemberAppUsage(memberId).catch(e => { console.error("[TEO GYM] getMemberAppUsage error:", e); return { summary: null, activeDays30: 0 }; }),
+        // 개인운동 — 관리자는 조회만 한다(1차 범위: 수정·삭제 없음). 최근 10건만 읽어 회원 상세 진입 비용을 최소화한다.
+        getPersonalWorkouts(memberId, 10).catch(e => { console.error("[TEO GYM] getPersonalWorkouts error:", e); return []; }),
       ]);
       console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
       setSessions(ss);
@@ -6431,6 +7437,7 @@ export default function App() {
       setCardioLogs(cl);
       setSessionReadsMap(srm);
       setMemberAppUsage(au);
+      setMemberPersonalWorkouts((pw || []).map(normalizePersonalWorkout).filter(Boolean));
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -6449,6 +7456,7 @@ export default function App() {
     setNutritionData(null);
     setMemberPrivateData(null);
     setCardioLogs([]);
+    setMemberPersonalWorkouts([]);
     setHealthHubInitialTab(opts.healthHubTab || "대시보드");
     setHubScrollTarget(opts.scrollTarget || null);
     setTrendInitialDate(opts.initialDate || null);
@@ -7154,7 +8162,7 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -12261,7 +13269,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   );
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -12537,6 +13545,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
 
   const [showPreview, setShowPreview] = useState(false);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
+  // "최근 개인운동" 카드 — 기본은 최근 1건만, "전체 개인운동 보기"로 이미 읽어둔 최근 목록을 펼친다(추가 조회 없음).
+  const [showAllPersonalWorkouts, setShowAllPersonalWorkouts] = useState(false);
+  const [expandedPersonalWorkoutId, setExpandedPersonalWorkoutId] = useState(null);
 
   // ── 나이 ─────────────────────────────────────────────────
   const age = member.birthYear ? (new Date().getFullYear() - parseInt(member.birthYear) + 1) : null;
@@ -12654,6 +13665,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
           .hub-toprow{gap:10px;margin-bottom:10px !important;}
           .hub-sec-brief{padding:9px 12px 8px !important;}
           .hub-sec-recent{padding:8px 6px 5px !important;}
+          .hub-sec-personal{padding:9px 12px 9px !important;}
           .hub-sec-today{padding:11px 14px !important;}
           .hub-sec-prep{padding:10px 13px 12px !important;}
           .hub-vitals>div{padding:5px 9px !important;}
@@ -12866,6 +13878,77 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             <button onClick={()=>setScreen("history")} style={{display:"block",width:"calc(100% - 16px)",margin:"6px 8px 4px",padding:9,border:"none",background:DB.bg,borderRadius:12,fontSize:11.5,fontWeight:700,color:DB.sub,textAlign:"center",cursor:"pointer",fontFamily:DB.font}}>전체 수업일지 (히스토리) →</button>
           </section>
   );
+
+  // ⑤-1 최근 개인운동 — 회원이 회원앱에서 직접 기록한 운동. 관리자는 조회만 한다(1차 범위: 수정·삭제 없음).
+  // "최근 수업" 카드 바로 아래에 두어 다음 수업 설계 시 "PT 수업 → 개인운동" 흐름을 위에서 아래로 한 번에 확인할 수 있게 한다.
+  // 기록이 없으면 큰 빈 카드를 만들지 않고 한 줄 안내만 표시한다. 대표(TEO) 개인 기록 계정은 회원앱 개념이 없어 카드를 숨긴다.
+  // 이 카드는 읽기 전용이므로 회원의 appUsage·sessionReads를 절대 만들지 않는다(관리자 화면은 회원 활동 기록 경로를 타지 않음).
+  const secPersonalWorkout = isOwner(member) ? null : (() => {
+    const completed = (personalWorkouts||[]).filter(w => w?.status === "completed");
+    const visible = showAllPersonalWorkouts ? completed : completed.slice(0, 1);
+    return (
+      <section className="hub-sec-personal" style={{...card, padding:"12px 14px 12px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:completed.length?8:2}}>
+          <span style={cardTitle}>최근 개인운동</span>
+          {completed.length>0&&<span style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font}}>회원 직접 기록</span>}
+        </div>
+        {loading ? <Skel n={2}/> : completed.length===0 ? (
+          <div style={{fontSize:11.5,color:DB.faint,fontFamily:DB.font}}>아직 개인운동 기록이 없습니다.</div>
+        ) : (
+          <>
+            {visible.map(w => {
+              const sum = buildPersonalWorkoutCardSummary(w);
+              const open = expandedPersonalWorkoutId===w.id;
+              const exercises = (w.exercises||[]).filter(e=>String(e?.name||"").trim());
+              return (
+                <div key={w.id} style={{borderTop:visible.indexOf(w)>0?DB.hairline:"none",paddingTop:visible.indexOf(w)>0?10:0,marginTop:visible.indexOf(w)>0?10:0}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                    <b style={{fontSize:13.5,fontWeight:800,color:DB.text,letterSpacing:"-.2px",fontVariantNumeric:"tabular-nums"}}>{formatMonthDayKo(w.workoutDate)}</b>
+                    <span style={{fontSize:12,fontWeight:700,color:DB.mintSoft}}>{sum.partsLabel}</span>
+                    {sum.durationLabel&&<span style={{fontSize:11.5,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>· {sum.durationLabel}</span>}
+                    <span style={{marginLeft:"auto",fontSize:11,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>{sum.metaLabel}</span>
+                  </div>
+                  {exercises.map((e,ei)=>{
+                    const s = summarizePersonalWorkoutExercise(e);
+                    return (
+                      <div key={ei} style={{padding:"6px 0",borderTop:ei>0?`1px solid rgba(15,23,42,.05)`:"none"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline"}}>
+                          <b style={{fontSize:12.5,fontWeight:700,color:DB.text}}>{e.name}</b>
+                          {/* 세트별 중량·횟수가 서로 다르면 한 줄로 왜곡하지 않고 아래에 세트별로 펼쳐 보여준다 */}
+                          <span style={{fontSize:12,color:DB.sub,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{s.uniform?s.text:`${s.setCount}세트 (세트별 상이)`}</span>
+                        </div>
+                        {!s.uniform&&(
+                          <div style={{display:"flex",flexWrap:"wrap",gap:"4px 10px",marginTop:4,paddingLeft:2}}>
+                            {s.lines.map((line,li)=><span key={li} style={{fontSize:11.5,color:DB.sub,fontVariantNumeric:"tabular-nums"}}>{li+1}세트 {line}</span>)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {String(w.memo||"").trim()&&(
+                    <div style={{marginTop:9,padding:"9px 11px",background:DB.bg,borderRadius:DB.radiusSm}}>
+                      <span style={{display:"block",fontSize:10,fontWeight:800,color:DB.faint,fontFamily:DB.font,marginBottom:3}}>메모</span>
+                      <span style={{fontSize:12,color:DB.text,lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{w.memo}</span>
+                    </div>
+                  )}
+                  {sum.volumeLabel&&(
+                    <button type="button" onClick={()=>setExpandedPersonalWorkoutId(open?null:w.id)} style={{marginTop:7,border:"none",background:"none",padding:0,cursor:"pointer",fontFamily:DB.font,fontSize:11,fontWeight:700,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>
+                      {open?`총 볼륨 ${sum.volumeLabel} · 총 ${sum.totalSets}세트 ▲`:"총 볼륨 보기 ▾"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {completed.length>1&&(
+              <button type="button" onClick={()=>setShowAllPersonalWorkouts(v=>!v)} style={{display:"block",width:"100%",marginTop:10,padding:8,border:"none",background:DB.bg,borderRadius:12,fontSize:11.5,fontWeight:700,color:DB.sub,textAlign:"center",cursor:"pointer",fontFamily:DB.font}}>
+                {showAllPersonalWorkouts?"최근 1건만 보기":`전체 개인운동 보기 (최근 ${completed.length}건)`}
+              </button>
+            )}
+          </>
+        )}
+      </section>
+    );
+  })();
 
   // ⑤-2 회원 앱 이용 현황 — 관리자 전용 참고 정보(점수·등급·순위 없음). 회원앱 화면에는 이 값을 절대 노출하지 않는다.
   // "수업일지 확인"은 기존 sessionReads 요약 계산(summarizeSessionReadStatus)을, "몸 상태 입력"은 getRecentFeedbackInputStats를
@@ -13424,13 +14507,13 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
            기본 접힘 카드인 분석 도구·회원 관리를 좌측으로 옮겨 좌우 컬럼 높이를 맞추고 전체 스크롤을 줄인다.
            우측이 더 넓어야 할 콘텐츠(부위 버튼·전송 버튼·다음 수업 준비 그리드)가 많아 좌 0.8fr : 우 1.3fr 비율은 그대로 유지 */
         <div className="hub-2panel">
-          <div className="hub-side">{secBrief}{secAnalysis}{secManage}{secRecent}{secAppUsage}</div>
+          <div className="hub-side">{secBrief}{secAnalysis}{secManage}{secRecent}{secPersonalWorkout}{secAppUsage}</div>
           <div className="hub-main">{secToday}{secPrep}{secReview}{secRegistration}</div>
         </div>
       ) : (
         /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 등록 관리 → 분석 → 회원관리 */
         <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",minWidth:0}}>
-          {secToday}{secBrief}{secRecent}{secAppUsage}{secPrep}{secReview}{secRegistration}{secAnalysis}{secManage}
+          {secToday}{secBrief}{secRecent}{secPersonalWorkout}{secAppUsage}{secPrep}{secReview}{secRegistration}{secAnalysis}{secManage}
         </div>
       )}
 

@@ -76,6 +76,36 @@ function usScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 개인운동 공통 계산 헬퍼: 실제 실행 시나리오 검증 ──
+// 회원앱 기록 화면·목록·상세와 관리자 "최근 개인운동" 카드가 모두 같은 함수를 쓰므로, 원본 소스를 그대로
+// 슬라이스해 실행한다(로직을 여기에 다시 옮겨 적지 않는다). 볼륨은 기존 exVol을, 식별자는 기존
+// canonicalExerciseKey를 재사용하므로 그 원본 구간까지 함께 잘라 같은 스코프에서 실행한다.
+let personalWorkoutLib = null;
+try {
+  const sliceLimits = db.slice(db.indexOf('export const PERSONAL_WORKOUT_LIMITS'), db.indexOf('export async function getPersonalWorkouts')).replace('export const', 'const');
+  const sliceMuscleConst = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const AI_GOAL_OPTIONS'));
+  const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
+  const sliceFuncVol = app.slice(app.indexOf('function funcExVol'), app.indexOf('function funcExStats'));
+  const sliceExVol = app.slice(app.indexOf('const ASSIST_MACHINE_KEYWORDS'), app.indexOf('const CSS = `'));
+  const sliceBadge = app.slice(app.indexOf('const MUSCLE_TOP_BADGE_LABEL'), app.indexOf('const GROWTH_METRIC_DEFS'));
+  const sliceDateLabel = app.slice(app.indexOf('const KOREAN_DAY_NAMES'), app.indexOf('function rpeDescription'));
+  const sliceWeightFmt = app.slice(app.indexOf('function formatWeightValue'), app.indexOf('function ChangeReportMetric'));
+  const sliceSuggestConst = app.slice(app.indexOf('const EX_MUSCLE_SUGGEST'), app.indexOf('const EXERCISE_LIBRARY'));
+  const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function getInitialSessionParts'));
+  const slicePersonal = app.slice(app.indexOf('const PERSONAL_WORKOUT_PART_OPTIONS'), app.indexOf('function MemberPersonalWorkoutCard'));
+  personalWorkoutLib = new Function(
+    `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
+    'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete };'
+  )();
+} catch (e) {
+  console.error('[regression] 개인운동 헬퍼 추출 실패:', e.message);
+}
+function pwScenario(name, fn) {
+  if (!personalWorkoutLib) return [name, false];
+  try { return [name, !!fn(personalWorkoutLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 const daysAgoStr = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const daysFromNowStr = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 function wgScenario(name, fn) {
@@ -1536,7 +1566,8 @@ const checks = [
   ['회원앱: correctionSummaries를 다른 컬렉션과 동일한 readStep 패턴으로 로딩하고 common prop으로 전달, 실패해도 다른 데이터 로딩을 막지 않음',
     app.includes('readStep("13","correctionSummaries",`members/${p.id}/correctionSummaries`,()=>getCorrectionSummaries(p.id),[])') &&
     app.includes('setCorrectionSummaries((csm||[]).filter(x=>x.visibleToMember!==false));') &&
-    app.includes('cardioSaving,correctionSummaries};')
+    // common prop 목록의 마지막 항목이 아니어도 통과해야 한다(개인운동 prop 추가 이후) — 전달 여부만 확인한다
+    (app.includes('cardioSaving,correctionSummaries};') || app.includes('cardioSaving,correctionSummaries,'))
   ],
   ['Firestore 규칙 테스트: correctionSummaries에 회원 read 허용/write 차단/타회원 차단/휴식중 회원 차단 케이스 존재',
     (() => {
@@ -2392,6 +2423,374 @@ const checks = [
   ['회원앱: 제출 후에도 프로필에서 사전 문진을 다시 수정할 수 있음',
     app.includes('mode="edit"') && app.includes('사전 문진 수정하기') &&
     app.includes('const isEditMode = mode === "edit";')
+  ],
+  // ══════════════════════════════════════════════════════════════════════
+  // 개인운동 기록 1차 — 회원앱 기록/복원/불러오기 + 관리자 조회 + Rules 보안 + 회귀
+  // ══════════════════════════════════════════════════════════════════════
+  ['개인운동 저장 경로: members/{id}/personalWorkouts 전용 서브컬렉션 + 상한값 단일 정의',
+    db.includes('/members/{id}/personalWorkouts/{id}') &&
+    db.includes('export const PERSONAL_WORKOUT_LIMITS = {') &&
+    db.includes('maxExercises: 20') && db.includes('maxSetsPerExercise: 20') &&
+    db.includes('maxMemoLength: 1000') && db.includes('maxParts: 4') &&
+    db.includes('collection(db, "members", memberId, "personalWorkouts")')
+  ],
+  ['개인운동 데이터 함수: 시작/진행 저장/완료/삭제/목록/진행중 조회가 모두 존재하고 목록은 limit 사용',
+    db.includes('export async function createPersonalWorkout') &&
+    db.includes('export async function updatePersonalWorkoutProgress') &&
+    db.includes('export async function completePersonalWorkout') &&
+    db.includes('export async function deletePersonalWorkout') &&
+    db.includes('export async function getPersonalWorkouts') &&
+    db.includes('export async function getInProgressPersonalWorkouts') &&
+    db.includes('orderBy("workoutDate", "desc"), limit(max)') &&
+    db.includes('where("status", "==", "in_progress")')
+  ],
+  ['개인운동 시작: status는 항상 in_progress + startedAt/createdAt은 서버 타임스탬프',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function createPersonalWorkout'), db.indexOf('export async function updatePersonalWorkoutProgress'));
+      return fn.includes('status: "in_progress"') && fn.includes('startedAt: serverTimestamp()') && fn.includes('createdAt: serverTimestamp()');
+    })()
+  ],
+  ['개인운동 진행 중 저장: status/startedAt/createdAt/completedAt을 절대 갱신하지 않는다(허용 필드 화이트리스트)',
+    (() => {
+      const start = db.indexOf('export async function updatePersonalWorkoutProgress');
+      const fn = db.slice(start, db.indexOf('return { id: workoutId, ...allowed };', start));
+      return !fn.includes('status') && !fn.includes('startedAt') && !fn.includes('createdAt') && !fn.includes('completedAt') &&
+        fn.includes('allowed.exercises') && fn.includes('allowed.memo') && fn.includes('updatedAt: serverTimestamp()');
+    })()
+  ],
+  ['개인운동 완료: endedAt/completedAt은 완료 저장 1회에서만 서버 시각으로 확정',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function completePersonalWorkout'), db.indexOf('export async function deletePersonalWorkout'));
+      return fn.includes('status: "completed"') && fn.includes('endedAt: serverTimestamp()') && fn.includes('completedAt: serverTimestamp()');
+    })()
+  ],
+  ['개인운동 appUsage 중복 방지: 저장마다 appUsage를 따로 쓰지 않고 완료 시 기존 touchMemberActivities만 1회 호출',
+    (() => {
+      const block = db.slice(db.indexOf('// 개인운동 기록 — members/{memberId}/personalWorkouts'));
+      return !block.includes('recordMemberAppUsage') &&
+        block.includes('await touchMemberActivities(memberId, [{') &&
+        block.includes('type: "personalWorkout"') &&
+        // touchMemberActivities는 완료 함수 안에서만 호출된다(진행 중 자동 저장에서는 호출 없음)
+        !db.slice(db.indexOf('export async function updatePersonalWorkoutProgress'), db.indexOf('export async function completePersonalWorkout')).includes('touchMemberActivities');
+    })()
+  ],
+  ['개인운동 공통 헬퍼: 화면마다 재계산하지 않는 단일 계산 함수 세트가 존재',
+    app.includes('function normalizePersonalWorkout(') &&
+    app.includes('function normalizePersonalWorkoutSet(') &&
+    app.includes('function normalizePersonalWorkoutExercise(') &&
+    app.includes('function calculatePersonalExerciseVolume(') &&
+    app.includes('function calculatePersonalWorkoutTotals(') &&
+    app.includes('function getLastCompletedPersonalExerciseRecord(') &&
+    app.includes('function summarizePersonalWorkoutExercise(') &&
+    app.includes('function buildPersonalWorkoutCardSummary(') &&
+    app.includes('function getPersonalWorkoutDurationMinutes(') &&
+    app.includes('function validatePersonalWorkoutForComplete(')
+  ],
+  ['개인운동 볼륨: 기존 exVol()을 재사용하고 별도 볼륨 계산식을 새로 만들지 않음',
+    (() => {
+      const fn = app.slice(app.indexOf('function calculatePersonalExerciseVolume'), app.indexOf('function normalizePersonalWorkoutExercise'));
+      return fn.includes('exVol(') && !fn.includes('parseFloat');
+    })()
+  ],
+  ['개인운동 부위 옵션: 새 한국어 enum을 만들지 않고 기존 저장값(SESSION_TYPE_OPTIONS / MUSCLE_MAP 키)만 사용',
+    (() => {
+      const m = app.match(/const PERSONAL_WORKOUT_PART_OPTIONS = \[([^\]]+)\]/);
+      if (!m) return false;
+      const parts = m[1].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+      const sessionTypes = (app.match(/const SESSION_TYPE_OPTIONS = \[([\s\S]*?)\];/) || [])[1] || '';
+      const muscleMap = (app.match(/const MUSCLE_MAP\s+= \{([\s\S]*?)\n\};/) || [])[1] || '';
+      return parts.length === 8 && parts.every(p => sessionTypes.includes(`"${p}"`) || muscleMap.includes(`"${p}"`));
+    })()
+  ],
+  ['개인운동 운동 종목: 별도 운동 사전을 신설하지 않고 본인 PT 기록·개인운동·기존 분류 상수만 후보로 사용',
+    (() => {
+      const fn = app.slice(app.indexOf('function buildPersonalExerciseCandidates'), app.indexOf('function validatePersonalWorkoutForComplete'));
+      return fn.includes('EXERCISE_LIBRARY.forEach') && fn.includes('EX_MUSCLE_SUGGEST.forEach') &&
+        fn.includes('canonicalExerciseKey(label)') && fn.includes('suggestMuscle(label,{})') &&
+        !fn.includes('exerciseClassifications');
+    })()
+  ],
+  ['개인운동 식별자: 새 exerciseId 체계를 만들지 않고 기존 canonicalExerciseKey를 저장·비교 키로 사용',
+    app.includes('exerciseKey:canonicalExerciseKey(name)||""') &&
+    (() => {
+      const fn = app.slice(app.indexOf('function getLastCompletedPersonalExerciseRecord'), app.indexOf('function buildPersonalExerciseCandidates'));
+      // 운동명 문자열 부분 일치(includes)로 느슨하게 비교하지 않는다
+      return fn.includes('canonicalExerciseKey(e?.name))===key') && !fn.includes('.includes(');
+    })()
+  ],
+  ['하단 탭: 표시 문구만 "수업"→"운동"으로 변경, 내부 라우팅 key(workout)와 appUsage 기록은 그대로 유지',
+    app.includes('["workout",HM_PATHS.dumbbell,"운동"]') &&
+    !app.includes('["workout",HM_PATHS.dumbbell,"수업"]') &&
+    app.includes('{tab==="workout"&&<MemberWorkout {...common}/>}') &&
+    app.includes('recordMemberAppUsage(profile.id,tab).catch(()=>{});') &&
+    app.includes('p.setWorkoutView?.("calendar"); p.setTab("workout");')
+  ],
+  ['운동 탭: 상단 개인운동 진입 + 기존 수업일지(MemberJournal) 유지 + 캘린더 세그먼트 유지',
+    (() => {
+      const fn = app.slice(app.indexOf('function MemberWorkout(p){'), app.indexOf('const JOURNAL_OPEN_ID_KEY'));
+      return fn.includes('<MemberPersonalWorkoutEntry') && fn.includes('<MemberJournal {...p}/>') &&
+        fn.includes('<MemberCalendar {...p}/>') && fn.includes('options={[["journal","운동 기록"],["calendar","캘린더"]]}') &&
+        fn.includes('<h1 className="sj-page-title">운동</h1>');
+    })()
+  ],
+  ['운동 탭 통합 목록: 최신 PT 수업 자동 펼침·sessionReads 대상은 PT 수업만 유지하고 개인운동만 날짜순 병합',
+    (() => {
+      const fn = app.slice(app.indexOf('function MemberJournal({'), app.indexOf('// ════════════════════════════════════════════════════\r\n// 개인운동 기록 — 공통 계산 헬퍼') >= 0
+        ? app.indexOf('// 개인운동 기록 — 공통 계산 헬퍼')
+        : app.length);
+      return fn.includes('const isExp=(s)=>!!lq||(openId==null&&s.id===latestId)||openId===s.id;') &&
+        fn.includes('const displayed=[...(heroSession?[heroSession]:[]),...visibleRows.filter(r=>r.kind==="session").map(r=>r.s)];') &&
+        fn.includes('markSessionDetailRead(latestId,"auto_expanded_recent_session")') &&
+        fn.includes('kind:"personal"') && fn.includes('w.status==="completed"') &&
+        // 개인운동 카드 렌더에서는 어떤 확인/읽음 처리도 하지 않는다
+        !app.slice(app.indexOf('const renderPersonal=(w)=>('), app.indexOf('const heroItems=[]; const prevItems=[];')).includes('markSession');
+    })()
+  ],
+  ['개인운동 카드: sessionReads(수업일지 회원 확인)를 만들지 않는다',
+    (() => {
+      const comp = app.slice(app.indexOf('function MemberPersonalWorkoutCard'), app.indexOf('function MemberPersonalWorkoutEntry'));
+      return !comp.includes('markSessionDetailRead') && !comp.includes('markSessionsAsRead') && comp.includes('개인운동');
+    })()
+  ],
+  ['개인운동 중복 시작 차단: 진행 중 기록이 있으면 시작 버튼 대신 이어서 기록/종료/삭제 안내',
+    app.includes('if(personalInProgress.length>0){') &&
+    app.includes('alert("진행 중인 개인운동이 있어요. 기존 기록을 이어서 작성하거나 종료해주세요.");') &&
+    (() => {
+      const comp = app.slice(app.indexOf('function MemberPersonalWorkoutEntry'), app.indexOf('function MemberPersonalExercisePicker'));
+      return comp.includes('if(inProgress.length>0){') && comp.includes('이어서 기록') && comp.includes('운동 종료') && comp.includes('기록 삭제');
+    })()
+  ],
+  ['개인운동 진행 중 저장: 구조 변경은 즉시, 값 입력은 디바운스, 화면 이탈 시 flush (매초 쓰기 없음)',
+    (() => {
+      const comp = app.slice(app.indexOf('function MemberPersonalWorkoutScreen({'), app.indexOf('// Firestore에 저장된 세트(숫자)를 입력창에서'));
+      return comp.includes('timerRef.current=setTimeout(()=>flush(),1500)') &&
+        comp.includes('markDirty(true)') && comp.includes('markDirty(false)') &&
+        comp.includes('window.addEventListener("pagehide",onHide)') &&
+        comp.includes('document.addEventListener("visibilitychange",onVisibility)') &&
+        // 경과 시간은 화면 계산만 — 저장 호출 없이 setInterval로 표시값만 갱신
+        comp.includes('const t=setInterval(()=>setNowMs(Date.now()),30000)') &&
+        !comp.includes('setInterval(()=>onSaveProgress');
+    })()
+  ],
+  ['개인운동 세트 추가: 직전 세트의 중량·횟수를 기본값으로 복사',
+    app.includes('const lastSet=e.sets[e.sets.length-1]||{weight:"",reps:""};') &&
+    app.includes('return {...e,sets:[...e.sets,{weight:lastSet.weight||"",reps:lastSet.reps||""}]};')
+  ],
+  ['개인운동 지난 기록 불러오기: 자동 덮어쓰기 금지 + 입력값이 있으면 확인 절차 + 세트 배열 전체 복사',
+    (() => {
+      const fn = app.slice(app.indexOf('const loadLastRecord ='), app.indexOf('const openSummary=()=>{'));
+      return fn.includes('window.confirm("현재 입력한 세트를 지난 기록으로 바꿀까요?")') &&
+        fn.includes('getPersonalWorkoutValidSets(last.exercise).map(') &&
+        // 요약값만 복사하지 않고 세트 배열 전체를 그대로 옮긴다
+        fn.includes('sets:copied');
+    })()
+  ],
+  ['개인운동 종료: Firestore를 건드리지 않고 요약만 띄우고, 완료 전환은 "운동 저장" 1회에서만 발생',
+    (() => {
+      const openFn = app.slice(app.indexOf('const openSummary=()=>{'), app.indexOf('const saveCompleted=async()=>{'));
+      const saveFn = app.slice(app.indexOf('const saveCompleted=async()=>{'), app.indexOf('const summaryPreview='));
+      return openFn.includes('validatePersonalWorkoutForComplete(') && !openFn.includes('onComplete') && !openFn.includes('onSaveProgress') &&
+        saveFn.includes('await onComplete(workout.id,{') && saveFn.includes('pendingRef.current=false;');
+    })()
+  ],
+  ['관리자 회원 상세: "최근 개인운동" 카드가 최근 수업 카드 아래에 배치되고 조회 전용(수정·삭제 없음)',
+    app.includes('const secPersonalWorkout = isOwner(member) ? null : (() => {') &&
+    app.includes('<span style={cardTitle}>최근 개인운동</span>') &&
+    app.includes('{secBrief}{secAnalysis}{secManage}{secRecent}{secPersonalWorkout}{secAppUsage}') &&
+    app.includes('{secToday}{secBrief}{secRecent}{secPersonalWorkout}{secAppUsage}{secPrep}') &&
+    (() => {
+      const sec = app.slice(app.indexOf('const secPersonalWorkout = isOwner(member)'), app.indexOf('// ⑤-2 회원 앱 이용 현황'));
+      return !sec.includes('updatePersonalWorkout') && !sec.includes('deletePersonalWorkout') && !sec.includes('completePersonalWorkout') &&
+        sec.includes('아직 개인운동 기록이 없습니다.') &&
+        sec.includes('전체 개인운동 보기') &&
+        // 세트별 값이 다르면 한 줄로 왜곡하지 않고 세트별로 펼쳐 보여준다
+        sec.includes('s.uniform?s.text:`${s.setCount}세트 (세트별 상이)`') &&
+        sec.includes('메모');
+    })()
+  ],
+  ['관리자 회원 상세: 개인운동은 최근 10건만 읽고 회원 활동 기록(appUsage/sessionReads)을 만들지 않음',
+    app.includes('getPersonalWorkouts(memberId, 10).catch(') &&
+    app.includes('personalWorkouts={memberPersonalWorkouts}') &&
+    (() => {
+      const sec = app.slice(app.indexOf('const secPersonalWorkout = isOwner(member)'), app.indexOf('// ⑤-2 회원 앱 이용 현황'));
+      return !sec.includes('recordMemberAppUsage') && !sec.includes('markSessionDetailRead') && !sec.includes('markSessionsRead');
+    })()
+  ],
+  ['Firestore Rules: personalWorkouts는 회원 본인 쓰기 + 트레이너 읽기, memberId 위조·필드 위조·과대 배열 차단',
+    (() => {
+      const block = membersBlockFlat.slice(membersBlockFlat.indexOf('match /personalWorkouts/{workoutId}'), membersBlockFlat.indexOf('match /memberMessages/{messageId}'));
+      return block.includes('allow read: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);') &&
+        block.includes('allow create: if isMemberSelfActive(memberId)') &&
+        block.includes('request.resource.data.memberId == memberId') &&
+        block.includes('request.resource.data.status == "in_progress"') &&
+        block.includes('request.resource.data.keys().hasOnly([') &&
+        block.includes('request.resource.data.exercises.size() <= 20') &&
+        block.includes('request.resource.data.memo.size() <= 1000') &&
+        block.includes('request.resource.data.workoutParts.size() <= 4') &&
+        block.includes('personalWorkoutTotalsValid(request.resource.data)') &&
+        block.includes('request.resource.data.startedAt == resource.data.startedAt') &&
+        block.includes('request.resource.data.createdAt == resource.data.createdAt') &&
+        block.includes('resource.data.status == "in_progress"') &&
+        block.includes('allow delete: if isTrainerOfMember(memberId) || isMemberSelfActive(memberId);');
+    })()
+  ],
+  ['Firestore Rules: 개인운동 파생 합계 타입·범위 검증 헬퍼가 존재하고 규칙을 넓게 열지 않음',
+    firestoreRules.includes('function personalWorkoutTotalsValid(data) {') &&
+    firestoreRules.includes('data.totalExercises is number') &&
+    firestoreRules.includes('data.totalSets is number') &&
+    firestoreRules.includes('data.totalVolume is number') &&
+    firestoreRules.includes('data.exerciseKeys is list') &&
+    // 트레이너는 1차에서 개인운동을 수정하지 않는다(회원 본인만 create/update)
+    !membersBlockFlat.slice(membersBlockFlat.indexOf('match /personalWorkouts/{workoutId}'), membersBlockFlat.indexOf('match /memberMessages/{messageId}')).includes('allow write')
+  ],
+  ['Firestore 규칙 테스트: 개인운동 보안 시나리오(타회원 읽기/쓰기·memberId 위조·필드 위조·과대 배열·타입·타임스탬프·비로그인) 케이스 존재',
+    (() => {
+      const testSrc = fs.readFileSync(path.join(root, 'tests', 'rules', 'firestore.rules.test.mjs'), 'utf8');
+      return testSrc.includes('describe("6-3. personalWorkouts') &&
+        testSrc.includes('[관리자] 회원 개인운동 read 허용') &&
+        testSrc.includes('[회원 A] 회원 B 개인운동 read 차단') &&
+        testSrc.includes('[회원 A] 회원 B 경로에 개인운동 write 차단') &&
+        testSrc.includes('[진행중 회원] memberId 위조 차단') &&
+        testSrc.includes('[진행중 회원] 허용되지 않은 필드 저장 차단') &&
+        testSrc.includes('[진행중 회원] 과도한 종목·세트·부위·메모 차단') &&
+        testSrc.includes('[진행중 회원] 잘못된 타입(문자 합계·문자 배열 아님) 차단') &&
+        testSrc.includes('[진행중 회원] startedAt/createdAt/workoutDate 변조 차단') &&
+        testSrc.includes('[진행중 회원] completed 상태로 바로 생성 차단') &&
+        testSrc.includes('[휴식중 회원] 개인운동 read/write 차단') &&
+        testSrc.includes('[비로그인] 개인운동 read/write 차단');
+    })()
+  ],
+  ['개인운동 시나리오: 부위 미선택 시작 차단 / 빈 운동 종료 차단 / 세트 없는 종목 종료 차단',
+    pwScenario('시작·종료 검증', lib => {
+      const noPart = lib.validatePersonalWorkoutForComplete({ workoutParts: [], exercises: [{ name: '벤치프레스', sets: [{ weight: 20, reps: 10 }] }], startedAt: new Date(Date.now() - 600000) });
+      const noEx = lib.validatePersonalWorkoutForComplete({ workoutParts: ['가슴'], exercises: [], startedAt: new Date(Date.now() - 600000) });
+      const noSets = lib.validatePersonalWorkoutForComplete({ workoutParts: ['가슴'], exercises: [{ name: '벤치프레스', sets: [] }], startedAt: new Date(Date.now() - 600000) });
+      const noStart = lib.validatePersonalWorkoutForComplete({ workoutParts: ['가슴'], exercises: [{ name: '벤치프레스', sets: [{ weight: 20, reps: 10 }] }], startedAt: null });
+      const ok = lib.validatePersonalWorkoutForComplete({ workoutParts: ['가슴'], exercises: [{ name: '벤치프레스', sets: [{ weight: 20, reps: 10 }] }], startedAt: new Date(Date.now() - 600000) });
+      return !noPart.ok && noPart.message.includes('운동 부위') &&
+        !noEx.ok && !noSets.ok && !noStart.ok && ok.ok && ok.durationMinutes === 10;
+    })[1]
+  ],
+  ['개인운동 시나리오: 음수·문자·과대 중량/횟수는 저장되지 않고 빈 세트는 완료 저장에서 정리됨',
+    pwScenario('세트 검증', lib => {
+      const ex = lib.normalizePersonalWorkoutExercise({ name: '벤치프레스', sets: [
+        { weight: '20', reps: '12' },
+        { weight: '-5', reps: '10' },      // 음수 중량 → null
+        { weight: 'abc', reps: 'xyz' },    // 문자 → 세트 자체가 무효
+        { weight: '99999', reps: '9999' }, // 과대값 → 상한으로 절단
+        { weight: '', reps: '' },          // 빈 세트 → 제거
+      ] }, 0);
+      const kept = lib.normalizePersonalWorkoutExercise({ name: '벤치프레스', sets: [{ weight: '', reps: '' }] }, 0, { keepEmptySets: true });
+      return ex.sets.length === 3 &&
+        ex.sets[0].weight === 20 && ex.sets[0].reps === 12 && ex.sets[0].volume === 240 &&
+        ex.sets[1].weight === null && ex.sets[1].reps === 10 && ex.sets[1].volume === 0 &&
+        ex.sets[2].weight === lib.PERSONAL_WORKOUT_LIMITS.maxWeight && ex.sets[2].reps === lib.PERSONAL_WORKOUT_LIMITS.maxReps &&
+        ex.sets.every((s, i) => s.setNumber === i + 1) &&
+        kept.sets.length === 1;   // 진행 중 저장에서는 빈 세트 줄을 그대로 보존해 새로고침 후 복원된다
+    })[1]
+  ],
+  ['개인운동 시나리오: 소수 중량(2.5/7.5/22.5) 정상 저장 + 중량 없는 운동 볼륨 0 처리',
+    pwScenario('소수·맨몸', lib => {
+      const ex = lib.normalizePersonalWorkoutExercise({ name: '덤벨 컬', sets: [{ weight: '2.5', reps: '12' }, { weight: '7.5', reps: '10' }, { weight: '22.5', reps: '8' }] }, 0);
+      const bw = lib.normalizePersonalWorkoutExercise({ name: '플랭크', sets: [{ weight: '', reps: '30' }] }, 0);
+      return ex.sets.map(s => s.weight).join(',') === '2.5,7.5,22.5' &&
+        ex.totalVolume === 2.5 * 12 + 7.5 * 10 + 22.5 * 8 &&
+        bw.sets[0].weight === null && bw.totalVolume === 0 && bw.totalSets === 1;
+    })[1]
+  ],
+  ['개인운동 시나리오: 총 종목·총 세트·총 볼륨이 유효 세트만으로 일관되게 계산됨',
+    pwScenario('합계 계산', lib => {
+      const exercises = [
+        lib.normalizePersonalWorkoutExercise({ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 15 }, { weight: 20, reps: 15 }] }, 0),
+        lib.normalizePersonalWorkoutExercise({ name: '인클라인 덤벨프레스', sets: [{ weight: 12, reps: 12 }] }, 1),
+        lib.normalizePersonalWorkoutExercise({ name: '', sets: [{ weight: 30, reps: 10 }] }, 2),   // 이름 없는 항목은 집계 제외
+      ];
+      const t = lib.calculatePersonalWorkoutTotals(exercises);
+      return t.totalExercises === 2 && t.totalSets === 3 && t.totalVolume === 20 * 15 * 2 + 12 * 12;
+    })[1]
+  ],
+  ['개인운동 시나리오: 마지막 동일 운동은 본인 완료 기록만 사용(진행 중·다른 운동 제외)',
+    pwScenario('마지막 기록', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const workouts = [
+        { id: 'w_progress', status: 'in_progress', workoutDate: daysAgoStr(0), exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 60, reps: 5 }] }] },
+        { id: 'w_old', status: 'completed', workoutDate: daysAgoStr(20), exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 15, reps: 12 }] }] },
+        { id: 'w_recent', status: 'completed', workoutDate: daysAgoStr(5), exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 15 }, { weight: 20, reps: 15 }, { weight: 22.5, reps: 10 }] }] },
+        { id: 'w_other', status: 'completed', workoutDate: daysAgoStr(1), exercises: [{ name: '랫풀다운', sets: [{ weight: 40, reps: 12 }] }] },
+      ].map(w => lib.normalizePersonalWorkout(w));
+      const found = lib.getLastCompletedPersonalExerciseRecord(workouts, key, 'w_progress');
+      const none = lib.getLastCompletedPersonalExerciseRecord(workouts, lib.canonicalExerciseKey('스쿼트'), null);
+      // 세트별 값이 다르면 요약 한 줄로 왜곡하지 않고 세트 배열 전체를 그대로 돌려준다
+      return found && found.workoutId === 'w_recent' && found.exercise.sets.length === 3 &&
+        found.summary.uniform === false && found.summary.lines.length === 3 &&
+        found.summary.lines[2] === '22.5kg × 10회' && none === null;
+    })[1]
+  ],
+  ['개인운동 시나리오: 마지막 기록 판정에 다른 회원 기록이 섞이지 않음(본인 경로 목록만 입력)',
+    // getLastCompletedPersonalExerciseRecord는 memberId나 Firestore를 전혀 참조하지 않고 호출부가 넘긴 배열만 훑는다.
+    // 호출부는 항상 본인 경로(members/{본인}/personalWorkouts)에서 읽은 목록만 넘기므로 다른 회원 기록을 조회할 경로 자체가 없다.
+    (() => {
+      const fn = app.slice(app.indexOf('function getLastCompletedPersonalExerciseRecord'), app.indexOf('function buildPersonalExerciseCandidates'));
+      const noCrossMember = !fn.includes('memberId') && !fn.includes('getDocs') && !fn.includes('collection(');
+      const callSites = app.includes('getLastCompletedPersonalExerciseRecord(personalWorkouts,') &&
+        app.includes('personalWorkouts={p.personalWorkouts||[]}') &&
+        app.includes('personalWorkouts:completedPersonalWorkouts');
+      return noCrossMember && callSites;
+    })() &&
+    pwScenario('본인 기록만', lib => lib.getLastCompletedPersonalExerciseRecord([], lib.canonicalExerciseKey('바벨 벤치프레스'), null) === null)[1]
+  ],
+  ['개인운동 시나리오: 세트가 모두 같으면 한 줄 요약, 다르면 세트별로 표시(왜곡 없음)',
+    pwScenario('종목 요약', lib => {
+      const same = lib.summarizePersonalWorkoutExercise(lib.normalizePersonalWorkoutExercise({ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 15 }, { weight: 20, reps: 15 }, { weight: 20, reps: 15 }, { weight: 20, reps: 15 }, { weight: 20, reps: 15 }] }, 0));
+      const diff = lib.summarizePersonalWorkoutExercise(lib.normalizePersonalWorkoutExercise({ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 15 }, { weight: 20, reps: 15 }, { weight: 22.5, reps: 10 }] }, 0));
+      const bw = lib.summarizePersonalWorkoutExercise(lib.normalizePersonalWorkoutExercise({ name: '플랭크', sets: [{ weight: '', reps: 30 }, { weight: '', reps: 30 }] }, 0));
+      return same.uniform && same.text === '20kg × 15회 × 5세트' &&
+        !diff.uniform && diff.lines.join(' / ') === '20kg × 15회 / 20kg × 15회 / 22.5kg × 10회' &&
+        bw.uniform && bw.text === '30회 × 2세트';   // 중량 없는 운동에 잘못된 "0kg"를 붙이지 않는다
+    })[1]
+  ],
+  ['개인운동 시나리오: 운동 시간·카드 요약 문구가 저장값 기준으로 일관되게 만들어짐',
+    pwScenario('카드 요약', lib => {
+      const started = new Date('2026-07-30T19:12:00+09:00');
+      const completed = lib.normalizePersonalWorkout({
+        id: 'w1', status: 'completed', workoutDate: '2026-07-30', workoutParts: ['가슴', '팔'],
+        startedAt: started, endedAt: new Date(started.getTime() + 52 * 60000), durationMinutes: 52,
+        exercises: [
+          { name: '바벨 벤치프레스', muscleTop: '가슴', sets: [{ weight: 20, reps: 15 }, { weight: 20, reps: 15 }] },
+          { name: '인클라인 덤벨프레스', muscleTop: '가슴', sets: [{ weight: 12, reps: 12 }] },
+        ],
+        memo: '가슴 자극이 잘 느껴졌음',
+      });
+      const sum = lib.buildPersonalWorkoutCardSummary(completed);
+      const inProgress = lib.normalizePersonalWorkout({ id: 'w2', status: 'in_progress', workoutDate: '2026-07-30', startedAt: new Date(Date.now() - 25 * 60000), exercises: [] });
+      const live = lib.buildPersonalWorkoutCardSummary(inProgress, Date.now());
+      return sum.partsLabel === '가슴·팔' && sum.durationLabel === '52분' &&
+        sum.metaLabel === '운동 2종목 · 총 3세트' && sum.volumeLabel === '총 744kg' &&
+        // 진행 중 기록은 endedAt 없이 화면 현재 시각으로만 경과 시간을 계산한다(Firestore 쓰기 없음)
+        live.durationLabel === '25분' && live.metaLabel === '기록된 운동 없음' &&
+        lib.formatPersonalWorkoutDuration(75) === '1시간 15분';
+    })[1]
+  ],
+  ['개인운동 시나리오: 운동 종목 후보가 본인 PT 기록을 최우선으로 포함하고 부위 이름은 후보에서 제외',
+    pwScenario('종목 후보', lib => {
+      const candidates = lib.buildPersonalExerciseCandidates({
+        sessions: [{ date: daysAgoStr(3), exercises: [{ name: '스미스 벤치프레스' }] }],
+        personalWorkouts: [{ status: 'completed', exercises: [{ name: '케이블 크로스오버' }] }],
+      });
+      const names = candidates.map(c => c.name);
+      const first = candidates[0];
+      return first.name === '스미스 벤치프레스' && first.source === 'session' &&
+        names.includes('케이블 크로스오버') && names.includes('랫풀다운') && names.includes('벤치프레스') &&
+        !names.includes('컬') && !names.includes('복부') && !names.includes('윗가슴') &&
+        // 중복 표기는 정규화 키로 하나만 남는다
+        new Set(candidates.map(c => c.key)).size === candidates.length;
+    })[1]
+  ],
+  ['개인운동 시나리오: 기능운동(시간 기반) 분류값을 저장하지 않아 볼륨 규칙이 중량×횟수 하나로 유지됨',
+    pwScenario('기능운동 배제', lib => {
+      const ex = lib.normalizePersonalWorkoutExercise({ name: '오픈북', muscleTop: '기능', equipment: '기능', sets: [{ weight: 5, reps: 10 }] }, 0);
+      return ex.muscleTop !== '기능' && ex.equipment !== '기능' && ex.totalVolume === 50;
+    })[1]
   ],
 ];
 

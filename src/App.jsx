@@ -1525,6 +1525,10 @@ function MemberApp({ onLogout }) {
   // 하단 내비게이션은 그대로 유지되며(탭은 계속 workout), 탭을 옮기면 목록으로 자동 복귀한다.
   const [personalRecordTarget,setPersonalRecordTarget]=useState(null);
   useEffect(()=>{ if(tab!=="workout") setPersonalRecordTarget(null); },[tab]);
+  // 개인운동 완료 안내 — alert()는 네이티브 모달이라 모바일에서 blur·뷰포트 재계산을 유발하고(기존 수업 후 몸 상태 피드백과 동일한 이유로
+  // 이미 회피한 패턴), 자동화 테스트에서는 스크립트 실행 자체를 막는 것이 확인되어 비차단 토스트(기존 sj-fb-saved-toast 재사용)로 표시한다.
+  const [personalWorkoutToast,setPersonalWorkoutToast]=useState("");
+  useEffect(()=>{ if(!personalWorkoutToast) return; const t=setTimeout(()=>setPersonalWorkoutToast(""),2200); return ()=>clearTimeout(t); },[personalWorkoutToast]);
   // 수업일지 "수업 후 몸 상태" 피드백 카드 펼침 상태 — 세션 id 기준 Set, 항상 new Set()(전체 접힘)에서 시작.
   // MemberJournal이 아니라 여기(MemberApp)에 두는 이유: RPE/근육통/메모 저장(saveFeedback)은 항상 load()를 거치고,
   // load()는 setLoading(true)로 화면 전체를 잠깐 Spin으로 바꿨다 되돌리므로 그 사이 하위 트리(MemberJournal 포함)가
@@ -1786,7 +1790,7 @@ function MemberApp({ onLogout }) {
     setPersonalInProgress(prev=>prev.filter(w=>w.id!==workoutId));
     setPersonalRecordTarget(null);
     resetMemberScroll();
-    alert("개인운동이 저장됐어요.");
+    setPersonalWorkoutToast("개인운동이 저장됐어요");
     reloadPersonalWorkouts();
   };
   const removePersonalWorkout=async(workout)=>{
@@ -1812,7 +1816,7 @@ function MemberApp({ onLogout }) {
   const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
     personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
     personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
-    startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout};
+    startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{/* 하단 탭 표시 문구만 "수업"→"운동"으로 변경 — 내부 라우팅 key(workout), 딥링크, 앱 이용 현황(appUsage) 기록은 그대로 유지한다. */}
     {[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"운동"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
 }
@@ -3297,6 +3301,7 @@ function MemberWorkout(p){
       />
       <MemberJournal {...p}/>
     </>}
+    {p.personalWorkoutToast&&<div className="sj-fb-saved-toast" role="status">{p.personalWorkoutToast}</div>}
   </>;
 }
 // 수업일지 상위 세션 카드 펼침 상태(openId)는 sessionStorage에도 저장한다 —

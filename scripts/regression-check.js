@@ -2537,6 +2537,11 @@ const checks = [
     app.includes('status:"in_progress", source:"memberApp",') &&
     app.includes('setPersonalInProgress(prev=>[localWorkout,...prev.filter(w=>w.id!==localWorkout.id)]);')
   ],
+  ['개인운동 완료 안내: alert() 대신 비차단 토스트(기존 sj-fb-saved-toast 재사용) — 실기기 자동화 검증 중 alert()가 스크립트 실행 자체를 막는 것을 확인해 제거함',
+    !app.slice(app.indexOf('const completePersonalWorkoutRecord=async(workoutId,payload)=>{'), app.indexOf('const removePersonalWorkout=async(workout)=>{')).includes('alert(') &&
+    app.includes('setPersonalWorkoutToast("개인운동이 저장됐어요");') &&
+    app.includes('{p.personalWorkoutToast&&<div className="sj-fb-saved-toast" role="status">{p.personalWorkoutToast}</div>}')
+  ],
   ['개인운동 운동 종목: 별도 운동 사전을 신설하지 않고 본인 PT 기록·개인운동·기존 분류 상수만 후보로 사용',
     (() => {
       const fn = app.slice(app.indexOf('function buildPersonalExerciseCandidates'), app.indexOf('function validatePersonalWorkoutForComplete'));

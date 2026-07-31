@@ -92,10 +92,14 @@ try {
   const sliceWeightFmt = app.slice(app.indexOf('function formatWeightValue'), app.indexOf('function ChangeReportMetric'));
   const sliceSuggestConst = app.slice(app.indexOf('const EX_MUSCLE_SUGGEST'), app.indexOf('const EXERCISE_LIBRARY'));
   const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function getInitialSessionParts'));
-  const slicePersonal = app.slice(app.indexOf('const PERSONAL_WORKOUT_PART_OPTIONS'), app.indexOf('function MemberPersonalWorkoutCard'));
+  // 비교 헬퍼(개인운동 2차 1단계)는 방향 라벨에 formatMonthDayKo를 쓰므로 그 원본 구간도 같은 스코프에 함께 넣는다.
+  const sliceMonthDayKo = app.slice(app.indexOf('function formatMonthDayKo'), app.indexOf('function formatWhenLabel'));
+  // 슬라이스 끝 경계는 첫 JSX 컴포넌트 직전(MemberExerciseComparison)까지다 — JSX가 섞이면 new Function 파싱이 깨진다.
+  const slicePersonal = app.slice(app.indexOf('const PERSONAL_WORKOUT_PART_OPTIONS'), app.indexOf('function MemberExerciseComparison'));
   personalWorkoutLib = new Function(
-    `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
-    'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete };'
+    `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceMonthDayKo}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
+    'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete, ' +
+    'normalizeComparableExercise, buildExercisePerformanceSnapshot, compareExercisePerformance, formatExerciseComparisonSummary, buildMemberExerciseComparisonIndex, formatExerciseSnapshotLine, getExerciseRecordDateKey };'
   )();
 } catch (e) {
   console.error('[regression] 개인운동 헬퍼 추출 실패:', e.message);
@@ -1192,7 +1196,7 @@ const checks = [
   ],
   ['수업일지 카드 순서: 운동종목(SessionMini)이 피드백 카드(MemberFeedbackForm)보다 먼저 표시',
     (() => {
-      const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>');
+      const i = app.indexOf('<SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen} comparisonIndex={comparisonIndex}/>');
       const j = app.indexOf('<MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>{');
       return i !== -1 && j !== -1 && i < j;
     })()
@@ -2831,6 +2835,253 @@ const checks = [
       const ex = lib.normalizePersonalWorkoutExercise({ name: '오픈북', muscleTop: '기능', equipment: '기능', sets: [{ weight: 5, reps: 10 }] }, 0);
       return ex.muscleTop !== '기능' && ex.equipment !== '기능' && ex.totalVolume === 50;
     })[1]
+  ],
+
+  // ── 개인운동 2차 1단계: PT 수업 ↔ 개인운동 같은 운동 비교 ──────────────────────────
+  // 회원앱(PT 수업 상세·개인운동 상세)과 관리자 "최근 개인운동" 카드가 모두 이 헬퍼 하나만 쓴다.
+  // 비교 결과는 어디에도 저장하지 않고 원본에서 매번 계산하므로, 아래 시나리오가 곧 화면 표시 결과다.
+  ['비교 시나리오: canonicalExerciseKey가 정확히 같은 운동만 매칭하고 유사한 다른 운동은 매칭하지 않음',
+    pwScenario('동일 운동 판정', lib => {
+      const idx = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [
+          { name: '벤치 프레스', sets: [{ weight: 20, reps: 12 }] },
+          { name: '인클라인 벤치프레스', sets: [{ weight: 30, reps: 10 }] },
+          { name: '바벨 컬', sets: [{ weight: 20, reps: 10 }] },
+        ] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [
+          { exerciseKey: lib.canonicalExerciseKey('Bench Press'), name: 'Bench Press', sets: [{ weight: 22.5, reps: 10 }] },
+          { exerciseKey: lib.canonicalExerciseKey('덤벨 컬'), name: '덤벨 컬', sets: [{ weight: 20, reps: 12 }] },
+        ] }],
+      });
+      // "벤치 프레스" ↔ "Bench Press"는 EXERCISE_LIBRARY 별칭으로 같은 canonical key → 매칭
+      const matched = idx.getComparison('personal', 'p1', { name: 'Bench Press' });
+      // 인클라인 벤치프레스(이름 부분 포함)·바벨 컬 vs 덤벨 컬(기구만 다름)은 서로 다른 운동 → 매칭 없음
+      const incline = idx.getComparison('pt', 's1', { name: '인클라인 벤치프레스' });
+      const curl = idx.getComparison('pt', 's1', { name: '바벨 컬' });
+      return !!matched && matched.exerciseKey === lib.canonicalExerciseKey('벤치프레스') && incline === null && curl === null;
+    })[1]
+  ],
+  ['비교 시나리오: PT가 더 과거면 "PT → 개인운동", 개인운동이 더 과거면 "개인운동 → PT"로 방향이 뒤집힘',
+    pwScenario('비교 방향', lib => {
+      const ptEx = { name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 12 }, { weight: 20, reps: 12 }, { weight: 20, reps: 12 }] };
+      const pwEx = { exerciseKey: lib.canonicalExerciseKey('바벨 벤치프레스'), name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }, { weight: 22.5, reps: 10 }, { weight: 22.5, reps: 10 }] };
+      const ptFirst = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [ptEx] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [pwEx] }],
+      }).getComparison('personal', 'p1', pwEx);
+      const pwFirst = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-25', isPublished: true, exercises: [ptEx] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-20', status: 'completed', exercises: [pwEx] }],
+      }).getComparison('pt', 's1', ptEx);
+      return ptFirst.previous.kind === 'pt' && ptFirst.recent.kind === 'personal' &&
+        ptFirst.directionLabel === '7월 20일 PT 수업 → 7월 25일 개인운동' && ptFirst.isCurrentRecent === true &&
+        pwFirst.previous.kind === 'personal' && pwFirst.recent.kind === 'pt' &&
+        pwFirst.directionLabel === '7월 20일 개인운동 → 7월 25일 PT 수업' && pwFirst.isCurrentRecent === true;
+    })[1]
+  ],
+  ['비교 시나리오: 최고 중량 증가·감소가 부호까지 정확히 표시됨',
+    pwScenario('최고 중량', lib => {
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '스쿼트', sets: [{ weight: 60, reps: 10 }] });
+      const up = lib.buildExercisePerformanceSnapshot({ name: '스쿼트', sets: [{ weight: 62.5, reps: 10 }] });
+      const down = lib.buildExercisePerformanceSnapshot({ name: '스쿼트', sets: [{ weight: 55, reps: 10 }] });
+      const same = lib.buildExercisePerformanceSnapshot({ name: '스쿼트', sets: [{ weight: 60, reps: 10 }, { weight: 60, reps: 10 }] });
+      const upLabels = lib.compareExercisePerformance(prev, up).metrics.map(m => m.label);
+      const downCmp = lib.compareExercisePerformance(prev, down);
+      const sameCmp = lib.compareExercisePerformance(prev, same);
+      return prev.topWeight === 60 && upLabels.includes('중량 +2.5kg') &&
+        downCmp.metrics.some(m => m.key === 'weight' && m.label === '중량 -5kg' && m.dir === 'down') &&
+        // 중량이 같으면 중량 문구를 만들지 않고 weightSame으로만 표시한다
+        sameCmp.weightSame === true && !sameCmp.metrics.some(m => m.key === 'weight');
+    })[1]
+  ],
+  ['비교 시나리오: 동일 중량 최고 반복만 비교하고, 공통 중량이 없으면 반복 비교를 제외함',
+    pwScenario('동일 중량 반복', lib => {
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 20, reps: 10 }, { weight: 30, reps: 6 }] });
+      const recent = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 20, reps: 12 }, { weight: 30, reps: 6 }] });
+      const noCommon = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 25, reps: 15 }, { weight: 35, reps: 15 }] });
+      const withCommon = lib.compareExercisePerformance(prev, recent);
+      const without = lib.compareExercisePerformance(prev, noCommon);
+      // 공통 중량 중 가장 무거운 30kg은 반복이 같으므로, 변화가 있는 20kg 기준으로만 문구가 나오면 안 된다 —
+      // 기준은 "공통 중량 중 최고 중량"이라 30kg(변화 0)이 선택돼 반복 문구 자체가 생기지 않아야 한다.
+      const prev2 = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 20, reps: 10 }] });
+      const recent2 = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 20, reps: 12 }] });
+      const single = lib.compareExercisePerformance(prev2, recent2);
+      return !withCommon.metrics.some(m => m.key === 'reps') &&
+        single.metrics.some(m => m.key === 'reps' && m.label === '20kg 기준 반복 +2회') &&
+        !without.metrics.some(m => m.key === 'reps');
+    })[1]
+  ],
+  ['비교 시나리오: 총 유효 세트 변화는 기존 유효 세트 판정(횟수 1회 이상)으로만 계산됨',
+    pwScenario('세트 변화', lib => {
+      // 빈 세트·횟수 누락 줄은 입력 줄 개수로 세지 않는다
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100, reps: 10 }, { weight: 100, reps: 10 }, { weight: 100, reps: null }, {}] });
+      const recent = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100, reps: 10 }, { weight: 100, reps: 10 }, { weight: 100, reps: 10 }] });
+      return prev.setCount === 2 && recent.setCount === 3 &&
+        lib.compareExercisePerformance(prev, recent).metrics.some(m => m.key === 'sets' && m.label === '세트 +1');
+    })[1]
+  ],
+  ['비교 시나리오: 볼륨 변화율이 기존 볼륨 규칙(중량×횟수)으로 계산되고 이전 볼륨 0이면 계산하지 않음',
+    pwScenario('볼륨 변화율', lib => {
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100, reps: 12 }] });   // 1,200kg
+      const recent = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100, reps: 15 }] }); // 1,500kg
+      const pct = lib.compareExercisePerformance(prev, recent).metrics.find(m => m.key === 'volume');
+      // 맨몸(중량 없음) → 볼륨 0이라 퍼센트 계산 자체를 하지 않는다(0으로 나눈 Infinity 방지)
+      const bwPrev = lib.buildExercisePerformanceSnapshot({ name: '푸쉬업', sets: [{ reps: 15 }] });
+      const bwRecent = lib.buildExercisePerformanceSnapshot({ name: '푸쉬업', sets: [{ reps: 20 }] });
+      const bwCmp = lib.compareExercisePerformance(bwPrev, bwRecent);
+      // 1% 미만의 미세한 차이는 과장하지 않고 표시하지 않는다
+      const tinyPrev = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100, reps: 100 }] });
+      const tinyRecent = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100.2, reps: 100 }] });
+      const tiny = lib.compareExercisePerformance(tinyPrev, tinyRecent);
+      return prev.totalVolume === 1200 && recent.totalVolume === 1500 && pct.label === '볼륨 +25%' &&
+        bwPrev.totalVolume === 0 && !bwCmp.metrics.some(m => m.key === 'volume') &&
+        !tiny.metrics.some(m => m.key === 'volume');
+    })[1]
+  ],
+  ['비교 시나리오: 맨몸 운동에 0kg 향상 문구를 만들지 않고 NaN·Infinity가 표시되지 않음',
+    pwScenario('맨몸·NaN 방어', lib => {
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '푸쉬업', sets: [{ weight: null, reps: 15 }, { weight: 0, reps: 15 }] });
+      const recent = lib.buildExercisePerformanceSnapshot({ name: '푸쉬업', sets: [{ weight: null, reps: 20 }, { weight: null, reps: 18 }, { weight: null, reps: 15 }] });
+      const cmp = lib.compareExercisePerformance(prev, recent);
+      const all = [...cmp.metrics.map(m => m.label), lib.formatExerciseSnapshotLine(prev), lib.formatExerciseSnapshotLine(recent)].join(' ');
+      return prev.hasWeight === false && !/0kg|NaN|Infinity|undefined|null/.test(all) &&
+        cmp.metrics.some(m => m.label === '반복 +5회') && cmp.metrics.some(m => m.label === '세트 +1') &&
+        lib.formatExerciseSnapshotLine(prev) === '15회 · 2세트';
+    })[1]
+  ],
+  ['비교 시나리오: 진행 중 개인운동·비공개 PT·유효 세트 없는 기록은 비교 대상에서 제외됨',
+    pwScenario('제외 조건', lib => {
+      const ex = { name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] };
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const pwEx = { exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] };
+      // 비공개(isPublished !== true) PT만 있으면 개인운동 쪽 비교가 생기지 않는다
+      const draftOnly = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: false, exercises: [ex] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [pwEx] }],
+      }).getComparison('personal', 'p1', pwEx);
+      // 진행 중(in_progress) 개인운동만 있으면 PT 쪽 비교가 생기지 않는다
+      const inProgressOnly = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [ex] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'in_progress', exercises: [pwEx] }],
+      }).getComparison('pt', 's1', ex);
+      // 유효 세트(횟수 1회 이상)가 없는 운동은 양쪽 모두 비교 대상이 아니다
+      const emptySets = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 0 }, {}] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [pwEx] }],
+      }).getComparison('personal', 'p1', pwEx);
+      return draftOnly === null && inProgressOnly === null && emptySets === null;
+    })[1]
+  ],
+  ['비교 시나리오: 같은 기록 안에 동일 운동이 두 번 있으면 세트를 합쳐 하나의 수행으로 비교함',
+    pwScenario('중복 운동 병합', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const dupEx = { exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }, { weight: 20, reps: 10 }] };
+      const idx = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        // 같은 기록 안 앞뒤로 나눠 기록된 동일 운동 2건 → 4세트 · 볼륨 800kg 하나로 합산
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [dupEx, dupEx] }],
+      });
+      const cmp = idx.getComparison('personal', 'p1', dupEx);
+      return cmp.recent.snapshot.setCount === 4 && cmp.recent.snapshot.totalVolume === 800 &&
+        cmp.previous.snapshot.setCount === 1 && cmp.metrics.some(m => m.label === '세트 +3');
+    })[1]
+  ],
+  ['비교 시나리오: 상대 기록이 없거나 지표 변화가 하나도 없으면 비교 영역을 만들지 않음',
+    pwScenario('빈 비교 방지', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const sets = [{ weight: 20, reps: 10 }, { weight: 20, reps: 10 }];
+      // PT만 존재 / 개인운동만 존재 → null
+      const ptOnly = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets }] }],
+        personalWorkouts: [],
+      }).getComparison('pt', 's1', { name: '바벨 벤치프레스' });
+      const pwOnly = lib.buildMemberExerciseComparisonIndex({
+        sessions: [],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets }] }],
+      }).getComparison('personal', 'p1', { exerciseKey: key });
+      // 두 기록이 완전히 동일하면 변화 지표가 0개 → 비교 영역 없음
+      const identical = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets }] }],
+      }).getComparison('personal', 'p1', { exerciseKey: key });
+      return ptOnly === null && pwOnly === null && identical === null;
+    })[1]
+  ],
+  ['비교 시나리오: 모두 증가면 "수행 증가" 배지, 감소가 섞이면 중립 문구만 사용(퇴보 표현 금지)',
+    pwScenario('문구 톤', lib => {
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 100, reps: 10 }, { weight: 100, reps: 10 }] });
+      const allUp = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 110, reps: 10 }, { weight: 110, reps: 10 }, { weight: 110, reps: 10 }] });
+      const mixed = lib.buildExercisePerformanceSnapshot({ name: '레그프레스', sets: [{ weight: 110, reps: 5 }] });
+      const up = lib.formatExerciseComparisonSummary(lib.compareExercisePerformance(prev, allUp));
+      const mix = lib.formatExerciseComparisonSummary(lib.compareExercisePerformance(prev, mixed));
+      const text = [...up.lines, ...mix.lines, up.badgeLabel || '', mix.neutralNote || ''].join(' ');
+      return up.badgeLabel === '수행 증가' && up.tone === 'up' && up.headline.length <= 2 &&
+        mix.badgeLabel === null && mix.neutralNote === '이전 기록과 차이가 있어요' &&
+        !/퇴보|향상됐|떨어졌|실력/.test(text);
+    })[1]
+  ],
+  ['비교 시나리오: 중량이 같으면 "중량은 같고 …" 형태로 조건을 함께 표시함',
+    pwScenario('중량 동일 문구', lib => {
+      const prev = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 20, reps: 10 }] });
+      const recent = lib.buildExercisePerformanceSnapshot({ name: '랫풀다운', sets: [{ weight: 20, reps: 12 }] });
+      const sum = lib.formatExerciseComparisonSummary(lib.compareExercisePerformance(prev, recent));
+      return sum.headline[0] === '중량은 같고 20kg 기준 반복 +2회';
+    })[1]
+  ],
+  ['비교 시나리오: 같은 날짜 기록과 Timestamp/문자열 날짜 혼재를 안전하게 처리함',
+    pwScenario('날짜 방어', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const pwEx = { exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }] };
+      const sameDay = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-25', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', exercises: [pwEx] }],
+      }).getComparison('personal', 'p1', pwEx);
+      // Firestore Timestamp 형태(toDate)로 들어와도 같은 날짜 키로 변환된다
+      const ts = { toDate: () => new Date(2026, 6, 25, 12, 0, 0) };
+      return sameDay.sameDay === true && sameDay.previous.kind === 'pt' && sameDay.recent.kind === 'personal' &&
+        sameDay.directionLabel === '7월 25일 PT 수업 · 개인운동 (같은 날)' &&
+        lib.getExerciseRecordDateKey({ workoutDate: ts }) === '2026-07-25' &&
+        lib.getExerciseRecordDateKey({}) === '';
+    })[1]
+  ],
+  ['비교 시나리오: 이두·삼두 및 레거시 "팔" 부위 기록도 정상적으로 비교됨',
+    pwScenario('이두·삼두·레거시 팔', lib => {
+      const key = lib.canonicalExerciseKey('덤벨 컬');
+      const pwEx = { exerciseKey: key, name: '덤벨 컬', muscleTop: '팔-이두근', sets: [{ weight: 12, reps: 12 }] };
+      const cmp = lib.buildMemberExerciseComparisonIndex({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '덤벨 컬', muscleTop: '팔', sets: [{ weight: 10, reps: 12 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-25', status: 'completed', workoutParts: ['팔'], exercises: [pwEx] }],
+      }).getComparison('personal', 'p1', pwEx);
+      // 부위(muscleTop) 표기가 달라도 비교 기준은 운동명 canonical key 하나뿐이다
+      return !!cmp && cmp.metrics.some(m => m.label === '중량 +2kg');
+    })[1]
+  ],
+  ['비교 UI: 회원앱 개인운동 상세는 비교를 붙여도 sessionReads/markSessionsAsRead를 호출하지 않음',
+    app.includes('function MemberExerciseComparison') &&
+    // 개인운동 카드 렌더 경로(renderPersonal)에는 markSessionsAsRead/markSessionDetailRead 호출이 없다
+    !/const renderPersonal=[\s\S]{0,400}?markSession/.test(app) &&
+    // PT 수업 카드의 기존 확인 기록 호출은 그대로 유지된다
+    app.includes('markSessionDetailRead(s.id,"session_content_open")') &&
+    app.includes('markSessionDetailRead(latestId,"auto_expanded_recent_session")')
+  ],
+  ['비교 UI: 회원앱 PT 수업 상세는 "웨이트 트레이닝" 섹션에만 비교를 붙임(움직임 준비 제외)',
+    app.includes('<ExerciseReportSection title="웨이트 트레이닝"') &&
+    /title="웨이트 트레이닝"[^/]*comparisonIndex=\{comparisonIndex\}/.test(app) &&
+    !/title="움직임 준비"[^/]*comparisonIndex/.test(app)
+  ],
+  ['비교 UI: 관리자 "최근 개인운동" 카드는 조회 전용이며 비교도 이미 로드된 목록만 사용함',
+    app.includes('const cmpIndex = buildMemberExerciseComparisonIndex({ sessions, personalWorkouts: completed })') &&
+    app.includes('cmpIndex.getComparison("personal", w.id, e)') &&
+    // 비교를 위해 새 Firestore 조회를 추가하지 않았다(카드 안 getPersonalWorkouts/getSessions 호출 없음)
+    !/hub-sec-personal[\s\S]{0,4000}?(getSessions\(|getPersonalWorkouts\()/.test(app)
+  ],
+  ['비교 결과 미저장: comparisonResult/improvementPercent 등 파생 필드를 Firestore에 쓰지 않음',
+    !/comparisonResult|improvementPercent|previousPtWeight|performanceStatus/.test(app) &&
+    !/comparisonResult|improvementPercent|previousPtWeight|performanceStatus/.test(db) &&
+    // personalWorkouts 저장 경로(생성·진행 중 저장·완료)는 1차 구현 그대로다
+    db.includes('export async function createPersonalWorkout') &&
+    db.includes('export async function updatePersonalWorkoutProgress') &&
+    db.includes('export async function completePersonalWorkout')
   ],
 ];
 

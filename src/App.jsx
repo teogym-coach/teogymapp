@@ -3327,6 +3327,9 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     });
   },[]);
   const [showAll,setShowAll]=useState(!!journalFocusId); const prInfo=useMemo(()=>buildSessionPrInfo(sessions),[sessions]); const growthBadges=useMemo(()=>{const map=new Map(); sessions.forEach(s=>{const g=buildSessionGrowthBadge(sessions,s); if(g)map.set(s.id,g);}); return map;},[sessions]);
+  // PT 수업 ↔ 개인운동 같은 운동 비교 인덱스 — 이미 로드된 sessions/personalWorkouts만으로 한 번에 만든다(Firestore 추가 조회 없음).
+  // sessions는 회원앱 로딩 단계에서 getPublishedSessions로 읽은 공개 수업만 들어오고, 인덱스가 isPublished를 한 번 더 확인한다.
+  const comparisonIndex=useMemo(()=>buildMemberExerciseComparisonIndex({sessions,personalWorkouts}),[sessions,personalWorkouts]);
   // "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds/setFeedbackOpen)는 MemberApp에서 props로 내려받는다 —
   // 저장(saveFeedback)은 항상 MemberApp의 load()를 거치는데, load()는 setLoading(true)로 전체 화면을 Spin으로
   // 잠깐 교체했다가 되돌리므로 MemberJournal을 포함한 모든 하위 컴포넌트가 그 사이 통째로 언마운트→재마운트된다.
@@ -3393,7 +3396,7 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
           </div>
           <button type="button" className="sj-collapse-btn" onClick={()=>toggleSess(s)} aria-label="수업 접기">접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></button>
         </header>
-        <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen}/>
+        <SessionMini s={s} exFilter={lq||null} openKeys={openKeys} toggleOpen={toggleOpen} comparisonIndex={comparisonIndex}/>
         {/* 오늘 수업 기록 — 같은 수업 카드 안에서 운동 목록 아래에 이어지는 흐름(별도 카드 아님) */}
         <MemberFeedbackForm s={s} onSave={saveFeedback} open={expandedFeedbackIds.has(s.id)} onToggle={next=>{
           // "수업 후 몸 상태" 펼치기(닫힘→열림)만 확인으로 기록 — 접기는 확인이 아니고, 이미 열린 상태에서 다시 열리는 호출도 없다(next===true는 openWithScroll 클릭에서만 옴).
@@ -3424,7 +3427,8 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
     <MemberPersonalWorkoutCard key={`p_${w.id}`} workout={w} showKindBadge={true}
       open={openPersonalId===w.id}
       onToggle={()=>setOpenPersonalId(prev=>prev===w.id?null:w.id)}
-      onDelete={removePersonalWorkout}/>
+      onDelete={removePersonalWorkout}
+      comparisonIndex={comparisonIndex}/>
   );
   const heroItems=[]; const prevItems=[];
   // "최근 수업 · 부위 · PR" 표시는 카드 밖 별도 라벨이 아니라 카드 내부 최상단 통합 메타(sj-card-meta, renderExpanded 참고)로 표시한다.
@@ -3721,12 +3725,262 @@ function validatePersonalWorkoutForComplete({workoutParts=[], exercises=[], star
   return { ok:true, message:"", durationMinutes:Math.max(0,Math.round((endMs-start.getTime())/60000)) };
 }
 
+// ════════════════════════════════════════════════════
+// PT 수업 ↔ 개인운동 "같은 운동" 비교 (개인운동 2차 1단계)
+//
+// 회원앱(PT 수업 상세·개인운동 상세)과 관리자앱(회원 상세 "최근 개인운동" 카드)이 전부 아래 함수만 사용한다.
+//
+// 저장 원칙: 비교 결과는 Firestore에 절대 저장하지 않는다. sessions/personalWorkouts 원본에서 매번 계산하므로
+//           원본 기록이 수정되면 비교 결과도 자동으로 따라 바뀐다(문서 필드 추가 없음 · Rules 변경 없음).
+// 조회 원칙: 화면에 이미 로드된 배열만 사용한다. 운동 카드마다 Firestore를 다시 읽는 N+1 구조를 만들지 않는다.
+// 판정 원칙: 동일 운동은 canonicalExerciseKey 완전 일치만 인정한다. 이름 부분 포함·유사어·부위/기구 일치는
+//           절대 쓰지 않는다("벤치프레스"와 "인클라인 벤치프레스", "바벨 컬"과 "덤벨 컬"은 서로 다른 운동).
+// 문구 원칙: 숫자 하나로 "향상/퇴보"를 단정하지 않는다. 객관적인 변화값만 보여주고, 모든 지표가 같은 방향으로
+//           좋아졌을 때만 작은 배지를 붙인다. 감소가 섞이면 경고색·"퇴보" 표현 없이 중립 문구만 쓴다
+//           (컨디션과 운동 목적에 따라 세트·중량이 달라질 수 있기 때문).
+// ════════════════════════════════════════════════════
+
+// 비교 카드에 붙이는 기록 종류 라벨 — 회원이 "어느 기록끼리 비교했는지" 항상 알 수 있어야 한다.
+const EXERCISE_COMPARE_KIND_LABEL={ pt:"PT 수업", personal:"개인운동" };
+// 볼륨 변화율 최소 표시 기준(%) — 반올림 0%나 오차 수준의 미세한 차이를 "변화"로 과장하지 않는다.
+const EXERCISE_COMPARE_MIN_VOLUME_PCT=1;
+
+// 기록 1건의 날짜 키("YYYY-MM-DD") — sessions는 date, personalWorkouts는 workoutDate를 쓴다.
+// 두 컬렉션 모두 문자열 날짜로 저장되지만, Firestore Timestamp/Date가 섞여 들어와도 같은 형식으로 맞춘다.
+function getExerciseRecordDateKey(record){
+  const raw=record?.workoutDate||record?.date||record?.publishedAt||record?.createdAt||null;
+  if(typeof raw==="string") return raw.slice(0,10);
+  const d=toPersonalWorkoutDate(raw);
+  if(!d) return "";
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// 비교 전용 운동 정규화 — 원본 문서는 절대 바꾸지 않고 비교에만 쓰는 사본을 만든다.
+//   · 식별키: 개인운동은 저장된 exerciseKey, PT 기록과 레거시 개인운동은 canonicalExerciseKey(name)로 읽기 시에만 보완
+//   · 유효 세트: 기존 getPersonalWorkoutValidSets(횟수 1회 이상)를 그대로 재사용 — 입력 줄 개수를 세지 않는다
+//   · 기능운동(시간 기반) 분류값은 비교 사본에서만 제거해 볼륨 규칙을 "중량×횟수" 하나로 유지한다
+//     (개인운동은 애초에 기능 분류를 저장하지 않으므로, PT 기록 쪽 표기가 달라도 같은 기준으로 계산된다)
+function normalizeComparableExercise(exercise){
+  const name=String(exercise?.name||"").trim();
+  const exerciseKey=String(exercise?.exerciseKey||"")||canonicalExerciseKey(name)||"";
+  if(!exerciseKey) return null;
+  const sets=getPersonalWorkoutValidSets(exercise).map(s=>{
+    const w=Number(s?.weight), r=Number(s?.reps);
+    return { weight:(Number.isFinite(w)&&w>0)?w:null, reps:(Number.isFinite(r)&&r>0)?Math.floor(r):0 };
+  }).filter(s=>s.reps>0);
+  if(!sets.length) return null;
+  return { exerciseKey, name, sets };
+}
+
+// 운동 1종목의 수행 snapshot — 최고 중량 / 중량별 최고 반복 / 총 유효 세트 / 총 볼륨.
+// 같은 기록 안에 동일 exerciseKey 운동이 두 번 있으면(앞뒤로 나눠 기록한 경우) 한쪽을 버리지 않고 세트를 합쳐
+// 하나의 수행으로 본다 — 합치는 것은 비교용 snapshot에서만이고 원본 화면의 종목 표시는 그대로 둔다.
+function buildExercisePerformanceSnapshot(exercises){
+  const list=(Array.isArray(exercises)?exercises:[exercises]).map(normalizeComparableExercise).filter(Boolean);
+  if(!list.length) return null;
+  const sets=list.flatMap(e=>e.sets);
+  if(!sets.length) return null;
+  const weighted=sets.filter(s=>s.weight>0);
+  // 중량별 최고 반복 — 키는 중량 문자열. 두 기록에 공통으로 존재하는 중량에서만 반복 수를 비교한다.
+  const repsByWeight={};
+  weighted.forEach(s=>{ const k=String(s.weight); repsByWeight[k]=Math.max(repsByWeight[k]||0,s.reps); });
+  const topWeight=weighted.length?Math.max(...weighted.map(s=>s.weight)):null;
+  // 볼륨은 기존 규칙(exVol 기반 calculatePersonalExerciseVolume)을 그대로 재사용한다 — 중량 없는 세트는 0.
+  const volumeSource={ name:list[0].name, equipment:"", muscleTop:"", sets:sets.map((s,i)=>({ setNumber:i+1, weight:s.weight, reps:s.reps, volume:0, recordType:"weightReps" })) };
+  return {
+    exerciseKey:list[0].exerciseKey,
+    name:list[0].name,
+    setCount:sets.length,
+    hasWeight:weighted.length>0,
+    topWeight,
+    topWeightReps:topWeight!=null?repsByWeight[String(topWeight)]:null,
+    maxReps:Math.max(...sets.map(s=>s.reps)),
+    repsByWeight,
+    totalVolume:weighted.length?calculatePersonalExerciseVolume(volumeSource):0,
+  };
+}
+
+// "22.5kg × 10회 · 3세트" — 최고 중량 세트를 대표로 쓰는 기존 summarizeTopSet 표기와 같은 구성.
+// 중량이 없는 맨몸 운동은 "12회 · 3세트"로 표시하고 0kg을 억지로 붙이지 않는다.
+function formatExerciseSnapshotLine(snapshot){
+  if(!snapshot) return "";
+  const head=(snapshot.hasWeight&&snapshot.topWeight!=null)
+    ? `${formatWeightValue(snapshot.topWeight)} × ${snapshot.topWeightReps}회`
+    : `${snapshot.maxReps}회`;
+  return `${head} · ${snapshot.setCount}세트`;
+}
+
+// 두 수행 snapshot 비교 — previous(더 오래된 기록) 대비 recent(더 최근 기록)가 어떻게 달라졌는지 계산한다.
+// 이번 단계 지표는 ①최고 중량 ②동일 중량 최고 반복 ③총 유효 세트 ④총 볼륨 4개뿐이다.
+function compareExercisePerformance(previous, recent){
+  if(!previous||!recent) return null;
+  const metrics=[];
+  const signedInt=n=>`${n>0?"+":""}${n}`;
+
+  // ① 최고 중량 — 양쪽 모두 중량 기록이 있을 때만 비교한다. 맨몸 운동에 "0kg 향상"을 만들지 않는다.
+  let weightSame=false;
+  if(previous.hasWeight&&recent.hasWeight&&previous.topWeight!=null&&recent.topWeight!=null){
+    const diff=Math.round((recent.topWeight-previous.topWeight)*10)/10;
+    if(diff===0) weightSame=true;
+    else metrics.push({ key:"weight", dir:diff>0?"up":"down", label:`중량 ${diff>0?"+":"-"}${formatWeightValue(Math.abs(diff))}` });
+  }
+
+  // ② 동일 중량 최고 반복 — 두 기록에 공통으로 존재하는 중량 중 가장 무거운 값을 기준으로 한다.
+  //    공통 중량이 하나도 없으면 서로 다른 조건이므로 반복 수를 억지로 비교하지 않는다.
+  const commonWeights=Object.keys(previous.repsByWeight)
+    .filter(w=>recent.repsByWeight[w]!=null)
+    .map(Number).filter(Number.isFinite);
+  if(commonWeights.length){
+    const w=Math.max(...commonWeights);
+    const diff=recent.repsByWeight[String(w)]-previous.repsByWeight[String(w)];
+    if(diff!==0) metrics.push({ key:"reps", dir:diff>0?"up":"down", label:`${formatWeightValue(w)} 기준 반복 ${signedInt(diff)}회` });
+  } else if(!previous.hasWeight&&!recent.hasWeight){
+    // 양쪽 모두 중량 없는 맨몸 운동 — 조건이 같으므로 최고 반복 수는 그대로 비교할 수 있다.
+    const diff=recent.maxReps-previous.maxReps;
+    if(diff!==0) metrics.push({ key:"reps", dir:diff>0?"up":"down", label:`반복 ${signedInt(diff)}회` });
+  }
+
+  // ③ 총 유효 세트
+  const setDiff=recent.setCount-previous.setCount;
+  if(setDiff!==0) metrics.push({ key:"sets", dir:setDiff>0?"up":"down", label:`세트 ${signedInt(setDiff)}` });
+
+  // ④ 총 볼륨 변화율 — 이전 볼륨이 0이거나 중량 없는 운동이면 계산하지 않는다(Infinity/NaN 표시 금지).
+  if(previous.hasWeight&&recent.hasWeight&&previous.totalVolume>0&&Number.isFinite(recent.totalVolume)){
+    const pct=((recent.totalVolume-previous.totalVolume)/previous.totalVolume)*100;
+    const rounded=Math.round(pct);
+    if(Number.isFinite(rounded)&&Math.abs(rounded)>=EXERCISE_COMPARE_MIN_VOLUME_PCT){
+      metrics.push({ key:"volume", dir:rounded>0?"up":"down", label:`볼륨 ${signedInt(rounded)}%` });
+    }
+  }
+
+  if(!metrics.length) return null;   // 비교 가능한 지표가 하나도 없으면 비교 영역 자체를 만들지 않는다
+  const ups=metrics.filter(m=>m.dir==="up").length;
+  const downs=metrics.filter(m=>m.dir==="down").length;
+  const tone=(downs===0&&ups>=2)?"up":(downs>0?"mixed":"flat");
+  return {
+    metrics, weightSame, tone,
+    badgeLabel: tone==="up"?"수행 증가":null,
+    neutralNote: tone==="mixed"?"이전 기록과 차이가 있어요":null,
+  };
+}
+
+// 화면 문구 정리 — 기본 화면은 핵심 변화 1~2개만 보여주고, 자세히 펼치면 전체 지표를 보여준다.
+// 지표 표시 순서는 중량 > 반복 > 볼륨 > 세트(회원이 가장 먼저 확인하는 순서).
+function formatExerciseComparisonSummary(comparison){
+  if(!comparison?.metrics?.length) return null;
+  const order={ weight:0, reps:1, volume:2, sets:3 };
+  const lines=[...comparison.metrics].sort((a,b)=>(order[a.key]??9)-(order[b.key]??9)).map(m=>m.label);
+  // 중량이 그대로면 "중량은 같고 20kg 기준 반복 +2회"처럼 조건을 함께 알려준다.
+  const headline=comparison.weightSame
+    ? [`중량은 같고 ${lines[0]}`, ...lines.slice(1,2)]
+    : lines.slice(0,2);
+  return { headline, lines, tone:comparison.tone, badgeLabel:comparison.badgeLabel, neutralNote:comparison.neutralNote };
+}
+
+// 회원 1명의 "PT 수업 ↔ 개인운동" 비교 인덱스.
+//   · PT 기록: 회원에게 공개된 수업(isPublished === true)만. 비공개·작성 중 수업은 회원앱/관리자앱 모두 비교 대상이 아니다.
+//     (0회차 체험수업은 기존에도 회원 수업일지에 그대로 노출되므로 별도로 제외하지 않는다 — 기존 정책 유지)
+//   · 개인운동: status === "completed"만. 진행 중(in_progress) 기록은 제외한다.
+//   · 두 배열은 항상 같은 회원 1명의 하위 컬렉션(members/{id}/...)에서 읽은 것이라 타 회원 기록이 섞일 수 없다.
+//   · 상대 기록은 "다른 종류의 기록 중 같은 운동이 있는 가장 최근 1건"이다(PT는 개인운동과만, 개인운동은 PT와만 비교).
+function buildMemberExerciseComparisonIndex({sessions=[], personalWorkouts=[]}={}){
+  const buildRecords=(list,kind)=>(list||[]).map(r=>{
+    const dateKey=getExerciseRecordDateKey(r);
+    if(!dateKey) return null;
+    const byKey=new Map();
+    (r?.exercises||[]).forEach(e=>{
+      const c=normalizeComparableExercise(e);
+      if(!c) return;                                   // 유효 세트가 없는 운동은 비교 대상에서 제외
+      if(!byKey.has(c.exerciseKey)) byKey.set(c.exerciseKey,[]);
+      byKey.get(c.exerciseKey).push(e);                // 같은 기록 안 동일 운동은 배열로 모아 snapshot에서 합친다
+    });
+    return byKey.size?{ kind, id:String(r.id||""), dateKey, byKey }:null;
+  }).filter(Boolean);
+
+  const byDateDesc=(a,b)=>String(b.dateKey).localeCompare(String(a.dateKey))||String(b.id).localeCompare(String(a.id));
+  const ptRecords=buildRecords((sessions||[]).filter(s=>s&&s.isPublished===true),"pt").sort(byDateDesc);
+  const personalRecords=buildRecords((personalWorkouts||[]).filter(w=>w&&w.status==="completed"),"personal").sort(byDateDesc);
+
+  const snapshotCache=new Map();
+  const snapshotOf=(record,key)=>{
+    const cacheKey=`${record.kind}|${record.id}|${key}`;
+    if(!snapshotCache.has(cacheKey)) snapshotCache.set(cacheKey,buildExercisePerformanceSnapshot(record.byKey.get(key)||[]));
+    return snapshotCache.get(cacheKey);
+  };
+
+  // (기록 종류, 기록 id, 운동) → 비교 결과 또는 null. 비교할 상대가 없으면 null이므로 빈 카드를 만들지 않는다.
+  const getComparison=(kind,recordId,exercise)=>{
+    const key=String(exercise?.exerciseKey||"")||canonicalExerciseKey(exercise?.name)||"";
+    if(!key) return null;
+    const ownList=kind==="pt"?ptRecords:personalRecords;
+    const otherList=kind==="pt"?personalRecords:ptRecords;
+    const own=ownList.find(r=>r.id===String(recordId||"")&&r.byKey.has(key));
+    const other=otherList.find(r=>r.byKey.has(key));
+    if(!own||!other) return null;
+    const ownSnap=snapshotOf(own,key), otherSnap=snapshotOf(other,key);
+    if(!ownSnap||!otherSnap) return null;
+    // 방향은 두 기록의 실제 날짜 순서로 정한다 — PT를 기준값으로 고정하지 않는다.
+    // 같은 날짜면 시각 정보가 없어 순서를 단정할 수 없으므로 PT 수업을 이전, 개인운동을 최근으로 두고 "같은 날"로 표시한다.
+    const sameDay=own.dateKey===other.dateKey;
+    const ownIsRecent=sameDay?own.kind==="personal":own.dateKey>other.dateKey;
+    const prevRec=ownIsRecent?other:own, prevSnap=ownIsRecent?otherSnap:ownSnap;
+    const recentRec=ownIsRecent?own:other, recentSnap=ownIsRecent?ownSnap:otherSnap;
+    const comparison=compareExercisePerformance(prevSnap,recentSnap);
+    if(!comparison) return null;
+    const side=(rec,snap)=>({ kind:rec.kind, kindLabel:EXERCISE_COMPARE_KIND_LABEL[rec.kind], dateKey:rec.dateKey, snapshot:snap, line:formatExerciseSnapshotLine(snap) });
+    return {
+      exerciseKey:key,
+      sameDay,
+      isCurrentRecent:ownIsRecent,
+      current:side(own,ownSnap),
+      counterpart:side(other,otherSnap),
+      previous:side(prevRec,prevSnap),
+      recent:side(recentRec,recentSnap),
+      metrics:comparison.metrics,
+      // "7월 20일 PT 수업 → 7월 25일 개인운동"
+      directionLabel: sameDay
+        ? `${formatMonthDayKo(own.dateKey)} PT 수업 · 개인운동 (같은 날)`
+        : `${formatMonthDayKo(prevRec.dateKey)} ${EXERCISE_COMPARE_KIND_LABEL[prevRec.kind]} → ${formatMonthDayKo(recentRec.dateKey)} ${EXERCISE_COMPARE_KIND_LABEL[recentRec.kind]}`,
+      ...formatExerciseComparisonSummary(comparison),
+    };
+  };
+  return { getComparison, hasAny:ptRecords.length>0&&personalRecords.length>0 };
+}
+
 // ── 개인운동 UI (회원앱) ──────────────────────────────────────────────────────
 // 기존 수업 탭 디자인(sj-*)과 회원앱 공통 시트(MemberBottomSheet)를 그대로 재사용한다.
 // 개인운동 카드는 sessionReads(수업일지 회원 확인)를 절대 호출하지 않는다 — 확인 기록은 PT 수업일지 전용 개념이다.
 
+// PT 수업 ↔ 개인운동 같은 운동 비교 영역 (회원앱 공통) — PT 수업 상세와 개인운동 상세가 같은 컴포넌트를 쓴다.
+// 비교할 상대 기록이 없으면 상위에서 comparison=null이 되어 아예 렌더되지 않는다("데이터 없음" 빈 카드를 만들지 않는다).
+// 기본 화면은 핵심 변화 1~2개만 보여주고, "자세히"를 눌러야 두 기록 원본 수치와 전체 지표를 펼친다.
+function MemberExerciseComparison({comparison}){
+  const [open,setOpen]=useState(false);
+  if(!comparison?.headline?.length) return null;
+  const {directionLabel,headline,lines,badgeLabel,neutralNote,previous,recent,isCurrentRecent}=comparison;
+  const rows=[[previous,!isCurrentRecent],[recent,isCurrentRecent]];
+  return <div className="pw-cmp">
+    <div className="pw-cmp-top">
+      <span className="pw-cmp-dir">{directionLabel}</span>
+      {badgeLabel&&<em className="pw-cmp-badge">{badgeLabel}</em>}
+    </div>
+    <div className="pw-cmp-metrics">{headline.map((t,i)=><span key={i}>{t}</span>)}</div>
+    {neutralNote&&<span className="pw-cmp-note">{neutralNote}</span>}
+    <button type="button" className="pw-cmp-more" onClick={()=>setOpen(v=>!v)} aria-expanded={open}>{open?"접기 ▴":"자세히 ▾"}</button>
+    {open&&<div className="pw-cmp-detail">
+      {rows.map(([side,isCurrent],i)=>(
+        <div key={i} className={"pw-cmp-row"+(isCurrent?" now":"")}>
+          <span>{formatKoreanDateLabel(side.dateKey)} {side.kindLabel}{isCurrent?" · 이번 기록":""}</span>
+          <b>{side.line}</b>
+        </div>
+      ))}
+      {lines.length>headline.length&&<div className="pw-cmp-all">{lines.map((t,i)=><span key={i}>{t}</span>)}</div>}
+    </div>}
+  </div>;
+}
+
 // 목록 카드 — 접힘/펼침 한 컴포넌트. 펼침 상태는 상위(MemberJournal)가 관리한다.
-function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete}){
+function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete,comparisonIndex=null}){
   const sum=buildPersonalWorkoutCardSummary(workout);
   const exercises=(workout?.exercises||[]).filter(e=>String(e?.name||"").trim());
   const startedLabel=formatLastSavedLabel(workout?.startedAt);
@@ -3761,6 +4015,8 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
       ? <p className="pw-empty-line">기록된 운동이 없어요.</p>
       : <ul className="pw-ex-list">{exercises.map((e,i)=>{
           const s=summarizePersonalWorkoutExercise(e);
+          // 같은 운동의 최근 PT 수업 기록이 있을 때만 비교 영역을 붙인다(없으면 null → 렌더 없음).
+          const cmp=comparisonIndex?.getComparison?.("personal",workout?.id,e)||null;
           return <li key={i} className="pw-ex-item">
             <div className="pw-ex-head">
               <b>{e.name}</b>
@@ -3770,6 +4026,7 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
             {s.uniform
               ? <span className="pw-ex-sum">{s.text}</span>
               : <div className="pw-ex-lines">{s.lines.map((line,li)=><span key={li}>{li+1}세트 {line}</span>)}</div>}
+            <MemberExerciseComparison comparison={cmp}/>
           </li>;
         })}</ul>}
     {String(workout?.memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{workout.memo}</p></div>}
@@ -6313,9 +6570,11 @@ function summarizeTopSet(e){
   bits.push(`${sets.length}세트`);
   return bits.join(" · ");
 }
-function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
+function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen,comparisonIndex=null,sessionId=null}){
   const open=openKeys.has(exKey);
   const sets=getFilledSets(e);
+  // 같은 운동의 최근 개인운동 기록이 있을 때만 비교 영역을 붙인다. 아코디언을 펼쳤을 때만 보여줘 목록이 복잡해지지 않게 한다.
+  const comparison=comparisonIndex?.getComparison?.("pt",sessionId,e)||null;
   const summary=weight?summarizeTopSet(e):formatAssistExerciseDose(e);
   // 운동 유형에 따라 표의 열을 자동 구성 — 값이 있는 열만 표시(웨이트: 세트·중량·반복 / 맨몸: 세트·반복 / 시간: 세트·시간)
   const cols=[
@@ -6343,11 +6602,13 @@ function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen}){
         {e.stimMemo&&<em>대표 메모 · {e.stimMemo}</em>}
         {e.memo&&<em>{e.memo}</em>}
       </div>}
+      <MemberExerciseComparison comparison={comparison}/>
     </div>}
   </div>;
 }
-function ExerciseReportSection({title,items,weight=false,sessionId,openKeys,toggleOpen}){if(!items.length)return null; return <section className={weight?"sj-ex-section weight":"sj-ex-section assist"}><h3>{title}</h3>{items.map((e,i)=><ExerciseAccordionRow key={`${title}-${e.name||i}-${i}`} e={e} weight={weight} exKey={`${sessionId}-${title}-${e.name||i}-${i}`} openKeys={openKeys} toggleOpen={toggleOpen}/>)}</section>}
-function SessionMini({s,exFilter,openKeys,toggleOpen}){const groups={"움직임 준비":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>{if(e.name||isFuncEx(e))groups[getMemberExerciseSection(e)]?.push(e);}); const filterItems=items=>exFilter?items.filter(e=>(e.name||"").toLowerCase().includes(exFilter)):items; return <div className="session-mini sj-session-mini"><ExerciseReportSection title="움직임 준비" items={filterItems(groups["움직임 준비"])} sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/><ExerciseReportSection title="웨이트 트레이닝" items={filterItems(groups["웨이트 트레이닝"])} weight sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
+function ExerciseReportSection({title,items,weight=false,sessionId,openKeys,toggleOpen,comparisonIndex=null}){if(!items.length)return null; return <section className={weight?"sj-ex-section weight":"sj-ex-section assist"}><h3>{title}</h3>{items.map((e,i)=><ExerciseAccordionRow key={`${title}-${e.name||i}-${i}`} e={e} weight={weight} exKey={`${sessionId}-${title}-${e.name||i}-${i}`} openKeys={openKeys} toggleOpen={toggleOpen} comparisonIndex={comparisonIndex} sessionId={sessionId}/>)}</section>}
+// 개인운동 비교(comparisonIndex)는 "웨이트 트레이닝" 섹션에만 넘긴다 — 움직임 준비(기능운동)는 중량×횟수 비교 대상이 아니다.
+function SessionMini({s,exFilter,openKeys,toggleOpen,comparisonIndex=null}){const groups={"움직임 준비":[],"웨이트 트레이닝":[]}; (s.exercises||[]).forEach(e=>{if(e.name||isFuncEx(e))groups[getMemberExerciseSection(e)]?.push(e);}); const filterItems=items=>exFilter?items.filter(e=>(e.name||"").toLowerCase().includes(exFilter)):items; return <div className="session-mini sj-session-mini"><ExerciseReportSection title="움직임 준비" items={filterItems(groups["움직임 준비"])} sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen}/><ExerciseReportSection title="웨이트 트레이닝" items={filterItems(groups["웨이트 트레이닝"])} weight sessionId={s.id} openKeys={openKeys} toggleOpen={toggleOpen} comparisonIndex={comparisonIndex}/>{s.sorenessReport&&<p className="soreness-summary">근육통 기록: {s.sorenessReport.part||'-'} · {s.sorenessReport.level||'-'} · {s.sorenessReport.timing||'-'}</p>}{s.trainerComment&&<p className="trainer-comment">대표 코멘트: {s.trainerComment}</p>}</div>}
 function SorenessRecorder({s,onSave}){const [open,setOpen]=useState(false); const [d,setD]=useState(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}); useEffect(()=>setD(s.sorenessReport||{part:'',level:'없음',timing:'다음날',memo:''}),[s.id,s.sorenessReport]); if(!open)return <button className="ghost compact" onClick={()=>setOpen(true)}>{s.sorenessReport?'근육통 기록 수정':'근육통 기록'}</button>; const save=()=>onSave?.(s.id,{...d,updatedBy:'member',updatedAt:new Date().toISOString()}); return <div className="soreness-form"><h3>근육통 기록</h3><input value={d.part} onChange={e=>setD({...d,part:e.target.value})} placeholder="근육통 부위"/><select value={d.level} onChange={e=>setD({...d,level:e.target.value})}>{['없음','약함','보통','강함','매우 강함'].map(x=><option key={x}>{x}</option>)}</select><select value={d.timing} onChange={e=>setD({...d,timing:e.target.value})}>{['당일','다음날','다다음날'].map(x=><option key={x}>{x}</option>)}</select><textarea value={d.memo} onChange={e=>setD({...d,memo:e.target.value})} placeholder="메모"/><button className="primary compact" onClick={save}>저장</button></div>}
 const MEMBER_CSS=`
 .member-shell,.member-login,.onboard{
@@ -6872,6 +7133,27 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pw-memo-view p{margin:0;font-size:13.5px;font-weight:700;color:#334155;line-height:1.6;white-space:pre-wrap;word-break:break-word}
 .pw-empty-line{margin:10px 0;font-size:13px;font-weight:700;color:#8B949E}
 .pw-danger-link{margin-top:12px;border:0;background:none;padding:0;color:#FF5A5F;font-size:12.5px;font-weight:800;text-decoration:underline;text-underline-offset:3px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* PT 수업 ↔ 개인운동 같은 운동 비교 — 카드 안에 들어가는 작은 보조 영역.
+   성장 배지(.sj-growth-badge, 민트 pill)와 시각적으로 충돌하지 않도록 배경은 회색 톤을 쓰고,
+   "수행 증가" 배지만 민트 포인트를 아주 작게 사용한다. 감소에는 빨간 경고색을 쓰지 않는다.
+   iPhone 좁은 폭에서도 지표가 잘리지 않도록 모든 줄은 flex-wrap으로 흐른다. */
+.pw-cmp{margin-top:10px;background:#F6F8FA;border:1px solid #EAEEF2;border-radius:14px;padding:10px 12px}
+.pw-cmp-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.pw-cmp-dir{font-size:11.5px;font-weight:700;color:#8B949E;font-variant-numeric:tabular-nums;word-break:keep-all}
+/* PT 수업 상세 안에서는 기존 ".session-mini em"(파란 대표 코멘트 톤)이 더 높은 우선순위로 적용되므로,
+   배지 색이 화면마다 달라지지 않도록 .pw-cmp를 앞에 붙여 같은 우선순위 이상으로 맞춘다. */
+.pw-cmp .pw-cmp-badge{font-style:normal;font-size:10.5px;font-weight:800;color:#0F9488;background:#E3F8F4;border:1px solid #BFEEE4;border-radius:999px;padding:2px 8px;white-space:nowrap;line-height:1.5}
+.pw-cmp-metrics{display:flex;flex-wrap:wrap;gap:4px 8px}
+.pw-cmp-metrics span{font-size:13px;font-weight:800;color:#334155;font-variant-numeric:tabular-nums;word-break:keep-all}
+.pw-cmp-note{display:block;margin-top:5px;font-size:11.5px;font-weight:700;color:#8B949E}
+.pw-cmp-more{margin-top:7px;border:0;background:none;padding:0;font-family:'Noto Sans KR',sans-serif;font-size:11.5px;font-weight:800;color:#8B949E;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-cmp-detail{margin-top:8px;padding-top:8px;border-top:1px solid #E6EBF0;display:grid;gap:6px}
+.pw-cmp-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pw-cmp-row span{font-size:11.5px;font-weight:700;color:#8B949E;word-break:keep-all}
+.pw-cmp-row b{font-size:12.5px;font-weight:800;color:#334155;font-variant-numeric:tabular-nums;word-break:keep-all}
+.pw-cmp-row.now b{color:#0F9488}
+.pw-cmp-all{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:2px}
+.pw-cmp-all span{font-size:12px;font-weight:700;color:#475569;font-variant-numeric:tabular-nums;word-break:keep-all}
 /* 운동 탭 상단 진입 버튼 */
 .pw-start-btn{width:100%;display:flex;align-items:center;gap:13px;border:1px solid #D9E7FF;background:linear-gradient(135deg,#EEF5FF,#FFFFFF);border-radius:20px;padding:15px 16px;margin:0 0 14px;text-align:left;cursor:pointer;box-shadow:0 2px 12px rgba(47,115,246,.08);-webkit-tap-highlight-color:transparent;transition:transform .15s ease}
 .pw-start-btn:active{transform:scale(.985)}
@@ -13949,6 +14231,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const secPersonalWorkout = isOwner(member) ? null : (() => {
     const completed = (personalWorkouts||[]).filter(w => w?.status === "completed");
     const visible = showAllPersonalWorkouts ? completed : completed.slice(0, 1);
+    // 최근 PT 수업과의 같은 운동 비교 — 이미 로드된 sessions/personalWorkouts만 사용한다(운동마다 Firestore 재조회 없음).
+    // 회원앱과 같은 결과를 보여주기 위해 회원에게 공개된 수업(isPublished === true)만 비교 대상으로 삼는다.
+    const cmpIndex = buildMemberExerciseComparisonIndex({ sessions, personalWorkouts: completed });
     return (
       <section className="hub-sec-personal" style={{...card, padding:"12px 14px 12px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:completed.length?8:2}}>
@@ -13973,6 +14258,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                   </div>
                   {exercises.map((e,ei)=>{
                     const s = summarizePersonalWorkoutExercise(e);
+                    // 같은 운동의 최근 PT 수업 기록이 있을 때만 비교 줄을 덧붙인다(없으면 null → 기존 표시 그대로).
+                    // 관리자는 세트별 원본 값을 그대로 확인해야 하므로 위 표시는 건드리지 않고 아래에 보조 정보만 추가한다.
+                    const cmp = cmpIndex.getComparison("personal", w.id, e);
                     return (
                       <div key={ei} style={{padding:"6px 0",borderTop:ei>0?`1px solid rgba(15,23,42,.05)`:"none"}}>
                         <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline"}}>
@@ -13983,6 +14271,22 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                         {!s.uniform&&(
                           <div style={{display:"flex",flexWrap:"wrap",gap:"4px 10px",marginTop:4,paddingLeft:2}}>
                             {s.lines.map((line,li)=><span key={li} style={{fontSize:11.5,color:DB.sub,fontVariantNumeric:"tabular-nums"}}>{li+1}세트 {line}</span>)}
+                          </div>
+                        )}
+                        {cmp&&(
+                          <div style={{marginTop:6,padding:"7px 9px",background:DB.bg,borderRadius:DB.radiusSm,display:"grid",gap:4}}>
+                            {/* 비교 기준 날짜·출처를 관리자 화면에서는 한 줄로 명확히 밝힌다 (예: "7월 25일 PT 수업과 비교") */}
+                            <span style={{fontSize:10.5,fontWeight:700,color:DB.faint,fontFamily:DB.font,fontVariantNumeric:"tabular-nums"}}>
+                              {formatMonthDayKo(cmp.counterpart.dateKey)} {cmp.counterpart.kindLabel}과 비교 · {cmp.directionLabel}
+                            </span>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:"3px 10px",alignItems:"baseline"}}>
+                              {cmp.lines.map((t,li)=><span key={li} style={{fontSize:11.5,fontWeight:700,color:DB.text,fontVariantNumeric:"tabular-nums"}}>{t}</span>)}
+                              {cmp.badgeLabel&&<em style={{fontStyle:"normal",fontSize:10,fontWeight:800,color:DB.mintSoft,background:DB.mintTintStrong,borderRadius:999,padding:"1.5px 7px"}}>{cmp.badgeLabel}</em>}
+                            </div>
+                            <span style={{fontSize:10.5,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>
+                              {cmp.previous.kindLabel} {cmp.previous.line} → {cmp.recent.kindLabel} {cmp.recent.line}
+                            </span>
+                            {cmp.neutralNote&&<span style={{fontSize:10.5,color:DB.faint}}>{cmp.neutralNote}</span>}
                           </div>
                         )}
                       </div>

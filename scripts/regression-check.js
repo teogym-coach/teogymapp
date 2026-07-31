@@ -3186,31 +3186,93 @@ const checks = [
       cases.slice(0, 2).every(([, ptW, , pwW, expected]) => Math.max(ptW, pwW) !== expected);
     })[1]
   ],
-  ['수업 준비 시나리오: 같은 날짜는 실제 시각(endedAt/publishedAt)으로 순서를 가림',
-    pwScenario('같은 날 시각 판정', lib => {
+  // PT session 저장 코드(addSession/updateSession, db.js)를 확인한 결과 session 문서에는
+  // createdAt(생성)·updatedAt(수정)·publishedAt(전송) 시각만 저장되고 셋 다 "실제 수업 수행 시각"이
+  // 아니다. completedAt은 session 문서에 아예 기록되지 않는다(personalWorkouts·온보딩 전용).
+  // 따라서 PT 쪽 같은 날짜 순서 판정에는 performedAt만 허용한다(현재 어떤 저장 경로도 채우지 않지만,
+  // 향후 실제 수행 시각 필드가 추가된다면 이 이름을 쓴다는 전제로 유일하게 허용한다).
+  ['수업 준비 시나리오: 같은 날 PT performedAt이 개인운동 endedAt보다 이르면 개인운동이 최근',
+    pwScenario('같은 날 시각 판정 · 개인운동 최근', lib => {
       const key = lib.canonicalExerciseKey('바벨 벤치프레스');
-      const make = (ptTime, pwTime) => lib.buildSessionPrepSummary({
-        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, publishedAt: ptTime,
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, performedAt: '2026-07-29T10:00:00.000Z',
           exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
-        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: pwTime,
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: '2026-07-29T18:00:00.000Z',
           exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
         todayKey: '2026-07-31',
       }).recommendation;
       // 개인운동(20kg)이 PT(25kg)보다 늦게 끝났다 → 더 가벼워도 20kg을 추천한다
-      const personalLater = make('2026-07-29T10:00:00.000Z', '2026-07-29T18:00:00.000Z');
-      // PT가 더 늦게 기록됐다 → 25kg
-      const ptLater = make('2026-07-29T20:00:00.000Z', '2026-07-29T09:00:00.000Z');
-      // Firestore Timestamp(toDate) 형태도 동일하게 처리된다
-      const ts = ms => ({ toDate: () => new Date(ms) });
-      const withTimestamp = make(ts(Date.UTC(2026, 6, 29, 10)), ts(Date.UTC(2026, 6, 29, 18)));
-      return personalLater.undecided === false && personalLater.weightLabel === '20kg' &&
-        personalLater.orderBy === 'time' && personalLater.sourceKind === 'personal' &&
-        personalLater.previousHigherNote === '이전 PT 수업 최고 중량 25kg' &&
-        ptLater.weightLabel === '25kg' && ptLater.sourceKind === 'pt' &&
-        withTimestamp.weightLabel === '20kg' && withTimestamp.orderBy === 'time';
+      return rec.undecided === false && rec.weightLabel === '20kg' &&
+        rec.orderBy === 'time' && rec.sourceKind === 'personal' &&
+        rec.previousHigherNote === '이전 PT 수업 최고 중량 25kg';
     })[1]
   ],
-  ['수업 준비 시나리오: 같은 날짜 + 시각 없음 → 높은 중량을 임의로 고르지 않고 "직접 확인 필요"',
+  ['수업 준비 시나리오: 같은 날 PT performedAt이 개인운동 endedAt보다 늦으면 PT가 최근',
+    pwScenario('같은 날 시각 판정 · PT 최근', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, performedAt: '2026-07-29T20:00:00.000Z',
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: '2026-07-29T18:00:00.000Z',
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      // Firestore Timestamp(toDate) 형태도 동일하게 처리되는지 함께 확인
+      const ts = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, performedAt: { toDate: () => new Date(Date.UTC(2026, 6, 29, 20)) },
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: { toDate: () => new Date(Date.UTC(2026, 6, 29, 18)) },
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return rec.undecided === false && rec.weightLabel === '25kg' && rec.orderBy === 'time' && rec.sourceKind === 'pt' &&
+        ts.weightLabel === '25kg' && ts.orderBy === 'time';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 같은 날 PT publishedAt만 있고 performedAt이 없으면 순서 불명(전송 시각은 신뢰하지 않음)',
+    pwScenario('같은 날 publishedAt만', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, publishedAt: '2026-07-29T21:00:00.000Z',
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: '2026-07-29T18:00:00.000Z',
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return rec.undecided === true && rec.weight === null && rec.orderBy === null &&
+        rec.undecidedNote === '같은 날 기록 · 직접 확인 필요' &&
+        rec.ptWeightLabel === '25kg' && rec.personalWeightLabel === '20kg';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 같은 날 PT createdAt만 늦게 존재해도 순서 불명(생성 시각은 신뢰하지 않음)',
+    pwScenario('같은 날 createdAt만', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, createdAt: '2026-07-29T23:00:00.000Z',
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: '2026-07-29T18:00:00.000Z',
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return rec.undecided === true && rec.weight === null && rec.orderBy === null &&
+        rec.undecidedNote === '같은 날 기록 · 직접 확인 필요';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 같은 날 PT updatedAt만 늦게 존재해도 순서 불명(수정 시각은 신뢰하지 않음)',
+    pwScenario('같은 날 updatedAt만', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, updatedAt: '2026-07-29T23:00:00.000Z',
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: '2026-07-29T18:00:00.000Z',
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return rec.undecided === true && rec.weight === null && rec.orderBy === null &&
+        rec.undecidedNote === '같은 날 기록 · 직접 확인 필요';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 같은 날짜 + 어떤 시각 필드도 없으면 순서 불명(기존 동작 유지)',
     pwScenario('같은 날 순서 불명', lib => {
       const key = lib.canonicalExerciseKey('바벨 벤치프레스');
       const rec = lib.buildSessionPrepSummary({

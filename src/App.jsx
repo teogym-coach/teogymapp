@@ -3756,14 +3756,20 @@ function getExerciseRecordDateKey(record){
 }
 
 // 기록이 "실제로 언제 수행됐는지"를 판정할 때 쓰는 시각 필드 우선순위.
-//   · 개인운동: endedAt(운동 종료) → completedAt → startedAt — 회원이 실제로 운동한 시각이 그대로 저장된다.
-//   · PT 수업: performedAt → completedAt → publishedAt → updatedAt → createdAt
-//     PT 수업 문서에는 "수행 시각" 필드가 없고 기록·전송 시각만 있다. 트레이너가 지난 수업을 며칠 뒤에
-//     작성·전송하면 이 값이 실제 수업일보다 한참 뒤가 되므로, 날짜가 다를 때는 절대 순서 판정에 쓰지 않고
-//     같은 날짜 안에서 순서를 가릴 때만 보조로 사용한다(getExerciseRecordOrder 참고).
+//   · 개인운동: endedAt(운동 종료) → completedAt → startedAt — completePersonalWorkout()이 운동 종료
+//     시점에 서버 시각으로 1회만 기록하므로(db.js), 회원이 실제로 운동한 시각이 그대로 저장된다.
+//   · PT 수업: performedAt만 허용한다.
+//     addSession/updateSession(db.js)을 직접 확인한 결과 session 문서에는 createdAt(생성 시각)·
+//     updatedAt(수정 시각)·publishedAt(트레이너 전송 시각)만 저장되고, 셋 다 "실제 수업 수행 시각"이
+//     아니라 작성·수정·전송 시각이다 — 트레이너가 지난 수업을 며칠 뒤 작성·전송하면 이 값들이 실제
+//     수업일보다 한참 뒤가 되어 순서를 뒤집을 수 있다. completedAt은 session 문서에 아예 기록되지
+//     않는다(personalWorkouts·온보딩 전용 필드). performedAt은 현재 어떤 저장 경로도 채우지 않지만,
+//     향후 실제 수업 수행 시각 필드가 추가된다면 이 이름을 쓴다는 전제로 유일하게 허용해 둔다.
+//   날짜가 다를 때는 이 시각들을 절대 순서 판정에 쓰지 않고, 같은 날짜 안에서 순서를 가릴 때만
+//   보조로 사용한다(getExerciseRecordOrder 참고). PT 쪽에 신뢰할 시각이 없으면 순서 불명으로 처리한다.
 const EXERCISE_RECORD_TIME_FIELDS={
   personal:["endedAt","completedAt","startedAt"],
-  pt:["performedAt","completedAt","publishedAt","updatedAt","createdAt"],
+  pt:["performedAt"],
 };
 function getExerciseRecordTimeMs(record, kind){
   for(const field of (EXERCISE_RECORD_TIME_FIELDS[kind]||[])){

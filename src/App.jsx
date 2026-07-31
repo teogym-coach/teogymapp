@@ -3947,6 +3947,120 @@ function buildMemberExerciseComparisonIndex({sessions=[], personalWorkouts=[]}={
   return { getComparison, hasAny:ptRecords.length>0&&personalRecords.length>0 };
 }
 
+// ════════════════════════════════════════════════════
+// 관리자 "오늘 수업 준비" 요약 (개인운동 2차 2단계)
+//
+// 관리자앱 수업 기록 화면(SessionScreen) 상단 카드 하나만 사용한다. 회원앱은 이 함수를 쓰지 않는다.
+//
+// 원칙: 조회 + 추천까지만이다. 이 함수는 순수 계산만 하고 어떤 값도 PT 기록에 자동 반영하지 않는다.
+//      Firestore 읽기/쓰기를 직접 하지 않고, 화면이 이미 갖고 있는 sessions/personalWorkouts 배열만 받는다.
+// 비교: Step1의 buildMemberExerciseComparisonIndex/buildExercisePerformanceSnapshot을 그대로 재사용한다.
+//      비교 로직을 여기서 다시 만들지 않는다.
+// ════════════════════════════════════════════════════
+
+// 두 날짜 키("YYYY-MM-DD") 사이의 일수. 정오 기준으로 계산해 서머타임·시간대 경계에서 하루가 밀리지 않게 한다.
+function getDayDiffFromDateKeys(fromKey, toKey){
+  const a=Date.parse(`${String(fromKey||"").slice(0,10)}T12:00:00`);
+  const b=Date.parse(`${String(toKey||"").slice(0,10)}T12:00:00`);
+  if(!Number.isFinite(a)||!Number.isFinite(b)) return null;
+  return Math.round((b-a)/86400000);
+}
+
+// "오늘" / "1일 전" / "3일 전" — 미래 날짜(음수)는 "오늘"로 처리해 이상한 문구가 나오지 않게 한다.
+function formatElapsedDayLabel(days){
+  if(days==null||!Number.isFinite(days)) return null;
+  return days<=0?"오늘":`${days}일 전`;
+}
+
+// 다음 시작 중량 추천 — Step1 비교 결과(같은 운동의 PT 기록 + 개인운동 기록)만 입력으로 받는다.
+//   · 같은 운동의 PT 기록이 없으면(comparison === null) 추천하지 않는다 → 화면에서 추천 영역을 숨긴다
+//   · 양쪽 모두 중량 기록이 있어야 한다. 맨몸 운동은 추천 대상이 아니다(0kg 추천 금지)
+//   · 추천값은 두 기록의 최고 중량 중 더 높은 값이고, 같으면 더 최근 기록을 출처로 표기한다
+//     (요청 예시 "PT 20 / 개인 22.5 → 22.5", "PT 25 / 개인 20 → 25" 두 건과 모두 일치하는 규칙)
+//   · 어느 쪽 기록에서 나온 값인지와 두 기록의 값·날짜를 함께 돌려줘, 트레이너가 근거를 그대로 확인할 수 있게 한다
+//   · 이 값은 표시 전용이다. 세트·중량 입력란에 절대 자동으로 넣지 않는다.
+function buildNextStartWeightRecommendation(comparison){
+  if(!comparison) return null;
+  const pt=comparison.current.kind==="pt"?comparison.current:comparison.counterpart;
+  const personal=comparison.current.kind==="personal"?comparison.current:comparison.counterpart;
+  const ptWeight=pt?.snapshot?.hasWeight?Number(pt.snapshot.topWeight):null;
+  const personalWeight=personal?.snapshot?.hasWeight?Number(personal.snapshot.topWeight):null;
+  if(!(ptWeight>0)||!(personalWeight>0)) return null;
+  const weight=Math.max(ptWeight,personalWeight);
+  const fromPersonal=personalWeight>ptWeight||(personalWeight===ptWeight&&String(personal.dateKey)>=String(pt.dateKey));
+  const source=fromPersonal?personal:pt;
+  return {
+    weight,
+    weightLabel:formatWeightValue(weight),
+    sourceKind:source.kind,
+    sourceLabel:`${formatMonthDayKo(source.dateKey)} ${source.kindLabel} 최고 중량 기준`,
+    ptWeightLabel:formatWeightValue(ptWeight),
+    ptDateLabel:formatMonthDayKo(pt.dateKey),
+    personalWeightLabel:formatWeightValue(personalWeight),
+    personalDateLabel:formatMonthDayKo(personal.dateKey),
+  };
+}
+
+// 수업 기록 화면 상단 "오늘 수업 준비" 카드 데이터.
+// 완료된 개인운동이 하나도 없으면 null을 돌려준다 → 화면에서 카드 자체를 만들지 않는다("기록 없음" 빈 카드 금지).
+function buildSessionPrepSummary({sessions=[], personalWorkouts=[], todayKey=""}={}){
+  // 최근 completed 1건만 사용한다. 진행 중(in_progress)은 제외.
+  const completed=(personalWorkouts||[])
+    .filter(w=>w&&w.status==="completed"&&getExerciseRecordDateKey(w))
+    .sort((a,b)=>String(getExerciseRecordDateKey(b)).localeCompare(String(getExerciseRecordDateKey(a)))||String(b.id||"").localeCompare(String(a.id||"")));
+  const workout=completed[0];
+  if(!workout) return null;
+  const exercises=(workout.exercises||[]).filter(e=>String(e?.name||"").trim()&&getPersonalWorkoutValidSets(e).length>0);
+  if(!exercises.length) return null;   // 유효 세트가 하나도 없는 기록은 보여줄 내용이 없다
+
+  const dateKey=getExerciseRecordDateKey(workout);
+  const card=buildPersonalWorkoutCardSummary(workout);
+  const index=buildMemberExerciseComparisonIndex({sessions,personalWorkouts:completed});
+
+  // 대표 운동 — 볼륨이 가장 큰 종목. 볼륨이 같거나 전부 맨몸(볼륨 0)이면 세트 수 → 총 횟수 → 기록 순서로 정한다.
+  const ranked=exercises.map((e,i)=>{
+    const valid=getPersonalWorkoutValidSets(e);
+    return { exercise:e, order:i, volume:calculatePersonalExerciseVolume(e), setCount:valid.length,
+             totalReps:valid.reduce((s,x)=>s+(Number(x?.reps)||0),0) };
+  }).sort((a,b)=>b.volume-a.volume||b.setCount-a.setCount||b.totalReps-a.totalReps||a.order-b.order);
+  const top=ranked[0];
+
+  // 대표 운동 수행값은 Step1과 같은 snapshot을 쓴다 — 같은 기록 안 동일 종목 중복도 같은 방식으로 합산된다.
+  const sameKeyExercises=exercises.filter(e=>
+    (String(e?.exerciseKey||"")||canonicalExerciseKey(e?.name)) === (String(top.exercise?.exerciseKey||"")||canonicalExerciseKey(top.exercise?.name)));
+  const topSnapshot=buildExercisePerformanceSnapshot(sameKeyExercises.length?sameKeyExercises:[top.exercise]);
+  const comparison=index.getComparison("personal",workout.id,top.exercise);
+  const elapsedDays=todayKey?getDayDiffFromDateKeys(dateKey,todayKey):null;
+
+  return {
+    workoutId:workout.id||"",
+    dateKey,
+    dateLabel:formatMonthDayKo(dateKey),
+    elapsedDays,
+    elapsedLabel:formatElapsedDayLabel(elapsedDays),
+    // "개인운동 후 2일 경과" — 오늘 기록이면 경과 문구 대신 "오늘 기록"으로 표시한다.
+    elapsedNote:elapsedDays==null?null:(elapsedDays<=0?"오늘 기록된 개인운동":`개인운동 후 ${elapsedDays}일 경과`),
+    partsLabel:card.partsLabel,               // 기존 formatPersonalWorkoutPartsLabel 결과 그대로("가슴·삼두")
+    durationLabel:card.durationLabel,
+    exerciseCount:card.totalExercises,
+    totalSets:card.totalSets,
+    totalVolumeLabel:card.volumeLabel,
+    memo:String(workout.memo||"").trim(),     // 비어 있으면 화면에서 메모 영역을 숨긴다
+    topExercise:{
+      name:top.exercise.name,
+      muscleTop:top.exercise.muscleTop||"",
+      equipment:top.exercise.equipment||"",
+      line:formatExerciseSnapshotLine(topSnapshot),
+      setCount:topSnapshot?.setCount??top.setCount,
+      volume:top.volume,
+      volumeLabel:top.volume>0?`${Math.round(top.volume).toLocaleString()}kg`:null,
+    },
+    comparison,                                                  // 같은 운동의 PT 기록이 없으면 null
+    recommendation:buildNextStartWeightRecommendation(comparison), // 없으면 추천 영역 숨김
+    otherExerciseNames:ranked.slice(1).map(r=>r.exercise.name),
+  };
+}
+
 // ── 개인운동 UI (회원앱) ──────────────────────────────────────────────────────
 // 기존 수업 탭 디자인(sj-*)과 회원앱 공통 시트(MemberBottomSheet)를 그대로 재사용한다.
 // 개인운동 카드는 sessionReads(수업일지 회원 확인)를 절대 호출하지 않는다 — 확인 기록은 PT 수업일지 전용 개념이다.
@@ -8508,7 +8622,7 @@ export default function App() {
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
         {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
-        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
+        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
@@ -15149,11 +15263,109 @@ function getInitialSessionParts({ editingSession, sessionDate, member }) {
   if (!nextDate || nextDate !== String(sessionDate || "").slice(0, 10)) return [];
   return parseNextParts(member?.nextWorkoutPart || member?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
 }
+// 수업 기록 화면 상단 "오늘 수업 준비" 카드 (개인운동 2차 2단계, 관리자 전용).
+// 조회 + 추천 표시 전용이다 — 이 컴포넌트는 onChange/onSave 계열 콜백을 하나도 받지 않으므로
+// 세트·중량·종목을 자동으로 채우거나 저장하는 경로가 구조적으로 존재하지 않는다.
+// prep이 null이면(완료된 개인운동 없음) 상위에서 아예 렌더하지 않아 빈 카드가 생기지 않는다.
+function SessionPrepCard({ prep }) {
+  const [showOthers, setShowOthers] = useState(false);
+  if (!prep) return null;
+  const { topExercise: top, comparison, recommendation } = prep;
+  const label = { fontSize:9.5, fontWeight:800, color:"#94A3B8", fontFamily:"'DM Mono',monospace", letterSpacing:.2 };
+  const chip  = { fontSize:11, fontWeight:800, padding:"3px 9px", borderRadius:999, background:"rgba(15,148,136,.10)", color:"#0F9488", whiteSpace:"nowrap" };
+  const block = { marginTop:10, paddingTop:10, borderTop:"1px solid #EDEFF2" };
+  return (
+    <Card title="오늘 수업 준비" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #D6DCE3"}}
+      titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
+
+      {/* ① 최근 개인운동 — 날짜 · 경과일 · 부위 · 종목 수 */}
+      <div style={{display:"flex",alignItems:"baseline",gap:7,flexWrap:"wrap"}}>
+        <Mo c="#94A3B8" s={9.5} style={{fontWeight:800}}>최근 개인운동</Mo>
+        <b style={{fontSize:13.5,fontWeight:800,color:"#0F172A",fontVariantNumeric:"tabular-nums"}}>{prep.dateLabel}</b>
+        {prep.elapsedLabel&&<span style={{fontSize:11.5,fontWeight:700,color:"#64748B",fontVariantNumeric:"tabular-nums"}}>{prep.elapsedLabel}</span>}
+        <span style={chip}>{prep.partsLabel}</span>
+        <span style={{marginLeft:"auto",fontSize:11,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>
+          운동 {prep.exerciseCount}종목 · 총 {prep.totalSets}세트{prep.totalVolumeLabel?` · ${prep.totalVolumeLabel}`:""}
+        </span>
+      </div>
+
+      {/* ② 대표 운동 + 최근 PT 대비 변화(Step1 비교 결과 그대로 사용) */}
+      <div style={{...block,display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+        <b style={{fontSize:14,fontWeight:800,color:"#0F172A"}}>{top.name}</b>
+        <span style={{fontSize:13,fontWeight:800,color:"#334155",fontVariantNumeric:"tabular-nums"}}>{top.line}</span>
+      </div>
+      {top.volumeLabel&&<div style={{marginTop:3,fontSize:11,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>볼륨 {top.volumeLabel}</div>}
+      {comparison&&(
+        <div style={{marginTop:7,padding:"8px 10px",background:"#F6F8FA",borderRadius:8}}>
+          <Mo c="#94A3B8" s={9.5} style={{display:"block",fontWeight:800,marginBottom:4}}>최근 PT 대비</Mo>
+          <div style={{display:"flex",flexWrap:"wrap",gap:"3px 10px",alignItems:"baseline"}}>
+            {comparison.lines.map((t,i)=><span key={i} style={{fontSize:12.5,fontWeight:800,color:"#334155",fontVariantNumeric:"tabular-nums"}}>{t}</span>)}
+            {comparison.badgeLabel&&<em style={{fontStyle:"normal",fontSize:10,fontWeight:800,color:"#0F9488",background:"rgba(15,148,136,.12)",borderRadius:999,padding:"1.5px 7px"}}>{comparison.badgeLabel}</em>}
+          </div>
+          <div style={{marginTop:4,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>{comparison.directionLabel}</div>
+          {comparison.neutralNote&&<div style={{marginTop:2,fontSize:10.5,color:"#94A3B8"}}>{comparison.neutralNote}</div>}
+        </div>
+      )}
+
+      {/* ③ 추천 시작 중량 — 같은 운동의 PT 기록이 없거나 맨몸 운동이면 recommendation이 null이라 영역 자체가 사라진다.
+          "자동 적용되지 않습니다"를 항상 함께 표시해 트레이너가 직접 입력해야 하는 값임을 분명히 한다. */}
+      {recommendation&&(
+        <div style={{...block}}>
+          <Mo c="#94A3B8" s={9.5} style={{display:"block",fontWeight:800,marginBottom:5}}>추천 · 다음 시작 중량</Mo>
+          <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+            <b style={{fontSize:20,fontWeight:900,color:"#0F9488",letterSpacing:"-.4px",fontVariantNumeric:"tabular-nums"}}>{recommendation.weightLabel}</b>
+            <span style={{fontSize:11,color:"#64748B",fontVariantNumeric:"tabular-nums"}}>{recommendation.sourceLabel}</span>
+          </div>
+          <div style={{marginTop:4,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>
+            {recommendation.ptDateLabel} PT {recommendation.ptWeightLabel} · {recommendation.personalDateLabel} 개인운동 {recommendation.personalWeightLabel}
+          </div>
+          <div style={{marginTop:5,fontSize:10.5,fontWeight:700,color:"#B45309",background:"rgba(245,158,11,.08)",borderRadius:6,padding:"4px 8px",display:"inline-block"}}>
+            자동 적용되지 않습니다 · 직접 입력해주세요
+          </div>
+        </div>
+      )}
+
+      {/* ④ 회원 메모 — 개인운동 메모가 있을 때만 */}
+      {prep.memo&&(
+        <div style={{...block}}>
+          <Mo c="#94A3B8" s={9.5} style={{display:"block",fontWeight:800,marginBottom:4}}>회원 메모</Mo>
+          <div style={{fontSize:12.5,color:"#334155",lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{prep.memo}</div>
+        </div>
+      )}
+
+      {/* ⑤ 나머지 종목 이름 + 경과 안내 */}
+      {prep.otherExerciseNames.length>0&&(
+        <div style={{marginTop:8}}>
+          <button type="button" onClick={()=>setShowOthers(v=>!v)}
+            style={{border:"none",background:"none",padding:0,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10.5,fontWeight:800,color:"#94A3B8"}}>
+            {showOthers?`그 외 ${prep.otherExerciseNames.length}종목 접기 ▲`:`그 외 ${prep.otherExerciseNames.length}종목 보기 ▼`}
+          </button>
+          {showOthers&&(
+            <div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:"4px 8px"}}>
+              {prep.otherExerciseNames.map((n,i)=><span key={i} style={{fontSize:11.5,fontWeight:700,color:"#64748B"}}>{n}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+      {prep.elapsedNote&&<div style={{marginTop:8,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>{prep.elapsedNote}</div>}
+    </Card>
+  );
+}
+
 function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
-  allMembers=[], classifications={}, onLearnExercise }) {
+  allMembers=[], classifications={}, onLearnExercise, personalWorkouts=[] }) {
   const isCorr = false;
   const isEdit = !!(editData?.id);
   const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
+
+  // ── "오늘 수업 준비" 카드 데이터 ──────────────────────────────────────
+  // 관리자 App이 회원 상세 진입 시 이미 읽어 둔 personalWorkouts(최근 10건)와 sessions를 그대로 쓴다 —
+  // 이 화면에서 Firestore를 추가로 읽지 않는다. 완료된 개인운동이 없으면 null이라 카드가 렌더되지 않는다.
+  // 대표(TEO) 개인 기록 계정은 회원앱 개념이 없어 카드를 만들지 않는다(회원 상세 "최근 개인운동" 카드와 동일 정책).
+  const sessionPrep = useMemo(
+    () => (isOwner(member) ? null : buildSessionPrepSummary({ sessions, personalWorkouts, todayKey: getKoreaDateString() })),
+    [member, sessions, personalWorkouts]
+  );
 
   // ── 수업 형태 & 2:1 멤버 ────────────────────────────────────────────
   const [sessionType, setSessionType] = useState(editData?.sessionType || "1:1");
@@ -15968,6 +16180,10 @@ function updateEx(ei, key, val) {
           })()}
         </Card>
       )}
+
+      {/* 오늘 수업 준비 — "오늘의 운동 부위"(기본 정보 카드) 아래, 운동 종목 입력(운동 목록 카드) 위.
+          조회·추천 전용 카드라 아래 운동 목록의 값을 건드리지 않는다. */}
+      <SessionPrepCard prep={sessionPrep} />
 
       <Card title="운동 목록" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
         {exercises.map((ex, ei) => {

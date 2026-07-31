@@ -99,7 +99,8 @@ try {
   personalWorkoutLib = new Function(
     `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceMonthDayKo}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
     'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete, ' +
-    'normalizeComparableExercise, buildExercisePerformanceSnapshot, compareExercisePerformance, formatExerciseComparisonSummary, buildMemberExerciseComparisonIndex, formatExerciseSnapshotLine, getExerciseRecordDateKey };'
+    'normalizeComparableExercise, buildExercisePerformanceSnapshot, compareExercisePerformance, formatExerciseComparisonSummary, buildMemberExerciseComparisonIndex, formatExerciseSnapshotLine, getExerciseRecordDateKey, ' +
+    'buildSessionPrepSummary, buildNextStartWeightRecommendation, getDayDiffFromDateKeys, formatElapsedDayLabel };'
   )();
 } catch (e) {
   console.error('[regression] 개인운동 헬퍼 추출 실패:', e.message);
@@ -3074,6 +3075,162 @@ const checks = [
     app.includes('cmpIndex.getComparison("personal", w.id, e)') &&
     // 비교를 위해 새 Firestore 조회를 추가하지 않았다(카드 안 getPersonalWorkouts/getSessions 호출 없음)
     !/hub-sec-personal[\s\S]{0,4000}?(getSessions\(|getPersonalWorkouts\()/.test(app)
+  ],
+  // ── 개인운동 2차 2단계: 관리자 "오늘 수업 준비" 카드 ──────────────────────────────
+  // 조회 + 추천 표시까지만이다. 세트·중량·종목 자동 입력, 자동 저장, PT 기록 수정은 절대 하지 않는다.
+  ['수업 준비 시나리오: 완료된 개인운동이 없으면 카드 데이터를 만들지 않음(빈 카드 금지)',
+    pwScenario('개인운동 없음', lib => {
+      const ex = { name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] };
+      const sessions = [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [ex] }];
+      const none = lib.buildSessionPrepSummary({ sessions, personalWorkouts: [], todayKey: '2026-07-31' });
+      // 진행 중(in_progress)만 있으면 최근 completed가 없으므로 역시 null
+      const onlyInProgress = lib.buildSessionPrepSummary({
+        sessions, personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-30', status: 'in_progress', exercises: [ex] }], todayKey: '2026-07-31' });
+      // 유효 세트가 하나도 없는 완료 기록도 보여줄 내용이 없어 null
+      const noValidSets = lib.buildSessionPrepSummary({
+        sessions, personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-30', status: 'completed', exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 0 }] }] }], todayKey: '2026-07-31' });
+      return none === null && onlyInProgress === null && noValidSets === null;
+    })[1]
+  ],
+  ['수업 준비 시나리오: 최근 completed 1건만 사용하고 날짜·경과일·부위·종목 수를 표시',
+    pwScenario('최근 1건·경과일·부위', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const prep = lib.buildSessionPrepSummary({
+        sessions: [],
+        personalWorkouts: [
+          { id: 'old', workoutDate: '2026-07-10', status: 'completed', workoutParts: ['등'], exercises: [{ exerciseKey: lib.canonicalExerciseKey('랫풀다운'), name: '랫풀다운', sets: [{ weight: 40, reps: 10 }] }] },
+          // 복수 부위 + 진행 중 기록이 더 최근이어도 completed 최신 1건만 쓴다
+          { id: 'p1', workoutDate: '2026-07-29', status: 'completed', workoutParts: ['가슴', '삼두'], exercises: [
+            { exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }, { weight: 22.5, reps: 10 }, { weight: 22.5, reps: 10 }] },
+            { exerciseKey: lib.canonicalExerciseKey('케이블 프레스다운'), name: '케이블 프레스다운', sets: [{ weight: 15, reps: 12 }] },
+          ] },
+          { id: 'p2', workoutDate: '2026-07-30', status: 'in_progress', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 30, reps: 10 }] }] },
+        ],
+        todayKey: '2026-07-31',
+      });
+      return prep.workoutId === 'p1' && prep.dateLabel === '7월 29일' &&
+        prep.elapsedDays === 2 && prep.elapsedLabel === '2일 전' && prep.elapsedNote === '개인운동 후 2일 경과' &&
+        prep.partsLabel === '가슴·삼두' && prep.exerciseCount === 2 && prep.totalSets === 4 &&
+        // 대표 운동 = 볼륨 최대 종목(675kg > 180kg)
+        prep.topExercise.name === '바벨 벤치프레스' && prep.topExercise.line === '22.5kg × 10회 · 3세트' &&
+        prep.otherExerciseNames.length === 1 && prep.otherExerciseNames[0] === '케이블 프레스다운';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 경과일 라벨이 오늘/1일 전/7일 전으로 정확히 계산됨',
+    pwScenario('경과일 계산', lib => {
+      return lib.getDayDiffFromDateKeys('2026-07-31', '2026-07-31') === 0 &&
+        lib.getDayDiffFromDateKeys('2026-07-30', '2026-07-31') === 1 &&
+        lib.getDayDiffFromDateKeys('2026-07-24', '2026-07-31') === 7 &&
+        // 월 경계도 정상 계산
+        lib.getDayDiffFromDateKeys('2026-06-30', '2026-07-01') === 1 &&
+        lib.formatElapsedDayLabel(0) === '오늘' && lib.formatElapsedDayLabel(1) === '1일 전' && lib.formatElapsedDayLabel(7) === '7일 전' &&
+        // 미래 날짜(음수)·잘못된 날짜에도 이상한 문구가 나오지 않는다
+        lib.formatElapsedDayLabel(-3) === '오늘' && lib.getDayDiffFromDateKeys('', '2026-07-31') === null &&
+        lib.formatElapsedDayLabel(null) === null;
+    })[1]
+  ],
+  ['수업 준비 시나리오: 추천 시작 중량은 PT·개인운동 최고 중량 중 높은 값이고 출처를 함께 표시',
+    pwScenario('추천 중량', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const make = (ptW, pwW) => lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: ptW, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: pwW, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      const a = make(20, 22.5);   // 요청 예시 ① PT 20 / 개인 22.5 → 22.5
+      const b = make(25, 20);     // 요청 예시 ② PT 25 / 개인 20 → 25
+      return a.weightLabel === '22.5kg' && a.sourceKind === 'personal' && a.sourceLabel === '7월 29일 개인운동 최고 중량 기준' &&
+        b.weightLabel === '25kg' && b.sourceKind === 'pt' && b.sourceLabel === '7월 20일 PT 수업 최고 중량 기준' &&
+        // 두 기록의 값과 날짜를 함께 노출해 트레이너가 근거를 그대로 확인할 수 있다
+        b.ptWeightLabel === '25kg' && b.personalWeightLabel === '20kg' && b.ptDateLabel === '7월 20일';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 동일 운동이 없거나 맨몸 운동이면 추천 영역을 숨김',
+    pwScenario('추천 숨김', lib => {
+      const noMatch = lib.buildSessionPrepSummary({
+        // PT에는 다른 운동만 있어 같은 운동 비교 자체가 불가능하다
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '랫풀다운', sets: [{ weight: 40, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: lib.canonicalExerciseKey('바벨 벤치프레스'), name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      });
+      const bodyweight = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '푸쉬업', sets: [{ reps: 15 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: lib.canonicalExerciseKey('푸쉬업'), name: '푸쉬업', sets: [{ reps: 20 }] }] }],
+        todayKey: '2026-07-31',
+      });
+      // 비공개 PT만 있으면 비교·추천 모두 없다
+      const draftOnly = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: false, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: lib.canonicalExerciseKey('바벨 벤치프레스'), name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      });
+      return noMatch.comparison === null && noMatch.recommendation === null &&
+        bodyweight.recommendation === null && bodyweight.comparison !== null &&
+        draftOnly.comparison === null && draftOnly.recommendation === null &&
+        lib.buildNextStartWeightRecommendation(null) === null;
+    })[1]
+  ],
+  ['수업 준비 시나리오: 메모는 있을 때만 내려주고 없으면 빈 문자열(영역 숨김)',
+    pwScenario('메모 조건', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const base = memo => lib.buildSessionPrepSummary({
+        sessions: [],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', memo, exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      });
+      return base('왼쪽 어깨가 약간 불편했습니다.').memo === '왼쪽 어깨가 약간 불편했습니다.' &&
+        base('').memo === '' && base('   ').memo === '' && base(undefined).memo === '';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 비교는 Step1 헬퍼 결과를 그대로 사용(자체 비교 로직 없음)',
+    pwScenario('Step1 재사용', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const sessions = [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 12 }, { weight: 20, reps: 12 }] }] }];
+      const personalWorkouts = [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 22.5, reps: 10 }, { weight: 22.5, reps: 10 }, { weight: 22.5, reps: 10 }] }] }];
+      const prep = lib.buildSessionPrepSummary({ sessions, personalWorkouts, todayKey: '2026-07-31' });
+      const direct = lib.buildMemberExerciseComparisonIndex({ sessions, personalWorkouts })
+        .getComparison('personal', 'p1', { exerciseKey: key });
+      return JSON.stringify(prep.comparison.lines) === JSON.stringify(direct.lines) &&
+        prep.comparison.directionLabel === direct.directionLabel &&
+        prep.comparison.directionLabel === '7월 20일 PT 수업 → 7월 29일 개인운동';
+    })[1]
+  ],
+  ['수업 준비 UI: SessionScreen 상단 카드가 "오늘의 운동 부위" 아래 · "운동 목록" 위에 배치됨',
+    (() => {
+      const prep = app.indexOf('<SessionPrepCard prep={sessionPrep} />');
+      const parts = app.indexOf('<label>오늘의 운동 부위');
+      const exList = app.indexOf('<Card title="운동 목록"');
+      return prep !== -1 && parts !== -1 && exList !== -1 && parts < prep && prep < exList;
+    })()
+  ],
+  ['수업 준비 UI: 카드는 조회 전용 — 값 변경·저장 콜백을 받지 않고 자동 입력 경로가 없음',
+    (() => {
+      const i = app.indexOf('function SessionPrepCard');
+      const j = app.indexOf('function SessionScreen({ member, sessions, editData');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        // prep 하나만 받는다(onChange/onSave/setExercises 계열 prop 없음)
+        /function SessionPrepCard\(\{ prep \}\)/.test(body) &&
+        !/setExercises|setSelectedTypes|onSave|onChange|onApply|addDoc|updateDoc|setDoc/.test(body) &&
+        // "자동 적용되지 않습니다" 안내를 항상 함께 노출한다
+        body.includes('자동 적용되지 않습니다');
+    })()
+  ],
+  ['수업 준비 UI: Firestore 추가 조회 없이 이미 로드된 personalWorkouts prop만 사용(N+1 금지)',
+    app.includes('personalWorkouts={memberPersonalWorkouts} />}') &&
+    app.includes('buildSessionPrepSummary({ sessions, personalWorkouts, todayKey: getKoreaDateString() })') &&
+    (() => {
+      const i = app.indexOf('function SessionPrepCard');
+      const j = app.indexOf('const [sessionType, setSessionType]');
+      // SessionPrepCard 정의 ~ SessionScreen 초반(카드 데이터 계산 구간)에 Firestore 조회 호출이 없다
+      return !/getPersonalWorkouts\(|getSessions\(|getDocs\(/.test(app.slice(i, j));
+    })()
+  ],
+  ['수업 준비: PT 저장 구조·저장 로직에 영향 없음(기존 handleSaveSession 경로 그대로)',
+    app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id') &&
+    // 준비 카드에서 파생된 값을 세션 문서에 저장하지 않는다
+    !/recommendedStartWeight|sessionPrepResult|prepRecommendation/.test(app) &&
+    !/recommendedStartWeight|sessionPrepResult|prepRecommendation/.test(db)
   ],
   ['비교 결과 미저장: comparisonResult/improvementPercent 등 파생 필드를 Firestore에 쓰지 않음',
     !/comparisonResult|improvementPercent|previousPtWeight|performanceStatus/.test(app) &&

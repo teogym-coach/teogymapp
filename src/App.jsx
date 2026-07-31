@@ -4209,29 +4209,32 @@ function buildPersonalWorkoutImportOptions(workout){
 // 목록에 보이는 "운동 N종목 · 총 N세트"가 실제로 가져올 수 있는 양과 항상 일치한다.
 //   · 대상은 이미 전달받은 personalWorkouts 배열뿐이다 — Firestore를 추가로 읽지 않는다.
 //   · 정렬은 getCompletedPersonalWorkoutsLatestFirst() 하나만 쓴다(진행 중 기록은 여기서 제외된다).
-//   · 가져올 수 있는 종목이 하나도 없는 기록(options===null)은 골라도 다음 화면이 비므로 목록에서 뺀다.
+//   · 완료된 기록은 가져올 수 있든 없든 전부 목록에 남긴다. 기록이 사라진 것처럼 보이면 회원·트레이너가
+//     "기록이 없어졌다"고 오해하기 때문이다. 가져올 종목이 없는 기록(options===null)은 importable:false로
+//     표시해 화면에서 선택만 막고, 왜 못 고르는지 disabledReason으로 알려 준다.
 const PERSONAL_WORKOUT_IMPORT_LIST_LIMIT=10;
+const PERSONAL_WORKOUT_IMPORT_EMPTY_REASON="가져올 수 있는 운동이 없습니다.";
 function buildPersonalWorkoutImportCandidates(personalWorkouts=[], limit=PERSONAL_WORKOUT_IMPORT_LIST_LIMIT){
-  const out=[];
-  for(const workout of getCompletedPersonalWorkoutsLatestFirst(personalWorkouts)){
-    if(out.length>=limit) break;
+  return getCompletedPersonalWorkoutsLatestFirst(personalWorkouts).slice(0,limit).map((workout,i)=>{
     const options=buildPersonalWorkoutImportOptions(workout);
-    if(!options) continue;
-    out.push({
-      candidateId:options.workoutId||`pw-${options.dateKey}-${out.length}`,
+    const dateKey=options?options.dateKey:(getExerciseRecordDateKey(workout)||"");
+    return {
+      candidateId:String(workout.id||"")||`pw-${dateKey}-${i}`,
       workout,                                  // 다음 화면(ImportSheet)에 그대로 넘길 원본 문서 — 사본을 만들지 않는다
-      dateKey:options.dateKey,
-      dateLabel:options.dateLabel,              // 기존 formatMonthDayKo 결과("7월 31일")
-      partsLabel:options.partsLabel,            // 기존 formatPersonalWorkoutPartsLabel 결과("가슴·삼두")
-      exerciseCount:options.exerciseCount,
-      totalSets:options.totalSets,
+      importable:!!options,
+      disabledReason:options?"":PERSONAL_WORKOUT_IMPORT_EMPTY_REASON,
+      dateKey,
+      dateLabel:dateKey?formatMonthDayKo(dateKey):"",              // 기존 formatMonthDayKo 결과("7월 31일")
+      partsLabel:formatPersonalWorkoutPartsLabel(workout),         // 기존 결과 그대로("가슴·삼두")
+      // 가져올 수 없는 기록은 0종목 0세트다 — 카드에 보이는 수치가 실제 가져올 수 있는 양과 어긋나지 않게 한다
+      exerciseCount:options?options.exerciseCount:0,
+      totalSets:options?options.totalSets:0,
       // 운동 시간은 기존 개인운동 카드와 같은 함수를 쓴다(저장된 durationMinutes 우선, 없으면 시작~종료 차이)
       durationLabel:formatPersonalWorkoutDuration(getPersonalWorkoutDurationMinutes(workout)),
       // 회원 메모는 참고용 첫 줄만 — 가져오기 대상이 아니다
-      memoFirstLine:(options.memo.split(/\r?\n/).find(l=>l.trim())||"").trim(),
-    });
-  }
-  return out;
+      memoFirstLine:(String(workout?.memo||"").split(/\r?\n/).find(l=>l.trim())||"").trim(),
+    };
+  });
 }
 
 // 가져온 운동 카드의 부위 결정 — 우선순위를 명시적으로 고정한다.
@@ -15608,7 +15611,8 @@ function getInitialSessionParts({ editingSession, sessionDate, member }) {
 // Firestore를 읽지 않는다: 부모가 이미 만들어 둔 candidates 배열만 그린다.
 // 열릴 때마다 새로 mount되므로 항상 가장 최근 기록이 기본 선택된다(이전 선택을 기억하지 않는다).
 function PersonalWorkoutRecordPickerSheet({ candidates = [], onClose, onNext }) {
-  const [selectedId, setSelectedId] = useState(() => candidates[0]?.candidateId || "");
+  // 기본 선택은 "가져올 수 있는" 기록 중 가장 최근 1건이다 — 목록 첫 줄이 가져올 수 없는 기록일 수 있다.
+  const [selectedId, setSelectedId] = useState(() => (candidates.find(c => c.importable) || {}).candidateId || "");
 
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose?.(); };
@@ -15616,7 +15620,8 @@ function PersonalWorkoutRecordPickerSheet({ candidates = [], onClose, onNext }) 
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const picked = candidates.find(c => c.candidateId === selectedId) || null;
+  const found  = candidates.find(c => c.candidateId === selectedId);
+  const picked = found?.importable ? found : null;   // 비활성 기록은 어떤 경로로도 선택 결과가 되지 않는다
   const chip   = { fontSize:11, fontWeight:800, padding:"2px 8px", borderRadius:999, background:"rgba(15,148,136,.10)", color:"#0F9488", whiteSpace:"nowrap" };
   const action = { width:"100%", padding:"12px", borderRadius:9, border:"none", cursor:"pointer", fontSize:13, fontWeight:800 };
 
@@ -15648,25 +15653,43 @@ function PersonalWorkoutRecordPickerSheet({ candidates = [], onClose, onNext }) 
         {/* ── 기록 목록(내부 스크롤) ── */}
         <div role="radiogroup" aria-label="개인운동 기록 목록"
           style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px"}}>
+          {/* 완료된 기록은 가져올 수 없는 것까지 전부 그린다 — 목록에서 사라지면 기록이 없어진 것으로 오해한다.
+              가져올 종목이 없는 기록은 선택만 막고(disabled) 이유를 카드 안에 적어 준다. */}
           {candidates.map(c => {
-            const on = c.candidateId === selectedId;
+            const on  = c.importable && c.candidateId === selectedId;
+            const off = !c.importable;
             return (
               <button key={c.candidateId} type="button" role="radio" aria-checked={on}
-                onClick={() => setSelectedId(c.candidateId)}
+                disabled={off} aria-disabled={off}
+                onClick={() => { if (c.importable) setSelectedId(c.candidateId); }}
                 style={{display:"block",width:"100%",textAlign:"left",marginBottom:9,padding:"10px 12px",borderRadius:10,
-                  minHeight:44,cursor:"pointer",
-                  border:"1px solid "+(on ? "#39C7B8" : "#E2E8F0"), background: on ? "rgba(57,199,184,.05)" : "#FFFFFF"}}>
+                  minHeight:44, cursor: off ? "not-allowed" : "pointer",
+                  border:"1px solid "+(on ? "#39C7B8" : "#E2E8F0"),
+                  background: on ? "rgba(57,199,184,.05)" : (off ? "#F8FAFC" : "#FFFFFF")}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  <b style={{fontSize:13.5,fontWeight:800,color:"#0F172A",fontVariantNumeric:"tabular-nums"}}>{c.dateLabel}</b>
-                  {c.partsLabel && <span style={chip}>{c.partsLabel}</span>}
+                  <b style={{fontSize:13.5,fontWeight:800,color: off ? "#94A3B8" : "#0F172A",fontVariantNumeric:"tabular-nums"}}>{c.dateLabel}</b>
+                  {c.partsLabel && <span style={{...chip, ...(off ? {background:"#EEF2F6",color:"#94A3B8"} : null)}}>{c.partsLabel}</span>}
                   {on && <span style={{marginLeft:"auto",flexShrink:0,fontSize:10,fontWeight:800,color:"#0F9488"}}>✓ 선택됨</span>}
                 </div>
-                <div style={{marginTop:4,fontSize:11.5,color:"#64748B",fontVariantNumeric:"tabular-nums"}}>
-                  운동 {c.exerciseCount}종목 · 총 {c.totalSets}세트{c.durationLabel ? ` · ${c.durationLabel}` : ""}
-                </div>
+                {c.importable ? (
+                  <div style={{marginTop:4,fontSize:11.5,color:"#64748B",fontVariantNumeric:"tabular-nums"}}>
+                    운동 {c.exerciseCount}종목 · 총 {c.totalSets}세트{c.durationLabel ? ` · ${c.durationLabel}` : ""}
+                  </div>
+                ) : (
+                  c.durationLabel && (
+                    <div style={{marginTop:4,fontSize:11.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>
+                      운동 시간 {c.durationLabel}
+                    </div>
+                  )
+                )}
                 {c.memoFirstLine && (
                   <div style={{marginTop:3,fontSize:11,color:"#94A3B8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                     {c.memoFirstLine}
+                  </div>
+                )}
+                {off && (
+                  <div style={{marginTop:5,paddingTop:5,borderTop:"1px solid #E7EBEF",fontSize:11,fontWeight:700,color:"#B45309"}}>
+                    {c.disabledReason}
                   </div>
                 )}
               </button>
@@ -16161,7 +16184,8 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
     () => (isOwner(member) ? [] : buildPersonalWorkoutImportCandidates(personalWorkouts)),
     [member, personalWorkouts]
   );
-  const canImportPersonal = importCandidates.length > 0 && sessionType !== "2:1";
+  // 가져올 수 있는 기록이 하나도 없으면 버튼을 만들지 않는다(목록만 보여 주고 아무것도 못 고르는 모달 방지).
+  const canImportPersonal = importCandidates.some(c => c.importable) && sessionType !== "2:1";
   const [importOpen, setImportOpen] = useState(false);
   // 4단계: 어떤 기록을 가져올지 트레이너가 고른 결과. 모달을 열 때마다 null로 되돌려 항상 기록 선택 화면부터 시작한다
   // (기본 선택은 목록 첫 번째 = 가장 최근 completed 기록이며, 이전 선택을 기억하지 않는다).

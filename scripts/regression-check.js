@@ -3494,7 +3494,7 @@ const checks = [
     const twice = L.buildPersonalWorkoutImportCandidates([...ids].reverse().map(mk)).map(c => c.candidateId).join(',');
     return once === 'pw-c,pw-b,pw-a' && once === twice;
   }),
-  pwScenario('기록 선택 목록: 최근 10건까지만 표시한다', L => {
+  pwScenario('기록 선택 목록: 완료 기록 기준 최근 10건까지만 표시한다', L => {
     const many = Array.from({ length: 14 }, (_, i) => ({ id:`p${i}`, status:'completed',
       workoutDate:`2026-07-${String(i + 1).padStart(2, '0')}`,
       exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] }));
@@ -3502,13 +3502,24 @@ const checks = [
     return L.PERSONAL_WORKOUT_IMPORT_LIST_LIMIT === 10 && list.length === 10 &&
       list[0].dateKey === '2026-07-14' && list[9].dateKey === '2026-07-05';
   }),
-  pwScenario('기록 선택 목록: 가져올 수 있는 종목이 하나도 없는 기록은 목록에서 뺀다(빈 다음 화면 방지)', L => {
+  pwScenario('기록 선택 목록: 가져올 수 없는 완료 기록도 목록에 남기고(사라진 것처럼 보이지 않게) 선택만 막는다', L => {
     const empty = { id:'p1', status:'completed', workoutDate:'2026-07-31',
       exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:0}] }] };
-    const ok = { id:'p2', status:'completed', workoutDate:'2026-07-30',
+    const noEx  = { id:'p2', status:'completed', workoutDate:'2026-07-30', exercises:[] };
+    const ok    = { id:'p3', status:'completed', workoutDate:'2026-07-29',
       exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] };
-    const list = L.buildPersonalWorkoutImportCandidates([empty, ok]);
-    return list.length === 1 && list[0].candidateId === 'p2';
+    const list = L.buildPersonalWorkoutImportCandidates([empty, noEx, ok]);
+    return list.length === 3 && list.map(c => c.candidateId).join(',') === 'p1,p2,p3' &&
+      list[0].importable === false && list[1].importable === false && list[2].importable === true &&
+      list[0].disabledReason === '가져올 수 있는 운동이 없습니다.' && list[2].disabledReason === '' &&
+      // 가져올 수 없는 기록도 날짜·부위는 그대로 보이고, 수치는 0으로 정직하게 표시한다
+      list[0].dateLabel === '7월 31일' && list[0].exerciseCount === 0 && list[0].totalSets === 0;
+  }),
+  pwScenario('기록 선택 목록: 가져올 수 없는 기록만 있으면 가져오기 버튼 자체가 없다(빈 모달 방지)', L => {
+    const empty = { id:'p1', status:'completed', workoutDate:'2026-07-31',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:0}] }] };
+    const list = L.buildPersonalWorkoutImportCandidates([empty]);
+    return list.length === 1 && list.some(c => c.importable) === false;
   }),
   pwScenario('기록 선택 카드: 날짜·부위·종목 수·총 세트·운동 시간·메모 첫 줄을 기존 헬퍼 결과 그대로 쓴다', L => {
     const w = { id:'p1', status:'completed', workoutDate:'2026-07-31', workoutParts:['가슴','삼두'],
@@ -3819,7 +3830,7 @@ const checks = [
       const body = app.slice(i, j);
       return i !== -1 && j > i &&
         body.includes('isOwner(member) ? [] : buildPersonalWorkoutImportCandidates(personalWorkouts)') &&
-        body.includes('importCandidates.length > 0 && sessionType !== "2:1"') &&
+        body.includes('importCandidates.some(c => c.importable) && sessionType !== "2:1"') &&
         // 목록 계산은 useMemo로 한 번만 — 렌더마다 다시 만들지 않는다
         body.includes('const importOptions = useMemo(') &&
         !/getPersonalWorkouts\(|getSessions\(|getDocs\(|onSnapshot\(/.test(body);
@@ -3845,8 +3856,9 @@ const checks = [
       const j = app.indexOf('// 개인운동 선택 모달(관리자 PT 기록 화면 전용).');
       const body = app.slice(i, j);
       return i !== -1 && j > i &&
-        body.includes('useState(() => candidates[0]?.candidateId || "")') &&
-        body.includes('onClick={() => setSelectedId(c.candidateId)}') &&
+        // 기본 선택은 "가져올 수 있는" 기록 중 첫 번째 — 목록 첫 줄이 비활성 기록일 수 있다
+        body.includes('useState(() => (candidates.find(c => c.importable) || {}).candidateId || "")') &&
+        body.includes('onClick={() => { if (c.importable) setSelectedId(c.candidateId); }}') &&
         body.includes('role="radiogroup"') && body.includes('role="radio"') && body.includes('aria-checked={on}') &&
         body.includes('onClick={() => { if (picked) onNext?.(picked.workout); }} disabled={!picked}') &&
         // 목록 카드 표시값: 날짜 · 부위 · 종목 수 · 총 세트 · 운동 시간 · 메모 첫 줄
@@ -3860,6 +3872,24 @@ const checks = [
         body.includes('calc(14px + env(safe-area-inset-bottom))') &&
         // 이 화면은 조회·선택만 한다 — Firestore도 부모 exercises state도 건드리지 않는다
         !/getPersonalWorkouts\(|getDocs\(|onSnapshot\(|setExercises|applyPersonalWorkoutImport/.test(body);
+    })()
+  ],
+  ['기록 선택 UI: 가져올 수 없는 완료 기록도 목록에 그리되 선택 불가 + 사유 문구를 카드에 표시한다',
+    (() => {
+      const i = app.indexOf('function PersonalWorkoutRecordPickerSheet');
+      const j = app.indexOf('// 개인운동 선택 모달(관리자 PT 기록 화면 전용).');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        app.includes('const PERSONAL_WORKOUT_IMPORT_EMPTY_REASON="가져올 수 있는 운동이 없습니다.";') &&
+        // 목록에서 걸러 내지 않는다 — filter로 빼는 코드가 없어야 한다
+        !/candidates\.filter\(/.test(body) &&
+        body.includes('const off = !c.importable;') &&
+        body.includes('disabled={off} aria-disabled={off}') &&
+        body.includes('onClick={() => { if (c.importable) setSelectedId(c.candidateId); }}') &&
+        body.includes('cursor: off ? "not-allowed" : "pointer"') &&
+        body.includes('{c.disabledReason}') &&
+        // 비활성 기록은 어떤 경로로도 "다음"의 결과가 되지 않는다
+        body.includes('const picked = found?.importable ? found : null;');
     })()
   ],
   ['가져오기: 실행 취소는 로컬 스냅샷 1회분 복원뿐이고, 사용자가 직접 수정하기 시작하면 사라진다',

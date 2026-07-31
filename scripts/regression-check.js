@@ -100,7 +100,7 @@ try {
     `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceMonthDayKo}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
     'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete, ' +
     'normalizeComparableExercise, buildExercisePerformanceSnapshot, compareExercisePerformance, formatExerciseComparisonSummary, buildMemberExerciseComparisonIndex, formatExerciseSnapshotLine, getExerciseRecordDateKey, ' +
-    'buildSessionPrepSummary, buildNextStartWeightRecommendation, getDayDiffFromDateKeys, formatElapsedDayLabel };'
+    'buildSessionPrepSummary, buildNextStartWeightRecommendation, getDayDiffFromDateKeys, formatElapsedDayLabel, getExerciseRecordOrder, getExerciseRecordTimeMs };'
   )();
 } catch (e) {
   console.error('[regression] 개인운동 헬퍼 추출 실패:', e.message);
@@ -3129,21 +3129,146 @@ const checks = [
         lib.formatElapsedDayLabel(null) === null;
     })[1]
   ],
-  ['수업 준비 시나리오: 추천 시작 중량은 PT·개인운동 최고 중량 중 높은 값이고 출처를 함께 표시',
-    pwScenario('추천 중량', lib => {
+  // 추천 시작 중량은 "가장 최근에 실제로 수행한 기록의 최고 중량"이다.
+  // 과거 기록이 더 무거워도 추천값으로 승격하지 않는다(폐기된 max 규칙이 되살아나지 않는지 함께 확인).
+  ['수업 준비 시나리오: 추천 시작 중량 = 가장 최근 수행 기록의 최고 중량 (개인운동이 최근)',
+    pwScenario('추천 중량 · 개인운동 최근', lib => {
       const key = lib.canonicalExerciseKey('바벨 벤치프레스');
       const make = (ptW, pwW) => lib.buildSessionPrepSummary({
         sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: ptW, reps: 10 }] }] }],
         personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: pwW, reps: 10 }] }] }],
         todayKey: '2026-07-31',
       }).recommendation;
-      const a = make(20, 22.5);   // 요청 예시 ① PT 20 / 개인 22.5 → 22.5
-      const b = make(25, 20);     // 요청 예시 ② PT 25 / 개인 20 → 25
-      return a.weightLabel === '22.5kg' && a.sourceKind === 'personal' && a.sourceLabel === '7월 29일 개인운동 최고 중량 기준' &&
-        b.weightLabel === '25kg' && b.sourceKind === 'pt' && b.sourceLabel === '7월 20일 PT 수업 최고 중량 기준' &&
-        // 두 기록의 값과 날짜를 함께 노출해 트레이너가 근거를 그대로 확인할 수 있다
-        b.ptWeightLabel === '25kg' && b.personalWeightLabel === '20kg' && b.ptDateLabel === '7월 20일';
+      const up = make(20, 22.5);   // 과거 PT 20 → 최근 개인 22.5 → 22.5
+      const down = make(25, 20);   // 과거 PT 25 → 최근 개인 20 → 20 (과거 25kg으로 올리지 않는다)
+      return up.weightLabel === '22.5kg' && up.sourceKind === 'personal' &&
+        up.sourceLabel === '7월 29일 개인운동 기준' && up.orderBy === 'date' && up.previousHigherNote === null &&
+        down.weightLabel === '20kg' && down.sourceKind === 'personal' && down.sourceLabel === '7월 29일 개인운동 기준' &&
+        // 더 무거웠던 과거 PT 기록은 참고 문구로만 노출된다
+        down.previousHigherNote === '이전 PT 수업 최고 중량 25kg' &&
+        down.ptWeightLabel === '25kg' && down.personalWeightLabel === '20kg' && down.ptDateLabel === '7월 20일';
     })[1]
+  ],
+  ['수업 준비 시나리오: 추천 시작 중량 = 가장 최근 수행 기록의 최고 중량 (PT가 최근)',
+    pwScenario('추천 중량 · PT 최근', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const make = (pwW, ptW) => lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: ptW, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-20', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: pwW, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      const up = make(20, 25);     // 과거 개인 20 → 최근 PT 25 → 25
+      const down = make(25, 20);   // 과거 개인 25 → 최근 PT 20 → 20 (과거 25kg으로 올리지 않는다)
+      return up.weightLabel === '25kg' && up.sourceKind === 'pt' && up.sourceLabel === '7월 29일 PT 수업 기준' &&
+        up.previousHigherNote === null &&
+        down.weightLabel === '20kg' && down.sourceKind === 'pt' && down.sourceLabel === '7월 29일 PT 수업 기준' &&
+        down.previousHigherNote === '이전 개인운동 최고 중량 25kg';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 폐기된 max 규칙이 되살아나지 않음 — 과거 최고 중량은 절대 추천값이 되지 않는다',
+    pwScenario('max 규칙 폐기', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const cases = [
+        // [PT날짜, PT중량, 개인날짜, 개인중량, 기대 추천] — 앞 2건은 max(=100)과 결과가 다르다
+        ['2026-07-20', 100, '2026-07-29', 60, 60],
+        ['2026-07-29', 60, '2026-07-20', 100, 60],
+        ['2026-07-20', 40, '2026-07-29', 80, 80],
+      ];
+      return cases.every(([ptDate, ptW, pwDate, pwW, expected]) => {
+        const rec = lib.buildSessionPrepSummary({
+          sessions: [{ id: 's1', date: ptDate, isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: ptW, reps: 10 }] }] }],
+          personalWorkouts: [{ id: 'p1', workoutDate: pwDate, status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: pwW, reps: 10 }] }] }],
+          todayKey: '2026-07-31',
+        }).recommendation;
+        return rec.undecided === false && rec.weight === expected;
+      }) &&
+      // 앞 2건은 실제로 max와 결과가 달라야 의미가 있다
+      cases.slice(0, 2).every(([, ptW, , pwW, expected]) => Math.max(ptW, pwW) !== expected);
+    })[1]
+  ],
+  ['수업 준비 시나리오: 같은 날짜는 실제 시각(endedAt/publishedAt)으로 순서를 가림',
+    pwScenario('같은 날 시각 판정', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const make = (ptTime, pwTime) => lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, publishedAt: ptTime,
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: pwTime,
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      // 개인운동(20kg)이 PT(25kg)보다 늦게 끝났다 → 더 가벼워도 20kg을 추천한다
+      const personalLater = make('2026-07-29T10:00:00.000Z', '2026-07-29T18:00:00.000Z');
+      // PT가 더 늦게 기록됐다 → 25kg
+      const ptLater = make('2026-07-29T20:00:00.000Z', '2026-07-29T09:00:00.000Z');
+      // Firestore Timestamp(toDate) 형태도 동일하게 처리된다
+      const ts = ms => ({ toDate: () => new Date(ms) });
+      const withTimestamp = make(ts(Date.UTC(2026, 6, 29, 10)), ts(Date.UTC(2026, 6, 29, 18)));
+      return personalLater.undecided === false && personalLater.weightLabel === '20kg' &&
+        personalLater.orderBy === 'time' && personalLater.sourceKind === 'personal' &&
+        personalLater.previousHigherNote === '이전 PT 수업 최고 중량 25kg' &&
+        ptLater.weightLabel === '25kg' && ptLater.sourceKind === 'pt' &&
+        withTimestamp.weightLabel === '20kg' && withTimestamp.orderBy === 'time';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 같은 날짜 + 시각 없음 → 높은 중량을 임의로 고르지 않고 "직접 확인 필요"',
+    pwScenario('같은 날 순서 불명', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-29', isPublished: true, exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return rec.undecided === true && rec.weight === null && rec.weightLabel === null &&
+        rec.undecidedNote === '같은 날 기록 · 직접 확인 필요' && rec.sourceKind === null &&
+        // 참고 정보(두 기록의 날짜·중량)는 그대로 제공한다
+        rec.ptWeightLabel === '25kg' && rec.personalWeightLabel === '20kg';
+    })[1]
+  ],
+  ['수업 준비 시나리오: 가장 최근 기록에 유효 중량이 없으면 과거 중량으로 대체하지 않고 추천을 숨김',
+    pwScenario('최근 기록 중량 없음', lib => {
+      const key = lib.canonicalExerciseKey('푸쉬업');
+      // 과거 PT는 가중 20kg, 최근 개인운동은 맨몸 → 최근 기록에 중량이 없으므로 추천하지 않는다
+      const latestBodyweight = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '푸쉬업', sets: [{ weight: 20, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: key, name: '푸쉬업', sets: [{ reps: 20 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      // 양쪽 모두 맨몸이면 시작 중량 개념 자체가 없어 null
+      const bothBodyweight = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, exercises: [{ name: '푸쉬업', sets: [{ reps: 15 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', exercises: [{ exerciseKey: key, name: '푸쉬업', sets: [{ reps: 20 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return latestBodyweight === null && bothBodyweight === null;
+    })[1]
+  ],
+  ['수업 준비 시나리오: 날짜가 다르면 기록 시각(publishedAt)이 아무리 늦어도 수행 날짜 순서를 뒤집지 않음',
+    pwScenario('늦은 전송 방어', lib => {
+      const key = lib.canonicalExerciseKey('바벨 벤치프레스');
+      // 트레이너가 7월 20일 수업을 7월 30일에 뒤늦게 전송해도, 실제 수행일 기준으로 개인운동(7/29)이 최근이다
+      const rec = lib.buildSessionPrepSummary({
+        sessions: [{ id: 's1', date: '2026-07-20', isPublished: true, publishedAt: '2026-07-30T22:00:00.000Z',
+          exercises: [{ name: '바벨 벤치프레스', sets: [{ weight: 25, reps: 10 }] }] }],
+        personalWorkouts: [{ id: 'p1', workoutDate: '2026-07-29', status: 'completed', endedAt: '2026-07-29T18:00:00.000Z',
+          exercises: [{ exerciseKey: key, name: '바벨 벤치프레스', sets: [{ weight: 20, reps: 10 }] }] }],
+        todayKey: '2026-07-31',
+      }).recommendation;
+      return rec.orderBy === 'date' && rec.sourceKind === 'personal' && rec.weightLabel === '20kg';
+    })[1]
+  ],
+  ['수업 준비 UI: 추천 문구가 "최근 수행 기록 기준"이고 폐기된 "최고 중량 기준" 표기가 남아있지 않음',
+    (() => {
+      const i = app.indexOf('function SessionPrepCard');
+      const j = app.indexOf('function SessionScreen({ member, sessions, editData');
+      const body = app.slice(i, j);
+      const helper = app.slice(app.indexOf('function buildNextStartWeightRecommendation'), app.indexOf('function buildSessionPrepSummary'));
+      return body.includes('최근 수행 기록 기준') && body.includes('recommendation.sourceLabel') &&
+        body.includes('recommendation.previousHigherNote') && body.includes('recommendation.undecidedNote') &&
+        // 추천 출처 라벨에서 "최고 중량 기준" 표기가 사라졌다
+        !/최고 중량 기준/.test(body) && !/최고 중량 기준/.test(helper) &&
+        // max 규칙 잔재가 없다
+        !/Math\.max\(ptWeight/.test(helper) && helper.includes('getExerciseRecordOrder(pt,personal)');
+    })()
   ],
   ['수업 준비 시나리오: 동일 운동이 없거나 맨몸 운동이면 추천 영역을 숨김',
     pwScenario('추천 숨김', lib => {

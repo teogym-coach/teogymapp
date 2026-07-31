@@ -3755,6 +3755,38 @@ function getExerciseRecordDateKey(record){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
+// 기록이 "실제로 언제 수행됐는지"를 판정할 때 쓰는 시각 필드 우선순위.
+//   · 개인운동: endedAt(운동 종료) → completedAt → startedAt — 회원이 실제로 운동한 시각이 그대로 저장된다.
+//   · PT 수업: performedAt → completedAt → publishedAt → updatedAt → createdAt
+//     PT 수업 문서에는 "수행 시각" 필드가 없고 기록·전송 시각만 있다. 트레이너가 지난 수업을 며칠 뒤에
+//     작성·전송하면 이 값이 실제 수업일보다 한참 뒤가 되므로, 날짜가 다를 때는 절대 순서 판정에 쓰지 않고
+//     같은 날짜 안에서 순서를 가릴 때만 보조로 사용한다(getExerciseRecordOrder 참고).
+const EXERCISE_RECORD_TIME_FIELDS={
+  personal:["endedAt","completedAt","startedAt"],
+  pt:["performedAt","completedAt","publishedAt","updatedAt","createdAt"],
+};
+function getExerciseRecordTimeMs(record, kind){
+  for(const field of (EXERCISE_RECORD_TIME_FIELDS[kind]||[])){
+    const d=toPersonalWorkoutDate(record?.[field]);
+    if(d) return d.getTime();
+  }
+  return null;
+}
+
+// 두 기록 중 어느 쪽이 더 최근에 수행됐는지 판정한다. 순서를 확정할 수 없으면 null을 돌려준다(임의 선택 금지).
+//   ① 수행 날짜(date/workoutDate)가 다르면 날짜가 늦은 쪽이 최근이다 — 실제 수행일이 유일한 확실한 기준이다.
+//   ② 날짜가 같으면 실제 시각으로 가린다. 양쪽 모두 시각이 있고 서로 다를 때만 확정한다.
+//   ③ 같은 날짜인데 시각이 없거나 동일하면 순서 불명 → null. 중량이 높은 쪽을 임의로 고르지 않는다.
+function getExerciseRecordOrder(a, b){
+  const da=String(a?.dateKey||""), db=String(b?.dateKey||"");
+  if(!da||!db) return null;
+  if(da!==db) return da>db?{latest:a,previous:b,by:"date"}:{latest:b,previous:a,by:"date"};
+  const ta=Number.isFinite(a?.timeMs)?a.timeMs:null;
+  const tb=Number.isFinite(b?.timeMs)?b.timeMs:null;
+  if(ta==null||tb==null||ta===tb) return null;
+  return ta>tb?{latest:a,previous:b,by:"time"}:{latest:b,previous:a,by:"time"};
+}
+
 // 비교 전용 운동 정규화 — 원본 문서는 절대 바꾸지 않고 비교에만 쓰는 사본을 만든다.
 //   · 식별키: 개인운동은 저장된 exerciseKey, PT 기록과 레거시 개인운동은 canonicalExerciseKey(name)로 읽기 시에만 보완
 //   · 유효 세트: 기존 getPersonalWorkoutValidSets(횟수 1회 이상)를 그대로 재사용 — 입력 줄 개수를 세지 않는다
@@ -3894,7 +3926,9 @@ function buildMemberExerciseComparisonIndex({sessions=[], personalWorkouts=[]}={
       if(!byKey.has(c.exerciseKey)) byKey.set(c.exerciseKey,[]);
       byKey.get(c.exerciseKey).push(e);                // 같은 기록 안 동일 운동은 배열로 모아 snapshot에서 합친다
     });
-    return byKey.size?{ kind, id:String(r.id||""), dateKey, byKey }:null;
+    // timeMs는 "다음 시작 중량" 추천이 같은 날짜 기록의 순서를 가릴 때만 쓰는 보조 정보다.
+    // 비교(방향·지표) 계산에는 사용하지 않으므로 기존 비교 결과는 그대로 유지된다.
+    return byKey.size?{ kind, id:String(r.id||""), dateKey, timeMs:getExerciseRecordTimeMs(r,kind), byKey }:null;
   }).filter(Boolean);
 
   const byDateDesc=(a,b)=>String(b.dateKey).localeCompare(String(a.dateKey))||String(b.id).localeCompare(String(a.id));
@@ -3927,7 +3961,7 @@ function buildMemberExerciseComparisonIndex({sessions=[], personalWorkouts=[]}={
     const recentRec=ownIsRecent?own:other, recentSnap=ownIsRecent?ownSnap:otherSnap;
     const comparison=compareExercisePerformance(prevSnap,recentSnap);
     if(!comparison) return null;
-    const side=(rec,snap)=>({ kind:rec.kind, kindLabel:EXERCISE_COMPARE_KIND_LABEL[rec.kind], dateKey:rec.dateKey, snapshot:snap, line:formatExerciseSnapshotLine(snap) });
+    const side=(rec,snap)=>({ kind:rec.kind, kindLabel:EXERCISE_COMPARE_KIND_LABEL[rec.kind], dateKey:rec.dateKey, timeMs:rec.timeMs, snapshot:snap, line:formatExerciseSnapshotLine(snap) });
     return {
       exerciseKey:key,
       sameDay,
@@ -3973,31 +4007,61 @@ function formatElapsedDayLabel(days){
 }
 
 // 다음 시작 중량 추천 — Step1 비교 결과(같은 운동의 PT 기록 + 개인운동 기록)만 입력으로 받는다.
-//   · 같은 운동의 PT 기록이 없으면(comparison === null) 추천하지 않는다 → 화면에서 추천 영역을 숨긴다
-//   · 양쪽 모두 중량 기록이 있어야 한다. 맨몸 운동은 추천 대상이 아니다(0kg 추천 금지)
-//   · 추천값은 두 기록의 최고 중량 중 더 높은 값이고, 같으면 더 최근 기록을 출처로 표기한다
-//     (요청 예시 "PT 20 / 개인 22.5 → 22.5", "PT 25 / 개인 20 → 25" 두 건과 모두 일치하는 규칙)
-//   · 어느 쪽 기록에서 나온 값인지와 두 기록의 값·날짜를 함께 돌려줘, 트레이너가 근거를 그대로 확인할 수 있게 한다
-//   · 이 값은 표시 전용이다. 세트·중량 입력란에 절대 자동으로 넣지 않는다.
+//
+// 규칙: **가장 최근에 실제로 수행한 기록의 최고 중량**을 그대로 쓴다.
+//      과거 기록에 더 높은 중량이 있어도 추천값으로 승격하지 않는다 — 최근 통증·컨디션 저하·디로딩·자세 교정으로
+//      중량을 낮춘 상황을 과거 최고 기록이 덮어써 버리면 위험하기 때문이다. "다음 시작 중량"은 과거 최고 기록이
+//      아니라 가장 최근 수행 상태를 반영해야 한다.
+//      (이전에 쓰던 "두 기록 중 최고 중량(max)" 규칙은 폐기됐다. 되살리지 말 것.)
+//
+// 숨김/보류 조건
+//   · 같은 운동의 공개 PT 기록이 없으면(comparison === null) 추천하지 않는다
+//   · 양쪽 모두 중량 기록이 없으면(맨몸 운동) 추천 개념 자체가 없어 null
+//   · 순서를 확정할 수 없으면(같은 날짜 + 시각 없음) 중량을 고르지 않고 undecided로 돌려준다
+//   · 가장 최근 기록에 유효한 중량 세트가 없으면 추천하지 않는다(과거 중량으로 대체하지 않는다)
+//
+// 두 기록의 날짜·출처·최고 중량은 어느 경우에도 참고 정보로 함께 돌려준다.
+// 이 값은 표시 전용이다. 세트·중량 입력란에 절대 자동으로 넣지 않는다.
 function buildNextStartWeightRecommendation(comparison){
   if(!comparison) return null;
   const pt=comparison.current.kind==="pt"?comparison.current:comparison.counterpart;
   const personal=comparison.current.kind==="personal"?comparison.current:comparison.counterpart;
   const ptWeight=pt?.snapshot?.hasWeight?Number(pt.snapshot.topWeight):null;
   const personalWeight=personal?.snapshot?.hasWeight?Number(personal.snapshot.topWeight):null;
-  if(!(ptWeight>0)||!(personalWeight>0)) return null;
-  const weight=Math.max(ptWeight,personalWeight);
-  const fromPersonal=personalWeight>ptWeight||(personalWeight===ptWeight&&String(personal.dateKey)>=String(pt.dateKey));
-  const source=fromPersonal?personal:pt;
-  return {
-    weight,
-    weightLabel:formatWeightValue(weight),
-    sourceKind:source.kind,
-    sourceLabel:`${formatMonthDayKo(source.dateKey)} ${source.kindLabel} 최고 중량 기준`,
-    ptWeightLabel:formatWeightValue(ptWeight),
+  if(!(ptWeight>0)&&!(personalWeight>0)) return null;   // 양쪽 다 맨몸 — 시작 중량 개념 없음
+
+  // 참고 정보는 순서 판정 결과와 무관하게 항상 동일하게 제공한다.
+  const refs={
+    ptWeightLabel:ptWeight>0?formatWeightValue(ptWeight):null,
     ptDateLabel:formatMonthDayKo(pt.dateKey),
-    personalWeightLabel:formatWeightValue(personalWeight),
+    personalWeightLabel:personalWeight>0?formatWeightValue(personalWeight):null,
     personalDateLabel:formatMonthDayKo(personal.dateKey),
+  };
+
+  const order=getExerciseRecordOrder(pt,personal);
+  if(!order){
+    // 같은 날짜인데 순서를 확정할 시각이 없다 — 높은 중량을 임의로 고르지 않고 트레이너가 직접 확인하게 한다.
+    return { ...refs, weight:null, weightLabel:null, undecided:true, orderBy:null,
+      undecidedNote:"같은 날 기록 · 직접 확인 필요", sourceKind:null, sourceLabel:null, previousHigherNote:null };
+  }
+
+  const latestWeight=order.latest.kind==="pt"?ptWeight:personalWeight;
+  if(!(latestWeight>0)) return null;                    // 가장 최근 기록에 유효 중량 세트 없음 → 추천하지 않는다
+  const previousWeight=order.previous.kind==="pt"?ptWeight:personalWeight;
+
+  return {
+    ...refs,
+    weight:latestWeight,
+    weightLabel:formatWeightValue(latestWeight),
+    undecided:false,
+    undecidedNote:null,
+    orderBy:order.by,                                   // "date" | "time" — 무엇으로 순서를 가렸는지
+    sourceKind:order.latest.kind,
+    sourceLabel:`${formatMonthDayKo(order.latest.dateKey)} ${order.latest.kindLabel} 기준`,
+    // 과거 기록이 더 무거웠다면 그 사실만 참고로 알려준다(추천값으로 올리지 않는다).
+    previousHigherNote:(previousWeight>0&&previousWeight>latestWeight)
+      ? `이전 ${order.previous.kindLabel} 최고 중량 ${formatWeightValue(previousWeight)}`
+      : null,
   };
 }
 
@@ -15307,17 +15371,29 @@ function SessionPrepCard({ prep }) {
         </div>
       )}
 
-      {/* ③ 추천 시작 중량 — 같은 운동의 PT 기록이 없거나 맨몸 운동이면 recommendation이 null이라 영역 자체가 사라진다.
+      {/* ③ 추천 시작 중량 — "가장 최근에 실제로 수행한 기록"의 최고 중량만 쓴다(과거 최고 기록으로 올리지 않음).
+          같은 운동의 PT 기록이 없거나 최근 기록에 유효 중량이 없으면 recommendation이 null이라 영역 자체가 사라진다.
+          같은 날 기록이라 순서를 확정할 수 없으면 중량을 고르지 않고 "직접 확인 필요"로만 안내한다.
           "자동 적용되지 않습니다"를 항상 함께 표시해 트레이너가 직접 입력해야 하는 값임을 분명히 한다. */}
       {recommendation&&(
         <div style={{...block}}>
           <Mo c="#94A3B8" s={9.5} style={{display:"block",fontWeight:800,marginBottom:5}}>추천 · 다음 시작 중량</Mo>
-          <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
-            <b style={{fontSize:20,fontWeight:900,color:"#0F9488",letterSpacing:"-.4px",fontVariantNumeric:"tabular-nums"}}>{recommendation.weightLabel}</b>
-            <span style={{fontSize:11,color:"#64748B",fontVariantNumeric:"tabular-nums"}}>{recommendation.sourceLabel}</span>
-          </div>
+          {recommendation.undecided ? (
+            <div style={{fontSize:12.5,fontWeight:800,color:"#B45309"}}>{recommendation.undecidedNote}</div>
+          ) : (
+            <>
+              <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+                <b style={{fontSize:20,fontWeight:900,color:"#0F9488",letterSpacing:"-.4px",fontVariantNumeric:"tabular-nums"}}>{recommendation.weightLabel}</b>
+                <span style={{fontSize:11,color:"#64748B"}}>최근 수행 기록 기준</span>
+              </div>
+              <div style={{marginTop:3,fontSize:11,fontWeight:700,color:"#334155",fontVariantNumeric:"tabular-nums"}}>{recommendation.sourceLabel}</div>
+              {recommendation.previousHigherNote&&(
+                <div style={{marginTop:3,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>{recommendation.previousHigherNote}</div>
+              )}
+            </>
+          )}
           <div style={{marginTop:4,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>
-            {recommendation.ptDateLabel} PT {recommendation.ptWeightLabel} · {recommendation.personalDateLabel} 개인운동 {recommendation.personalWeightLabel}
+            {recommendation.ptDateLabel} PT {recommendation.ptWeightLabel||"중량 없음"} · {recommendation.personalDateLabel} 개인운동 {recommendation.personalWeightLabel||"중량 없음"}
           </div>
           <div style={{marginTop:5,fontSize:10.5,fontWeight:700,color:"#B45309",background:"rgba(245,158,11,.08)",borderRadius:6,padding:"4px 8px",display:"inline-block"}}>
             자동 적용되지 않습니다 · 직접 입력해주세요

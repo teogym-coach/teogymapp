@@ -4075,9 +4075,7 @@ function buildNextStartWeightRecommendation(comparison){
 // 완료된 개인운동이 하나도 없으면 null을 돌려준다 → 화면에서 카드 자체를 만들지 않는다("기록 없음" 빈 카드 금지).
 function buildSessionPrepSummary({sessions=[], personalWorkouts=[], todayKey=""}={}){
   // 최근 completed 1건만 사용한다. 진행 중(in_progress)은 제외.
-  const completed=(personalWorkouts||[])
-    .filter(w=>w&&w.status==="completed"&&getExerciseRecordDateKey(w))
-    .sort((a,b)=>String(getExerciseRecordDateKey(b)).localeCompare(String(getExerciseRecordDateKey(a)))||String(b.id||"").localeCompare(String(a.id||"")));
+  const completed=getCompletedPersonalWorkoutsLatestFirst(personalWorkouts);
   const workout=completed[0];
   if(!workout) return null;
   const exercises=(workout.exercises||[]).filter(e=>String(e?.name||"").trim()&&getPersonalWorkoutValidSets(e).length>0);
@@ -4129,6 +4127,238 @@ function buildSessionPrepSummary({sessions=[], personalWorkouts=[], todayKey=""}
     recommendation:buildNextStartWeightRecommendation(comparison), // 없으면 추천 영역 숨김
     otherExerciseNames:ranked.slice(1).map(r=>r.exercise.name),
   };
+}
+
+// ════════════════════════════════════════════════════
+// 개인운동 2차 3단계 — 관리자 PT 기록의 "개인운동에서 가져오기"
+// ════════════════════════════════════════════════════
+// 아래 함수는 모두 순수 함수다. Firestore를 읽지도 쓰지도 않고, 개인운동 원본 문서와 현재 PT
+// exercises 배열을 절대 mutate하지 않는다(항상 새 객체·새 배열을 만든다). 자동 반영 경로는 없다 —
+// 트레이너가 선택 모달에서 직접 고르고 확인을 눌렀을 때만 SessionScreen의 로컬 state가 바뀐다.
+
+// 완료된 개인운동을 최신순으로 정렬. 수업 준비 카드(buildSessionPrepSummary)와 가져오기 대상 선택이
+// 같은 기준을 쓰도록 정렬 규칙을 이 함수 하나로만 정의한다(같은 규칙을 두 벌 만들지 않는다).
+function getCompletedPersonalWorkoutsLatestFirst(personalWorkouts=[]){
+  return (personalWorkouts||[])
+    .filter(w=>w&&w.status==="completed"&&getExerciseRecordDateKey(w))
+    .sort((a,b)=>String(getExerciseRecordDateKey(b)).localeCompare(String(getExerciseRecordDateKey(a)))||String(b.id||"").localeCompare(String(a.id||"")));
+}
+// 가져오기 대상 개인운동 1건. Step4에서 "다른 날짜 기록 선택"을 붙일 때 이 함수만 교체하면 되도록
+// 대상 결정을 여기 한 곳으로 모아 둔다(호출부는 workout 객체 하나만 받는다).
+function pickLatestCompletedPersonalWorkout(personalWorkouts=[]){
+  return getCompletedPersonalWorkoutsLatestFirst(personalWorkouts)[0]||null;
+}
+
+// 선택 모달에 뿌릴 목록 — 유효 세트가 있는 종목만 남긴다.
+// 유효 세트 판정은 기존 getPersonalWorkoutValidSets()를 그대로 재사용한다(새 기준을 만들지 않는다).
+// 이름이 없거나 sets가 배열이 아닌 비정상 항목은 목록에서 빼고 개수만 skippedCount로 알려 준다 —
+// 항목 하나가 깨져도 모달 전체를 중단하지 않는다.
+function buildPersonalWorkoutImportOptions(workout){
+  if(!workout) return null;
+  const rawList=Array.isArray(workout.exercises)?workout.exercises:[];
+  const exercises=[];
+  let skippedCount=0;
+  rawList.forEach((ex,i)=>{
+    let name="", valid=[];
+    try{
+      name=String(ex?.name||"").trim();
+      valid=Array.isArray(ex?.sets)?getPersonalWorkoutValidSets(ex):[];
+    }catch(e){ name=""; valid=[]; }
+    if(!name||!valid.length){ if(ex) skippedCount+=1; return; }
+    const optionId=`pw-ex-${i}`;
+    exercises.push({
+      optionId,
+      order:i,
+      name,
+      exerciseKey:String(ex?.exerciseKey||"")||canonicalExerciseKey(name)||"",
+      muscleTop:String(ex?.muscleTop||""),
+      muscleSub:String(ex?.muscleSub||""),
+      equipment:String(ex?.equipment||""),
+      // 중량이 없는 맨몸 세트는 weight를 null로 두고 라벨에서도 "0kg"을 만들어 내지 않는다.
+      sets:valid.map((s,si)=>{
+        const w=Number(s?.weight);
+        const weight=(Number.isFinite(w)&&w>0)?w:null;
+        const reps=Math.floor(Number(s?.reps))||0;
+        return { setId:`${optionId}-s${si}`, weight, reps, label:`${weight!=null?`${formatWeightValue(weight)} × `:""}${reps}회` };
+      }),
+    });
+  });
+  if(!exercises.length) return null;
+  const dateKey=getExerciseRecordDateKey(workout)||"";
+  return {
+    workoutId:String(workout.id||""),
+    dateKey,
+    dateLabel:dateKey?formatMonthDayKo(dateKey):"",
+    partsLabel:formatPersonalWorkoutPartsLabel(workout),
+    workoutParts:Array.isArray(workout.workoutParts)?workout.workoutParts.filter(Boolean):[],
+    memo:String(workout.memo||"").trim(),
+    exercises,
+    exerciseCount:exercises.length,
+    totalSets:exercises.reduce((s,e)=>s+e.sets.length,0),
+    skippedCount,
+  };
+}
+
+// 가져온 운동 카드의 부위 결정 — 우선순위를 명시적으로 고정한다.
+// ① 개인운동에 저장된 muscleTop ② 운동명 기반 기존 분류(suggestMuscle) ③ 그 개인운동의 부위(workoutParts)
+// ④ 오늘의 운동 부위 ⑤ 신규 카드 기본값.
+// ①~③으로 정해진 부위는 auto:false라서 "오늘의 운동 부위 자동 상속" 효과가 나중에 덮어쓰지 않는다.
+// 이두/삼두는 기존 정책 그대로 MUSCLE_MAP 키("팔-이두근"/"팔-삼두근")로만 다루고, 개인운동 부위 값
+// ("이두"/"삼두")은 기존 SESSION_PART_TO_MUSCLE_TOP 매핑으로만 변환한다(새 매핑을 만들지 않는다).
+function resolveImportedMuscleTop({ personalExercise=null, workoutParts=[], todayMuscleTop="", fallbackTop="" }={}){
+  const own=String(personalExercise?.muscleTop||"");
+  if(own&&own!=="기능"&&MUSCLE_LIST.includes(own)) return { top:own, auto:false };
+  const name=String(personalExercise?.name||"").trim();
+  const guessed=name?suggestMuscle(name,{}):null;
+  if(guessed?.top&&guessed.top!=="기능"&&MUSCLE_LIST.includes(guessed.top)) return { top:guessed.top, sub:guessed.sub, auto:false };
+  for(const p of (workoutParts||[])){
+    const mapped=SESSION_PART_TO_MUSCLE_TOP[p];
+    if(mapped) return { top:mapped, auto:false };
+  }
+  if(todayMuscleTop&&MUSCLE_LIST.includes(todayMuscleTop)) return { top:todayMuscleTop, auto:true };
+  return { top:fallbackTop||"", auto:true };
+}
+
+// 개인운동 세트 → PT 세트. PT 세트 구조(mkSet)는 {weight,reps,volume,recordType} 4필드뿐이므로
+// 개인운동 전용 필드(setNumber 등)는 옮기지 않는다 — 세트 번호는 PT 화면이 배열 index로 표시한다.
+// 볼륨은 기존 calcVol()을 그대로 써서 트레이너가 직접 입력했을 때와 완전히 같은 값이 나오게 한다.
+function buildImportedSessionSet(set, ownerName, memberBodyWeight=""){
+  const weight=set?.weight!=null&&set.weight!==""?String(set.weight):"";
+  const reps=set?.reps!=null&&set.reps!==""?String(set.reps):"";
+  return { weight, reps, volume:calcVol(weight, reps, getExerciseType(ownerName), memberBodyWeight), recordType:"weightReps" };
+}
+
+// 개인운동 종목 1개 + 선택한 세트 → PT 운동 카드 draft.
+// baseExercise로 SessionScreen이 신규 카드에 쓰는 mkEx() 결과를 그대로 받아(기본 필드 세트를 여기서
+// 새로 발명하지 않는다) 이름·부위·기구·세트만 덮어쓴다. 개인운동 id·메모·볼륨·비교 결과 등은 담지 않는다.
+function buildSessionExerciseDraftFromPersonalExercise({
+  option=null, selectedSetIds=null, baseExercise=null, workoutParts=[], todayMuscleTop="", memberBodyWeight="",
+}={}){
+  if(!option) return null;
+  const name=String(option.name||"").trim();
+  if(!name) return null;
+  const picked=selectedSetIds
+    ? (option.sets||[]).filter(s=>selectedSetIds.has?selectedSetIds.has(s.setId):(selectedSetIds||[]).includes(s.setId))
+    : (option.sets||[]);
+  if(!picked.length) return null;
+
+  const base={ ...(baseExercise||mkEx(todayMuscleTop||undefined)) };
+  const resolved=resolveImportedMuscleTop({ personalExercise:option, workoutParts, todayMuscleTop, fallbackTop:base.muscleTop });
+  const muscleTop=resolved.top||base.muscleTop;
+  const subs=mSubs(muscleTop);
+  const ownSub=normMuscleSub(String(option.muscleSub||""));
+  const muscleSub=subs.includes(ownSub)?ownSub:(subs.includes(resolved.sub)?resolved.sub:(subs[0]||base.muscleSub));
+
+  // "기능"은 시간 기반 기록 구조라 중량×횟수 세트와 맞지 않는다 — 가져온 카드는 항상 웨이트 모드로 만든다.
+  const rawEquip=String(option.equipment||"");
+  const suggested=rawEquip?"":String(suggestEquipment(name,{})||"");
+  const pickedEquip=[rawEquip,suggested].find(v=>v&&v!=="기능"&&EQUIP_LIST.includes(v));
+  const equipment=pickedEquip||base.equipment;
+
+  return {
+    ...base,
+    name,
+    muscleTop,
+    muscleSub,
+    equipment,
+    sets:picked.map(s=>buildImportedSessionSet(s, name, memberBodyWeight)),
+    partAutoAssigned:resolved.auto,
+  };
+}
+
+// "의미 없는 초기 빈 운동 카드" 판정 — mkEx()가 만든 기본 카드에서 사용자가 아무것도 입력하지 않은
+// 상태만 true다. 운동명·세트값·피드백/자극/다음 계획/목적·기능운동 분류가 하나라도 있으면 false.
+// 부위·기구는 항상 기본값이 채워져 있으므로 "직접 바꿨는지"를 뜻하는 수동 플래그로 판단한다.
+function isBlankSessionExerciseCard(ex){
+  if(!ex) return false;
+  if(String(ex.name||"").trim()) return false;
+  const sets=Array.isArray(ex.sets)?ex.sets:[];
+  if(sets.some(s=>String(s?.weight??"").trim()||String(s?.reps??"").trim()||String(s?.durationSec??"").trim())) return false;
+  if([ex.feedback,ex.stimMemo,ex.stimPrimary,ex.stimSecondary,ex.stimNote,ex.nextPlan,ex.movementPurpose,ex.funcCategory,ex.funcTool]
+      .some(v=>String(v||"").trim())) return false;
+  if(Array.isArray(ex.funcBodyPart)?ex.funcBodyPart.length>0:!!String(ex.funcBodyPart||"").trim()) return false;
+  if(ex.stimRating!=null&&ex.stimRating!=="") return false;
+  if(ex._muscleManual||ex._equipManual||ex._funcManual||ex._purposeManual) return false;
+  if(ex.partAutoAssigned===false) return false;                                   // 부위를 직접 바꾼 카드
+  if(ex.m2&&((ex.m2.sets||[]).length||String(ex.m2.note||"").trim())) return false; // 2:1 회원B 입력
+  return true;
+}
+// 현재 PT 기록이 "사실상 비어 있는" 상태 — 모든 카드가 빈 카드일 때만 true.
+// 일부만 비어 있으면 사용자가 만든 배치라고 보고 아무것도 지우지 않는다(기존 기록 손실 방지 우선).
+function isSessionExerciseListEssentiallyEmpty(exercises=[]){
+  const list=Array.isArray(exercises)?exercises:[];
+  if(!list.length) return true;
+  return list.every(isBlankSessionExerciseCard);
+}
+
+// 동일 운동 판정 — canonicalExerciseKey 완전 일치만 인정한다.
+// 이름 문자열 단순 비교·부분 문자열·퍼지 매칭 금지. 운동명이 비면 키가 빈 문자열이 되고,
+// 빈 키는 어떤 카드와도 같은 운동으로 보지 않는다.
+function getSessionExerciseCanonicalKey(ex){
+  return canonicalExerciseKey(String(ex?.name||"").trim())||"";
+}
+// "같은 운동에 세트 추가"를 제시할 수 있는지 판정. 같은 키의 기존 카드가 2개 이상이면 어느 카드에
+// 합칠지 안전하게 정할 수 없으므로 병합 자체를 막고(mergeBlocked) 신규 카드 추가만 안내한다.
+function analyzePersonalWorkoutImportMerge({ exercises=[], drafts=[] }={}){
+  const byKey=new Map();
+  (Array.isArray(exercises)?exercises:[]).forEach((ex,i)=>{
+    const key=getSessionExerciseCanonicalKey(ex);
+    if(!key) return;
+    if(!byKey.has(key)) byKey.set(key,[]);
+    byKey.get(key).push(i);
+  });
+  const mergeableNames=[], newNames=[], duplicatedNames=[];
+  (Array.isArray(drafts)?drafts:[]).forEach(d=>{
+    const key=getSessionExerciseCanonicalKey(d);
+    const idxs=key?(byKey.get(key)||[]):[];
+    if(idxs.length>=2) duplicatedNames.push(String(d?.name||""));
+    else if(idxs.length===1) mergeableNames.push(String(d?.name||""));
+    else newNames.push(String(d?.name||""));
+  });
+  return {
+    mergeableCount:mergeableNames.length,
+    newCount:newNames.length,
+    duplicatedNames:[...new Set(duplicatedNames)],
+    mergeBlocked:duplicatedNames.length>0,
+  };
+}
+
+// 선택한 draft들을 현재 exercises에 반영한 "새 배열"을 돌려준다(원본 배열·객체는 건드리지 않는다).
+// mode="append": 전부 새 운동 카드로 마지막에 추가(동일 운동도 별도 카드).
+// mode="merge":  canonicalExerciseKey가 같은 기존 카드가 정확히 1개일 때만 그 카드의 세트 뒤에 붙이고,
+//                0개거나 2개 이상이면 합치지 않고 새 카드로 추가한다(임의 병합 금지).
+// 현재 기록이 사실상 비어 있으면 빈 카드를 걷어내고 가져온 운동으로 채운다.
+function applyPersonalWorkoutImport({ exercises=[], drafts=[], mode="append", memberBodyWeight="" }={}){
+  const source=Array.isArray(exercises)?exercises:[];
+  const valid=(Array.isArray(drafts)?drafts:[]).filter(d=>d&&String(d.name||"").trim()&&Array.isArray(d.sets)&&d.sets.length);
+  if(!valid.length) return { exercises:source, addedExercises:0, mergedExercises:0, addedSets:0, replacedBlank:false, changed:false };
+
+  const replacedBlank=isSessionExerciseListEssentiallyEmpty(source);
+  let next=replacedBlank?[]:source.map(e=>({ ...e, sets:Array.isArray(e?.sets)?e.sets.map(s=>({...s})):[] }));
+  let addedExercises=0, mergedExercises=0, addedSets=0;
+
+  valid.forEach(draft=>{
+    const key=getSessionExerciseCanonicalKey(draft);
+    let targetIdx=-1;
+    if(mode==="merge"&&key){
+      const idxs=[];
+      next.forEach((ex,i)=>{ if(getSessionExerciseCanonicalKey(ex)===key) idxs.push(i); });
+      if(idxs.length===1) targetIdx=idxs[0];
+    }
+    if(targetIdx>=0){
+      // 기존 운동명·부위·기구·세트는 그대로 두고 선택한 세트만 뒤에 붙인다.
+      // 볼륨은 (개인운동 이름이 아니라) 합쳐질 기존 카드의 이름 기준으로 다시 계산한다.
+      const target=next[targetIdx];
+      const appended=draft.sets.map(s=>({ ...s, volume:calcVol(s.weight, s.reps, getExerciseType(target.name), memberBodyWeight) }));
+      next=next.map((ex,i)=>i===targetIdx?{ ...ex, sets:[...(ex.sets||[]), ...appended] }:ex);
+      mergedExercises+=1; addedSets+=appended.length;
+    }else{
+      next=[...next, { ...draft, sets:draft.sets.map(s=>({...s})) }];
+      addedExercises+=1; addedSets+=draft.sets.length;
+    }
+  });
+
+  return { exercises:next, addedExercises, mergedExercises, addedSets, replacedBlank, changed:true };
 }
 
 // ── 개인운동 UI (회원앱) ──────────────────────────────────────────────────────
@@ -15337,7 +15567,216 @@ function getInitialSessionParts({ editingSession, sessionDate, member }) {
 // 조회 + 추천 표시 전용이다 — 이 컴포넌트는 onChange/onSave 계열 콜백을 하나도 받지 않으므로
 // 세트·중량·종목을 자동으로 채우거나 저장하는 경로가 구조적으로 존재하지 않는다.
 // prep이 null이면(완료된 개인운동 없음) 상위에서 아예 렌더하지 않아 빈 카드가 생기지 않는다.
-function SessionPrepCard({ prep }) {
+// 개인운동 선택 모달(관리자 PT 기록 화면 전용).
+// Firestore를 읽지도 쓰지도 않고 부모의 exercises state도 직접 바꾸지 않는다 — 트레이너가 고른 결과를
+// onApply(mode, drafts)로 넘길 뿐이고, 실제 반영은 부모가 한다. 모달은 열릴 때 새로 mount되므로
+// 이전에 임시로 체크했던 선택은 남지 않는다(닫았다 다시 열면 항상 초기화).
+function PersonalWorkoutImportSheet({ options, existingExercises=[], todayMuscleTop="", memberBodyWeight="", onClose, onApply }) {
+  const [selected, setSelected] = useState(() => new Set());   // 선택한 세트 id 집합 — 운동/세트 선택의 단일 원본
+  const [step, setStep]         = useState("select");          // "select" | "conflict"
+  const [applying, setApplying] = useState(false);
+  const applyingRef             = useRef(false);               // React 중복 이벤트·더블클릭 방어(상태 반영 전에도 막힌다)
+
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const toggleSet = setId => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(setId) ? next.delete(setId) : next.add(setId);
+    return next;
+  });
+  const toggleExercise = option => setSelected(prev => {
+    const next = new Set(prev);
+    const ids  = (option.sets || []).map(s => s.setId);
+    const all  = ids.length > 0 && ids.every(id => next.has(id));
+    ids.forEach(id => all ? next.delete(id) : next.add(id));
+    return next;
+  });
+
+  const selectedSetCount = selected.size;
+  const selectedExercises = (options.exercises || []).filter(o => (o.sets || []).some(s => selected.has(s.setId)));
+
+  // 변환 결과는 선택이 있을 때만 만든다(모달을 열어 두기만 해도 계산하지 않는다).
+  const drafts = useMemo(() => {
+    if (!selected.size) return [];
+    return (options.exercises || []).map(o => buildSessionExerciseDraftFromPersonalExercise({
+      option: o, selectedSetIds: selected, baseExercise: mkEx(todayMuscleTop || undefined),
+      workoutParts: options.workoutParts, todayMuscleTop, memberBodyWeight,
+    })).filter(Boolean);
+  }, [options, selected, todayMuscleTop, memberBodyWeight]);
+
+  const isEmptyRecord = useMemo(() => isSessionExerciseListEssentiallyEmpty(existingExercises), [existingExercises]);
+  const merge = useMemo(
+    () => (step === "conflict" ? analyzePersonalWorkoutImportMerge({ exercises: existingExercises, drafts }) : null),
+    [step, existingExercises, drafts]
+  );
+
+  function doApply(mode) {
+    if (applyingRef.current || !drafts.length) return;
+    applyingRef.current = true; setApplying(true);
+    // 성공하면 가드를 풀지 않는다 — 부모가 모달을 닫으므로, 여기서 되돌리면 더블클릭 2번째가 통과해
+    // 같은 운동이 두 번 추가된다. 예외로 반영이 실패한 경우에만 풀어 다시 시도할 수 있게 한다.
+    try { onApply?.(mode, drafts); }
+    catch (e) { applyingRef.current = false; setApplying(false); }
+  }
+  function handlePrimary() {
+    if (!drafts.length) return;
+    if (isEmptyRecord) { doApply("append"); return; }   // 사실상 비어 있는 기록이면 충돌 확인이 필요 없다
+    setStep("conflict");
+  }
+
+  const chip   = { fontSize:11, fontWeight:800, padding:"2px 8px", borderRadius:999, background:"rgba(15,148,136,.10)", color:"#0F9488", whiteSpace:"nowrap" };
+  const action = { width:"100%", padding:"12px", borderRadius:9, border:"none", cursor:"pointer", fontSize:13, fontWeight:800 };
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="개인운동에서 가져오기"
+      style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",
+        background:"rgba(15,23,42,.45)",padding:"14px 12px"}}>
+      <div style={{background:"#FFFFFF",borderRadius:14,border:"1px solid #D6DCE3",width:"100%",maxWidth:560,
+        maxHeight:"88vh",display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 12px 32px rgba(15,23,42,.18)"}}>
+
+        {/* ── 헤더 + 사용 중인 개인운동 기록 정보 ── */}
+        <div style={{flexShrink:0,padding:"15px 16px 12px",borderBottom:"1px solid #EDEFF2"}}>
+          <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+            <div style={{flex:1,minWidth:0}}>
+              <b style={{fontSize:15,fontWeight:800,color:"#0F172A"}}>개인운동에서 가져오기</b>
+              <div style={{marginTop:4,fontSize:11.5,color:"#64748B",lineHeight:1.6}}>
+                가져올 운동과 세트를 선택해주세요.<br/>가져온 뒤에도 자유롭게 수정할 수 있습니다.
+              </div>
+            </div>
+            <button type="button" onClick={onClose} aria-label="닫기"
+              style={{flexShrink:0,width:32,height:32,borderRadius:8,border:"1px solid #D8DEE5",background:"#FFFFFF",
+                color:"#64748B",fontSize:14,cursor:"pointer"}}>✕</button>
+          </div>
+          <div style={{marginTop:10,padding:"9px 11px",background:"#F6F8FA",borderRadius:9}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:7,flexWrap:"wrap"}}>
+              <b style={{fontSize:13,fontWeight:800,color:"#0F172A"}}>{options.dateLabel} 개인운동</b>
+              {options.partsLabel && <span style={chip}>{options.partsLabel}</span>}
+              <span style={{fontSize:11,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>운동 {options.exerciseCount}종목</span>
+            </div>
+            {options.skippedCount > 0 && (
+              <div style={{marginTop:5,fontSize:10.5,color:"#B45309",fontVariantNumeric:"tabular-nums"}}>
+                가져올 수 없는 기록 {options.skippedCount}개는 목록에서 제외했습니다
+              </div>
+            )}
+            {options.memo && (
+              <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #E7EBEF"}}>
+                <Mo c="#94A3B8" s={9.5} style={{display:"block",fontWeight:800,marginBottom:3}}>회원 메모 · 참고용(가져오지 않음)</Mo>
+                <div style={{fontSize:11.5,color:"#64748B",lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{options.memo}</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── 본문(내부 스크롤) ── */}
+        <div style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px"}}>
+          {step === "select" ? (
+            (options.exercises || []).map(o => {
+              const ids    = (o.sets || []).map(s => s.setId);
+              const picked = ids.filter(id => selected.has(id)).length;
+              const all    = ids.length > 0 && picked === ids.length;
+              return (
+                <div key={o.optionId} style={{marginBottom:9,borderRadius:10,padding:"9px 11px",
+                  border:"1px solid "+(picked ? "#39C7B8" : "#E2E8F0"), background: picked ? "rgba(57,199,184,.05)" : "#FFFFFF"}}>
+                  <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",minHeight:34}}>
+                    <input type="checkbox" checked={all} onChange={() => toggleExercise(o)}
+                      ref={el => { if (el) el.indeterminate = picked > 0 && !all; }}
+                      style={{width:20,height:20,flexShrink:0,accentColor:"#0F9488"}} />
+                    <span style={{flex:1,minWidth:0,fontSize:13.5,fontWeight:800,color:"#0F172A",wordBreak:"break-word"}}>{o.name}</span>
+                    <span style={{flexShrink:0,fontSize:10.5,fontWeight:800,fontVariantNumeric:"tabular-nums",
+                      color: picked ? "#0F9488" : "#94A3B8"}}>
+                      {picked > 0 ? `${picked}/${ids.length}세트 선택` : `${ids.length}세트`}
+                    </span>
+                  </label>
+                  <div style={{marginTop:4,paddingLeft:30}}>
+                    {(o.sets || []).map((s, i) => {
+                      const on = selected.has(s.setId);
+                      return (
+                        <label key={s.setId} style={{display:"flex",alignItems:"center",gap:9,minHeight:32,cursor:"pointer"}}>
+                          <input type="checkbox" checked={on} onChange={() => toggleSet(s.setId)}
+                            style={{width:18,height:18,flexShrink:0,accentColor:"#0F9488"}} />
+                          <Mo c="#94A3B8" s={9.5} style={{width:20,flexShrink:0}}>{i + 1}</Mo>
+                          <span style={{fontSize:12.5,fontWeight:700,fontVariantNumeric:"tabular-nums",color: on ? "#0F172A" : "#64748B"}}>{s.label}</span>
+                          {on && <span style={{marginLeft:"auto",flexShrink:0,fontSize:10,fontWeight:800,color:"#0F9488"}}>✓ 선택됨</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div>
+              <b style={{fontSize:13.5,fontWeight:800,color:"#0F172A"}}>현재 기록에 이미 입력된 운동이 있습니다</b>
+              <div style={{marginTop:6,fontSize:12,color:"#64748B",lineHeight:1.65}}>
+                기존에 입력한 운동과 세트는 지워지지 않습니다.<br/>어떻게 추가할지 선택해주세요.
+              </div>
+              <div style={{marginTop:10,padding:"9px 11px",background:"#F6F8FA",borderRadius:9,fontSize:11.5,
+                color:"#334155",fontVariantNumeric:"tabular-nums",lineHeight:1.7}}>
+                가져올 운동 {drafts.length}개 · 총 {drafts.reduce((s, d) => s + d.sets.length, 0)}세트<br/>
+                같은 운동으로 합칠 수 있는 운동 {merge?.mergeableCount ?? 0}개 · 새 운동 {merge?.newCount ?? 0}개
+              </div>
+              {merge?.mergeBlocked && (
+                <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"rgba(245,158,11,.10)",
+                  fontSize:11.5,fontWeight:700,color:"#B45309",lineHeight:1.6}}>
+                  같은 운동 카드가 여러 개 있습니다. 기존 기록 뒤에 새 운동으로 추가해주세요.
+                  <div style={{marginTop:3,fontWeight:600}}>({merge.duplicatedNames.join(", ")})</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── 하단 고정 액션(화면 밖으로 밀리지 않도록 본문만 스크롤) ── */}
+        <div style={{flexShrink:0,padding:"11px 16px calc(14px + env(safe-area-inset-bottom))",borderTop:"1px solid #EDEFF2",background:"#FFFFFF"}}>
+          {step === "select" ? (
+            <>
+              <div style={{marginBottom:7,fontSize:11.5,fontWeight:800,fontVariantNumeric:"tabular-nums",
+                color: selectedSetCount ? "#0F172A" : "#94A3B8"}}>
+                {selectedSetCount ? `운동 ${selectedExercises.length}개 · 총 ${selectedSetCount}세트 선택` : "선택한 운동이 없습니다"}
+              </div>
+              {selectedSetCount > 0 && (
+                <div style={{marginBottom:7,fontSize:10.5,fontWeight:700,color:"#0F9488",lineHeight:1.55}}>
+                  현재 기록에 추가됩니다 · 저장은 아래 저장 버튼을 눌러야 실행됩니다
+                </div>
+              )}
+              <button type="button" onClick={handlePrimary} disabled={!selectedSetCount || applying}
+                style={{...action, background: (!selectedSetCount || applying) ? "#E2E8F0" : "linear-gradient(135deg,#39C7B8,#0F9488)",
+                  color: (!selectedSetCount || applying) ? "#94A3B8" : "#FFFFFF",
+                  cursor: (!selectedSetCount || applying) ? "not-allowed" : "pointer"}}>
+                {applying ? "가져오는 중..." : "선택한 운동 가져오기"}
+              </button>
+            </>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              <button type="button" onClick={() => doApply("append")} disabled={applying}
+                style={{...action, background:"linear-gradient(135deg,#39C7B8,#0F9488)", color:"#FFFFFF"}}>
+                기존 기록 뒤에 추가
+              </button>
+              <button type="button" onClick={() => doApply("merge")}
+                disabled={applying || !!merge?.mergeBlocked || !merge?.mergeableCount}
+                style={{...action, background:"#FFFFFF",
+                  border:"1px solid "+((merge?.mergeBlocked || !merge?.mergeableCount) ? "#E2E8F0" : "#0F9488"),
+                  color:(merge?.mergeBlocked || !merge?.mergeableCount) ? "#94A3B8" : "#0F9488",
+                  cursor:(merge?.mergeBlocked || !merge?.mergeableCount) ? "not-allowed" : "pointer"}}>
+                같은 운동에 세트 추가
+              </button>
+              <button type="button" onClick={() => setStep("select")} disabled={applying}
+                style={{...action, background:"transparent", border:"1px solid #EDEFF2", color:"#64748B", fontWeight:700}}>
+                취소
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionPrepCard({ prep, onImport = null }) {
   const [showOthers, setShowOthers] = useState(false);
   if (!prep) return null;
   const { topExercise: top, comparison, recommendation } = prep;
@@ -15430,6 +15869,21 @@ function SessionPrepCard({ prep }) {
         </div>
       )}
       {prep.elapsedNote&&<div style={{marginTop:8,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>{prep.elapsedNote}</div>}
+
+      {/* ⑥ 개인운동에서 가져오기 — 가져올 수 있는 종목이 하나도 없거나(onImport=null) 대표 개인 기록 계정이면
+          아예 렌더하지 않는다(비활성 버튼으로 자리만 차지하지 않는다). 누르기 전에는 운동 목록을 건드리지 않는다. */}
+      {onImport&&(
+        <div style={{marginTop:11,paddingTop:10,borderTop:"1px solid #EDEFF2"}}>
+          <button type="button" onClick={onImport}
+            style={{width:"100%",padding:"11px",borderRadius:9,border:"1px solid #0F9488",background:"#FFFFFF",
+              color:"#0F9488",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>
+            개인운동에서 가져오기
+          </button>
+          <div style={{marginTop:5,fontSize:10.5,color:"#94A3B8",lineHeight:1.55}}>
+            선택한 운동만 아래 운동 목록에 추가됩니다 · 저장은 저장 버튼에서만 실행됩니다
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -15567,6 +16021,60 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
       ? { ...e, muscleTop: todayMuscleTop, muscleSub: mSubs(todayMuscleTop)[0] || e.muscleSub }
       : e));
   }, [todayMuscleTop]);
+
+  // ── 개인운동에서 가져오기(2차 3단계) ────────────────────────────────────
+  // 대상은 이미 전달받은 personalWorkouts(최근 10건)에서 고른 최근 completed 1건뿐이다 — Firestore를 추가로 읽지 않는다.
+  // 가져올 수 있는 종목(유효 세트 보유)이 하나도 없으면 importOptions가 null이라 버튼 자체가 렌더되지 않는다.
+  // 2:1 수업은 회원B 세트(m2) 구조까지 함께 맞춰야 하므로 이번 단계 범위 밖 — 버튼을 숨긴다.
+  const importWorkout = useMemo(
+    () => (isOwner(member) ? null : pickLatestCompletedPersonalWorkout(personalWorkouts)),
+    [member, personalWorkouts]
+  );
+  const importOptions = useMemo(() => (importWorkout ? buildPersonalWorkoutImportOptions(importWorkout) : null), [importWorkout]);
+  const canImportPersonal = !!importOptions && sessionType !== "2:1";
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUndo, setImportUndo] = useState(null);   // { exercises, label } — 가져오기 직전 스냅샷 1회분
+  const importedExercisesRef = useRef(null);
+
+  // 가져온 뒤 트레이너가 운동을 직접 수정하기 시작하면 실행 취소를 감춘다 —
+  // 그 시점의 되돌리기는 새로 입력한 값까지 지우게 되므로 "가져오기 직후"에만 제공한다.
+  useEffect(() => {
+    if (!importUndo) return;
+    if (importedExercisesRef.current && exercises !== importedExercisesRef.current) setImportUndo(null);
+  }, [exercises, importUndo]);
+
+  // 트레이너가 모달에서 확인했을 때만 호출된다. 여기서 하는 일은 로컬 exercises state 교체가 전부다 —
+  // Firestore 쓰기·onSave·임시저장 flush를 직접 부르지 않는다(최종 저장은 기존 저장 버튼에서만).
+  function handleApplyPersonalImport(mode, drafts) {
+    const before = exercises;
+    let result;
+    try {
+      result = applyPersonalWorkoutImport({
+        exercises: before, drafts, mode,
+        memberBodyWeight: bodyWeight || getLatestBodyWeight(bodyData, sessionDate)?.weight || "",
+      });
+    } catch (e) {
+      setImportOpen(false);
+      showToast("개인운동을 가져오지 못했습니다. 기존 기록은 그대로입니다", "err");
+      return;
+    }
+    if (!result?.changed) { setImportOpen(false); showToast("가져올 운동이 없습니다", "err"); return; }
+    const exCount = result.addedExercises + result.mergedExercises;
+    importedExercisesRef.current = result.exercises;
+    setExercises(result.exercises);
+    setImportUndo({ exercises: before, label: `운동 ${exCount}개 · ${result.addedSets}세트` });
+    setImportOpen(false);
+    showToast(`개인운동에서 운동 ${exCount}개 · ${result.addedSets}세트를 가져왔습니다`);
+  }
+  function handleUndoPersonalImport() {
+    if (!importUndo) return;
+    const snapshot = importUndo.exercises;
+    importedExercisesRef.current = null;
+    setImportUndo(null);
+    setExercises(snapshot);
+    showToast("가져오기를 실행 취소했습니다");
+  }
+
   const [showBodyPartPicker, setShowBodyPartPicker] = useState(false);
   const bodyPartPickerRef = useRef(null);
   // 오늘의 운동 부위 드롭다운 — 외부 영역 클릭(터치 포함) 시 닫힘
@@ -16265,7 +16773,31 @@ function updateEx(ei, key, val) {
 
       {/* 오늘 수업 준비 — "오늘의 운동 부위"(기본 정보 카드) 아래, 운동 종목 입력(운동 목록 카드) 위.
           조회·추천 전용 카드라 아래 운동 목록의 값을 건드리지 않는다. */}
-      <SessionPrepCard prep={sessionPrep} />
+      <SessionPrepCard prep={sessionPrep} onImport={canImportPersonal ? () => setImportOpen(true) : null} />
+
+      {/* 가져오기 직후 1회분 실행 취소 — Firestore 쓰기가 없으므로 로컬 스냅샷 복원만 하면 된다. */}
+      {importUndo && (
+        <div style={{marginTop:8,padding:"9px 11px",borderRadius:9,background:"rgba(57,199,184,.08)",
+          border:"1px solid rgba(15,148,136,.25)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{flex:1,minWidth:0,fontSize:11.5,fontWeight:700,color:"#0F172A",fontVariantNumeric:"tabular-nums"}}>
+            개인운동에서 {importUndo.label}를 가져왔습니다
+          </span>
+          <button type="button" onClick={handleUndoPersonalImport}
+            style={{flexShrink:0,padding:"6px 12px",borderRadius:7,border:"1px solid #0F9488",background:"#FFFFFF",
+              color:"#0F9488",fontSize:11.5,fontWeight:800,cursor:"pointer"}}>실행 취소</button>
+        </div>
+      )}
+
+      {importOpen && importOptions && (
+        <PersonalWorkoutImportSheet
+          options={importOptions}
+          existingExercises={exercises}
+          todayMuscleTop={todayMuscleTop}
+          memberBodyWeight={bodyWeight || getLatestBodyWeight(bodyData, sessionDate)?.weight || ""}
+          onClose={() => setImportOpen(false)}
+          onApply={handleApplyPersonalImport}
+        />
+      )}
 
       <Card title="운동 목록" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #D6DCE3"}} titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
         {exercises.map((ex, ei) => {

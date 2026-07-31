@@ -84,6 +84,10 @@ let personalWorkoutLib = null;
 try {
   const sliceLimits = db.slice(db.indexOf('export const PERSONAL_WORKOUT_LIMITS'), db.indexOf('export async function getPersonalWorkouts')).replace('export const', 'const');
   const sliceMuscleConst = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const AI_GOAL_OPTIONS'));
+  // 가져오기(개인운동 2차 3단계)는 "오늘의 운동 부위 → muscleTop" 매핑과 신규 운동/세트 기본값 생성기를 재사용하므로
+  // 그 원본 구간도 같은 스코프에 넣는다(값을 여기에 다시 적지 않는다).
+  const sliceSessionParts = app.slice(app.indexOf('const SESSION_BODY_PART_OPTIONS'), app.indexOf('// type(string) → selectedTypes(array) 호환 변환'));
+  const sliceMkEx = app.slice(app.indexOf('function mkSet()'), app.indexOf('// 네트워크 지연/오프라인 큐잉'));
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceFuncVol = app.slice(app.indexOf('function funcExVol'), app.indexOf('function funcExStats'));
   const sliceExVol = app.slice(app.indexOf('const ASSIST_MACHINE_KEYWORDS'), app.indexOf('const CSS = `'));
@@ -97,10 +101,13 @@ try {
   // 슬라이스 끝 경계는 첫 JSX 컴포넌트 직전(MemberExerciseComparison)까지다 — JSX가 섞이면 new Function 파싱이 깨진다.
   const slicePersonal = app.slice(app.indexOf('const PERSONAL_WORKOUT_PART_OPTIONS'), app.indexOf('function MemberExerciseComparison'));
   personalWorkoutLib = new Function(
-    `${sliceLimits}\n${sliceMuscleConst}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceMonthDayKo}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
+    `${sliceLimits}\n${sliceMuscleConst}\n${sliceSessionParts}\n${sliceMkEx}\n${sliceFuncEx}\n${sliceFuncVol}\n${sliceExVol}\n${sliceBadge}\n${sliceDateLabel}\n${sliceWeightFmt}\n${sliceMonthDayKo}\n${sliceSuggestConst}\n${sliceLib}\n${slicePersonal}\n` +
     'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete, ' +
     'normalizeComparableExercise, buildExercisePerformanceSnapshot, compareExercisePerformance, formatExerciseComparisonSummary, buildMemberExerciseComparisonIndex, formatExerciseSnapshotLine, getExerciseRecordDateKey, ' +
-    'buildSessionPrepSummary, buildNextStartWeightRecommendation, getDayDiffFromDateKeys, formatElapsedDayLabel, getExerciseRecordOrder, getExerciseRecordTimeMs };'
+    'buildSessionPrepSummary, buildNextStartWeightRecommendation, getDayDiffFromDateKeys, formatElapsedDayLabel, getExerciseRecordOrder, getExerciseRecordTimeMs, ' +
+    'mkEx, mkSet, getCompletedPersonalWorkoutsLatestFirst, pickLatestCompletedPersonalWorkout, buildPersonalWorkoutImportOptions, resolveImportedMuscleTop, ' +
+    'buildImportedSessionSet, buildSessionExerciseDraftFromPersonalExercise, isBlankSessionExerciseCard, isSessionExerciseListEssentiallyEmpty, ' +
+    'getSessionExerciseCanonicalKey, analyzePersonalWorkoutImportMerge, applyPersonalWorkoutImport };'
   )();
 } catch (e) {
   console.error('[regression] 개인운동 헬퍼 추출 실패:', e.message);
@@ -3384,21 +3391,23 @@ const checks = [
   ],
   ['수업 준비 UI: SessionScreen 상단 카드가 "오늘의 운동 부위" 아래 · "운동 목록" 위에 배치됨',
     (() => {
-      const prep = app.indexOf('<SessionPrepCard prep={sessionPrep} />');
+      const prep = app.indexOf('<SessionPrepCard prep={sessionPrep}');
       const parts = app.indexOf('<label>오늘의 운동 부위');
       const exList = app.indexOf('<Card title="운동 목록"');
       return prep !== -1 && parts !== -1 && exList !== -1 && parts < prep && prep < exList;
     })()
   ],
-  ['수업 준비 UI: 카드는 조회 전용 — 값 변경·저장 콜백을 받지 않고 자동 입력 경로가 없음',
+  ['수업 준비 UI: 카드는 값 변경·저장 콜백을 받지 않고, 사용자가 누르는 가져오기 버튼 외에 자동 입력 경로가 없음',
     (() => {
       const i = app.indexOf('function SessionPrepCard');
       const j = app.indexOf('function SessionScreen({ member, sessions, editData');
       const body = app.slice(i, j);
       return i !== -1 && j > i &&
-        // prep 하나만 받는다(onChange/onSave/setExercises 계열 prop 없음)
-        /function SessionPrepCard\(\{ prep \}\)/.test(body) &&
-        !/setExercises|setSelectedTypes|onSave|onChange|onApply|addDoc|updateDoc|setDoc/.test(body) &&
+        // prep + onImport(사용자 클릭 콜백)만 받는다 — setExercises/onSave/onChange 계열 prop은 없다
+        /function SessionPrepCard\(\{ prep, onImport = null \}\)/.test(body) &&
+        !/setExercises|setSelectedTypes|onSave|onChange|addDoc|updateDoc|setDoc/.test(body) &&
+        // onImport는 오직 onClick에 넘겨질 뿐, 렌더 중에 직접 호출되는 곳이 없다
+        /onClick=\{onImport\}/.test(body) && !/onImport\s*(\?\.)?\s*\(/.test(body) &&
         // "자동 적용되지 않습니다" 안내를 항상 함께 노출한다
         body.includes('자동 적용되지 않습니다');
     })()
@@ -3426,6 +3435,326 @@ const checks = [
     db.includes('export async function createPersonalWorkout') &&
     db.includes('export async function updatePersonalWorkoutProgress') &&
     db.includes('export async function completePersonalWorkout')
+  ],
+
+  // ── 개인운동 2차 3단계: 관리자 PT 기록 "개인운동에서 가져오기" ────────────────────
+  // 자동 반영이 아니라 "트레이너가 고른 것만" 로컬 state에 넣는 기능이다. 아래 검사는
+  // ① 자동 저장·자동 덮어쓰기 경로가 생기지 않았는지 ② 순수 변환이 실제로 맞는 값을 만드는지를 본다.
+  ['가져오기 대상: 최근 completed 개인운동 1건 선택 규칙을 수업 준비 카드와 공유(정렬 규칙 중복 정의 없음)',
+    app.includes('function getCompletedPersonalWorkoutsLatestFirst') &&
+    app.includes('function pickLatestCompletedPersonalWorkout') &&
+    app.includes('const completed=getCompletedPersonalWorkoutsLatestFirst(personalWorkouts);') &&
+    // 정렬식이 두 곳에 복사되어 있지 않다
+    (app.match(/w\.status==="completed"&&getExerciseRecordDateKey\(w\)/g) || []).length === 1
+  ],
+  pwScenario('가져오기 시나리오: 완료된 개인운동이 있고 유효 세트가 있으면 선택 목록을 만든다', L => {
+    const w = { id:'p1', status:'completed', workoutDate:'2026-07-29', workoutParts:['가슴','삼두'], memo:'가슴 위주',
+      exercises:[{ name:'벤치프레스', muscleTop:'가슴', muscleSub:'윗가슴', equipment:'바벨',
+        sets:[{setNumber:1,weight:20,reps:10},{setNumber:2,weight:22.5,reps:8}] }] };
+    const o = L.buildPersonalWorkoutImportOptions(L.pickLatestCompletedPersonalWorkout([w]));
+    return o && o.exerciseCount === 1 && o.totalSets === 2 && o.dateLabel === '7월 29일' && o.memo === '가슴 위주';
+  }),
+  pwScenario('가져오기 시나리오: 개인운동이 없거나 진행 중(in_progress)뿐이면 대상 자체가 없다(버튼 숨김)', L => {
+    const inProgress = { id:'p1', status:'in_progress', workoutDate:'2026-07-29',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] };
+    return L.pickLatestCompletedPersonalWorkout([]) === null &&
+           L.pickLatestCompletedPersonalWorkout([inProgress]) === null;
+  }),
+  pwScenario('가져오기 시나리오: 유효 세트가 하나도 없으면 목록을 만들지 않는다(빈 모달 금지)', L => {
+    const w = { id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:0},{weight:'',reps:''}] }, { name:'', sets:[{weight:10,reps:10}] }] };
+    return L.buildPersonalWorkoutImportOptions(w) === null;
+  }),
+  pwScenario('가져오기 시나리오: 유효 세트 기준은 기존 getPersonalWorkoutValidSets 그대로 — reps 0·빈 세트는 목록에 없다', L => {
+    const ex = { name:'벤치프레스', sets:[{weight:20,reps:10},{weight:22.5,reps:0},{weight:'',reps:''},{weight:22.5,reps:8}] };
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29', exercises:[ex] });
+    return o.exercises[0].sets.length === L.getPersonalWorkoutValidSets(ex).length && o.exercises[0].sets.length === 2;
+  }),
+  pwScenario('가져오기 시나리오: 맨몸 세트는 중량 없이도 가져올 수 있고 "0kg" 문자열을 만들지 않는다', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'푸쉬업', equipment:'맨몸', sets:[{weight:null,reps:15},{weight:0,reps:12}] }] });
+    const sets = o.exercises[0].sets;
+    return sets.length === 2 && sets.every(s => s.weight === null && !s.label.includes('0kg')) &&
+           sets[0].label === '15회' && sets[1].label === '12회';
+  }),
+  pwScenario('가져오기 시나리오: 비정상 항목(이름 없음·sets 배열 아님)은 목록에서 빼고 나머지는 그대로 가져올 수 있다', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'', sets:[{weight:20,reps:10}] }, { name:'깨진기록', sets:'배열아님' }, null,
+                  { name:'벤치프레스', sets:[{weight:20,reps:10}] }] });
+    // null 슬롯은 "기록"이 아니라 빈 자리이므로 안내 개수에 넣지 않는다(이름 없음 1건 + sets 깨짐 1건 = 2건)
+    return o && o.exerciseCount === 1 && o.exercises[0].name === '벤치프레스' && o.skippedCount === 2;
+  }),
+  pwScenario('가져오기 변환: 선택한 세트만 · 원래 순서 유지 · 세트번호는 PT 배열 순서로 정규화(1,2,4 → 1,2,3)', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'벤치프레스', muscleTop:'가슴', equipment:'바벨',
+        sets:[{setNumber:1,weight:20,reps:10},{setNumber:2,weight:22.5,reps:8},{setNumber:3,weight:25,reps:6},{setNumber:4,weight:27.5,reps:4}] }] });
+    const s = o.exercises[0].sets;
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([s[0].setId, s[1].setId, s[3].setId]),
+      baseExercise:L.mkEx('가슴'), workoutParts:o.workoutParts, todayMuscleTop:'가슴' });
+    return draft.name === '벤치프레스' && draft.sets.length === 3 &&
+      JSON.stringify(draft.sets.map(x => [x.weight, x.reps])) === JSON.stringify([['20','10'],['22.5','8'],['27.5','4']]) &&
+      // PT 세트 구조는 배열 index로 세트 번호를 표시하므로 개인운동 setNumber를 옮기지 않는다
+      draft.sets.every(x => !('setNumber' in x) && x.recordType === 'weightReps');
+  }),
+  pwScenario('가져오기 변환: PT 세트 볼륨은 기존 calcVol과 동일한 값(직접 입력했을 때와 같은 결과)', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'벤치프레스', muscleTop:'가슴', equipment:'바벨', sets:[{weight:20,reps:10}] }] });
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]), baseExercise:L.mkEx('가슴') });
+    return draft.sets[0].volume === 200;
+  }),
+  pwScenario('가져오기 변환: 개인운동 전용 필드(exerciseKey/order/totals/id/메모)는 PT draft에 담기지 않는다', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29', memo:'회원 메모',
+      exercises:[{ name:'벤치프레스', exerciseKey:'벤치프레스', order:0, totalSets:1, totalVolume:200,
+        muscleTop:'가슴', equipment:'바벨', sets:[{setNumber:1,weight:20,reps:10,volume:200}] }] });
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]), baseExercise:L.mkEx('가슴') });
+    const base = L.mkEx('가슴');
+    const extra = Object.keys(draft).filter(k => !(k in base) && k !== 'partAutoAssigned');
+    return extra.length === 0 && !JSON.stringify(draft).includes('회원 메모') && !JSON.stringify(draft).includes('p1') &&
+      draft.feedback === '' && draft.nextPlan === '';
+  }),
+  pwScenario('가져오기 변환: 원본 개인운동 객체를 mutate하지 않는다', L => {
+    const w = { id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'벤치프레스', muscleTop:'가슴', equipment:'바벨', sets:[{setNumber:1,weight:20,reps:10}] }] };
+    const snapshot = JSON.stringify(w);
+    const o = L.buildPersonalWorkoutImportOptions(w);
+    L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]), baseExercise:L.mkEx('가슴') });
+    return JSON.stringify(w) === snapshot;
+  }),
+  pwScenario('가져오기 부위: 개인운동에 저장된 부위를 그대로 쓰고, 오늘의 운동 부위 자동 상속 대상에서 제외한다', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29', workoutParts:['등'],
+      exercises:[{ name:'벤치프레스', muscleTop:'가슴', muscleSub:'윗가슴', equipment:'바벨', sets:[{weight:20,reps:10}] }] });
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]),
+      baseExercise:L.mkEx('등'), workoutParts:o.workoutParts, todayMuscleTop:'등' });
+    return draft.muscleTop === '가슴' && draft.muscleSub === '윗가슴' && draft.partAutoAssigned === false;
+  }),
+  pwScenario('가져오기 부위: 저장값이 없으면 운동명 분류 → 개인운동 부위 → 오늘의 운동 부위 순으로 복원(이두·삼두 분리 유지)', L => {
+    const build = (name, parts, today) => {
+      const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29', workoutParts:parts,
+        exercises:[{ name, muscleTop:'', muscleSub:'', equipment:'', sets:[{weight:20,reps:10}] }] });
+      return L.buildSessionExerciseDraftFromPersonalExercise({
+        option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]),
+        baseExercise:L.mkEx(today || undefined), workoutParts:o.workoutParts, todayMuscleTop:today });
+    };
+    const byName = build('벤치프레스', ['삼두'], '등');
+    const byParts = build('알수없는운동xyz', ['삼두'], '등');
+    const byToday = build('알수없는운동xyz', [], '등');
+    return byName.muscleTop === '가슴' && byName.partAutoAssigned === false &&
+           byParts.muscleTop === '팔-삼두근' && byParts.partAutoAssigned === false &&
+           byToday.muscleTop === '등' && byToday.partAutoAssigned === true;
+  }),
+  pwScenario('가져오기 부위: 레거시 "팔"은 이두/삼두로 임의 변환하지 않고 오늘의 운동 부위 기본값으로 넘어간다', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29', workoutParts:['팔'],
+      exercises:[{ name:'알수없는운동xyz', muscleTop:'', muscleSub:'', equipment:'', sets:[{weight:20,reps:10}] }] });
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]),
+      baseExercise:L.mkEx('가슴'), workoutParts:o.workoutParts, todayMuscleTop:'가슴' });
+    return draft.muscleTop !== '팔-이두근' && draft.muscleTop !== '팔-삼두근' && draft.muscleTop === '가슴';
+  }),
+  pwScenario('가져오기 변환: "기능"(시간 기반) 분류는 가져오지 않고 항상 중량×횟수 웨이트 카드로 만든다', L => {
+    const o = L.buildPersonalWorkoutImportOptions({ id:'p1', status:'completed', workoutDate:'2026-07-29',
+      exercises:[{ name:'벤치프레스', muscleTop:'기능', muscleSub:'기능', equipment:'기능', sets:[{weight:20,reps:10}] }] });
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]),
+      baseExercise:L.mkEx('가슴'), todayMuscleTop:'가슴' });
+    return draft.muscleTop !== '기능' && draft.equipment !== '기능' &&
+      draft.sets.every(s => s.recordType === 'weightReps') && draft.funcCategory === '';
+  }),
+  pwScenario('빈 카드 판정: 초기 기본 카드만 있으면 "사실상 비어 있음", 사용자 입력이 하나라도 있으면 아니다', L => {
+    const blank = { ...L.mkEx('가슴'), partAutoAssigned:true };
+    const named = { ...blank, name:'벤치프레스' };
+    const withSet = { ...blank, sets:[{ weight:'40', reps:'', volume:0, recordType:'weightReps' }] };
+    const withMemo = { ...blank, feedback:'허리 주의' };
+    const partChanged = { ...blank, partAutoAssigned:false };
+    const manual = { ...blank, _equipManual:true };
+    return L.isSessionExerciseListEssentiallyEmpty([blank]) &&
+      !L.isSessionExerciseListEssentiallyEmpty([named]) &&
+      !L.isSessionExerciseListEssentiallyEmpty([withSet]) &&
+      !L.isSessionExerciseListEssentiallyEmpty([withMemo]) &&
+      !L.isSessionExerciseListEssentiallyEmpty([partChanged]) &&
+      !L.isSessionExerciseListEssentiallyEmpty([manual]) &&
+      // 일부만 비어 있으면 사용자가 만든 배치이므로 비어 있다고 보지 않는다
+      !L.isSessionExerciseListEssentiallyEmpty([named, blank]);
+  }),
+  pwScenario('가져오기 적용: 사실상 비어 있는 기록이면 빈 카드를 대체하고, 입력이 있으면 절대 지우지 않는다', L => {
+    const draft = { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const blank = { ...L.mkEx('가슴'), partAutoAssigned:true };
+    const onBlank = L.applyPersonalWorkoutImport({ exercises:[blank], drafts:[draft], mode:'append' });
+    const existing = { ...L.mkEx('등'), name:'랫풀다운', sets:[{ weight:'30', reps:'12', volume:360, recordType:'weightReps' }] };
+    const onFilled = L.applyPersonalWorkoutImport({ exercises:[existing], drafts:[draft], mode:'append' });
+    return onBlank.replacedBlank === true && onBlank.exercises.length === 1 && onBlank.exercises[0].name === '벤치프레스' &&
+      onFilled.replacedBlank === false && onFilled.exercises.length === 2 &&
+      onFilled.exercises[0].name === '랫풀다운' && onFilled.exercises[0].sets[0].weight === '30';
+  }),
+  pwScenario('가져오기 적용(뒤에 추가): 기존 운동 보존 + 선택 순서대로 마지막에 추가 + 동일 운동도 별도 카드', L => {
+    const d1 = { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const d2 = { ...L.mkEx('가슴'), name:'케이블 플라이', sets:[{ weight:'15', reps:'12', volume:180, recordType:'weightReps' }] };
+    const cur = [{ ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] }];
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[d1, d2], mode:'append' });
+    return r.exercises.length === 3 && r.addedExercises === 2 && r.mergedExercises === 0 && r.addedSets === 2 &&
+      r.exercises[0].sets.length === 1 && r.exercises[0].sets[0].weight === '40' &&
+      r.exercises[1].name === '벤치프레스' && r.exercises[2].name === '케이블 플라이';
+  }),
+  pwScenario('가져오기 적용(같은 운동에 세트 추가): 동일 key 카드 1개면 기존 이름·부위·기구·세트를 유지하고 뒤에만 붙인다', L => {
+    const d1 = { ...L.mkEx('가슴'), name:'bench press', muscleTop:'가슴', equipment:'덤벨',
+      sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const d2 = { ...L.mkEx('가슴'), name:'케이블 플라이', sets:[{ weight:'15', reps:'12', volume:180, recordType:'weightReps' }] };
+    const cur = [
+      { ...L.mkEx('등'), name:'랫풀다운', sets:[{ weight:'30', reps:'12', volume:360, recordType:'weightReps' }] },
+      { ...L.mkEx('가슴'), name:'벤치프레스', muscleTop:'가슴', muscleSub:'윗가슴', equipment:'바벨',
+        sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] },
+    ];
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[d1, d2], mode:'merge' });
+    const merged = r.exercises[1];
+    return r.exercises.length === 3 && r.mergedExercises === 1 && r.addedExercises === 1 &&
+      // 표기가 달라도 canonical key가 같으면 기존 PT 운동명을 덮어쓰지 않는다
+      merged.name === '벤치프레스' && merged.muscleTop === '가슴' && merged.muscleSub === '윗가슴' && merged.equipment === '바벨' &&
+      merged.sets.length === 2 && merged.sets[0].weight === '40' && merged.sets[1].weight === '20' &&
+      r.exercises[0].sets.length === 1 && r.exercises[2].name === '케이블 플라이';
+  }),
+  pwScenario('가져오기 적용(같은 운동에 세트 추가): canonical key가 다르면 이름이 비슷해도 합치지 않는다', L => {
+    const draft = { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const cur = [{ ...L.mkEx('가슴'), name:'인클라인 벤치프레스', sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] }];
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[draft], mode:'merge' });
+    return L.getSessionExerciseCanonicalKey(cur[0]) !== L.getSessionExerciseCanonicalKey(draft) &&
+      r.exercises.length === 2 && r.mergedExercises === 0 && r.exercises[0].sets.length === 1;
+  }),
+  pwScenario('가져오기 적용: 동일 key 기존 카드가 2개 이상이면 병합을 막고(mergeBlocked) 임의 병합 없이 새 카드로 추가', L => {
+    const draft = { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const cur = [
+      { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] },
+      { ...L.mkEx('가슴'), name:'Bench Press', sets:[{ weight:'45', reps:'6', volume:270, recordType:'weightReps' }] },
+    ];
+    const info = L.analyzePersonalWorkoutImportMerge({ exercises:cur, drafts:[draft] });
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[draft], mode:'merge' });
+    return info.mergeBlocked === true && info.duplicatedNames.length === 1 &&
+      r.exercises.length === 3 && r.mergedExercises === 0 &&
+      r.exercises[0].sets.length === 1 && r.exercises[1].sets.length === 1;
+  }),
+  pwScenario('가져오기 적용: 운동명이 비어 있는 기존 카드는 어떤 draft와도 동일 운동으로 판정하지 않는다', L => {
+    const draft = { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const cur = [{ ...L.mkEx('가슴'), name:'', sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] }];
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[draft], mode:'merge' });
+    return L.getSessionExerciseCanonicalKey(cur[0]) === '' && r.mergedExercises === 0 && r.exercises.length === 2;
+  }),
+  pwScenario('가져오기 적용: 기존 PT exercises 배열·객체를 mutate하지 않는다(항상 새 배열/새 객체)', L => {
+    const draft = { ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'20', reps:'10', volume:200, recordType:'weightReps' }] };
+    const cur = [{ ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] }];
+    const snapshot = JSON.stringify(cur);
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[draft], mode:'merge' });
+    return JSON.stringify(cur) === snapshot && r.exercises !== cur && r.exercises[0] !== cur[0] && r.exercises[0].sets !== cur[0].sets;
+  }),
+  pwScenario('가져오기 적용: 선택 결과가 없으면 현재 exercises를 그대로 돌려주고 아무것도 바꾸지 않는다', L => {
+    const cur = [{ ...L.mkEx('가슴'), name:'벤치프레스', sets:[{ weight:'40', reps:'8', volume:320, recordType:'weightReps' }] }];
+    const r = L.applyPersonalWorkoutImport({ exercises:cur, drafts:[], mode:'append' });
+    return r.changed === false && r.exercises === cur && r.addedSets === 0;
+  }),
+  ['가져오기 UI: 선택 모달은 기본 미선택 + 다시 열면 초기화 + 운동/세트 2단 체크박스 + 부분 선택 개수 표시',
+    (() => {
+      const i = app.indexOf('function PersonalWorkoutImportSheet');
+      const j = app.indexOf('function SessionPrepCard');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        body.includes('const [selected, setSelected] = useState(() => new Set());') &&
+        body.includes('type="checkbox"') && body.includes('el.indeterminate = picked > 0 && !all') &&
+        body.includes('세트 선택`') && body.includes('총 ${selectedSetCount}세트 선택') &&
+        // 선택 0개면 적용 버튼 비활성화
+        body.includes('disabled={!selectedSetCount || applying}') &&
+        // ESC / 닫기 버튼 지원
+        body.includes('e.key === "Escape"') && body.includes('aria-label="닫기"') &&
+        body.includes('role="dialog"') && body.includes('aria-modal="true"');
+    })()
+  ],
+  ['가져오기 UI: 모달 본문만 스크롤하고 하단 적용 버튼은 항상 화면에 남는다(iPad·모바일 대응)',
+    (() => {
+      const i = app.indexOf('function PersonalWorkoutImportSheet');
+      const j = app.indexOf('function SessionPrepCard');
+      const body = app.slice(i, j);
+      return body.includes('maxHeight:"88vh"') && body.includes('flexDirection:"column"') &&
+        body.includes('flex:1,minHeight:0,overflowY:"auto"') &&
+        body.includes('calc(14px + env(safe-area-inset-bottom))');
+    })()
+  ],
+  ['가져오기 UI: 충돌 선택지는 "뒤에 추가"·"같은 운동에 세트 추가"·"취소"뿐 — 전체 덮어쓰기/삭제 옵션 없음',
+    (() => {
+      const i = app.indexOf('function PersonalWorkoutImportSheet');
+      const j = app.indexOf('function SessionPrepCard');
+      const body = app.slice(i, j);
+      return body.includes('기존 기록 뒤에 추가') && body.includes('같은 운동에 세트 추가') &&
+        body.includes('기존에 입력한 운동과 세트는 지워지지 않습니다') &&
+        body.includes('같은 운동 카드가 여러 개 있습니다. 기존 기록 뒤에 새 운동으로 추가해주세요.') &&
+        !/전체 덮어쓰기|덮어쓰기|기존 기록 삭제/.test(body);
+    })()
+  ],
+  ['가져오기 UI: 확인 버튼 더블클릭으로 두 번 반영되지 않는다(성공 시 가드를 풀지 않음 + 버튼 비활성화)',
+    (() => {
+      const i = app.indexOf('function PersonalWorkoutImportSheet');
+      const j = app.indexOf('function SessionPrepCard');
+      const body = app.slice(i, j);
+      return body.includes('const applyingRef             = useRef(false);') &&
+        body.includes('if (applyingRef.current || !drafts.length) return;') &&
+        body.includes('applyingRef.current = true; setApplying(true);') &&
+        // 성공 경로에서 가드를 되돌리면 더블클릭 2번째가 통과한다 — finally로 즉시 해제하지 않는다
+        !/finally\s*\{\s*applyingRef/.test(body) &&
+        body.includes('catch (e) { applyingRef.current = false; setApplying(false); }') &&
+        body.includes('disabled={applying}');
+    })()
+  ],
+  ['가져오기: 확정 시 로컬 exercises state만 바꾸고 Firestore 쓰기·자동 저장을 하지 않는다',
+    (() => {
+      const i = app.indexOf('function handleApplyPersonalImport');
+      const j = app.indexOf('const [showBodyPartPicker, setShowBodyPartPicker]');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        body.includes('setExercises(result.exercises);') &&
+        // 저장·전송 경로를 직접 부르지 않는다
+        !/handleSave|onSave\(|addSession|updateSession|addDoc|updateDoc|setDoc|publishSession/.test(body) &&
+        // 실패해도 기존 state를 유지한다
+        body.includes('기존 기록은 그대로입니다');
+    })()
+  ],
+  ['가져오기: 추가 Firestore 조회 없이 이미 전달된 personalWorkouts prop만 사용하고, 대표 계정·2:1에서는 버튼을 숨긴다',
+    (() => {
+      const i = app.indexOf('const importWorkout = useMemo(');
+      const j = app.indexOf('function handleUndoPersonalImport');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        body.includes('isOwner(member) ? null : pickLatestCompletedPersonalWorkout(personalWorkouts)') &&
+        body.includes("!!importOptions && sessionType !== \"2:1\"") &&
+        !/getPersonalWorkouts\(|getSessions\(|getDocs\(|onSnapshot\(/.test(body);
+    })()
+  ],
+  ['가져오기: 실행 취소는 로컬 스냅샷 1회분 복원뿐이고, 사용자가 직접 수정하기 시작하면 사라진다',
+    app.includes('const [importUndo, setImportUndo] = useState(null);') &&
+    app.includes('if (importedExercisesRef.current && exercises !== importedExercisesRef.current) setImportUndo(null);') &&
+    app.includes('setImportUndo({ exercises: before, label:') &&
+    app.includes('실행 취소</button>')
+  ],
+  ['가져오기: PT 저장 필드를 늘리지 않는다 — 개인운동 출처 id·비교값을 session 문서에 쓰지 않음',
+    !/importedFromWorkoutId|sourceWorkoutId|personalWorkoutId/.test(app) &&
+    !/importedFromWorkoutId|sourceWorkoutId|personalWorkoutId/.test(db) &&
+    // 저장 직전 정규화(화면 전용 필드 제거)는 기존 로직 그대로다
+    app.includes('const { _histIdx, _loaded, partAutoAssigned, ...rest } = e;')
+  ],
+  ['가져오기: 개인운동 원본은 읽기만 한다 — 관리자 화면에서 personalWorkouts 쓰기 함수를 호출하지 않음',
+    (() => {
+      const i = app.indexOf('function SessionScreen({ member, sessions, editData');
+      const j = app.indexOf('function PairSessionFormScreen');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        !/updatePersonalWorkoutProgress|completePersonalWorkout|deletePersonalWorkout|createPersonalWorkout/.test(body);
+    })()
+  ],
+  ['가져오기: 2:1 수업 화면(PairSessionFormScreen)은 이번 단계에서 전혀 손대지 않음',
+    (() => {
+      const i = app.indexOf('function PairSessionFormScreen');
+      const body = app.slice(i, i + 60000);
+      return i !== -1 && !/PersonalWorkoutImportSheet|applyPersonalWorkoutImport|buildPersonalWorkoutImportOptions/.test(body);
+    })()
   ],
 ];
 

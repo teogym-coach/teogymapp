@@ -105,7 +105,7 @@ try {
     'return { PERSONAL_WORKOUT_LIMITS, PERSONAL_WORKOUT_PART_OPTIONS, getPersonalWorkoutPartChipOptions, canonicalExerciseKey, normalizePersonalWorkout, normalizePersonalWorkoutSet, normalizePersonalWorkoutExercise, calculatePersonalExerciseVolume, calculatePersonalWorkoutTotals, collectPersonalWorkoutExerciseKeys, summarizePersonalWorkoutExercise, formatPersonalWorkoutPartsLabel, buildPersonalWorkoutCardSummary, getPersonalWorkoutDurationMinutes, formatPersonalWorkoutDuration, getPersonalWorkoutValidSets, getLastCompletedPersonalExerciseRecord, buildPersonalExerciseCandidates, validatePersonalWorkoutForComplete, ' +
     'normalizeComparableExercise, buildExercisePerformanceSnapshot, compareExercisePerformance, formatExerciseComparisonSummary, buildMemberExerciseComparisonIndex, formatExerciseSnapshotLine, getExerciseRecordDateKey, ' +
     'buildSessionPrepSummary, buildNextStartWeightRecommendation, getDayDiffFromDateKeys, formatElapsedDayLabel, getExerciseRecordOrder, getExerciseRecordTimeMs, ' +
-    'mkEx, mkSet, getCompletedPersonalWorkoutsLatestFirst, pickLatestCompletedPersonalWorkout, buildPersonalWorkoutImportOptions, resolveImportedMuscleTop, ' +
+    'mkEx, mkSet, getCompletedPersonalWorkoutsLatestFirst, PERSONAL_WORKOUT_IMPORT_LIST_LIMIT, buildPersonalWorkoutImportCandidates, buildPersonalWorkoutImportOptions, resolveImportedMuscleTop, ' +
     'buildImportedSessionSet, buildSessionExerciseDraftFromPersonalExercise, isBlankSessionExerciseCard, isSessionExerciseListEssentiallyEmpty, ' +
     'getSessionExerciseCanonicalKey, analyzePersonalWorkoutImportMerge, applyPersonalWorkoutImport };'
   )();
@@ -3440,10 +3440,12 @@ const checks = [
   // ── 개인운동 2차 3단계: 관리자 PT 기록 "개인운동에서 가져오기" ────────────────────
   // 자동 반영이 아니라 "트레이너가 고른 것만" 로컬 state에 넣는 기능이다. 아래 검사는
   // ① 자동 저장·자동 덮어쓰기 경로가 생기지 않았는지 ② 순수 변환이 실제로 맞는 값을 만드는지를 본다.
-  ['가져오기 대상: 최근 completed 개인운동 1건 선택 규칙을 수업 준비 카드와 공유(정렬 규칙 중복 정의 없음)',
+  ['가져오기 대상: 완료 개인운동 정렬 규칙을 수업 준비 카드와 공유(정렬 규칙 중복 정의 없음)',
     app.includes('function getCompletedPersonalWorkoutsLatestFirst') &&
-    app.includes('function pickLatestCompletedPersonalWorkout') &&
+    app.includes('function buildPersonalWorkoutImportCandidates') &&
     app.includes('const completed=getCompletedPersonalWorkoutsLatestFirst(personalWorkouts);') &&
+    // 같은 날짜 순서는 기존 개인운동 시각 우선순위(endedAt→completedAt→startedAt)를 그대로 재사용한다
+    app.includes('const ta=getExerciseRecordTimeMs(a,"personal"), tb=getExerciseRecordTimeMs(b,"personal");') &&
     // 정렬식이 두 곳에 복사되어 있지 않다
     (app.match(/w\.status==="completed"&&getExerciseRecordDateKey\(w\)/g) || []).length === 1
   ],
@@ -3451,14 +3453,105 @@ const checks = [
     const w = { id:'p1', status:'completed', workoutDate:'2026-07-29', workoutParts:['가슴','삼두'], memo:'가슴 위주',
       exercises:[{ name:'벤치프레스', muscleTop:'가슴', muscleSub:'윗가슴', equipment:'바벨',
         sets:[{setNumber:1,weight:20,reps:10},{setNumber:2,weight:22.5,reps:8}] }] };
-    const o = L.buildPersonalWorkoutImportOptions(L.pickLatestCompletedPersonalWorkout([w]));
+    const picked = L.buildPersonalWorkoutImportCandidates([w])[0];
+    const o = L.buildPersonalWorkoutImportOptions(picked.workout);
     return o && o.exerciseCount === 1 && o.totalSets === 2 && o.dateLabel === '7월 29일' && o.memo === '가슴 위주';
   }),
   pwScenario('가져오기 시나리오: 개인운동이 없거나 진행 중(in_progress)뿐이면 대상 자체가 없다(버튼 숨김)', L => {
     const inProgress = { id:'p1', status:'in_progress', workoutDate:'2026-07-29',
       exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] };
-    return L.pickLatestCompletedPersonalWorkout([]) === null &&
-           L.pickLatestCompletedPersonalWorkout([inProgress]) === null;
+    return L.buildPersonalWorkoutImportCandidates([]).length === 0 &&
+           L.buildPersonalWorkoutImportCandidates([inProgress]).length === 0;
+  }),
+
+  // ── 개인운동 2차 4단계: 여러 개인운동 기록 중 선택 ────────────────────────────
+  pwScenario('기록 선택 목록: completed만 담고 진행 중(in_progress)은 섞이지 않는다', L => {
+    const mk = (id, status, date) => ({ id, status, workoutDate:date,
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] });
+    const list = L.buildPersonalWorkoutImportCandidates([
+      mk('p1','completed','2026-07-29'), mk('p2','in_progress','2026-07-31'), mk('p3','completed','2026-07-30')]);
+    return list.length === 2 && list.every(c => c.workout.status === 'completed') &&
+      list.map(c => c.candidateId).join(',') === 'p3,p1';
+  }),
+  pwScenario('기록 선택 목록: workoutDate 최신순으로 정렬한다', L => {
+    const mk = (id, date) => ({ id, status:'completed', workoutDate:date,
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] });
+    const list = L.buildPersonalWorkoutImportCandidates([mk('a','2026-07-20'), mk('b','2026-07-31'), mk('c','2026-07-25')]);
+    return list.map(c => c.candidateId).join(',') === 'b,c,a' && list[0].dateLabel === '7월 31일';
+  }),
+  pwScenario('기록 선택 목록: 같은 날짜면 endedAt이 늦은 기록이 위로 온다', L => {
+    const mk = (id, endedAt) => ({ id, status:'completed', workoutDate:'2026-07-31', endedAt,
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] });
+    const list = L.buildPersonalWorkoutImportCandidates([
+      mk('a', '2026-07-31T09:30:00'), mk('b', '2026-07-31T19:10:00'), mk('c', '2026-07-31T13:00:00')]);
+    return list.map(c => c.candidateId).join(',') === 'b,c,a';
+  }),
+  pwScenario('기록 선택 목록: 날짜·시각이 같으면 id로 순서를 고정한다(매번 순서가 바뀌지 않는다)', L => {
+    const mk = id => ({ id, status:'completed', workoutDate:'2026-07-31', endedAt:'2026-07-31T19:10:00',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] });
+    const ids = ['pw-a','pw-c','pw-b'];
+    const once  = L.buildPersonalWorkoutImportCandidates(ids.map(mk)).map(c => c.candidateId).join(',');
+    const twice = L.buildPersonalWorkoutImportCandidates([...ids].reverse().map(mk)).map(c => c.candidateId).join(',');
+    return once === 'pw-c,pw-b,pw-a' && once === twice;
+  }),
+  pwScenario('기록 선택 목록: 최근 10건까지만 표시한다', L => {
+    const many = Array.from({ length: 14 }, (_, i) => ({ id:`p${i}`, status:'completed',
+      workoutDate:`2026-07-${String(i + 1).padStart(2, '0')}`,
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] }));
+    const list = L.buildPersonalWorkoutImportCandidates(many);
+    return L.PERSONAL_WORKOUT_IMPORT_LIST_LIMIT === 10 && list.length === 10 &&
+      list[0].dateKey === '2026-07-14' && list[9].dateKey === '2026-07-05';
+  }),
+  pwScenario('기록 선택 목록: 가져올 수 있는 종목이 하나도 없는 기록은 목록에서 뺀다(빈 다음 화면 방지)', L => {
+    const empty = { id:'p1', status:'completed', workoutDate:'2026-07-31',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:0}] }] };
+    const ok = { id:'p2', status:'completed', workoutDate:'2026-07-30',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] };
+    const list = L.buildPersonalWorkoutImportCandidates([empty, ok]);
+    return list.length === 1 && list[0].candidateId === 'p2';
+  }),
+  pwScenario('기록 선택 카드: 날짜·부위·종목 수·총 세트·운동 시간·메모 첫 줄을 기존 헬퍼 결과 그대로 쓴다', L => {
+    const w = { id:'p1', status:'completed', workoutDate:'2026-07-31', workoutParts:['가슴','삼두'],
+      durationMinutes:52, memo:'가슴 위주로 진행\n다음엔 중량 올리기',
+      exercises:[
+        { name:'벤치프레스', sets:[{weight:20,reps:10},{weight:22.5,reps:8}] },
+        { name:'딥스', sets:[{weight:null,reps:12}] }] };
+    const c = L.buildPersonalWorkoutImportCandidates([w])[0];
+    return c.dateLabel === '7월 31일' && c.partsLabel === L.formatPersonalWorkoutPartsLabel(w) && c.partsLabel === '가슴·삼두' &&
+      c.exerciseCount === 2 && c.totalSets === 3 &&
+      c.durationLabel === L.formatPersonalWorkoutDuration(L.getPersonalWorkoutDurationMinutes(w)) && c.durationLabel === '52분' &&
+      c.memoFirstLine === '가슴 위주로 진행';
+  }),
+  pwScenario('기록 선택 카드: 카드에 보이는 종목·세트 수는 실제로 가져올 수 있는 양과 일치한다(reps 0 제외)', L => {
+    const w = { id:'p1', status:'completed', workoutDate:'2026-07-31',
+      exercises:[
+        { name:'벤치프레스', sets:[{weight:20,reps:10},{weight:22.5,reps:0}] },
+        { name:'', sets:[{weight:10,reps:10}] }] };
+    const c = L.buildPersonalWorkoutImportCandidates([w])[0];
+    const o = L.buildPersonalWorkoutImportOptions(c.workout);
+    return c.exerciseCount === o.exerciseCount && c.totalSets === o.totalSets && c.exerciseCount === 1 && c.totalSets === 1;
+  }),
+  pwScenario('기록 선택 → 가져오기: 고른 기록이 그대로 다음 화면 옵션·draft로 이어진다(원본 mutate 없음)', L => {
+    const older = { id:'p1', status:'completed', workoutDate:'2026-07-20',
+      exercises:[{ name:'스쿼트', muscleTop:'하체', equipment:'바벨', sets:[{weight:60,reps:10}] }] };
+    const newer = { id:'p2', status:'completed', workoutDate:'2026-07-31',
+      exercises:[{ name:'벤치프레스', muscleTop:'가슴', equipment:'바벨', sets:[{weight:20,reps:10}] }] };
+    const snapshot = JSON.stringify([older, newer]);
+    const list = L.buildPersonalWorkoutImportCandidates([older, newer]);
+    // 기본 선택(첫 번째)이 아니라 트레이너가 고른 두 번째 기록을 그대로 넘긴다
+    const chosen = list[1];
+    const o = L.buildPersonalWorkoutImportOptions(chosen.workout);
+    const draft = L.buildSessionExerciseDraftFromPersonalExercise({
+      option:o.exercises[0], selectedSetIds:new Set([o.exercises[0].sets[0].setId]),
+      baseExercise:L.mkEx('가슴'), workoutParts:o.workoutParts, todayMuscleTop:'가슴' });
+    return chosen.candidateId === 'p1' && o.workoutId === 'p1' && draft.name === '스쿼트' &&
+      draft.sets[0].weight === '60' && JSON.stringify([older, newer]) === snapshot;
+  }),
+  pwScenario('기록 선택 목록: 원본 문서를 복사하지 않고 그대로 참조한다(사본으로 인한 값 불일치 방지)', L => {
+    const w = { id:'p1', status:'completed', workoutDate:'2026-07-31',
+      exercises:[{ name:'벤치프레스', sets:[{weight:20,reps:10}] }] };
+    const list = L.buildPersonalWorkoutImportCandidates([w]);
+    return list[0].workout === w;
   }),
   pwScenario('가져오기 시나리오: 유효 세트가 하나도 없으면 목록을 만들지 않는다(빈 모달 금지)', L => {
     const w = { id:'p1', status:'completed', workoutDate:'2026-07-29',
@@ -3664,6 +3757,8 @@ const checks = [
         body.includes('세트 선택`') && body.includes('총 ${selectedSetCount}세트 선택') &&
         // 선택 0개면 적용 버튼 비활성화
         body.includes('disabled={!selectedSetCount || applying}') &&
+        // 기록 선택 화면으로 되돌아갈 수 있다(4단계)
+        body.includes('다른 운동기록 선택') && body.includes('onClick={onBack}') &&
         // ESC / 닫기 버튼 지원
         body.includes('e.key === "Escape"') && body.includes('aria-label="닫기"') &&
         body.includes('role="dialog"') && body.includes('aria-modal="true"');
@@ -3719,13 +3814,52 @@ const checks = [
   ],
   ['가져오기: 추가 Firestore 조회 없이 이미 전달된 personalWorkouts prop만 사용하고, 대표 계정·2:1에서는 버튼을 숨긴다',
     (() => {
-      const i = app.indexOf('const importWorkout = useMemo(');
+      const i = app.indexOf('const importCandidates = useMemo(');
       const j = app.indexOf('function handleUndoPersonalImport');
       const body = app.slice(i, j);
       return i !== -1 && j > i &&
-        body.includes('isOwner(member) ? null : pickLatestCompletedPersonalWorkout(personalWorkouts)') &&
-        body.includes("!!importOptions && sessionType !== \"2:1\"") &&
+        body.includes('isOwner(member) ? [] : buildPersonalWorkoutImportCandidates(personalWorkouts)') &&
+        body.includes('importCandidates.length > 0 && sessionType !== "2:1"') &&
+        // 목록 계산은 useMemo로 한 번만 — 렌더마다 다시 만들지 않는다
+        body.includes('const importOptions = useMemo(') &&
         !/getPersonalWorkouts\(|getSessions\(|getDocs\(|onSnapshot\(/.test(body);
+    })()
+  ],
+  ['기록 선택 UI: 모달은 항상 기록 선택 화면부터 시작하고 이전 선택을 기억하지 않는다',
+    (() => {
+      const i = app.indexOf('const importCandidates = useMemo(');
+      const j = app.indexOf('function handleUndoPersonalImport');
+      const body = app.slice(i, j);
+      return body.includes('function openPersonalImport()  { setImportSelectedWorkout(null); setImportOpen(true); }') &&
+        body.includes('function closePersonalImport() { setImportOpen(false); setImportSelectedWorkout(null); }') &&
+        app.includes('onImport={canImportPersonal ? openPersonalImport : null}') &&
+        // 선택 전에는 기록 선택 화면, 선택 후에만 운동/세트 선택 화면
+        app.includes('<PersonalWorkoutRecordPickerSheet') &&
+        app.includes('onNext={setImportSelectedWorkout}') &&
+        app.includes('onBack={() => setImportSelectedWorkout(null)}');
+    })()
+  ],
+  ['기록 선택 UI: 기본 선택은 목록 첫 번째(가장 최근) · 카드 선택 변경 가능 · 다음 버튼으로만 진행',
+    (() => {
+      const i = app.indexOf('function PersonalWorkoutRecordPickerSheet');
+      const j = app.indexOf('// 개인운동 선택 모달(관리자 PT 기록 화면 전용).');
+      const body = app.slice(i, j);
+      return i !== -1 && j > i &&
+        body.includes('useState(() => candidates[0]?.candidateId || "")') &&
+        body.includes('onClick={() => setSelectedId(c.candidateId)}') &&
+        body.includes('role="radiogroup"') && body.includes('role="radio"') && body.includes('aria-checked={on}') &&
+        body.includes('onClick={() => { if (picked) onNext?.(picked.workout); }} disabled={!picked}') &&
+        // 목록 카드 표시값: 날짜 · 부위 · 종목 수 · 총 세트 · 운동 시간 · 메모 첫 줄
+        body.includes('{c.dateLabel}') && body.includes('{c.partsLabel}') &&
+        body.includes('운동 {c.exerciseCount}종목 · 총 {c.totalSets}세트') &&
+        body.includes('c.durationLabel ? ` · ${c.durationLabel}` : ""') && body.includes('{c.memoFirstLine}') &&
+        // ESC / 닫기 지원 + 목록만 스크롤하고 하단 버튼은 남는다
+        body.includes('e.key === "Escape"') && body.includes('aria-label="닫기"') &&
+        body.includes('role="dialog"') && body.includes('aria-modal="true"') &&
+        body.includes('maxHeight:"88vh"') && body.includes('flex:1,minHeight:0,overflowY:"auto"') &&
+        body.includes('calc(14px + env(safe-area-inset-bottom))') &&
+        // 이 화면은 조회·선택만 한다 — Firestore도 부모 exercises state도 건드리지 않는다
+        !/getPersonalWorkouts\(|getDocs\(|onSnapshot\(|setExercises|applyPersonalWorkoutImport/.test(body);
     })()
   ],
   ['가져오기: 실행 취소는 로컬 스냅샷 1회분 복원뿐이고, 사용자가 직접 수정하기 시작하면 사라진다',

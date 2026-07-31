@@ -66,7 +66,7 @@ try {
   const sliceUnsent = app.slice(app.indexOf('const UNSENT_SESSION_START_DATE'), app.indexOf('function buildReviewPendingList'));
   const sliceSessionRead = app.slice(app.indexOf('function getSessionReadStatus'), app.indexOf('function SessionReadBadge'));
   const sliceOnboardingStatus = app.slice(app.indexOf('const ONBOARDING_STATUS_LABEL'), app.indexOf('const DEFAULT_ADMIN_EMAIL'));
-  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceDaysAgo}\n${sliceMonthDayKo}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceOnboardingStatus}\n${sliceSessionRead}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE, getSessionReadStatus, formatSessionReadTime, summarizeSessionReadStatus, buildUnreadSessionMembers, UNREAD_SESSION_WINDOW_DAYS, hasRealFeedbackInput, getRecentFeedbackInputStats, formatRelativeActiveTime, getMemberLastActiveStatus, getInactiveAppMembers, getNoFeedbackActivityMembers, APP_USAGE_INACTIVE_GRACE_DAYS, getOnboardingStatusFromMember };`)();
+  unsentSessionLib = new Function(`${sliceKoreaDate}\n${sliceDaysAgo}\n${sliceMonthDayKo}\n${sliceFuncEx}\n${sliceOwner}\n${sliceExcluded}\n${sliceOnboardingStatus}\n${sliceSessionRead}\n${sliceUnsent}\nreturn { isTrialSessionNo, buildUnsentSessionMembers, UNSENT_SESSION_START_DATE, getSessionReadStatus, formatSessionReadTime, summarizeSessionReadStatus, buildUnreadSessionMembers, UNREAD_SESSION_WINDOW_DAYS, hasRealFeedbackInput, getRecentFeedbackInputStats, formatRelativeActiveTime, getMemberLastActiveStatus, getInactiveAppMembers, getNoFeedbackActivityMembers, APP_USAGE_INACTIVE_GRACE_DAYS, getOnboardingStatusFromMember, toMillisSafe, isAtOrAfterHomeTaskCutoff, HOME_TASK_CUTOFF_AT };`)();
 } catch (e) {
   console.error('[regression] 수업일지 미전송 헬퍼 추출 실패:', e.message);
 }
@@ -130,6 +130,10 @@ const arrEq = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.l
 const unsentMockMember = (id) => ({ id, name: id, status: 'active' });
 const unsentMockDate = daysAgoStr(1);
 const unsentToday = daysAgoStr(0);
+// 홈 "수업일지 미확인" cutoff 테스트용 — 회귀 스크립트는 항상 배포(cutoff) 이후에 실행되므로 "지금"은 항상 cutoff 이후,
+// "1년 전"은 항상 cutoff 이전으로 취급해도 안전하다.
+const unsentPublishedAfterCutoff = new Date().toISOString();
+const unsentPublishedBeforeCutoff = new Date(Date.now() - 365 * 86400000).toISOString();
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
   ...[
@@ -188,31 +192,56 @@ const checks = [
       const summary = lib.summarizeSessionReadStatus(sessions, readMap, 5);
       return summary.total === 4 && summary.readCount === 2 && summary.unreadCount === 2;
     }],
-    ['수업일지 미확인(홈): 공개+최근 14일 이내+미확인 → 목록에 포함', lib => {
+    ['수업일지 미확인(홈): 공개+최근 14일 이내+미확인+cutoff 이후 발행 → 목록에 포함', lib => {
       const members = [unsentMockMember('unread1')];
-      const sessionsMap = { unread1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      const sessionsMap = { unread1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }] };
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 1;
     }],
     ['수업일지 미확인(홈): 이미 확인한 기록은 목록에서 제외', lib => {
       const members = [unsentMockMember('read1')];
-      const sessionsMap = { read1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      const sessionsMap = { read1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }] };
       const readsByMember = { read1: { s1: { firstReadAt: unsentMockDate } } };
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, readsByMember, unsentToday).length === 0;
     }],
     ['수업일지 미확인(홈): 비공개 기록은 미확인 통계 대상이 아님(미전송 영역)', lib => {
       const members = [unsentMockMember('unpub1')];
-      const sessionsMap = { unpub1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: false }] };
+      const sessionsMap = { unpub1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: false, publishedAt: unsentPublishedAfterCutoff }] };
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
     }],
     ['수업일지 미확인(홈): 14일보다 오래된 공개·미확인 기록은 홈 알림 대상에서 제외', lib => {
       const members = [unsentMockMember('old1')];
-      const sessionsMap = { old1: [{ id: 's1', sessionNo: 3, date: daysAgoStr(20), isPublished: true }] };
+      const sessionsMap = { old1: [{ id: 's1', sessionNo: 3, date: daysAgoStr(20), isPublished: true, publishedAt: unsentPublishedAfterCutoff }] };
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
     }],
     ['수업일지 미확인(홈): 테스트 회원/대표(TEO) 개인 기록은 제외', lib => {
       const members = [{ id: 'test1', name: 'test1', status: 'active', isTestMember: true }];
-      const sessionsMap = { test1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      const sessionsMap = { test1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }] };
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
+    }],
+    // ── 홈 cutoff: 배포 기준 시각 이전 발행분은 제외, 이후 발행분만 포함(레거시·경계값 포함) ──
+    ['수업일지 미확인(홈) cutoff: 기준 시각 이전에 발행되고 미확인 → 제외', lib => {
+      const members = [unsentMockMember('beforecutoff1')];
+      const sessionsMap = { beforecutoff1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedBeforeCutoff }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
+    }],
+    ['수업일지 미확인(홈) cutoff: 기준 시각 이후에 발행되고 미확인 → 포함', lib => {
+      const members = [unsentMockMember('aftercutoff1')];
+      const sessionsMap = { aftercutoff1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 1;
+    }],
+    ['수업일지 미확인(홈) cutoff: 발행 시각(publishedAt)이 없는 레거시 기록 → 제외', lib => {
+      const members = [unsentMockMember('legacy1')];
+      const sessionsMap = { legacy1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
+    }],
+    ['수업일지 미확인(홈) cutoff: 기준 시각과 정확히 같은 시각에 발행되고 미확인 → 포함(경계값 포함)', lib => {
+      const members = [unsentMockMember('exactcutoff1')];
+      const sessionsMap = { exactcutoff1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: lib.HOME_TASK_CUTOFF_AT }] };
+      return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 1;
+    }],
+    ['홈 cutoff 헬퍼: toMillisSafe/isAtOrAfterHomeTaskCutoff가 값 없음/파싱 불가를 null(=제외)로 처리', lib => {
+      return lib.toMillisSafe(null) === null && lib.toMillisSafe(undefined) === null && lib.toMillisSafe('not-a-date') === null &&
+        lib.isAtOrAfterHomeTaskCutoff(null) === false && lib.isAtOrAfterHomeTaskCutoff(undefined) === false;
     }],
     // ── 회원 앱 이용 현황: hasRealFeedbackInput/getRecentFeedbackInputStats ──
     ['앱 이용 현황: 몸 상태 미저장(undefined) → 입력 완료 아님', lib => lib.hasRealFeedbackInput(undefined) === false],
@@ -2431,6 +2460,39 @@ const checks = [
     app.includes('const onboardingPendingList = useMemo(() => {') &&
     app.includes('title="사전 문진 미완료"') &&
     app.includes('id="home-onboarding-pending"')
+  ],
+  // ══════════════════════════════════════════════════════════════════════
+  // 홈 "오늘 해야 할 일" 배포 기준 시각(cutoff) — 수업일지 미확인·사전 문진 미완료 2개 항목만 적용,
+  // "회원앱 확인 필요"는 이미 롤링 윈도우 판정이라 제외(사용자 확인 완료)
+  // ══════════════════════════════════════════════════════════════════════
+  ['홈 cutoff: HOME_TASK_CUTOFF_AT은 고정값이고 new Date()/Date.now()를 기준점으로 재계산하지 않음',
+    /const HOME_TASK_CUTOFF_AT = new Date\("[\d-]+T[\d:]+\+09:00"\)\.getTime\(\);/.test(app) &&
+    app.includes('function toMillisSafe(value)') &&
+    app.includes('function isAtOrAfterHomeTaskCutoff(value)')
+  ],
+  ['홈 cutoff: "사전 문진 미완료"는 초대/가입 시각 또는 온보딩 초기화 시각, 안전정보 재확인은 실제 수정 시각 기준',
+    app.includes('if (st === "needs_update") return isAtOrAfterHomeTaskCutoff(m.onboardingUpdatedAt);') &&
+    app.includes('const invitedAt = m.memberAppInviteSentAt || m.memberUidLinkedAt || m.memberAppPasswordResetSentAt || null;') &&
+    app.includes('return isAtOrAfterHomeTaskCutoff(invitedAt) || isAtOrAfterHomeTaskCutoff(m.onboardingResetAt);')
+  ],
+  ['홈 cutoff: "회원앱 확인 필요"는 cutoff 미적용(이미 최근 이용/입력 부재만 보는 롤링 윈도우라 누적 백로그 없음)',
+    (() => {
+      const inactiveFn = app.slice(app.indexOf('function getInactiveAppMembers'), app.indexOf('function getNoFeedbackActivityMembers'));
+      const noFeedbackFn = app.slice(app.indexOf('function getNoFeedbackActivityMembers'), app.indexOf('function SessionReadBadge'));
+      return app.includes('function getInactiveAppMembers') && app.includes('function getNoFeedbackActivityMembers') &&
+        !inactiveFn.includes('isAtOrAfterHomeTaskCutoff') && !noFeedbackFn.includes('isAtOrAfterHomeTaskCutoff');
+    })()
+  ],
+  ['온보딩 초기화: resetMemberOnboarding이 writeBatch(문서 삭제+onboardingResetAt 기록)를 원자적으로 commit',
+    db.includes('export async function resetMemberOnboarding(memberId) {') &&
+    (() => {
+      const fn = db.slice(db.indexOf('export async function resetMemberOnboarding'), db.indexOf('export async function resetMemberOnboarding') + 1200);
+      return fn.includes('const batch = writeBatch(db);') &&
+        fn.includes('batch.delete(onboardingRef);') &&
+        fn.includes('onboardingResetAt: serverTimestamp()') &&
+        fn.includes('batch.update(memberRef, patch);') &&
+        fn.includes('await batch.commit();');
+    })()
   ],
   ['회원앱: 제출 후에도 프로필에서 사전 문진을 다시 수정할 수 있음',
     app.includes('mode="edit"') && app.includes('사전 문진 수정하기') &&

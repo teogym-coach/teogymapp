@@ -1891,21 +1891,28 @@ const ONBOARDING_PROFILE_ECHO_FIELDS = [
   "onboardingStatus", "onboardingCompletedAt", "onboardingUpdatedAt", "onboardingHasCaution",
 ];
 
+// 홈 "사전 문진 미완료" 배포 기준 시각(cutoff) 판정용 — 온보딩을 초기화한 회원은 members 문서의
+// onboardingResetAt(서버 시각)으로 "언제 다시 대상이 됐는지"를 남긴다. 초대/가입 시각(memberAppInviteSentAt 등)은
+// 초기화해도 지워지지 않아 "언제 초기화했는지"를 알 수 없으므로 별도 필드가 필요했다(App.jsx 홈 cutoff 로직 참고).
+// 문서 삭제(1)와 이 필드 기록(2)을 한 batch로 묶어, 실패 시 이 필드만 단독으로 남지 않게 한다.
 export async function resetMemberOnboarding(memberId) {
   requireUid();
+  const batch = writeBatch(db);
+
   // 1) 온보딩 답변 문서 자체를 완전히 삭제 — completed/진행 단계/입력값이 merge로 남지 않도록 한다.
   //    (이전엔 {completed:false}만 merge해서 gender·height·체중·목표 등 기존 답변이 그대로 남아있었음)
   const onboardingRef = doc(db, "members", memberId, "memberOnboarding", "main");
-  await deleteDoc(onboardingRef);
+  batch.delete(onboardingRef);
 
   // 2) 회원이 온보딩 이후 "내 정보" 화면에서 저장한 값이 members 문서에도 미러링돼 있어
   //    온보딩 답변을 지워도 이 값들이 다음 단계 기본값으로 자동 재입력되는 문제가 있었다.
   //    해당 온보딩 미러 필드만 지운다 — bodyCheck.records(체중 이력) 등 실제 기록은 그대로 유지된다.
   const memberRef = doc(db, "members", memberId);
-  const patch = { updatedAt: serverTimestamp() };
+  const patch = { updatedAt: serverTimestamp(), onboardingResetAt: serverTimestamp() };
   ONBOARDING_PROFILE_ECHO_FIELDS.forEach(f => { patch[f] = deleteField(); });
-  await updateDoc(memberRef, patch);
+  batch.update(memberRef, patch);
 
+  await batch.commit();
   return { id: "main", completed: false, reset: true };
 }
 

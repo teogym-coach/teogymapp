@@ -9455,9 +9455,9 @@ function QuickMenuTile({ icon, label, badge, onClick }) {
 }
 
 // 홈 섹션 헤더 — Apple식 큰 타이틀 + 우측 보조 링크
-function HomeSectionHead({ title, caption, actionLabel, onAction, isWide }) {
+function HomeSectionHead({ title, caption, actionLabel, onAction, isWide, compact }) {
   return (
-    <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",gap:12,marginBottom:isWide?16:12}}>
+    <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",gap:12,marginBottom:compact?10:(isWide?16:12)}}>
       <div>
         <div style={{fontFamily:DB.font,fontWeight:800,fontSize:isWide?20:17,color:DB.text,letterSpacing:"-.5px",lineHeight:1.2}}>{title}</div>
         {caption && <div style={{fontFamily:DB.font,fontWeight:500,fontSize:12.5,color:DB.faint,marginTop:4}}>{caption}</div>}
@@ -9475,7 +9475,7 @@ function HomeSectionHead({ title, caption, actionLabel, onAction, isWide }) {
 // 와이드: 세로 카드 / 모바일: Apple Reminders식 가로 행(전체 탭 영역) — 3장 구성에 최적화.
 // Compact 리스트 행 — "예쁜 카드"보다 "한눈에 보이는 체크리스트"가 목표(홈 화면 정보 밀도 개선).
 // isWide 여부와 무관하게 동일한 한 줄 행을 사용(이전엔 와이드에서 세로로 긴 별도 카드+버튼을 그려 높이가 4배 가까이 컸음).
-function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="mint", onClick, isWide }) {
+function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="mint", onClick, isWide, compact }) {
   const done = !count;
   const tones = {
     mint:  { fg:DB.mintSoft, bg:"rgba(57,199,184,.10)" },
@@ -9491,7 +9491,7 @@ function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="
     <div onClick={done?undefined:onClick} title={done?(doneDesc||"모두 완료됐어요"):desc}
       style={{
         background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,
-        padding:isWide?"10px 14px":"9px 12px",boxShadow:DB.shadow,
+        padding:compact?"8px 14px":(isWide?"10px 14px":"9px 12px"),boxShadow:DB.shadow,
         display:"flex",alignItems:"center",gap:10,
         cursor:done?"default":"pointer",opacity:done?.7:1,
       }}>
@@ -9848,6 +9848,11 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
 
   // "사전 문진 미완료" — 회원앱 가입은 했지만 아직 문진을 마치지 않은 회원 + 첫 수업이 임박한 미완료 회원.
   // members에 미러된 온보딩 상태만 사용하므로 홈에서 서브컬렉션을 추가로 읽지 않는다.
+  // + HOME_TASK_CUTOFF_AT 이후: "account_created/in_progress"(문진 미시작)는 초대·가입 시각(memberAppInviteSentAt 등,
+  // getInactiveAppMembers와 동일 필드) 또는 온보딩 초기화 시각(onboardingResetAt, resetMemberOnboarding이 기록)이
+  // 기준 시각 이후일 때만 포함하고, "needs_update"(제출 후 안전 정보 수정)는 실제 수정 시각(onboardingUpdatedAt,
+  // 완료·수정 시 항상 갱신됨)이 기준 시각 이후일 때만 포함한다. 첫 수업 임박(firstSoon)은 기준 시각과 무관하게
+  // 이미 향후 7일 이내로만 좁혀진 롤링 알림이라 그대로 유지한다. 관련 시각이 전혀 없는 기존 회원은 항상 제외.
   const onboardingPendingList = useMemo(() => {
     const soon = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
     return regularHomeMembers.filter(m => {
@@ -9855,8 +9860,13 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
       const st = getOnboardingStatusFromMember(m);
       if (st === "completed" || st === "legacy") return false;
       const firstSoon = m.firstSessionDate && m.firstSessionDate >= todayKST && m.firstSessionDate <= soon;
-      // 가입까지 마친 회원은 항상, 초대 전/발송 단계는 첫 수업이 임박했을 때만 알린다(과알림 방지)
-      return st === "account_created" || st === "in_progress" || st === "needs_update" || firstSoon;
+      if (firstSoon) return true; // 첫 수업 임박 알림은 기존 그대로(기준 시각 무관)
+      if (st === "needs_update") return isAtOrAfterHomeTaskCutoff(m.onboardingUpdatedAt);
+      if (st === "account_created" || st === "in_progress") {
+        const invitedAt = m.memberAppInviteSentAt || m.memberUidLinkedAt || m.memberAppPasswordResetSentAt || null;
+        return isAtOrAfterHomeTaskCutoff(invitedAt) || isAtOrAfterHomeTaskCutoff(m.onboardingResetAt);
+      }
+      return false; // invited/not_invited 등은 firstSoon이 아니면 기존과 동일하게 대상 아님
     }).map(m => ({
       m,
       obStatus: getOnboardingStatusFromMember(m),
@@ -10082,6 +10092,15 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const GAP = isWide ? 38 : 28;   // 섹션 간 여백 — 여백 자체가 디자인이 되도록 기존보다 15~20% 여유
   const GAPM = 14;                // 같은 그룹 내 카드 간 여백
 
+  // iPad 가로모드("오늘 해야 할 일" 카드 7개가 한 줄로 밀려 잘리던 문제) 대응 — 사이드바(AdminSidebar, 세로 190px/가로 236px)와
+  // 좌우 패딩(PAD 상의 38px×2 / 18px×2)까지 뺀 "실제 카드가 배치되는 폭"을 기준으로 열 수를 정한다(창 폭 자체가 아니라).
+  // 넓은 가로모드(iPad Pro 12.9" 1366px 등, 콘텐츠 폭 약 1054px) → 4열, 좁은 가로모드(iPad 1024px 등, 콘텐츠 폭 약 712px) → 3열.
+  // 세로모드·모바일은 기존 그대로(2열/1열) 유지 — isWide/isPortrait 자체는 다른 레이아웃과 공유하므로 건드리지 않는다.
+  const landscapeWide = isWide && !isPortrait;
+  const homeTaskSideW = isWide ? (isPortrait ? 190 : 236) : 0;
+  const homeTaskContentW = isWide ? Math.min(winW - homeTaskSideW, 1240) - 76 : winW - 36;
+  const homeTaskCols = !isWide ? 1 : (isPortrait ? 2 : (homeTaskContentW >= 860 ? 4 : 3));
+
   const dateStr = new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"long"});
   const aiTip = buildAiCoachingTip(todaySummary);
   const aiMember = todaySummary.attention[0]?.member || null;
@@ -10240,28 +10259,29 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
              Hero/오늘의 한 줄 카드는 업무 효율 우선 개편으로 삭제(하루 1회성 정보 + AI 코치와 중복) — 첫 화면 최상단으로 승격.
              "회원 입력 확인"은 벨 아이콘·알림 Drawer·"체크가 필요한 회원" 카드와 역할이 중복돼 제거하고 자리를
              "수업일지 미전송"으로 교체(기존 isPublished 필드 재사용, 새 필드 없음), "후기 미작성"을 3번째로 추가
-             (reviewStatus 필드 재사용). "2:1 수업 정리"는 미정리 건이 있을 때만 표시 — 카드 수에 맞춰 열 수를
-             그대로 맞춰 빈 칸을 남기지 않는다. 3개(카드 수 가변) 카드는 실제 가로모드(isWide && !isPortrait)에서만
-             한 줄 균등 배치하고, 태블릿 세로처럼 폭은 넓지만 세로로 긴 화면(isWide && isPortrait)은 2열로 줄인다. ═══ */}
-        <div style={{marginBottom:GAP}}>
-          <HomeSectionHead isWide={isWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
-          <div style={{display:"grid",gridTemplateColumns:!isWide?"1fr":(isPortrait?"repeat(2,1fr)":`repeat(${5+(onboardingPendingList.length>0?1:0)+(draftPair>0?1:0)},1fr)`),gap:isWide?10:6}}>
-            <TodayActionCard isWide={isWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={scrollToSection("home-next-booking")} />
-            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unsentSessionRows.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={scrollToSection("home-unsent-sessions")} />
-            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={unreadSessionRows.length} unit="명" title="수업일지 미확인" desc="전송했지만 회원이 아직 안 봤어요" doneDesc="전송한 수업일지를 모두 확인했어요" cta="확인하기" onClick={scrollToSection("home-unread-sessions")} />
-            <TodayActionCard isWide={isWide} icon={sc3} tone="amber" count={appUsageCheckRows.length} unit="명" title="회원앱 확인 필요" desc="최근 이용 흔적이나 입력이 뜸해요" doneDesc="모든 회원이 앱을 꾸준히 이용하고 있어요" cta="확인하기" onClick={scrollToSection("home-appusage-check")} />
-            <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
+             (reviewStatus 필드 재사용). "2:1 수업 정리"는 미정리 건이 있을 때만 표시.
+             열 수는 카드 개수(5~7개 가변)에 맞춰 한 줄로 욱여넣지 않고 homeTaskCols(실제 콘텐츠 폭 기준 4/3/2/1)로 고정하고,
+             CSS Grid 자동 줄바꿈에 맡긴다 — 7개+4열이면 4+3, 7개+3열이면 3+3+1로 자연스럽게 여러 줄이 된다.
+             minmax(0,1fr)로 각 트랙의 최소폭을 0으로 둬 카드가 화면 밖으로 밀리지 않고 제목 말줄임(TodayActionCard)이 정상 동작하게 한다. ═══ */}
+        <div style={{marginBottom:landscapeWide?22:GAP}}>
+          <HomeSectionHead isWide={isWide} compact={landscapeWide} title="오늘 해야 할 일" caption="숫자가 아니라 행동이 먼저 — 지금 필요한 것부터" />
+          <div style={{display:"grid",gridTemplateColumns:`repeat(${homeTaskCols}, minmax(0,1fr))`,gap:landscapeWide?8:(isWide?10:6)}}>
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="mint" count={nextBookingList.length} unit="명" title="다음 예약 필요" desc="다음 일정을 등록해주세요" doneDesc="모든 회원의 다음 예약이 등록됐어요" cta="확인하기" onClick={scrollToSection("home-next-booking")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={unsentSessionRows.length} unit="건" title="수업일지 미전송" desc="회원에게 아직 전송하지 않았어요" doneDesc="모든 수업일지가 전송됐어요" cta="확인하기" onClick={scrollToSection("home-unsent-sessions")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={unreadSessionRows.length} unit="명" title="수업일지 미확인" desc="전송했지만 회원이 아직 안 봤어요" doneDesc="전송한 수업일지를 모두 확인했어요" cta="확인하기" onClick={scrollToSection("home-unread-sessions")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={appUsageCheckRows.length} unit="명" title="회원앱 확인 필요" desc="최근 이용 흔적이나 입력이 뜸해요" doneDesc="모든 회원이 앱을 꾸준히 이용하고 있어요" cta="확인하기" onClick={scrollToSection("home-appusage-check")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
             {onboardingPendingList.length > 0 && (
-              <TodayActionCard isWide={isWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
+              <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
             )}
             {draftPair > 0 && (
-              <TodayActionCard isWide={isWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
+              <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc5} tone="amber" count={draftPair} unit="건" title="2:1 수업 정리" desc="분배가 남았어요" doneDesc="분배가 모두 정리됐어요" cta="정리하기" onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
             )}
           </div>
         </div>
 
         {/* ═══ 오늘 수업 + (체크 필요 회원 → AI 코칭) ═══ */}
-        <div style={{display:"grid",gridTemplateColumns:isWide?"1.5fr 1fr":"1fr",gap:isWide?20:GAPM,alignItems:"start",marginBottom:GAP}}>
+        <div style={{display:"grid",gridTemplateColumns:isWide?"1.5fr 1fr":"1fr",gap:isWide?20:GAPM,alignItems:"start",marginBottom:landscapeWide?22:GAP}}>
 
           {/* 오늘 수업 — Apple Calendar식 그룹 리스트 (박스 나열 대신 하나의 그룹 + 헤어라인) */}
           <div style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:DB.radius,padding:isWide?"24px 28px":"20px 18px",boxShadow:DB.shadow}}>
@@ -10818,6 +10838,39 @@ function toUnsentCheckDateKey(raw) {
   if (typeof raw === "number") return getKoreaDateString(new Date(raw)); // 숫자 timestamp(ms)
   return String(raw).slice(0, 10);
 }
+
+// ════════════════════════════════════════════════════
+// 홈 "오늘 해야 할 일" 신규 데이터 판정 공통 헬퍼 — "수업일지 미확인"·"사전 문진 미완료" 2개 항목이 공유한다
+// ("회원앱 확인 필요"는 최근 이용/입력 부재를 보는 롤링 윈도우 판정이라 이 cutoff 대상이 아니다 — 홈 화면 주석 참고).
+// Firestore Timestamp/JS Date/ISO 문자열/숫자 ms 등 실제 저장 형태가 섞여 있어도 안전하게 ms로 변환한다.
+// ════════════════════════════════════════════════════
+// toComparableTime(회원 이용현황 판정용, 이 파일 아래쪽에 별도 정의)과 달리 값이 없거나 파싱 불가하면
+// 0(1970년)이 아니라 null을 반환한다 — "판단 불가한 레거시 데이터"와 "1970년"을 구분해, 호출부가 null이면
+// 항상 제외 처리하도록 강제하기 위함이다.
+function toMillisSafe(value) {
+  if (value == null) return null;
+  if (typeof value?.toDate === "function") {
+    const d = value.toDate();
+    return Number.isNaN(d?.getTime?.()) ? null : d.getTime();
+  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+  return null;
+}
+// 이번 수정 배포 기준 시각(KST, 고정값) — 이 시각 이후 발생(수업일지 발행·사전 문진 초대/초기화)한 데이터만
+// "수업일지 미확인"·"사전 문진 미완료" 홈 집계 대상에 포함하고, 이 시각 이전의 기존 누적 데이터는 제외한다.
+// new Date()/Date.now()를 기준점으로 쓰지 않고 배포 직전 실제 KST 시각으로 1회 확정한 값이며, 이후 절대 바뀌지 않는다.
+const HOME_TASK_CUTOFF_AT = new Date("2026-07-31T12:30:00+09:00").getTime(); // 2026-07-31 12:30:00 KST 확정(작업 요약 참고)
+// 기준 시각과 같거나 이후면 포함(경계값 포함) — 값이 없어 판단 불가능한 레거시 데이터는 항상 제외(false)한다.
+function isAtOrAfterHomeTaskCutoff(value) {
+  const ms = toMillisSafe(value);
+  return ms != null && ms >= HOME_TASK_CUTOFF_AT;
+}
+
 // 0회차(체험 수업) 판별 — sessionNo가 숫자 0 또는 "0"·"0회차" 같은 문자열 형태로 저장된 경우만 0회차로 인정한다.
 // 값이 비어있거나("") 숫자로 해석할 수 없으면 절대 0회차로 간주하지 않는다(회차 정보 없음 = 기존 판정 그대로 유지).
 function isTrialSessionNo(sessionNo) {
@@ -10864,6 +10917,9 @@ function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayK
 // 이미 회원에게 공개(isPublished)됐지만 회원이 아직 상세를 열어보지 않은 기록만 대상 — 오래된 기록이 계속 쌓이지
 // 않도록 최근 14일 이내 공개분만 홈 알림 대상으로 삼는다(전체 미확인은 회원 상세/히스토리 "회원 미확인" 필터에서 확인).
 // sessionsMap은 회원별 최근 5세션만 담고 있어 그 범위 안에서만 판별한다(buildUnsentSessionMembers와 동일한 제약).
+// + HOME_TASK_CUTOFF_AT 이후: 회원 확인 여부와 별개로, 실제 발행 시각(publishedAt, db.js publishSession이
+// serverTimestamp로 기록)이 기준 시각 이후인 기록만 홈 집계에 포함한다 — 세션 날짜(date)가 아니라 "회원에게 실제로
+// 공개된 시각"을 기준으로 삼는다. publishedAt이 없는(기준 시각 도입 이전에 발행된) 레거시 기록은 판단 불가로 제외.
 const UNREAD_SESSION_WINDOW_DAYS = 14;
 function buildUnreadSessionMembers(members, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST) {
   const sinceKey = getKoreaDateString(new Date(Date.now() - (UNREAD_SESSION_WINDOW_DAYS - 1) * 86400000));
@@ -10881,6 +10937,7 @@ function buildUnreadSessionMembers(members, liveMembersById, sessionsMap, sessio
       if (!s.isPublished) return; // 비공개는 "미전송" 영역이지 "미확인" 대상이 아니다
       const d = toUnsentCheckDateKey(s.date || s.sessionDate || s.createdAt);
       if (!d || d < sinceKey || d > todayKST) return;
+      if (!isAtOrAfterHomeTaskCutoff(s.publishedAt)) return; // 기준 시각 이후 실제 발행분만(레거시·기준 이전 발행 제외)
       if (getSessionReadStatus(s.id, readMap).isRead) return;
       unreadCount += 1;
       if (d > latestDate) latestDate = d;

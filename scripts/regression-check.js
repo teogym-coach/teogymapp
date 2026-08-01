@@ -95,7 +95,7 @@ try {
   const sliceDateLabel = app.slice(app.indexOf('const KOREAN_DAY_NAMES'), app.indexOf('function rpeDescription'));
   const sliceWeightFmt = app.slice(app.indexOf('function formatWeightValue'), app.indexOf('function ChangeReportMetric'));
   const sliceSuggestConst = app.slice(app.indexOf('const EX_MUSCLE_SUGGEST'), app.indexOf('const EXERCISE_LIBRARY'));
-  const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function getInitialSessionParts'));
+  const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function normalizeToKoreaDateKey'));
   // 비교 헬퍼(개인운동 2차 1단계)는 방향 라벨에 formatMonthDayKo를 쓰므로 그 원본 구간도 같은 스코프에 함께 넣는다.
   const sliceMonthDayKo = app.slice(app.indexOf('function formatMonthDayKo'), app.indexOf('function formatWhenLabel'));
   // 슬라이스 끝 경계는 첫 JSX 컴포넌트 직전(MemberExerciseComparison)까지다 — JSX가 섞이면 new Function 파싱이 깨진다.
@@ -115,6 +115,25 @@ try {
 function pwScenario(name, fn) {
   if (!personalWorkoutLib) return [name, false];
   try { return [name, !!fn(personalWorkoutLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
+// ── 신규 수업 기록 초기값(날짜·오늘의 운동 부위): 실제 실행 시나리오 검증 ──
+// 회원 상세 "다음 수업 준비"(nextWorkoutDate/nextWorkoutPart)가 신규 수업일지 초기값으로 그대로 연결되는지,
+// 기존 기록 수정은 절대 덮이지 않는지를 원본 소스 그대로 슬라이스해 실행한다.
+let sessionInitLib = null;
+try {
+  const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceTypes = app.slice(app.indexOf('const SESSION_TYPE_OPTIONS'), app.indexOf('function calculateKoreanAgeFromBirthYear'));
+  const sliceNextParts = app.slice(app.indexOf('const NEXT_PT_PART_OPTIONS'), app.indexOf('function normalizeEmail'));
+  const sliceInit = app.slice(app.indexOf('function normalizeToKoreaDateKey'), app.indexOf('function PersonalWorkoutRecordPickerSheet'));
+  sessionInitLib = new Function(`${sliceKoreaDate}\n${sliceTypes}\n${sliceNextParts}\n${sliceInit}\nreturn { getInitialNewSessionValues, normalizeToKoreaDateKey, parseNextParts, SESSION_BODY_PART_OPTIONS, normalizeTypes, getKoreaDateString };`)();
+} catch (e) {
+  console.error('[regression] 신규 수업 초기값 헬퍼 추출 실패:', e.message);
+}
+function siScenario(name, fn) {
+  if (!sessionInitLib) return [name, false];
+  try { return [name, !!fn(sessionInitLib)]; }
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
@@ -3982,6 +4001,58 @@ const checks = [
       return i !== -1 && !/PersonalWorkoutImportSheet|applyPersonalWorkoutImport|buildPersonalWorkoutImportOptions/.test(body);
     })()
   ],
+  ['수업 기록 화면: 신규 기록 날짜·오늘의 운동 부위 초기값이 getInitialNewSessionValues 통합 헬퍼를 통해 계산됨',
+    app.includes('const initialSessionValues = getInitialNewSessionValues({') &&
+    app.includes('const [date,           setDate]           = useState(initialSessionValues.date);') &&
+    app.includes('const [selectedTypes,  setSelectedTypes]  = useState(initialSessionValues.selectedTypes);')
+  ],
+  siScenario('신규 기록 초기값 시나리오A: 다음 수업 날짜+부위 모두 저장 → 둘 다 자동 적용', lib => {
+    const member = { nextWorkoutDate: '2026-08-03', nextWorkoutPart: '어깨 · 가슴' };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return r.date === '2026-08-03' && JSON.stringify(r.selectedTypes) === JSON.stringify(['어깨', '가슴']);
+  }),
+  siScenario('신규 기록 초기값 시나리오B: 날짜만 저장 → 날짜만 자동 적용, 부위는 빈 선택(기존 기본 동작)', lib => {
+    const member = { nextWorkoutDate: '2026-08-03' };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return r.date === '2026-08-03' && r.selectedTypes.length === 0;
+  }),
+  siScenario('신규 기록 초기값 시나리오C: 부위만 저장 → 오늘 날짜 유지, 부위만 자동 선택', lib => {
+    const member = { nextWorkoutPart: '어깨 · 가슴' };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return r.date === '2026-08-01' && JSON.stringify(r.selectedTypes) === JSON.stringify(['어깨', '가슴']);
+  }),
+  siScenario('신규 기록 초기값 시나리오D: 다음 수업 준비 값이 전혀 없음 → 오늘 날짜 + 빈 선택(기존 기본 동작 유지)', lib => {
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member: {}, todayStr: '2026-08-01' });
+    return r.date === '2026-08-01' && r.selectedTypes.length === 0;
+  }),
+  siScenario('신규 기록 초기값 시나리오E: 기존 기록 수정 → 다음 수업 준비와 무관하게 그 기록에 저장된 날짜·부위를 그대로 유지', lib => {
+    const member = { nextWorkoutDate: '2026-08-03', nextWorkoutPart: '어깨 · 가슴' };
+    const editingSession = { id: 'sess1', date: '2026-07-31', selectedTypes: ['등'] };
+    const r = lib.getInitialNewSessionValues({ editingSession, member, todayStr: '2026-08-01' });
+    return r.date === '2026-07-31' && JSON.stringify(r.selectedTypes) === JSON.stringify(['등']);
+  }),
+  siScenario('신규 기록 초기값: 레거시 필드(nextPtDate/nextPtPart)도 nextWorkoutDate/Part가 없을 때 대체로 인식된다', lib => {
+    const member = { nextPtDate: '2026-08-05', nextPtPart: '하체' };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return r.date === '2026-08-05' && JSON.stringify(r.selectedTypes) === JSON.stringify(['하체']);
+  }),
+  siScenario('신규 기록 초기값: NEXT_PT_PART_OPTIONS 전용 값(팔/코어 등)은 오늘의 운동 부위 UI 값이 아니므로 걸러지고, 대응되는 값만 적용', lib => {
+    const member = { nextWorkoutPart: '어깨 · 팔 · 코어' };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return JSON.stringify(r.selectedTypes) === JSON.stringify(['어깨']);
+  }),
+  siScenario('신규 기록 초기값 시나리오H: Firestore Timestamp({seconds}) 날짜도 한국 기준 자정 경계에서 하루 밀리지 않는다', lib => {
+    // 2026-08-03 00:30 KST = 2026-08-02 15:30 UTC — toISOString 기반이면 하루 밀릴 수 있는 경계 시각
+    const seconds = Math.floor(Date.UTC(2026, 7, 2, 15, 30) / 1000);
+    const member = { nextWorkoutDate: { seconds } };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return r.date === '2026-08-03';
+  }),
+  siScenario('신규 기록 초기값: 날짜가 Date 객체로 저장돼 있어도 한국 기준 자정 경계에서 하루 밀리지 않는다', lib => {
+    const member = { nextWorkoutDate: new Date(Date.UTC(2026, 7, 2, 15, 30)) }; // KST 2026-08-03 00:30
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return r.date === '2026-08-03';
+  }),
 ];
 
 let failed = 0;

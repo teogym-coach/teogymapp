@@ -15645,18 +15645,45 @@ function suggestMuscle(name, classifications) {
   return null;
 }
 
-// 신규 수업 기록 시작 시 "오늘의 운동 부위" 초기값을 결정한다.
-// 우선순위: ① 기존 수업 수정이면 그 수업에 저장된 부위만 사용(다른 값으로 절대 덮지 않음)
-//          ② 신규 기록이면 같은 날짜에 저장된 "다음 수업 준비" 부위(nextWorkoutPart)를 초기값으로 사용
-//          ③ 둘 다 없으면 빈 선택 상태
+// "다음 수업 준비" 날짜는 실제로는 <input type="date">에서만 저장되어 항상 "YYYY-MM-DD" 문자열이지만,
+// Firestore Timestamp/Date 객체/{seconds} 형태로 들어와도 안전하게 한국 날짜 문자열로 정규화한다.
+// toISOString()은 UTC 기준이라 자정 근처 KST 시각에서 하루가 밀릴 수 있어 getKoreaDateString(Intl Asia/Seoul)을 쓴다.
+function normalizeToKoreaDateKey(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^\d{4}-\d{2}-\d{2}/);
+    if (m) return m[0];
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? "" : getKoreaDateString(d);
+  }
+  if (value instanceof Date) return isNaN(value.getTime()) ? "" : getKoreaDateString(value);
+  if (typeof value.toDate === "function") {
+    try { return getKoreaDateString(value.toDate()); } catch { return ""; }
+  }
+  if (typeof value.seconds === "number") return getKoreaDateString(new Date(value.seconds * 1000));
+  return "";
+}
+// 신규 수업 기록 시작 시 "날짜"와 "오늘의 운동 부위" 초기값을 결정한다.
+// 우선순위: ① 기존 수업 수정(editingSession 존재)이면 그 수업에 저장된 날짜·부위만 사용(다른 값으로 절대 덮지 않음)
+//          ② 신규 기록이면 회원에게 저장된 "다음 수업 준비" 날짜(nextWorkoutDate)·부위(nextWorkoutPart)를
+//             각각 독립적으로 초기값에 반영한다 — 한쪽만 저장돼 있어도 그 하나만 적용된다.
+//          ③ 값이 없으면 오늘 날짜·빈 선택 상태(기존 기본 동작)
 // nextWorkoutPart는 NEXT_PT_PART_OPTIONS 값(예: "팔","코어","전신","교정")까지 포함할 수 있지만
 // "오늘의 운동 부위" UI는 SESSION_BODY_PART_OPTIONS만 다루므로, 두 옵션 목록에 공통으로 존재하는
 // 값만 그대로 채택하고(이두/삼두 등) 대응 관계가 불분명한 값은 새 매핑을 만들지 않고 걸러낸다.
-function getInitialSessionParts({ editingSession, sessionDate, member }) {
-  if (editingSession) return normalizeTypes(editingSession.selectedTypes || editingSession.type);
-  const nextDate = String(member?.nextWorkoutDate || member?.nextPtDate || "").slice(0, 10);
-  if (!nextDate || nextDate !== String(sessionDate || "").slice(0, 10)) return [];
-  return parseNextParts(member?.nextWorkoutPart || member?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
+function getInitialNewSessionValues({ editingSession, member, todayStr }) {
+  if (editingSession) {
+    return {
+      date: editingSession.date || todayStr,
+      selectedTypes: normalizeTypes(editingSession.selectedTypes || editingSession.type),
+    };
+  }
+  const nextDateKey = normalizeToKoreaDateKey(member?.nextWorkoutDate || member?.nextPtDate);
+  const nextParts = parseNextParts(member?.nextWorkoutPart || member?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
+  return {
+    date: nextDateKey || todayStr,
+    selectedTypes: nextParts,
+  };
 }
 // 수업 기록 화면 상단 "오늘 수업 준비" 카드 (개인운동 2차 2단계, 관리자 전용).
 // 조회 + 추천 표시 전용이다 — 이 컴포넌트는 onChange/onSave 계열 콜백을 하나도 받지 않으므로
@@ -16129,13 +16156,16 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
 
   const [trainerName,    setTrainerName]    = useState(editData?.trainerName    || last?.trainerName    || "김태오");
   const [gymName,        setGymName]        = useState(editData?.gymName        || last?.gymName        || "테오짐");
-  const [date,           setDate]           = useState(editData?.date           || new Date().toISOString().split("T")[0]);
-  const [sessionNo,      setSessionNo]      = useState(editData?.sessionNo !== undefined ? editData.sessionNo : (last ? Number(last.sessionNo||0)+1 : 1));
-  const [selectedTypes,  setSelectedTypes]  = useState(() => getInitialSessionParts({
+  // 날짜·"오늘의 운동 부위" 초기값 — 신규 기록이면 회원의 "다음 수업 준비"(nextWorkoutDate/nextWorkoutPart)를 반영한다.
+  // useState 초기값 계산에만 쓰이므로 이후 재렌더링에서 다시 계산돼도 이미 정해진 state를 덮어쓰지 않는다.
+  const initialSessionValues = getInitialNewSessionValues({
     editingSession: editData,
-    sessionDate: editData?.date || new Date().toISOString().split("T")[0],
     member,
-  }));
+    todayStr: new Date().toISOString().split("T")[0],
+  });
+  const [date,           setDate]           = useState(initialSessionValues.date);
+  const [sessionNo,      setSessionNo]      = useState(editData?.sessionNo !== undefined ? editData.sessionNo : (last ? Number(last.sessionNo||0)+1 : 1));
+  const [selectedTypes,  setSelectedTypes]  = useState(initialSessionValues.selectedTypes);
   const [intensity,      setIntensity]      = useState(editData?.intensity      || "중강도");
   const [condition,      setCondition]      = useState(editData?.condition      || "상");
   const [exercises,      setExercises]      = useState(() => {

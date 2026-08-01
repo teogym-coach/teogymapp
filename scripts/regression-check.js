@@ -203,6 +203,11 @@ const checks = [
       };
       return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 2;
     }],
+    ['수업일지 미전송(홈): teo(대표) 개인 기록은 조건을 만족해도 제외(isExcludedAdminMember)', lib => {
+      const members = [{ id: 'teo_unsent', name: 'teo_unsent', status: 'active', isOwner: true }];
+      const sessionsMap = { teo_unsent: [{ sessionNo: 1, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
     ['수업일지 회원 확인: 읽음 기록이 없으면 getSessionReadStatus가 isRead:false를 반환', lib => {
       return lib.getSessionReadStatus('s1', {}).isRead === false;
     }],
@@ -249,8 +254,16 @@ const checks = [
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
     }],
     ['수업일지 미확인(홈): 테스트 회원/대표(TEO) 개인 기록은 제외', lib => {
-      const members = [{ id: 'test1', name: 'test1', status: 'active', isTestMember: true }];
-      const sessionsMap = { test1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }] };
+      const members = [
+        { id: 'test1', name: 'test1', status: 'active', isTestMember: true },
+        { id: 'teo_unread', name: 'teo_unread', status: 'active', isOwner: true },
+      ];
+      const sessionsMap = {
+        test1: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }],
+        teo_unread: [{ id: 's1', sessionNo: 3, date: unsentMockDate, isPublished: true, publishedAt: unsentPublishedAfterCutoff }],
+      };
+      // teo(isOwner)도 회원전용앱에서 실제로 운동일지를 확인할 수 있게 됐지만(canUseMemberLinkedFeatures),
+      // 홈 "수업일지 미확인" 운영 집계에서는 isExcludedAdminMember로 계속 제외되어야 한다.
       return lib.buildUnreadSessionMembers(members, {}, sessionsMap, {}, unsentToday).length === 0;
     }],
     // ── 홈 cutoff: 배포 기준 시각 이전 발행분은 제외, 이후 발행분만 포함(레거시·경계값 포함) ──
@@ -365,6 +378,11 @@ const checks = [
       const sessionsMap = { wfb1: [{ id: 's1', isPublished: true }] };
       return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 1;
     }],
+    ['앱 이용 현황(홈): teo(대표) 개인 기록은 몸 상태 미입력 조건을 만족해도 제외', lib => {
+      const members = [{ id: 'teo_nofb', name: 'teo_nofb', status: 'active', isOwner: true }];
+      const sessionsMap = { teo_nofb: [{ id: 's1', isPublished: true }] };
+      return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
   ].map(([name, fn]) => usScenario(name, fn)),
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
   ['대표 운동기록 저장', app.includes('isOwner') && app.includes('OWNER_LEGACY_NAME') && app.includes('대표님')],
@@ -412,10 +430,15 @@ const checks = [
     firestoreRules.includes('request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastReadAt", "lastReadSource", "readCount"])')
   ],
   ['관리자앱: 히스토리 카드 회원 확인 배지 + 회원 상세 요약 + 홈 "수업일지 미확인"이 모두 공통 헬퍼(getSessionReadStatus 등) 재사용, 각자 재구현하지 않음',
-    app.includes('function SessionReadBadge({ session, readMap, compact=false })') &&
-    app.includes('<SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} />') &&
+    app.includes('function SessionReadBadge({ session, readMap, compact=false, ownerLabel=false })') &&
+    app.includes('<SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} ownerLabel={isOwner(member)} />') &&
     app.includes('const readSummary = summarizeSessionReadStatus(sessions, sessionReadsMap, 5);') &&
     app.includes('function buildUnreadSessionMembers(members, liveMembersById, sessionsMap, sessionReadsMapByMember, todayKST)')
+  ],
+  ['관리자앱: teo(대표)도 회원 연동 기능(확인 배지 등)을 canUseMemberLinkedFeatures로 항상 사용 가능 — isOwner로 통째로 숨기지 않음',
+    app.includes('function canUseMemberLinkedFeatures(member) {') &&
+    app.includes('{canUseMemberLinkedFeatures(member) && <SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} ownerLabel={isOwner(member)} />}') &&
+    !app.includes('{!isOwner(member) && <SessionReadBadge')
   ],
 
   // ── 회원 앱 이용 현황(관리자 전용 참고 지표) ──
@@ -431,15 +454,17 @@ const checks = [
     db.includes('query(collection(db, "members", memberId, "appUsageDays"), where("date", ">=", cutoffKey))') &&
     db.includes('export async function getMemberAppUsageSummary(memberId)')
   ],
-  ['회원 앱 이용 현황: 회원앱은 home/workout/health/analysis/profile 탭 진입 시에만 기록하고 세션당 최소 10분 간격(sessionStorage)으로 스로틀 — 온보딩 중·TEO·테스트 회원은 제외',
+  ['회원 앱 이용 현황: 회원앱은 home/workout/health/analysis/profile 탭 진입 시에만 기록하고 세션당 최소 10분 간격(sessionStorage)으로 스로틀 — 온보딩 중·테스트 회원은 제외(TEO 대표는 실사용 검증을 위해 더 이상 제외하지 않음)',
     app.includes('const APP_USAGE_MIN_INTERVAL_MS=10*60*1000;') &&
-    app.includes('if(!profile?.id||profile.memberUid!==auth.currentUser?.uid||!onboardingDone||isExcludedAdminMember(profile))return;') &&
-    app.includes('recordMemberAppUsage(profile.id,tab).catch(()=>{});')
+    app.includes('if(!profile?.id||profile.memberUid!==auth.currentUser?.uid||!onboardingDone||profile.isTestMember===true)return;') &&
+    app.includes('recordMemberAppUsage(profile.id,tab).catch(()=>{});') &&
+    !app.includes('isExcludedAdminMember(profile))return;')
   ],
-  ['회원 앱 이용 현황: 관리자앱 회원 상세 카드가 최근 이용/최근 30일 이용/수업일지 확인/몸 상태 입력을 모두 기존 계산 함수 재사용으로 표시(회원앱에는 노출 안 함)',
-    app.includes('const secAppUsage = isOwner(member) ? null : (() => {') &&
+  ['회원 앱 이용 현황: 관리자앱 회원 상세 카드가 최근 이용/최근 30일 이용/수업일지 확인/몸 상태 입력을 모두 기존 계산 함수 재사용으로 표시(회원앱에는 노출 안 함) — teo(대표)도 canUseMemberLinkedFeatures로 동일하게 표시',
+    app.includes('const secAppUsage = canUseMemberLinkedFeatures(member) ? (() => {') &&
     app.includes('const lastActive = getMemberLastActiveStatus(memberAppUsage);') &&
-    app.includes('const feedbackStats = getRecentFeedbackInputStats(sessions, 4);')
+    app.includes('const feedbackStats = getRecentFeedbackInputStats(sessions, 4);') &&
+    !app.includes('const secAppUsage = isOwner(member) ? null')
   ],
   ['Firestore Rules appUsage/appUsageDays: 회원 본인만 자기 데이터 생성·갱신 가능, 읽기는 트레이너 전용(회원앱에 노출하지 않는 정책과 일치) + firstUsedAt/date 불변',
     firestoreRules.includes('match /appUsage/{docId}') &&
@@ -2743,12 +2768,12 @@ const checks = [
     })()
   ],
   ['관리자 회원 상세: "최근 개인운동" 카드가 최근 수업 카드 아래에 배치되고 조회 전용(수정·삭제 없음)',
-    app.includes('const secPersonalWorkout = isOwner(member) ? null : (() => {') &&
+    app.includes('const secPersonalWorkout = canUseMemberLinkedFeatures(member) ? (() => {') &&
     app.includes('<span style={cardTitle}>최근 개인운동</span>') &&
     app.includes('{secBrief}{secAnalysis}{secManage}{secRecent}{secPersonalWorkout}{secAppUsage}') &&
     app.includes('{secToday}{secBrief}{secRecent}{secPersonalWorkout}{secAppUsage}{secPrep}') &&
     (() => {
-      const sec = app.slice(app.indexOf('const secPersonalWorkout = isOwner(member)'), app.indexOf('// ⑤-2 회원 앱 이용 현황'));
+      const sec = app.slice(app.indexOf('const secPersonalWorkout = canUseMemberLinkedFeatures(member)'), app.indexOf('// ⑤-2 회원 앱 이용 현황'));
       return !sec.includes('updatePersonalWorkout') && !sec.includes('deletePersonalWorkout') && !sec.includes('completePersonalWorkout') &&
         sec.includes('아직 개인운동 기록이 없습니다.') &&
         sec.includes('전체 개인운동 보기') &&
@@ -2761,8 +2786,23 @@ const checks = [
     app.includes('getPersonalWorkouts(memberId, 10).catch(') &&
     app.includes('personalWorkouts={memberPersonalWorkouts}') &&
     (() => {
-      const sec = app.slice(app.indexOf('const secPersonalWorkout = isOwner(member)'), app.indexOf('// ⑤-2 회원 앱 이용 현황'));
+      const sec = app.slice(app.indexOf('const secPersonalWorkout = canUseMemberLinkedFeatures(member)'), app.indexOf('// ⑤-2 회원 앱 이용 현황'));
       return !sec.includes('recordMemberAppUsage') && !sec.includes('markSessionDetailRead') && !sec.includes('markSessionsRead');
+    })()
+  ],
+  ['관리자 회원 상세: teo(대표)도 "최근 개인운동"·"회원 앱 이용 현황" 카드를 일반 회원과 동일하게 사용(isOwner로 카드 자체를 숨기지 않음)',
+    !app.includes('const secPersonalWorkout = isOwner(member) ? null') &&
+    !app.includes('const secAppUsage = isOwner(member) ? null') &&
+    app.includes('function canUseMemberLinkedFeatures(member) {') &&
+    app.includes('return !!member?.id;')
+  ],
+  ['관리자 회원 상세: "오늘 회원 상태"(통증·근육통·컨디션·RPE·메모) 섹션은 isOwner 분기 없이 항상 계산·표시 — teo(대표)의 회원앱 입력도 그대로 보인다',
+    (() => {
+      const sec = app.slice(app.indexOf('const ciPain = ci.find'), app.indexOf('const latestMsg = ms[0]||null;'));
+      return sec.length > 0 &&
+        sec.includes('const soreInfo = (()=>{') &&
+        sec.includes('const memberRpe = (()=>{') &&
+        !sec.includes('isOwner') && !sec.includes('isExcludedAdminMember') && !sec.includes('canUseMemberLinkedFeatures');
     })()
   ],
   ['Firestore Rules: personalWorkouts는 회원 본인 쓰기 + 트레이너 읽기, memberId 위조·필드 위조·과대 배열 차단',
@@ -3553,8 +3593,8 @@ const checks = [
       const j = app.indexOf('function SessionScreen({ member, sessions, editData');
       const body = app.slice(i, j);
       return i !== -1 && j > i &&
-        // prep + onImport(사용자 클릭 콜백)만 받는다 — setExercises/onSave/onChange 계열 prop은 없다
-        /function SessionPrepCard\(\{ prep, onImport = null \}\)/.test(body) &&
+        // prep + onImport(사용자 클릭 콜백) + title(문구 전용)만 받는다 — setExercises/onSave/onChange 계열 prop은 없다
+        /function SessionPrepCard\(\{ prep, onImport = null, title = "오늘 수업 준비" \}\)/.test(body) &&
         !/setExercises|setSelectedTypes|onSave|onChange|addDoc|updateDoc|setDoc/.test(body) &&
         // onImport는 오직 onClick에 넘겨질 뿐, 렌더 중에 직접 호출되는 곳이 없다
         /onClick=\{onImport\}/.test(body) && !/onImport\s*(\?\.)?\s*\(/.test(body) &&
@@ -3973,17 +4013,18 @@ const checks = [
         body.includes('기존 기록은 그대로입니다');
     })()
   ],
-  ['가져오기: 추가 Firestore 조회 없이 이미 전달된 personalWorkouts prop만 사용하고, 대표 계정·2:1에서는 버튼을 숨긴다',
+  ['가져오기: 추가 Firestore 조회 없이 이미 전달된 personalWorkouts prop만 사용하고, teo(대표)도 일반 회원과 동일하게 후보를 만들며(canUseMemberLinkedFeatures) 2:1에서만 버튼을 숨긴다',
     (() => {
       const i = app.indexOf('const importCandidates = useMemo(');
       const j = app.indexOf('function handleUndoPersonalImport');
       const body = app.slice(i, j);
       return i !== -1 && j > i &&
-        body.includes('isOwner(member) ? [] : buildPersonalWorkoutImportCandidates(personalWorkouts)') &&
+        body.includes('canUseMemberLinkedFeatures(member) ? buildPersonalWorkoutImportCandidates(personalWorkouts) : []') &&
         body.includes('importCandidates.some(c => c.importable) && sessionType !== "2:1"') &&
         // 목록 계산은 useMemo로 한 번만 — 렌더마다 다시 만들지 않는다
         body.includes('const importOptions = useMemo(') &&
-        !/getPersonalWorkouts\(|getSessions\(|getDocs\(|onSnapshot\(/.test(body);
+        !/getPersonalWorkouts\(|getSessions\(|getDocs\(|onSnapshot\(/.test(body) &&
+        !body.includes('isOwner(member) ? [] :');
     })()
   ],
   ['기록 선택 UI: 모달은 항상 기록 선택 화면부터 시작하고 이전 선택을 기억하지 않는다',

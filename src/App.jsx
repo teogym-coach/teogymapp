@@ -1575,12 +1575,14 @@ function MemberApp({ onLogout }) {
   },[badgeUnreadCount]);
   // 회원 앱 이용 현황(관리자 전용 참고 지표, 회원앱 화면에는 절대 노출하지 않음) — home/workout/health/analysis/profile
   // 주요 탭 진입만 활동으로 인정한다. 온보딩 진행 중(정상 탭 화면이 아직 아님)에는 기록하지 않는다.
-  // 관리자 "회원앱 미리보기"는 이 컴포넌트 트리를 타지 않으므로 별도 플래그 없이 구조적으로 배제되고(수업일지
-  // 회원 확인 기능과 동일한 방식), TEO 대표·테스트 회원 계정은 isExcludedAdminMember로 명시적으로 제외한다.
+  // 관리자 "회원앱 미리보기"는 이 컴포넌트 트리를 타지 않으므로 별도 플래그 없이 구조적으로 배제된다(수업일지
+  // 회원 확인 기능과 동일한 방식). TEO 대표 계정은 실제로 회원전용앱을 사용하며 관리자 상세 화면(secAppUsage)에서
+  // 이 기록을 그대로 보여줘야 하므로 더 이상 제외하지 않는다 — 🧪 테스트 회원(isTestMember)만 계속 제외한다.
+  // (실제 회원 이용 통계·KPI 쪽 제외는 이 write 여부와 무관하게 isExcludedAdminMember가 조회 단계에서 별도로 처리한다.)
   // sessionStorage에 마지막 저장 시각을 남겨, 저장 후 load()로 MemberApp이 재마운트돼 React state가 초기화돼도
   // 짧은 시간 안에 중복 저장되지 않게 한다(탭 전환마다 무조건 쓰지 않고 최소 10분 간격으로 제한).
   useEffect(()=>{
-    if(!profile?.id||profile.memberUid!==auth.currentUser?.uid||!onboardingDone||isExcludedAdminMember(profile))return;
+    if(!profile?.id||profile.memberUid!==auth.currentUser?.uid||!onboardingDone||profile.isTestMember===true)return;
     let lastWriteAt=0;
     try{ lastWriteAt=Number(sessionStorage.getItem(APP_USAGE_LAST_WRITE_KEY))||0; }catch{}
     if(Date.now()-lastWriteAt<APP_USAGE_MIN_INTERVAL_MS)return;
@@ -10765,6 +10767,8 @@ const isOwner = (m) => {
 // 회원 목록·검색·통계·유입 분석 등 일반 회원 대상 화면에서 공통으로 제외하기 위한 단일 판정 함수.
 // 우선순위: 기존 구분값(isOwner/role, isTestMember) 우선 → 이름 비교는 fallback(대소문자·앞뒤 공백 무시).
 // Firestore 데이터/로그인 계정은 그대로 두고, "일반 회원" 파생 집계에서만 걸러내는 용도.
+// 주의: 이 함수는 "운영 집계 포함 여부"만 판정한다 — 개인운동·앱 이용 현황·추천·불러오기·확인 상태 같은
+// "회원 연동 기능"을 숨기는 용도로는 사용하지 않는다(그 용도는 아래 canUseMemberLinkedFeatures 참고).
 function isExcludedAdminMember(m) {
   if (!m) return false;
   if (isOwner(m)) return true;
@@ -10773,6 +10777,15 @@ function isExcludedAdminMember(m) {
   return name === "test member" || name === "teo";
 }
 const isRegularAdminMember = (m) => !isExcludedAdminMember(m);
+
+// 회원 상세(HubScreen)·수업일지 작성 화면의 "회원 연동 기능"(최근 개인운동, 회원 앱 이용 현황,
+// 다음 수업 준비·추천 시작 중량, 과거 개인운동 불러오기, 수업일지 확인 상태) 사용 가능 여부 —
+// isExcludedAdminMember(운영 집계 제외)와는 별개의 판정이다. 대표(teo)도 회원전용앱을 실제로 사용해
+// personalWorkouts·appUsage·sessionReads 등 회원과 동일한 데이터를 쌓으므로, 이 판정은 owner 여부와
+// 무관하게 항상 true다 — 문서(member)가 존재하면 화면·기능을 숨기지 않는다.
+function canUseMemberLinkedFeatures(member) {
+  return !!member?.id;
+}
 
 // 회원앱 로그인/상태 차단/공지/2:1 테스트용 프리셋 — docs/member-app-test-accounts.md 참고
 // 계정 1개를 만들어두고 상태(active/paused/ended)만 바꿔가며 재사용한다.
@@ -14848,9 +14861,10 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
 
   // ⑤-1 최근 개인운동 — 회원이 회원앱에서 직접 기록한 운동. 관리자는 조회만 한다(1차 범위: 수정·삭제 없음).
   // "최근 수업" 카드 바로 아래에 두어 다음 수업 설계 시 "PT 수업 → 개인운동" 흐름을 위에서 아래로 한 번에 확인할 수 있게 한다.
-  // 기록이 없으면 큰 빈 카드를 만들지 않고 한 줄 안내만 표시한다. 대표(TEO) 개인 기록 계정은 회원앱 개념이 없어 카드를 숨긴다.
+  // 기록이 없으면 큰 빈 카드를 만들지 않고 한 줄 안내만 표시한다. 대표(TEO)도 회원전용앱에서 개인운동을 기록하므로
+  // 일반 회원과 동일하게 표시한다(canUseMemberLinkedFeatures — 회원 연동 기능은 owner 여부로 숨기지 않는다).
   // 이 카드는 읽기 전용이므로 회원의 appUsage·sessionReads를 절대 만들지 않는다(관리자 화면은 회원 활동 기록 경로를 타지 않음).
-  const secPersonalWorkout = isOwner(member) ? null : (() => {
+  const secPersonalWorkout = canUseMemberLinkedFeatures(member) ? (() => {
     const completed = (personalWorkouts||[]).filter(w => w?.status === "completed");
     const visible = showAllPersonalWorkouts ? completed : completed.slice(0, 1);
     // 최근 PT 수업과의 같은 운동 비교 — 이미 로드된 sessions/personalWorkouts만 사용한다(운동마다 Firestore 재조회 없음).
@@ -14937,13 +14951,14 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
         )}
       </section>
     );
-  })();
+  })() : null;
 
   // ⑤-2 회원 앱 이용 현황 — 관리자 전용 참고 정보(점수·등급·순위 없음). 회원앱 화면에는 이 값을 절대 노출하지 않는다.
   // "수업일지 확인"은 기존 sessionReads 요약 계산(summarizeSessionReadStatus)을, "몸 상태 입력"은 getRecentFeedbackInputStats를
   // 그대로 재사용한다 — 새 UI를 각각 따로 만들지 않고 이 카드 하나로 정리(회원 상세 화면 세로 스크롤 증가 최소화).
-  // 대표(TEO) 개인 운동기록은 회원앱 열람 개념이 없으므로 카드 자체를 표시하지 않는다.
-  const secAppUsage = isOwner(member) ? null : (() => {
+  // 대표(TEO)도 회원전용앱 이용 기록이 실제로 쌓이므로(MemberApp recordMemberAppUsage) 일반 회원과 동일하게 표시한다.
+  // 단, 이 값은 관리자 참고용일 뿐 실제 회원 이용 통계(홈 대시보드 KPI)에는 여전히 포함되지 않는다(isExcludedAdminMember로 별도 제외).
+  const secAppUsage = canUseMemberLinkedFeatures(member) ? (() => {
     const lastActive = getMemberLastActiveStatus(memberAppUsage);
     const readSummary = summarizeSessionReadStatus(sessions, sessionReadsMap, 5);
     const feedbackStats = getRecentFeedbackInputStats(sessions, 4);
@@ -14956,11 +14971,11 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     return (
       <section className="hub-sec-appusage" style={{...card, padding:"12px 8px 4px"}}>
         <div style={{padding:"0 8px",marginBottom:2}}>
-          <span style={cardTitle}>회원 앱 이용 현황</span>
+          <span style={cardTitle}>{t("회원 앱 이용 현황","대표 앱 이용 현황")}</span>
         </div>
         {row("최근 이용", <b style={{fontWeight:800}}>{lastActive.lastActiveLabel}</b>)}
         {row("최근 30일 이용", lastActive.activeDays30>0 ? <b style={{fontWeight:800}}>{lastActive.activeDays30}일</b> : <span style={{color:DB.faint}}>기록 없음</span>)}
-        {row("수업일지 확인", readSummary.total===0 ? <span style={{color:DB.faint}}>수업일지 확인 기록 없음</span> : (
+        {row(t("수업일지 확인","운동일지 확인"), readSummary.total===0 ? <span style={{color:DB.faint}}>{t("수업일지 확인 기록 없음","운동일지 확인 기록 없음")}</span> : (
           <span>
             최근 {readSummary.total}건 중 {readSummary.readCount}건 확인
             {readSummary.unreadCount>0 && (
@@ -14970,7 +14985,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             )}
           </span>
         ))}
-        {row("수업 후 몸 상태", feedbackStats.total===0 ? <span style={{color:DB.faint}}>몸 상태 입력 기록 없음</span> : (
+        {row(t("수업 후 몸 상태","운동 후 몸 상태"), feedbackStats.total===0 ? <span style={{color:DB.faint}}>몸 상태 입력 기록 없음</span> : (
           <span>
             최근 {feedbackStats.total}회 중 {feedbackStats.inputCount}회 입력
             {feedbackStats.lastInputAt && <><br/><span style={{fontSize:11,color:DB.faint}}>마지막 입력 {formatMonthDayKo(getKoreaDateString(typeof feedbackStats.lastInputAt?.toDate==="function"?feedbackStats.lastInputAt.toDate():feedbackStats.lastInputAt))}</span></>}
@@ -14978,7 +14993,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
         ))}
       </section>
     );
-  })();
+  })() : null;
 
   // 오늘 기록이 이미 있는(작성 중 또는 전송 완료) 상태에서도 항상 노출되는 "새 기록" 진입부.
   // 기존 기록은 그대로 두고 완전히 별개의 addDoc 신규 문서를 시작하며, 동시에 존재하는 다른 작성 중(미전송)
@@ -16127,7 +16142,7 @@ function PersonalWorkoutImportSheet({ options, existingExercises=[], todayMuscle
   );
 }
 
-function SessionPrepCard({ prep, onImport = null }) {
+function SessionPrepCard({ prep, onImport = null, title = "오늘 수업 준비" }) {
   const [showOthers, setShowOthers] = useState(false);
   if (!prep) return null;
   const { topExercise: top, comparison, recommendation } = prep;
@@ -16135,7 +16150,7 @@ function SessionPrepCard({ prep, onImport = null }) {
   const chip  = { fontSize:11, fontWeight:800, padding:"3px 9px", borderRadius:999, background:"rgba(15,148,136,.10)", color:"#0F9488", whiteSpace:"nowrap" };
   const block = { marginTop:10, paddingTop:10, borderTop:"1px solid #EDEFF2" };
   return (
-    <Card title="오늘 수업 준비" style={{marginTop:11,background:"#FFFFFF",border:"1px solid #D6DCE3"}}
+    <Card title={title} style={{marginTop:11,background:"#FFFFFF",border:"1px solid #D6DCE3"}}
       titleStyle={{color:"#0F172A",fontWeight:800,fontSize:13,borderBottomColor:"#D6DCE3"}}>
 
       {/* ① 최근 개인운동 — 날짜 · 경과일 · 부위 · 종목 수 */}
@@ -16221,7 +16236,7 @@ function SessionPrepCard({ prep, onImport = null }) {
       )}
       {prep.elapsedNote&&<div style={{marginTop:8,fontSize:10.5,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>{prep.elapsedNote}</div>}
 
-      {/* ⑥ 개인운동에서 가져오기 — 가져올 수 있는 종목이 하나도 없거나(onImport=null) 대표 개인 기록 계정이면
+      {/* ⑥ 개인운동에서 가져오기 — 가져올 수 있는 종목이 하나도 없으면(onImport=null)
           아예 렌더하지 않는다(비활성 버튼으로 자리만 차지하지 않는다). 누르기 전에는 운동 목록을 건드리지 않는다. */}
       {onImport&&(
         <div style={{marginTop:11,paddingTop:10,borderTop:"1px solid #EDEFF2"}}>
@@ -16248,9 +16263,10 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   // ── "오늘 수업 준비" 카드 데이터 ──────────────────────────────────────
   // 관리자 App이 회원 상세 진입 시 이미 읽어 둔 personalWorkouts(최근 10건)와 sessions를 그대로 쓴다 —
   // 이 화면에서 Firestore를 추가로 읽지 않는다. 완료된 개인운동이 없으면 null이라 카드가 렌더되지 않는다.
-  // 대표(TEO) 개인 기록 계정은 회원앱 개념이 없어 카드를 만들지 않는다(회원 상세 "최근 개인운동" 카드와 동일 정책).
+  // 대표(TEO)도 회원전용앱에서 개인운동을 기록하므로 일반 회원과 동일하게 추천·비교를 계산한다
+  // (canUseMemberLinkedFeatures — 회원 연동 기능은 owner 여부로 숨기지 않는다).
   const sessionPrep = useMemo(
-    () => (isOwner(member) ? null : buildSessionPrepSummary({ sessions, personalWorkouts, todayKey: getKoreaDateString() })),
+    () => (canUseMemberLinkedFeatures(member) ? buildSessionPrepSummary({ sessions, personalWorkouts, todayKey: getKoreaDateString() }) : null),
     [member, sessions, personalWorkouts]
   );
 
@@ -16380,8 +16396,9 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   // 대상 후보는 이미 전달받은 personalWorkouts(최근 10건)에서 만든 completed 목록뿐이다 — Firestore를 추가로 읽지 않는다.
   // 가져올 수 있는 종목(유효 세트 보유)이 있는 기록이 하나도 없으면 후보가 비어 버튼 자체가 렌더되지 않는다.
   // 2:1 수업은 회원B 세트(m2) 구조까지 함께 맞춰야 하므로 이번 단계 범위 밖 — 버튼을 숨긴다.
+  // 대표(TEO)도 회원전용앱에서 개인운동을 기록하므로 일반 회원과 동일하게 후보를 만든다.
   const importCandidates = useMemo(
-    () => (isOwner(member) ? [] : buildPersonalWorkoutImportCandidates(personalWorkouts)),
+    () => (canUseMemberLinkedFeatures(member) ? buildPersonalWorkoutImportCandidates(personalWorkouts) : []),
     [member, personalWorkouts]
   );
   // 가져올 수 있는 기록이 하나도 없으면 버튼을 만들지 않는다(목록만 보여 주고 아무것도 못 고르는 모달 방지).
@@ -17137,7 +17154,7 @@ function updateEx(ei, key, val) {
 
       {/* 오늘 수업 준비 — "오늘의 운동 부위"(기본 정보 카드) 아래, 운동 종목 입력(운동 목록 카드) 위.
           조회·추천 전용 카드라 아래 운동 목록의 값을 건드리지 않는다. */}
-      <SessionPrepCard prep={sessionPrep} onImport={canImportPersonal ? openPersonalImport : null} />
+      <SessionPrepCard prep={sessionPrep} onImport={canImportPersonal ? openPersonalImport : null} title={isOwner(member) ? "오늘 운동 준비" : "오늘 수업 준비"} />
 
       {/* 가져오기 직후 1회분 실행 취소 — Firestore 쓰기가 없으므로 로컬 스냅샷 복원만 하면 된다. */}
       {importUndo && (
@@ -18439,7 +18456,7 @@ function getNoFeedbackActivityMembers(members, liveMembersById, sessionsMap, tod
 
 // 히스토리 카드용 회원 확인 배지 — 비공개 세션은 표시하지 않는다(공개·비공개 배지가 이미 상태를 전달하므로 중복 없음).
 // compact(모바일 등 좁은 화면)에서는 시각 없이 "회원 확인"만 표시하고, 최초 확인 시각은 title 툴팁으로 제공한다.
-function SessionReadBadge({ session, readMap, compact=false }) {
+function SessionReadBadge({ session, readMap, compact=false, ownerLabel=false }) {
   if (!session?.isPublished) return null;
   const status = getSessionReadStatus(session.id, readMap);
   if (!status.isRead) {
@@ -18447,7 +18464,7 @@ function SessionReadBadge({ session, readMap, compact=false }) {
       <span style={{display:"inline-flex",alignItems:"center",fontFamily:DB.font,fontSize:11,fontWeight:700,
         padding:"3px 10px",borderRadius:999,background:"rgba(245,158,11,.10)",color:"#92600A",
         border:"1px solid rgba(245,158,11,.28)",whiteSpace:"nowrap"}}>
-        {compact?"미확인":"회원 미확인"}
+        {(compact||ownerLabel)?"미확인":"회원 미확인"}
       </span>
     );
   }
@@ -18456,7 +18473,7 @@ function SessionReadBadge({ session, readMap, compact=false }) {
     <span title={timeLabel?`최초 확인 · ${timeLabel}`:undefined} style={{display:"inline-flex",alignItems:"center",gap:4,fontFamily:DB.font,fontSize:11,fontWeight:700,
       padding:"3px 10px",borderRadius:999,background:"rgba(34,197,94,.10)",color:"#15803D",
       border:"1px solid rgba(34,197,94,.28)",whiteSpace:"nowrap"}}>
-      {(compact||!timeLabel)?"회원 확인":`확인 · ${timeLabel}`}
+      {(compact||!timeLabel)?(ownerLabel?"확인함":"회원 확인"):`확인 · ${timeLabel}`}
     </span>
   );
 }
@@ -19632,10 +19649,14 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
         </div>
       )}
 
-      {/* 회원 확인 필터 — 대표(TEO) 개인 운동기록은 회원앱 열람 개념이 없으므로 숨긴다 */}
-      {!isOwner(member) && (
+      {/* 확인 상태 필터 — 대표(TEO)도 회원전용앱에서 운동일지를 실제로 열어보므로 일반 회원과 동일하게 제공한다.
+          문구만 대표 전용으로 바꾼다(회원 확인 → 확인함). */}
+      {canUseMemberLinkedFeatures(member) && (
         <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-          {[["all","전체"],["read","회원 확인"],["unread","회원 미확인"]].map(([m,l])=>(
+          {(isOwner(member)
+            ? [["all","전체"],["read","확인함"],["unread","미확인"]]
+            : [["all","전체"],["read","회원 확인"],["unread","회원 미확인"]]
+          ).map(([m,l])=>(
             <button key={m} onClick={()=>setReadFilter(m)}
               style={{padding:"7px 15px",borderRadius:999,border:`1px solid ${readFilter===m?"rgba(34,197,94,.4)":DB.border}`,
                 fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font,
@@ -19690,7 +19711,7 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
                         <HistNum weight={700} style={{fontSize:15}}>{s.sessionNo}</HistNum>회차
                       </span>
                       <HistPublishBadge s={s} />
-                      {!isOwner(member) && <SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} />}
+                      {canUseMemberLinkedFeatures(member) && <SessionReadBadge session={s} readMap={sessionReadsMap} compact={isMobile} ownerLabel={isOwner(member)} />}
                     </div>
                     <div style={{fontFamily:DB.font,fontWeight:600,fontSize:14,color:DB.mintSoft,marginBottom:14}}>{weekday}</div>
 

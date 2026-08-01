@@ -118,6 +118,22 @@ function pwScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 개인운동 종목 검색 시트 iOS 키보드 대응: 순수 함수 실제 실행 시나리오 검증 ──
+// visualViewport 스냅샷 → (키보드에 가려진 높이, 시트 가용 높이) 계산은 JSX/훅과 분리된 순수 함수(computeKeyboardSheetLayout)라
+// 원본 소스를 그대로 슬라이스해 실행한다.
+let keyboardSheetLib = null;
+try {
+  const sliceCompute = app.slice(app.indexOf('function computeKeyboardSheetLayout'), app.indexOf('function useKeyboardAwareViewport'));
+  keyboardSheetLib = new Function(`${sliceCompute}\nreturn { computeKeyboardSheetLayout };`)();
+} catch (e) {
+  console.error('[regression] 키보드 시트 레이아웃 헬퍼 추출 실패:', e.message);
+}
+function ksScenario(name, fn) {
+  if (!keyboardSheetLib) return [name, false];
+  try { return [name, !!fn(keyboardSheetLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 신규 수업 기록 초기값(날짜·오늘의 운동 부위): 실제 실행 시나리오 검증 ──
 // 회원 상세 "다음 수업 준비"(nextWorkoutDate/nextWorkoutPart)가 신규 수업일지 초기값으로 그대로 연결되는지,
 // 기존 기록 수정은 절대 덮이지 않는지를 원본 소스 그대로 슬라이스해 실행한다.
@@ -2924,6 +2940,59 @@ const checks = [
       const ex = lib.normalizePersonalWorkoutExercise({ name: '오픈북', muscleTop: '기능', equipment: '기능', sets: [{ weight: 5, reps: 10 }] }, 0);
       return ex.muscleTop !== '기능' && ex.equipment !== '기능' && ex.totalVolume === 50;
     })[1]
+  ],
+
+  // ── 개인운동 2차 5단계: 운동 종목 검색 시트 iOS 키보드 대응 ────────────────────────
+  ['키보드 시트 레이아웃: visualViewport 미지원 환경에서는 기존 레이아웃 그대로(오프셋 0, 높이 제한 없음)',
+    ksScenario('미지원 fallback', lib => {
+      const r = lib.computeKeyboardSheetLayout({});
+      return r.keyboardInset === 0 && r.availableHeight === null;
+    })[1]
+  ],
+  ['키보드 시트 레이아웃: 키보드가 닫혀 있으면(레이아웃=뷰포트 높이) 오프셋 0',
+    ksScenario('키보드 닫힘', lib => {
+      const r = lib.computeKeyboardSheetLayout({ layoutHeight: 844, viewportHeight: 844, offsetTop: 0 });
+      return r.keyboardInset === 0 && r.availableHeight === null;
+    })[1]
+  ],
+  ['키보드 시트 레이아웃: 키보드가 열리면(뷰포트 축소) 오프셋만큼 시트를 올리고 가용 높이를 제한',
+    ksScenario('키보드 열림', lib => {
+      const r = lib.computeKeyboardSheetLayout({ layoutHeight: 844, viewportHeight: 480, offsetTop: 0 });
+      return r.keyboardInset === 364 && r.availableHeight === 468;
+    })[1]
+  ],
+  ['키보드 시트 레이아웃: visualViewport.offsetTop이 0이 아니어도(포커스로 인한 뷰포트 이동) 오프셋을 정확히 계산',
+    ksScenario('offsetTop != 0', lib => {
+      const r = lib.computeKeyboardSheetLayout({ layoutHeight: 844, viewportHeight: 460, offsetTop: 20 });
+      return r.keyboardInset === 364 && r.availableHeight !== null;
+    })[1]
+  ],
+  ['키보드 시트 레이아웃: 가로모드처럼 레이아웃 높이가 작아도 같은 공식으로 동작(가용 높이 최소 260px 보장)',
+    ksScenario('가로모드', lib => {
+      const r = lib.computeKeyboardSheetLayout({ layoutHeight: 400, viewportHeight: 200, offsetTop: 0 });
+      return r.keyboardInset === 200 && r.availableHeight === 260;
+    })[1]
+  ],
+  ['운동 종목 검색 시트: 배경 스크롤 잠금(useLockBodyScroll)이 열릴 때 scrollY를 저장하고 닫힐 때 원래 위치로 복원',
+    (() => {
+      const comp = app.slice(app.indexOf('function useLockBodyScroll'), app.indexOf('function MemberBottomSheet('));
+      return comp.includes('body.style.position="fixed"') && comp.includes('body.style.top=`-${scrollY}px`') &&
+        comp.includes('window.scrollTo(0,scrollY)');
+    })()
+  ],
+  ['운동 종목 검색 시트: 제목·검색창(pw-picker-fixed)은 고정하고 검색 결과(pw-picker-scroll)만 내부 스크롤',
+    (() => {
+      const comp = app.slice(app.indexOf('function MemberPersonalExercisePicker'), app.indexOf('// 개인운동 기록 화면 — 시작(부위 선택)'));
+      return comp.includes('className="pw-picker-fixed"') && comp.includes('className="pw-picker-scroll"') &&
+        comp.includes('useKeyboardAwareViewport(open)') && comp.includes('useLockBodyScroll(open)');
+    })()
+  ],
+  ['운동 종목 검색 시트: 검색 input은 연락처 자동완성 대신 검색 입력으로 동작하는 속성을 사용',
+    (() => {
+      const comp = app.slice(app.indexOf('function MemberPersonalExercisePicker'), app.indexOf('// 개인운동 기록 화면 — 시작(부위 선택)'));
+      return comp.includes('name="exercise-query"') && comp.includes('autoComplete="off"') &&
+        comp.includes('autoCapitalize="none"') && comp.includes('enterKeyHint="search"');
+    })()
   ],
 
   // ── 개인운동 2차 1단계: PT 수업 ↔ 개인운동 같은 운동 비교 ──────────────────────────

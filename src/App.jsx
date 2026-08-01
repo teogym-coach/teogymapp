@@ -2389,7 +2389,75 @@ function AttendanceCard({attendance=[],onCheckin,saving}){const today=getKoreaDa
 // 회원앱 V2 공통 컴포넌트 — Bottom Sheet / Segmented Control / 섹션 헤더
 // 디자인 토큰(--mb-*)과 .mv2-* 클래스(MEMBER_CSS 하단)를 재사용한다. 저장 로직 없음(표시 전용).
 // ════════════════════════════════════════════════════
-function MemberBottomSheet({open,onClose,title,children}){
+
+// iOS 키보드 대응 순수 함수 — visualViewport 스냅샷에서 (키보드 등으로 가려진 하단 높이, 키보드가 열렸을 때 시트에 남는 가용 높이)를 계산한다.
+// window.innerHeight(레이아웃 뷰포트)는 키보드가 열려도 거의 변하지 않고, visualViewport만 줄어드는 iOS Safari 특성을 이용한다.
+function computeKeyboardSheetLayout({layoutHeight,viewportHeight,offsetTop,topGap=12,minAvailable=260}={}){
+  if(!(layoutHeight>0)||!(viewportHeight>0)) return {keyboardInset:0,availableHeight:null};
+  const viewportBottom=(offsetTop||0)+viewportHeight;
+  const keyboardInset=Math.max(0,Math.round(layoutHeight-viewportBottom));
+  const availableHeight=keyboardInset>0?Math.max(minAvailable,Math.round(viewportHeight-topGap)):null;
+  return {keyboardInset,availableHeight};
+}
+
+// iOS/Android 키보드가 열렸을 때 visualViewport를 추적해 (키보드에 가려진 높이, 시트 가용 높이)를 반환하는 훅.
+// active=false이거나 visualViewport 미지원 환경에서는 항상 {keyboardInset:0,availableHeight:null}(기존 레이아웃 그대로) — 안전한 fallback.
+function useKeyboardAwareViewport(active){
+  const [state,setState]=useState({keyboardInset:0,availableHeight:null});
+  useEffect(()=>{
+    if(!active){ setState({keyboardInset:0,availableHeight:null}); return; }
+    const vv=typeof window!=="undefined"?window.visualViewport:null;
+    if(!vv) return;
+    let raf=null;
+    const update=()=>{
+      if(raf!=null) cancelAnimationFrame(raf);
+      raf=requestAnimationFrame(()=>{
+        setState(computeKeyboardSheetLayout({
+          layoutHeight:window.innerHeight||vv.height,
+          viewportHeight:vv.height,
+          offsetTop:vv.offsetTop,
+        }));
+      });
+    };
+    update();
+    vv.addEventListener("resize",update);
+    vv.addEventListener("scroll",update);
+    return ()=>{
+      vv.removeEventListener("resize",update);
+      vv.removeEventListener("scroll",update);
+      if(raf!=null) cancelAnimationFrame(raf);
+    };
+  },[active]);
+  return state;
+}
+
+// 바텀시트가 열린 동안 배경(body) 스크롤을 잠근다. iOS에서 overflow:hidden만 쓰면 스크롤 위치가 튀므로
+// position:fixed + 현재 scrollY를 top으로 저장했다가, 닫힐 때 원래 스크롤 위치로 복원한다.
+function useLockBodyScroll(active){
+  useEffect(()=>{
+    if(!active) return;
+    const body=document.body;
+    const scrollY=window.scrollY||window.pageYOffset||0;
+    const prev={position:body.style.position,top:body.style.top,left:body.style.left,right:body.style.right,width:body.style.width,overflow:body.style.overflow};
+    body.style.position="fixed";
+    body.style.top=`-${scrollY}px`;
+    body.style.left="0";
+    body.style.right="0";
+    body.style.width="100%";
+    body.style.overflow="hidden";
+    return ()=>{
+      body.style.position=prev.position;
+      body.style.top=prev.top;
+      body.style.left=prev.left;
+      body.style.right=prev.right;
+      body.style.width=prev.width;
+      body.style.overflow=prev.overflow;
+      window.scrollTo(0,scrollY);
+    };
+  },[active]);
+}
+
+function MemberBottomSheet({open,onClose,title,children,sheetClassName,sheetStyle,bodyClassName}){
   useEffect(()=>{
     if(!open) return;
     const onKey=e=>{ if(e.key==="Escape") onClose?.(); };
@@ -2399,13 +2467,13 @@ function MemberBottomSheet({open,onClose,title,children}){
   if(!open) return null;
   return <div className="mv2-sheet-root" role="dialog" aria-modal="true" aria-label={title||"입력"}>
     <div className="mv2-sheet-overlay" onClick={onClose}/>
-    <div className="mv2-sheet">
+    <div className={"mv2-sheet"+(sheetClassName?` ${sheetClassName}`:"")} style={sheetStyle}>
       <div className="mv2-sheet-handle" aria-hidden="true"/>
       <div className="mv2-sheet-head">
         <b>{title}</b>
         <button type="button" className="mv2-sheet-close" onClick={onClose} aria-label="닫기">✕</button>
       </div>
-      <div className="mv2-sheet-body">{children}</div>
+      <div className={"mv2-sheet-body"+(bodyClassName?` ${bodyClassName}`:"")}>{children}</div>
     </div>
   </div>;
 }
@@ -4520,37 +4588,74 @@ function MemberPersonalWorkoutEntry({inProgress=[],onStart,onResume,onDelete,bus
 function MemberPersonalExercisePicker({open,onClose,candidates=[],onPick}){
   const [q,setQ]=useState("");
   useEffect(()=>{ if(open) setQ(""); },[open]);
+  const searchInputRef=useRef(null);
+  const {keyboardInset,availableHeight}=useKeyboardAwareViewport(open);
+  useLockBodyScroll(open);
+  // 포커스 직후 iOS 키보드 애니메이션이 끝나갈 무렵 한 번 더 위치를 맞춘다(임의의 긴 timeout 대신 rAF 두 프레임).
+  const handleSearchFocus=useCallback(()=>{
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        searchInputRef.current?.scrollIntoView?.({block:"nearest"});
+      });
+    });
+  },[]);
+  const sheetStyle=useMemo(()=>{
+    const style={};
+    if(keyboardInset>0) style["--pw-keyboard-offset"]=`${keyboardInset}px`;
+    if(availableHeight!=null) style["--pw-sheet-max-h"]=`${availableHeight}px`;
+    return style;
+  },[keyboardInset,availableHeight]);
   const query=q.trim();
   const filtered=useMemo(()=>{
     const base=query?candidates.filter(c=>matchSearch(c.name,query)):candidates;
     return base.slice(0,60);
   },[candidates,query]);
   const exactExists=filtered.some(c=>canonicalExerciseKey(c.name)===canonicalExerciseKey(query));
-  return <MemberBottomSheet open={open} onClose={onClose} title="운동 종목 추가">
-    <div className="ex-search-wrap sj-search-wrap pw-picker-search">
-      <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
-      <input type="search" className="ex-search sj-search" placeholder="운동 이름 검색 (예: 벤치)" value={q} onChange={e=>setQ(e.target.value)} aria-label="운동 이름 검색"/>
-      {q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")} aria-label="검색어 지우기"><SjIcon paths={SJ_PATHS.x} size={16}/></button>}
+  return <MemberBottomSheet open={open} onClose={onClose} title="운동 종목 추가" sheetClassName="pw-picker-sheet" sheetStyle={sheetStyle} bodyClassName="pw-picker-body">
+    <div className="pw-picker-fixed">
+      <div className="ex-search-wrap sj-search-wrap pw-picker-search">
+        <i className="sj-search-icon"><SjIcon paths={SJ_PATHS.search} size={16}/></i>
+        <input
+          ref={searchInputRef}
+          type="search"
+          name="exercise-query"
+          className="ex-search sj-search"
+          placeholder="운동 이름 검색 (예: 벤치)"
+          value={q}
+          onChange={e=>setQ(e.target.value)}
+          onFocus={handleSearchFocus}
+          aria-label="운동 이름 검색"
+          inputMode="search"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="search"
+        />
+        {q&&<button type="button" className="ex-search-clear" onClick={()=>setQ("")} aria-label="검색어 지우기"><SjIcon paths={SJ_PATHS.x} size={16}/></button>}
+      </div>
+      {query.length>=2&&!exactExists&&(
+        <button type="button" className="pw-picker-custom" onClick={()=>onPick({name:query,source:"custom"})}>
+          <b>"{query}" 직접 추가</b><small>목록에 없는 운동은 이렇게 추가할 수 있어요</small>
+        </button>
+      )}
     </div>
-    {query.length>=2&&!exactExists&&(
-      <button type="button" className="pw-picker-custom" onClick={()=>onPick({name:query,source:"custom"})}>
-        <b>"{query}" 직접 추가</b><small>목록에 없는 운동은 이렇게 추가할 수 있어요</small>
-      </button>
-    )}
-    {filtered.length===0
-      ? <p className="pw-picker-empty">{query?"검색 결과가 없어요. 위 버튼으로 직접 추가할 수 있어요.":"운동 이름을 입력해 검색해보세요."}</p>
-      : <ul className="pw-picker-list">{filtered.map(c=>(
-          <li key={c.key}>
-            <button type="button" onClick={()=>onPick(c)}>
-              <span className="pw-picker-name">{c.name}</span>
-              <span className="pw-picker-tags">
-                {c.muscleTop&&<em>{muscleTopBadgeLabel(c.muscleTop)}</em>}
-                {c.source==="session"&&<em className="src">수업 기록</em>}
-                {c.source==="personal"&&<em className="src">지난 개인운동</em>}
-              </span>
-            </button>
-          </li>
-        ))}</ul>}
+    <div className="pw-picker-scroll">
+      {filtered.length===0
+        ? <p className="pw-picker-empty">{query?"검색 결과가 없어요. 위 버튼으로 직접 추가할 수 있어요.":"운동 이름을 입력해 검색해보세요."}</p>
+        : <ul className="pw-picker-list">{filtered.map(c=>(
+            <li key={c.key}>
+              <button type="button" onClick={()=>onPick(c)}>
+                <span className="pw-picker-name">{c.name}</span>
+                <span className="pw-picker-tags">
+                  {c.muscleTop&&<em>{muscleTopBadgeLabel(c.muscleTop)}</em>}
+                  {c.source==="session"&&<em className="src">수업 기록</em>}
+                  {c.source==="personal"&&<em className="src">지난 개인운동</em>}
+                </span>
+              </button>
+            </li>
+          ))}</ul>}
+    </div>
   </MemberBottomSheet>;
 }
 
@@ -7145,6 +7250,14 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-sheet-body{padding:2px 20px calc(24px + env(safe-area-inset-bottom,0px));overflow-y:auto;-webkit-overflow-scrolling:touch}
 .mv2-sheet-hint{margin:0 0 14px;padding:12px 14px;background:#F6F8FB;border-radius:14px;color:#20242A;font-size:13px;font-weight:800;line-height:1.4}
 .mv2-sheet-hint span{display:block;margin-top:3px;color:#8B949E;font-size:11px;font-weight:700}
+/* 운동 종목 검색 시트 — iOS 키보드 대응. 제목/검색창은 고정, 검색 결과만 내부 스크롤. 키보드가 열리면 --pw-keyboard-offset/--pw-sheet-max-h(useKeyboardAwareViewport)로 시트를 visualViewport 위에 고정한다. */
+.pw-picker-sheet{transition:bottom .15s ease}
+.mv2-sheet-body.pw-picker-body{display:flex;flex-direction:column;min-height:0;overflow-y:hidden}
+.pw-picker-fixed{flex-shrink:0}
+.pw-picker-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+@media(max-width:699.98px){
+  .pw-picker-sheet{bottom:var(--pw-keyboard-offset,0px);max-height:var(--pw-sheet-max-h,88dvh)}
+}
 /* 섹션 헤더 */
 .mv2-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:4px 2px 12px}
 .mv2-section-head b{display:block;font-size:18px;color:#20242A;letter-spacing:-.3px}

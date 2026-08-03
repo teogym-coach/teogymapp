@@ -21595,6 +21595,121 @@ function RegionGrowthPanel({ sessions, muscleTotals, metric, selectedMuscle, onS
 }
 
 // ════════════════════════════════════════════
+// 부위 간 비교(비중·구성) — "부위 분석" 탭 전용. RegionGrowthPanel(선택 부위의 시간 흐름)과 달리
+// 모든 부위를 한 화면에서 비교하는 용도. buildRegionOccurrences를 재사용해 훈련량 탭과 동일한
+// vol/sets 계산 기준(코어 보정 등 기존 muscleTop 분류 그대로)을 유지한다.
+// ════════════════════════════════════════════
+function buildRegionCompareRows(sl) {
+  const rows = MUSCLE_LIST.map(g=>{
+    const occ = buildRegionOccurrences(sl, g);
+    const vol = occ.reduce((s,p)=>s+p.vol,0);
+    const sets = occ.reduce((s,p)=>s+p.sets,0);
+    const count = occ.length;
+    const lastDate = count ? occ[occ.length-1].date : "";
+    const avgSets = count>0 ? Math.round((sets/count)*10)/10 : 0;
+    return { g, vol, sets, count, lastDate, avgSets };
+  });
+  const totalVol = rows.reduce((s,r)=>s+r.vol,0);
+  const totalSets = rows.reduce((s,r)=>s+r.sets,0);
+  return rows.map(r=>({
+    ...r,
+    volPct: totalVol>0 ? Math.round((r.vol/totalVol)*1000)/10 : 0,
+    setPct: totalSets>0 ? Math.round((r.sets/totalSets)*1000)/10 : 0,
+  }));
+}
+// 훈련하지 않은 부위(count===0)는 오래된 순 판단에서 제외 — "가장 오래 훈련하지 않은 부위"는
+// 훈련한 적이 있는 부위 중 가장 최근 기록이 오래된 부위를 뜻한다.
+function findLeastRecentTrainedPart(rows) {
+  const trained = rows.filter(r=>r.count>0 && r.lastDate);
+  if (!trained.length) return null;
+  return [...trained].sort((a,b)=> a.lastDate < b.lastDate ? -1 : a.lastDate > b.lastDate ? 1 : 0)[0].g;
+}
+
+function RegionCompareBar({ g, pct, color }) {
+  return (
+    <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:4,marginBottom:5}}>
+      <div style={{height:"100%",width:Math.max(0,Math.min(100,pct))+"%",background:color,borderRadius:4,transition:"width .5s"}}/>
+    </div>
+  );
+}
+
+function RegionUntrainedList({ rows }) {
+  if (!rows.length) return null;
+  return (
+    <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+      <Mo c="#6b7280" s={9} style={{display:"block",marginBottom:8}}>기록 없는 부위</Mo>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {rows.map(r=>(
+          <span key={r.g} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"3px 9px",borderRadius:12,background:"rgba(255,255,255,0.04)",color:"#4b5563"}}>{r.g}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 부위별 훈련 비중 — 누적 볼륨을 부위 간 비교하는 가로 막대(비율 기준 너비) 그래프
+function RegionVolumeCompare({ rows }) {
+  const trained = rows.filter(r=>r.vol>0).sort((a,b)=>b.vol-a.vol);
+  const untrained = rows.filter(r=>r.vol<=0);
+  if (!trained.length && !untrained.length) return <Emp msg="부위가 지정된 운동 기록이 없습니다." />;
+  return (
+    <Card title="🧩 부위별 훈련 비중">
+      {!trained.length ? <Emp msg="선택한 기간에 볼륨 기록이 없습니다." /> : (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {trained.map(r=>(
+            <div key={r.g}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4,flexWrap:"wrap",gap:4}}>
+                <Mo c={mColor(r.g)} s={12} style={{fontWeight:700}}>{r.g}</Mo>
+                <Mo c="#e2e8f0" s={11} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>{formatVolumeKgT(r.vol)} · {r.volPct}%</Mo>
+              </div>
+              <RegionCompareBar pct={r.volPct} color={mColor(r.g)} />
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동 {r.count}회</span>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>최근 {r.lastDate||"—"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <RegionUntrainedList rows={untrained} />
+    </Card>
+  );
+}
+
+// 부위별 세트 구성 — 누적 세트를 부위 간 비교하는 가로 막대 그래프 + 최근 5회 세트 비중
+function RegionSetCompare({ rows, recentSetMap, recentSetTotal }) {
+  const trained = rows.filter(r=>r.sets>0).sort((a,b)=>b.sets-a.sets);
+  const untrained = rows.filter(r=>r.sets<=0);
+  if (!trained.length && !untrained.length) return <Emp msg="세트가 지정된 운동 기록이 없습니다." />;
+  return (
+    <Card title="🧩 부위별 세트 구성">
+      {!trained.length ? <Emp msg="선택한 기간에 세트 기록이 없습니다." /> : (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {trained.map(r=>{
+            const recentPct = recentSetTotal>0 ? Math.round(((recentSetMap[r.g]||0)/recentSetTotal)*1000)/10 : null;
+            return (
+              <div key={r.g}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4,flexWrap:"wrap",gap:4}}>
+                  <Mo c={mColor(r.g)} s={12} style={{fontWeight:700}}>{r.g}</Mo>
+                  <Mo c="#e2e8f0" s={11} style={{fontFamily:"'DM Mono',monospace",fontWeight:700}}>{r.sets}세트 · {r.setPct}%</Mo>
+                </div>
+                <RegionCompareBar pct={r.setPct} color={mColor(r.g)} />
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동 {r.count}회</span>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>회당 평균 {r.avgSets}세트</span>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(r.g)}18`,color:mColor(r.g)}}>최근 5회 {recentPct!=null?`${recentPct}%`:"기록 없음"}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <RegionUntrainedList rows={untrained} />
+    </Card>
+  );
+}
+
+// ════════════════════════════════════════════
 // 훈련 피드백 (구 블록 피드백) — 통계 나열이 아니라 "다음 수업 준비"용 화면
 // 부위·기구별 볼륨 계산은 위 buildMuscleVolumeData 등 블록 피드백 원 로직을 그대로 재사용한다.
 // ════════════════════════════════════════════
@@ -26539,6 +26654,23 @@ const EXERCISE_ANALYSIS_PERIODS = [
   { key:"20",  label:"최근 20회" },
   { key:"all", label:"전체" },
 ];
+// 부위 분석 탭 전용 기간 필터 — 위 EXERCISE_ANALYSIS_PERIODS(세션 횟수 기준)와 달리
+// 달력 기준(일수)이라 별도로 둔다. "전체"가 기본값.
+const REGION_ANALYSIS_PERIODS = [
+  { key:"30d", label:"최근 30일" },
+  { key:"3m",  label:"최근 3개월" },
+  { key:"all", label:"전체" },
+];
+function filterSessionsByCalendarPeriod(sessions, periodKey) {
+  const arr = sessions || [];
+  if (periodKey === "all") return arr;
+  const days = periodKey === "30d" ? 30 : periodKey === "3m" ? 90 : null;
+  if (days == null) return arr;
+  const threshold = new Date();
+  threshold.setDate(threshold.getDate() - days);
+  const thresholdStr = `${threshold.getFullYear()}-${String(threshold.getMonth()+1).padStart(2,"0")}-${String(threshold.getDate()).padStart(2,"0")}`;
+  return arr.filter(s => (s.date||"") >= thresholdStr);
+}
 const EXERCISE_ANALYSIS_TABS = [
   { key:"growth",    label:"📈 성장" },
   { key:"volume",    label:"🏋️ 훈련량" },
@@ -26557,6 +26689,7 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [regionMuscle, setRegionMuscle] = useState(null);
   const [growthWindow, setGrowthWindow] = useState("core");
+  const [regionPeriod, setRegionPeriod] = useState("all");
 
   const periodSessions = useMemo(()=>pickPeriodSessions(sessions, period), [sessions, period]);
   const summary   = useMemo(()=>buildExerciseAnalysisSummary(periodSessions), [periodSessions]);
@@ -26580,14 +26713,35 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
   const totalSetsAll = periodSessions.reduce((a,s)=>a+calcTotalSets(s.exercises),0);
   const avgSets = periodSessions.length ? Math.round((totalSetsAll/periodSessions.length)*10)/10 : 0;
 
-  // 부위 분석 탭 — 블록 피드백과 동일한 공통 헬퍼 재사용(같은 기간이면 결과가 일치)
+  // 부위 분석 탭(기구별/세부) 및 훈련량 탭 RegionGrowthPanel — 블록 피드백과 동일한 공통 헬퍼 재사용
   const muscleData    = buildMuscleVolumeData(periodSessions);
   const equipData     = buildEquipVolumeData(periodSessions);
   const detailList     = buildDetailVolumeList(periodSessions);
   const muscleTotals   = buildMuscleTotals(muscleData);
   const equipTotals    = buildEquipTotals(equipData);
-  const muscleDayAvg   = buildMuscleDayAvg(periodSessions, muscleTotals);
-  const partSetList    = buildPartSetList(periodSessions);
+
+  // 부위 분석 > 부위별/세트분석 전용 — 위 count 기반 period와 별개인 달력 기준 필터(regionPeriod)를
+  // 적용한다. 훈련량 탭의 RegionGrowthPanel(muscleTotals 등, periodSessions 기준)에는 영향 없음.
+  const regionSessions       = useMemo(()=>filterSessionsByCalendarPeriod(sessions, regionPeriod), [sessions, regionPeriod]);
+  const regionCompareRows    = useMemo(()=>buildRegionCompareRows(regionSessions), [regionSessions]);
+  const regionMuscleTotals   = useMemo(()=>buildMuscleTotals(buildMuscleVolumeData(regionSessions)), [regionSessions]);
+  const regionMuscleDayAvg   = useMemo(()=>buildMuscleDayAvg(regionSessions, regionMuscleTotals), [regionSessions, regionMuscleTotals]);
+  const regionPartSetList    = useMemo(()=>buildPartSetList(regionSessions), [regionSessions]);
+  const regionRecentSessions = useMemo(()=>regionSessions.slice(-5), [regionSessions]);
+  const regionRecentVolTotals = useMemo(()=>buildMuscleTotals(buildMuscleVolumeData(regionRecentSessions)), [regionRecentSessions]);
+  const regionRecentSetList  = useMemo(()=>buildPartSetList(regionRecentSessions), [regionRecentSessions]);
+  const regionRecentSetTotal = regionRecentSetList.reduce((s,x)=>s+x.total,0);
+  const regionRecentSetMap   = Object.fromEntries(regionRecentSetList.map(x=>[x.g,x.total]));
+  const regionRowByG         = Object.fromEntries(regionCompareRows.map(r=>[r.g,r]));
+
+  const regionTrainedVol  = regionCompareRows.filter(r=>r.vol>0).sort((a,b)=>b.vol-a.vol);
+  const regionTrainedSets = regionCompareRows.filter(r=>r.sets>0).sort((a,b)=>b.sets-a.sets);
+  const regionMostTrained       = regionTrainedVol[0]?.g || null;
+  const regionMostTrainedRecent = regionRecentVolTotals[0]?.g || null;
+  const regionLeastRecentPart   = findLeastRecentTrainedPart(regionCompareRows);
+  const regionMostSets          = regionTrainedSets[0]?.g || null;
+  const regionMostRecentFocus   = regionRecentSetList[0]?.g || null;
+  const regionHighestAvgSets    = [...regionCompareRows.filter(r=>r.count>0)].sort((a,b)=>b.avgSets-a.avgSets)[0]?.g || null;
 
   if (!sessions.length) {
     return (
@@ -26830,7 +26984,9 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
         </div>
       )}
 
-      {/* 부위 분석 탭 — 블록 피드백과 동일한 공통 헬퍼(buildMuscleVolumeData 등) 재사용 */}
+      {/* 부위 분석 탭 — "선택 부위의 시간 흐름"인 훈련량 탭과 달리 "부위 간 비중·구성 비교"가 목적.
+          부위별/세트분석은 buildRegionCompareRows(regionSessions, 달력 기준 regionPeriod)로 계산하고,
+          기구별/세부는 기존 그대로 상단 count 기반 period(periodSessions)를 사용한다. */}
       {tab==="region" && (
         <div>
           <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
@@ -26843,22 +26999,41 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
             ))}
           </div>
 
+          {(regionView==="muscle"||regionView==="sets") && (
+            <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
+              {REGION_ANALYSIS_PERIODS.map(p=>(
+                <button key={p.key} onClick={()=>setRegionPeriod(p.key)}
+                  style={{padding:"5px 11px",borderRadius:14,border:"1px solid",flexShrink:0,cursor:"pointer",
+                    borderColor:regionPeriod===p.key?"#7c6fff":"rgba(255,255,255,0.08)",
+                    background:regionPeriod===p.key?"rgba(124,111,255,.12)":"transparent",
+                    color:regionPeriod===p.key?"#7c6fff":"#94a3b8",fontSize:10,fontWeight:700}}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {muscleTotals.length===0 && equipTotals.length===0 && detailList.length===0 ? (
             <Emp msg="부위가 지정된 운동 기록이 없습니다." />
           ) : (
             <>
               {regionView==="muscle" && (
                 <div>
-                  <RegionGrowthPanel
-                    sessions={periodSessions} muscleTotals={muscleTotals} metric="vol"
-                    selectedMuscle={regionMuscle} onSelectMuscle={setRegionMuscle}
-                    growthWindow={growthWindow} onWindowChange={setGrowthWindow} tt={tt}
-                  />
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(96px,1fr))",gap:8,marginBottom:12}}>
+                    <StatTile label="가장 많이 훈련한 부위" value={regionMostTrained||"기록 없음"} />
+                    <StatTile label="최근 가장 많이 훈련한 부위" value={regionMostTrainedRecent||"기록 없음"} />
+                    <StatTile label="가장 오래 훈련하지 않은 부위" value={regionLeastRecentPart||"기록 없음"} />
+                    <StatTile label="전체 운동 부위 수" value={regionTrainedVol.length+"개"} />
+                  </div>
+
+                  <RegionVolumeCompare rows={regionCompareRows} />
+
                   <Card title="💪 누적 부위별 볼륨" style={{marginTop:11}}>
-                    {muscleTotals.length===0 ? <Emp msg="부위가 지정된 운동 기록이 없습니다." /> : (
+                    {regionMuscleTotals.length===0 ? <Emp msg="부위가 지정된 운동 기록이 없습니다." /> : (
                       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                        {muscleTotals.map(({g,total})=>{
-                          const {days,avg}=muscleDayAvg[g]||{days:0,avg:0};
+                        {regionMuscleTotals.map(({g,total})=>{
+                          const {days,avg}=regionMuscleDayAvg[g]||{days:0,avg:0};
+                          const row=regionRowByG[g];
                           return (
                             <div key={g}>
                               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:3}}>
@@ -26866,11 +27041,13 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
                                 <Mo c="#6060a0" s={10}>{total.toLocaleString()} kg</Mo>
                               </div>
                               <div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,marginBottom:5}}>
-                                <div style={{height:"100%",width:((total/(muscleTotals[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
+                                <div style={{height:"100%",width:((total/(regionMuscleTotals[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
                               </div>
                               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동일 {days}일</span>
                                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>일평균 {avg.toLocaleString()} kg</span>
+                                {row && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>전체 비중 {row.volPct}%</span>}
+                                {row?.lastDate && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>최근 {row.lastDate}</span>}
                               </div>
                             </div>
                           );
@@ -26882,29 +27059,38 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
               )}
               {regionView==="sets" && (
                 <div>
-                  <RegionGrowthPanel
-                    sessions={periodSessions} muscleTotals={muscleTotals} metric="sets"
-                    selectedMuscle={regionMuscle} onSelectMuscle={setRegionMuscle}
-                    growthWindow={growthWindow} onWindowChange={setGrowthWindow} tt={tt}
-                  />
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(96px,1fr))",gap:8,marginBottom:12}}>
+                    <StatTile label="가장 많은 세트를 수행한 부위" value={regionMostSets||"기록 없음"} />
+                    <StatTile label="최근 5회 가장 집중한 부위" value={regionMostRecentFocus||"기록 없음"} />
+                    <StatTile label="1회 평균 세트가 가장 높은 부위" value={regionHighestAvgSets||"기록 없음"} />
+                    <StatTile label="가장 오래 수행하지 않은 부위" value={regionLeastRecentPart||"기록 없음"} />
+                  </div>
+
+                  <RegionSetCompare rows={regionCompareRows} recentSetMap={regionRecentSetMap} recentSetTotal={regionRecentSetTotal} />
+
                   <Card title="📋 부위별 누적 세트" style={{marginTop:11}}>
-                    {partSetList.length===0 ? <Emp msg="세트 기록이 없습니다." /> : (
+                    {regionPartSetList.length===0 ? <Emp msg="세트 기록이 없습니다." /> : (
                       <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                        {partSetList.map(({g,total,days,avg})=>(
+                        {regionPartSetList.map(({g,total,days,avg})=>{
+                          const row=regionRowByG[g];
+                          return (
                           <div key={g}>
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:3}}>
                               <Mo c={mColor(g)} s={11} style={{fontWeight:700}}>{g}</Mo>
                               <Mo c="#6060a0" s={10}>{total}세트 합계</Mo>
                             </div>
                             <div style={{height:4,background:"rgba(255,255,255,0.08)",borderRadius:3,marginBottom:5}}>
-                              <div style={{height:"100%",width:((total/(partSetList[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
+                              <div style={{height:"100%",width:((total/(regionPartSetList[0]?.total||1))*100)+"%",background:mColor(g),borderRadius:3,transition:"width .5s"}}/>
                             </div>
                             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                               <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>운동일 {days}회</span>
                               <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:`${mColor(g)}18`,color:mColor(g)}}>회당 평균 {avg}세트</span>
+                              {row && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>전체 비중 {row.setPct}%</span>}
+                              {row?.lastDate && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:4,background:"rgba(255,255,255,0.05)",color:"#94a3b8"}}>최근 수행일 {row.lastDate}</span>}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </Card>

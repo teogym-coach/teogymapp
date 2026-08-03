@@ -21439,13 +21439,159 @@ function buildPartSetList(sl) {
     .map(([g,v])=>({g, total:v.total, days:v.days, avg:Math.round(v.total/v.days)}))
     .sort((a,b)=>b.total-a.total);
 }
-function buildSetTrend(sl) {
-  return sl.map((s,i) => ({ name: String(i+1)+"회", sets: calcTotalSets(s.exercises) }));
-}
 // 1,000kg 미만은 kg, 이상은 t(소수점 첫째자리) — 블록 피드백과 표기 통일
 function formatVolumeKgT(v) {
   const n = Number(v)||0;
   return n >= 1000 ? (n/1000).toFixed(1)+"t" : Math.round(n).toLocaleString()+"kg";
+}
+
+// ════════════════════════════════════════════
+// 부위 성장 분석 — "세션" 기준이 아니라 "해당 부위를 실제로 훈련한 순서" 기준으로
+// 볼륨/세트가 어떻게 증가했는지 추적(운동 분석 화면 훈련량·부위 분석 탭 공통 헬퍼)
+// ════════════════════════════════════════════
+function buildRegionOccurrences(sl, muscleTop) {
+  const pts = [];
+  (sl||[]).forEach(s=>{
+    const exs = (s.exercises||[]).filter(ex=>ex.muscleTop===muscleTop);
+    if (!exs.length) return;
+    const vol = exs.reduce((sum,ex)=>sum+(ex.sets||[]).reduce((a,st)=>a+(st.volume||0),0),0);
+    const sets = exs.reduce((sum,ex)=>sum+(ex.sets||[]).filter(isValidSet).length,0);
+    if (vol<=0 && sets<=0) return;
+    pts.push({ date:s.date||"", sessionNo:s.sessionNo, vol, sets });
+  });
+  return pts.map((p,i)=>({ ...p, occ:i+1 }));
+}
+// 성장 지표(첫 vs 최근/최고/평균) — metric은 "vol" 또는 "sets"
+function buildRegionGrowthStats(occPoints, metric) {
+  if (!occPoints.length) return null;
+  const vals = occPoints.map(p=>p[metric]);
+  const first = vals[0], last = vals[vals.length-1], max = Math.max(...vals);
+  const pct = (a,b) => (a>0 ? Math.round(((b-a)/a)*1000)/10 : null);
+  const totalPct = pct(first,last);
+  const maxPct = pct(first,max);
+  const recentN = Math.min(3, vals.length);
+  const avgRecent = Math.round(vals.slice(-recentN).reduce((a,b)=>a+b,0)/recentN);
+  const avgAll = Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  const avgPct = pct(avgAll, avgRecent);
+  const recent3 = vals.slice(-3);
+  const rising3 = recent3.length===3 && recent3[0]<recent3[1] && recent3[1]<recent3[2];
+  const prev = vals.length>=2 ? vals[vals.length-2] : null;
+  const lastVsPrevPct = prev!=null ? pct(prev,last) : null;
+  const isNewMax = vals.length>1 && last===max && vals.slice(0,-1).every(v=>v<last);
+  let trend = "데이터 부족";
+  if (lastVsPrevPct!=null) trend = lastVsPrevPct>3 ? "상승" : lastVsPrevPct<-3 ? "하락" : "유지";
+  return { count:vals.length, first, last, max, totalPct, maxPct, avgAll, avgRecent, avgPct, rising3, lastVsPrevPct, isNewMax, trend };
+}
+const REGION_GROWTH_WINDOWS = [
+  { key:"core", label:"처음·중간·최근" },
+  { key:"3",    label:"최근 3회" },
+  { key:"5",    label:"최근 5회" },
+  { key:"all",  label:"전체" },
+];
+function pickRegionGrowthWindow(occPoints, windowKey) {
+  if (!occPoints.length) return [];
+  if (windowKey==="3") return occPoints.slice(-3);
+  if (windowKey==="5") return occPoints.slice(-5);
+  if (windowKey==="all") return occPoints;
+  // core: 첫 · 중간 · 최근 3점(기록이 3회 이하면 있는 그대로)
+  if (occPoints.length<=3) return occPoints;
+  const midIdx = Math.floor((occPoints.length-1)/2);
+  return [occPoints[0], occPoints[midIdx], occPoints[occPoints.length-1]];
+}
+function regionGrowthArrow(v) { return v==null ? "■" : v>0 ? "▲" : v<0 ? "▼" : "■"; }
+function regionGrowthColor(v) { return v==null ? "#94a3b8" : v>0 ? "#22c55e" : v<0 ? "#ef4444" : "#94a3b8"; }
+
+// 성장 카드 배지 목록 — RegionGrowthPanel 전용
+function RegionGrowthBadges({ stats, metricLabel }) {
+  const rows = [];
+  if (stats.totalPct!=null) rows.push({icon:regionGrowthArrow(stats.totalPct), color:regionGrowthColor(stats.totalPct), text:`총 ${metricLabel} ${stats.totalPct>0?"+":""}${stats.totalPct}%`});
+  if (stats.isNewMax) rows.push({icon:"🏆", color:"#ffd166", text:`NEW 최고 ${metricLabel} 기록`});
+  else if (stats.maxPct!=null) rows.push({icon:regionGrowthArrow(stats.maxPct), color:regionGrowthColor(stats.maxPct), text:`최고 ${metricLabel} +${stats.maxPct}%`});
+  if (stats.avgPct!=null) rows.push({icon:regionGrowthArrow(stats.avgPct), color:regionGrowthColor(stats.avgPct), text:`평균 ${metricLabel} ${stats.avgPct>0?"+":""}${stats.avgPct}%`});
+  if (stats.rising3) rows.push({icon:"🔥", color:"#22c55e", text:"최근 3회 연속 증가"});
+  if (stats.count>=2) {
+    if (stats.trend==="상승") rows.push({icon:"▲", color:"#22c55e", text:`최근 수업 대비 +${stats.lastVsPrevPct}%`});
+    else if (stats.trend==="하락") rows.push({icon:"▼", color:"#ef4444", text:`최근 수업 대비 ${stats.lastVsPrevPct}%`});
+    else if (stats.trend==="유지") rows.push({icon:"■", color:"#94a3b8", text:"최근 유지중"});
+  }
+  if (stats.trend==="하락") rows.push({icon:"💡", color:"#818cf8", text:"다음 수업에서 볼륨을 조금 더 올려보세요"});
+  if (!rows.length) return <Mo c="#6b7280" s={10}>성장률을 계산하려면 기록이 2회 이상 필요합니다.</Mo>;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {rows.map((r,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:7}}>
+          <span style={{fontSize:12,flexShrink:0}}>{r.icon}</span>
+          <Mo c={r.color} s={12} style={{fontWeight:700}}>{r.text}</Mo>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 부위 성장 그래프 + 성장 카드 — 훈련량 탭 · 부위 분석(부위별/세트분석) 탭 공통 컴포넌트
+function RegionGrowthPanel({ sessions, muscleTotals, metric, selectedMuscle, onSelectMuscle, growthWindow, onWindowChange, tt }) {
+  const activeMuscle = (selectedMuscle && muscleTotals.some(m=>m.g===selectedMuscle)) ? selectedMuscle : (muscleTotals[0]?.g || null);
+  const occPoints = useMemo(()=> activeMuscle ? buildRegionOccurrences(sessions, activeMuscle) : [], [sessions, activeMuscle]);
+  const stats = useMemo(()=> buildRegionGrowthStats(occPoints, metric), [occPoints, metric]);
+  const chartPoints = useMemo(()=> pickRegionGrowthWindow(occPoints, growthWindow), [occPoints, growthWindow]);
+  const metricLabel = metric==="vol" ? "볼륨" : "세트";
+  const fmt = v => metric==="vol" ? formatVolumeKgT(v) : `${v}세트`;
+  const color = activeMuscle ? mColor(activeMuscle) : "#5EEAD4";
+
+  if (!muscleTotals.length) return <Emp msg="부위가 지정된 운동 기록이 없습니다." />;
+  const lastOcc = occPoints.length ? occPoints[occPoints.length-1].occ : null;
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+        {muscleTotals.map(({g})=>(
+          <button key={g} onClick={()=>onSelectMuscle(g)}
+            style={{padding:"6px 12px",borderRadius:16,border:"1px solid",flexShrink:0,cursor:"pointer",
+              borderColor:g===activeMuscle?mColor(g):"rgba(255,255,255,0.08)",
+              background:g===activeMuscle?`${mColor(g)}22`:"transparent",
+              color:g===activeMuscle?mColor(g):"#94a3b8",fontSize:11,fontWeight:700}}>{g}</button>
+        ))}
+      </div>
+
+      {!occPoints.length ? <Emp msg={`${activeMuscle} 운동 기록이 없습니다.`} /> : (
+        <>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+            {REGION_GROWTH_WINDOWS.map(w=>(
+              <button key={w.key} onClick={()=>onWindowChange(w.key)}
+                style={{padding:"5px 10px",borderRadius:12,border:"1px solid",flexShrink:0,cursor:"pointer",
+                  borderColor:growthWindow===w.key?color:"rgba(255,255,255,0.08)",
+                  background:growthWindow===w.key?`${color}18`:"transparent",
+                  color:growthWindow===w.key?color:"#6b7280",fontSize:10,fontWeight:700}}>{w.label}</button>
+            ))}
+          </div>
+
+          <Card title={`${activeMuscle} ${metricLabel} 성장 추이`} style={{marginBottom:12}}>
+            <ResponsiveContainer width="100%" height={170}>
+              <LineChart data={chartPoints.map(p=>({ label: p.occ===lastOcc?"최근":`${p.occ}번째`, value:p[metric] }))}
+                margin={{top:6,right:6,left:-22,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
+                <XAxis dataKey="label" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
+                <Tooltip contentStyle={tt} formatter={(v)=>[fmt(v), activeMuscle]}/>
+                <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2.5} dot={{fill:color,r:4}} activeDot={{r:6}} name={activeMuscle}/>
+              </LineChart>
+            </ResponsiveContainer>
+            <Mo c="#6b7280" s={9} style={{display:"block",marginTop:6}}>총 {occPoints.length}회 훈련 · {occPoints[0].date||"—"} → {occPoints[occPoints.length-1].date||"—"}</Mo>
+          </Card>
+
+          {stats && (
+            <Card title="📊 성장 카드">
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+                <Mo c="#94a3b8" s={10}>첫 운동 → 최근</Mo>
+                <Mo c="#e2e8f0" s={13} style={{fontFamily:"'DM Mono',monospace",fontWeight:800}}>{fmt(stats.first)} → {fmt(stats.last)}</Mo>
+              </div>
+              <RegionGrowthBadges stats={stats} metricLabel={metricLabel} />
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 // ════════════════════════════════════════════
@@ -26409,6 +26555,8 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
   const [regionView, setRegionView] = useState("muscle");
   const [showAllExercises, setShowAllExercises] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState(null);
+  const [regionMuscle, setRegionMuscle] = useState(null);
+  const [growthWindow, setGrowthWindow] = useState("core");
 
   const periodSessions = useMemo(()=>pickPeriodSessions(sessions, period), [sessions, period]);
   const summary   = useMemo(()=>buildExerciseAnalysisSummary(periodSessions), [periodSessions]);
@@ -26428,10 +26576,8 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
   };
   const tt={background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11};
 
-  // 훈련량 탭
-  const volTrend = periodSessions.map(s=>({name:(s.sessionNo||"")+"회", total: Number(s.totalVolume)||0}));
-  const setsTrend = periodSessions.map(s=>({name:(s.sessionNo||"")+"회", sets: calcTotalSets(s.exercises)}));
-  const totalSetsAll = setsTrend.reduce((a,r)=>a+r.sets,0);
+  // 훈련량 탭 — 세션 총합이 아니라 부위 성장 그래프(RegionGrowthPanel)로 표시
+  const totalSetsAll = periodSessions.reduce((a,s)=>a+calcTotalSets(s.exercises),0);
   const avgSets = periodSessions.length ? Math.round((totalSetsAll/periodSessions.length)*10)/10 : 0;
 
   // 부위 분석 탭 — 블록 피드백과 동일한 공통 헬퍼 재사용(같은 기간이면 결과가 일치)
@@ -26442,7 +26588,6 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
   const equipTotals    = buildEquipTotals(equipData);
   const muscleDayAvg   = buildMuscleDayAvg(periodSessions, muscleTotals);
   const partSetList    = buildPartSetList(periodSessions);
-  const regionSetTrend = buildSetTrend(periodSessions);
 
   if (!sessions.length) {
     return (
@@ -26612,28 +26757,12 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
                 <StatTile label="총 세트" value={totalSetsAll+"세트"} />
                 <StatTile label="회당 평균 세트" value={avgSets+"세트"} />
               </div>
-              <Card title="세션별 총 볼륨 추이" style={{marginBottom:12}}>
-                <ResponsiveContainer width="100%" height={150}>
-                  <LineChart data={volTrend} margin={{top:6,right:6,left:-22,bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                    <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                    <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                    <Tooltip contentStyle={tt}/>
-                    <Line type="monotone" dataKey="total" stroke="#5EEAD4" strokeWidth={2} dot={{fill:"#5EEAD4",r:3}} name="총볼륨(kg)"/>
-                  </LineChart>
-                </ResponsiveContainer>
-              </Card>
-              <Card title="세션별 총 세트 추이">
-                <ResponsiveContainer width="100%" height={150}>
-                  <LineChart data={setsTrend} margin={{top:6,right:6,left:-22,bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                    <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                    <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                    <Tooltip contentStyle={tt}/>
-                    <Line type="monotone" dataKey="sets" stroke="#818cf8" strokeWidth={2} dot={{fill:"#818cf8",r:3}} name="총세트"/>
-                  </LineChart>
-                </ResponsiveContainer>
-              </Card>
+              <Mo c="#6b7280" s={10} style={{display:"block",marginBottom:10}}>세션마다 운동 부위가 다르므로, 부위별로 볼륨이 어떻게 성장했는지 확인하세요.</Mo>
+              <RegionGrowthPanel
+                sessions={periodSessions} muscleTotals={muscleTotals} metric="vol"
+                selectedMuscle={regionMuscle} onSelectMuscle={setRegionMuscle}
+                growthWindow={growthWindow} onWindowChange={setGrowthWindow} tt={tt}
+              />
             </div>
           )}
         </div>
@@ -26720,18 +26849,11 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
             <>
               {regionView==="muscle" && (
                 <div>
-                  <Card title="💪 부위별 볼륨 분포">
-                    <ResponsiveContainer width="100%" height={175}>
-                      <BarChart data={muscleData} margin={{top:6,right:6,left:-22,bottom:0}}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                        <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                        <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                        <Tooltip contentStyle={tt}/>
-                        <Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>
-                        {MUSCLE_LIST.map(g=><Bar key={g} dataKey={g} stackId="a" fill={mColor(g)}/>)}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </Card>
+                  <RegionGrowthPanel
+                    sessions={periodSessions} muscleTotals={muscleTotals} metric="vol"
+                    selectedMuscle={regionMuscle} onSelectMuscle={setRegionMuscle}
+                    growthWindow={growthWindow} onWindowChange={setGrowthWindow} tt={tt}
+                  />
                   <Card title="💪 누적 부위별 볼륨" style={{marginTop:11}}>
                     {muscleTotals.length===0 ? <Emp msg="부위가 지정된 운동 기록이 없습니다." /> : (
                       <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -26760,17 +26882,11 @@ function ExerciseAnalysisScreen({ member, sessions, onBack }) {
               )}
               {regionView==="sets" && (
                 <div>
-                  <Card title="📋 세션별 총세트 추이">
-                    <ResponsiveContainer width="100%" height={150}>
-                      <LineChart data={regionSetTrend} margin={{top:6,right:6,left:-22,bottom:0}}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/>
-                        <XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                        <YAxis tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/>
-                        <Tooltip contentStyle={tt}/>
-                        <Line type="monotone" dataKey="sets" stroke="#818cf8" strokeWidth={2} dot={{fill:"#818cf8",r:3}} name="총세트"/>
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </Card>
+                  <RegionGrowthPanel
+                    sessions={periodSessions} muscleTotals={muscleTotals} metric="sets"
+                    selectedMuscle={regionMuscle} onSelectMuscle={setRegionMuscle}
+                    growthWindow={growthWindow} onWindowChange={setGrowthWindow} tt={tt}
+                  />
                   <Card title="📋 부위별 누적 세트" style={{marginTop:11}}>
                     {partSetList.length===0 ? <Emp msg="세트 기록이 없습니다." /> : (
                       <div style={{display:"flex",flexDirection:"column",gap:9}}>

@@ -2157,7 +2157,11 @@ const checks = [
     db.includes("if (data.condition) {") &&
     db.includes('activities.push({ type: "condition", label: "컨디션", value: data.condition, dateKey });') &&
     db.includes('activities.push({ type: "pain", label: "통증", value, dateKey });') &&
-    app.includes('"memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps"')
+    app.includes('"memo","pain","soreness","rpe","personalWorkoutSoreness","personalWorkoutRpe","condition","personalWorkout","weight","cardio","kcal","steps"')
+  ],
+  ['개인운동 활동 타입: personalWorkout/personalWorkoutRpe/personalWorkoutSoreness가 PT용 rpe/soreness와 분리된 아이콘·라벨을 갖는다',
+    app.includes('personalWorkout:"🏋️", personalWorkoutRpe:"🏋️", personalWorkoutSoreness:"🦵"') &&
+    app.includes('personalWorkout:"개인운동", personalWorkoutRpe:"개인운동 RPE", personalWorkoutSoreness:"개인운동 근육통"')
   ],
 
   // ── 기존 코멘트 개인화 (홈/건강 탭, 수업 탭은 제외) ──
@@ -2761,10 +2765,22 @@ const checks = [
   ],
   ['개인운동 종료: Firestore를 건드리지 않고 요약만 띄우고, 완료 전환은 "운동 저장" 1회에서만 발생',
     (() => {
-      const openFn = app.slice(app.indexOf('const openSummary=()=>{'), app.indexOf('const saveCompleted=async()=>{'));
-      const saveFn = app.slice(app.indexOf('const saveCompleted=async()=>{'), app.indexOf('const summaryPreview='));
+      const openFn = app.slice(app.indexOf('const openSummary=()=>{'), app.indexOf('const saveCompleted=async(rpeValue)=>{'));
+      const saveFn = app.slice(app.indexOf('const saveCompleted=async(rpeValue)=>{'), app.indexOf('const summaryPreview='));
       return openFn.includes('validatePersonalWorkoutForComplete(') && !openFn.includes('onComplete') && !openFn.includes('onSaveProgress') &&
-        saveFn.includes('await onComplete(workout.id,{') && saveFn.includes('pendingRef.current=false;');
+        saveFn.includes('await onComplete(workout.id,{') && saveFn.includes('pendingRef.current=false;') &&
+        saveFn.includes('rpe:rpeValue??null');
+    })()
+  ],
+  ['개인운동 종료 RPE: 종료 시 강도 선택 단계가 있고 미입력으로도 완료 가능(나중에 입력)',
+    (() => {
+      const sheet = app.slice(app.indexOf('<MemberBottomSheet open={summaryOpen}'), app.indexOf('// "HH:MM" 입력창 값'));
+      return sheet.includes('오늘 개인운동은 전체적으로 얼마나 힘들었나요?') &&
+        sheet.includes('onClick={()=>saveCompleted(rpeChoice)}') &&
+        sheet.includes('onClick={()=>saveCompleted(null)}') &&
+        // 나중에 입력 버튼은 RPE 선택 여부와 무관하게 항상 눌러 완료할 수 있어야 한다(disabled 조건에 rpeChoice가 없어야 함)
+        /나중에 입력<\/button>/.test(sheet) &&
+        !/disabled=\{completing\|\|rpeChoice==null\}[^>]*>나중에 입력/.test(sheet);
     })()
   ],
   ['관리자 회원 상세: "최근 개인운동" 카드가 최근 수업 카드 아래에 배치되고 조회 전용(수정·삭제 없음)',
@@ -3603,13 +3619,13 @@ const checks = [
     })()
   ],
   ['수업 준비 UI: Firestore 추가 조회 없이 이미 로드된 personalWorkouts prop만 사용(N+1 금지)',
-    app.includes('personalWorkouts={memberPersonalWorkouts} />}') &&
+    app.includes('personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}') &&
     app.includes('buildSessionPrepSummary({ sessions, personalWorkouts, todayKey: getKoreaDateString() })') &&
     (() => {
       const i = app.indexOf('function SessionPrepCard');
       const j = app.indexOf('const [sessionType, setSessionType]');
       // SessionPrepCard 정의 ~ SessionScreen 초반(카드 데이터 계산 구간)에 Firestore 조회 호출이 없다
-      return !/getPersonalWorkouts\(|getSessions\(|getDocs\(/.test(app.slice(i, j));
+      return !/getPersonalWorkouts\(|getSessions\(|getDocs\(|getPersonalWorkoutSorenessMap\(/.test(app.slice(i, j));
     })()
   ],
   ['수업 준비: PT 저장 구조·저장 로직에 영향 없음(기존 handleSaveSession 경로 그대로)',
@@ -4111,6 +4127,151 @@ const checks = [
       return i !== -1 && !/PersonalWorkoutImportSheet|applyPersonalWorkoutImport|buildPersonalWorkoutImportOptions/.test(body);
     })()
   ],
+  // ════════════════════════════════════════════════════
+  // 개인운동 수정·RPE·근육통 (2026-08)
+  // ════════════════════════════════════════════════════
+  ['개인운동 완료 기록 수정: 신규 함수가 생성/진행저장과 분리되고, memberId·createdAt은 patch로 받지도 쓰지도 않음(위조·불변성 위반 차단)',
+    db.includes('export async function editCompletedPersonalWorkout(memberId, workoutId, patch = {}) {') &&
+    !db.slice(db.indexOf('export async function editCompletedPersonalWorkout'), db.indexOf('function clampSorenessLevel(v) {')).includes('patch.memberId') &&
+    !db.slice(db.indexOf('export async function editCompletedPersonalWorkout'), db.indexOf('function clampSorenessLevel(v) {')).includes('createdAt:')
+  ],
+  ['개인운동 완료 기록 수정: rpe는 null 허용 + 값이 있을 때만 rpeUpdatedAt 갱신(내용만 수정 시 손대지 않음)',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function editCompletedPersonalWorkout'), db.indexOf('function clampSorenessLevel(v) {'));
+      return fn.includes('if (patch.rpe !== undefined) {') &&
+        fn.includes('body.rpe = Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : null;') &&
+        fn.includes('body.rpeUpdatedAt = serverTimestamp();');
+    })()
+  ],
+  ['개인운동 완료 시 RPE 동시 저장: completePersonalWorkout이 rpe 미전달이면 건드리지 않고, 전달 시 1~10으로 clamp',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function completePersonalWorkout'), db.indexOf('function clampSorenessLevel(v) {'));
+      return fn.includes('if (payload.rpe !== undefined) {') && fn.includes('Math.max(1, Math.min(10, Math.round(n)))');
+    })()
+  ],
+  ['개인운동 삭제: personalWorkoutSoreness도 함께 정리해 고아 근육통 문서를 남기지 않음',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function deletePersonalWorkout'), db.indexOf('// 완료된 기록 수정'));
+      return fn.includes('deleteDoc(doc(db, "members", memberId, "personalWorkouts", workoutId))') &&
+        fn.includes('deleteDoc(doc(db, "members", memberId, "personalWorkoutSoreness", workoutId))');
+    })()
+  ],
+  ['개인운동 근육통 저장: 문서ID=workoutId 결정적 생성(1건당 1건) + upsert(getDoc으로 존재 여부 판정 후 create/update 분기)',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function savePersonalWorkoutSoreness'), db.length);
+      return fn.includes('doc(db, "members", memberId, "personalWorkoutSoreness", workoutId)') &&
+        fn.includes('const existing = await getDoc(ref);') &&
+        fn.includes('const isFirstSave = !existing.exists();') &&
+        fn.includes('await setDoc(ref,') && fn.includes('await updateDoc(ref,');
+    })()
+  ],
+  ['개인운동 근육통 저장: timing은 next_day/two_days_later만 허용하고 daysAfterWorkout이 timing에서 그대로 파생됨(값 어긋남 불가)',
+    db.includes('const timing = data.timing === "two_days_later" ? "two_days_later" : "next_day";') &&
+    db.includes('daysAfterWorkout: timing === "two_days_later" ? 2 : 1,') &&
+    db.includes('source: "personalWorkout",')
+  ],
+  ['개인운동 근육통 저장: 부위 중복 방지(같은 part 재추가 불가) + 최대 개수 제한',
+    db.includes('.filter(bp => bp.part && !seenParts.has(bp.part) && seenParts.add(bp.part))') &&
+    db.includes('.slice(0, PERSONAL_WORKOUT_LIMITS.maxParts);')
+  ],
+  ['근육통 안내 날짜 계산: ms/24h 나눗셈이 아니라 두 YYYY-MM-DD 문자열의 자정 UTC 差로 계산(23시 완료도 다음날 오전 정상 판정)',
+    (() => {
+      const fn = app.slice(app.indexOf('function koreaDateDaysDiff(fromDateStr,toDateStr){'), app.indexOf('function getPersonalWorkoutCompletionDateKey'));
+      return fn.includes('T00:00:00Z') && !fn.includes('/ 86400000 / 24') && fn.includes('Math.round((b.getTime()-a.getTime())/86400000)');
+    })()
+  ],
+  ['근육통 안내 창(window): 당일(0)·72시간 초과(3일 이상)는 timing이 null 이 되어 자동 안내·신규 입력이 노출되지 않음, 1/2일만 next_day/two_days_later',
+    (() => {
+      const fn = app.slice(app.indexOf('function getPersonalWorkoutSorenessWindow'), app.indexOf('function normalizePersonalWorkoutSoreness'));
+      return fn.includes('const timing=days===1?"next_day":days===2?"two_days_later":null;') &&
+        fn.includes('withinAutoWindow:days===1||days===2,');
+    })()
+  ],
+  ['근육통 완료 날짜 우선순위: endedAt → completedAt → workoutDate → updatedAt → createdAt 순으로 판정',
+    (() => {
+      const fn = app.slice(app.indexOf('function getPersonalWorkoutCompletionDateKey'), app.indexOf('function getPersonalWorkoutSorenessWindow'));
+      return fn.indexOf('"endedAt","completedAt"') < fn.indexOf('workout?.workoutDate') &&
+        fn.indexOf('workout?.workoutDate') < fn.indexOf('"updatedAt","createdAt"');
+    })()
+  ],
+  ['근육통 없음 선택: overallLevel 0 + 부위별 level 0으로 명시 저장(미입력과 구분), 홈/운동탭 배너에서 skip 시 재촉하지 않음',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalSorenessBanner'), app.indexOf('function PersonalSorenessSheet'));
+      return fn.includes('overallLevel:0,bodyParts:(workout.workoutParts||[]).map(part=>({part,level:0}))');
+    })()
+  ],
+  ['근육통 안내 대상: 완료된 기록 중 자동 안내 창(1~2일) 안이고 아직 근육통이 없는 것만, 최신순 정렬',
+    (() => {
+      const fn = app.slice(app.indexOf('function buildPersonalSorenessPrompts'), app.indexOf('function PersonalSorenessBanner'));
+      return fn.includes('!sorenessMap[w.id]') && fn.includes('.filter(x=>x.window.withinAutoWindow)') &&
+        fn.includes('.sort((a,b)=>String(b.workout.workoutDate||"").localeCompare(String(a.workout.workoutDate||"")));');
+    })()
+  ],
+  ['근육통 입력 시트: timing은 창(window)에서 자동 결정되고 회원이 직접 선택하지 않음(선택 UI 없음) + 기존 통증 기록 화면 이동 안내 포함',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalSorenessSheet'), app.indexOf('// 운동 종목 선택 시트'));
+      return fn.includes('const timing=soreness?.timing||(win.timing||"next_day");') &&
+        !fn.includes('setTiming') &&
+        fn.includes('통증은 건강 탭에서 기록');
+    })()
+  ],
+  ['완료 기록 수정 화면: 기존 값이 모두 채워진 채로 열리고, 변경 후 나가면 확인창을 띄운다(자동저장 아님)',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalWorkoutEditScreen'), app.indexOf('// 건강 탭 대시보드'));
+      return fn.includes('useState(()=>String(workout?.workoutDate||"").slice(0,10))') &&
+        fn.includes('useState(()=>toTimeInputValue(workout?.startedAt))') &&
+        fn.includes('useState(()=>workout?.rpe??null)') &&
+        fn.includes('수정 중인 내용이 저장되지 않았습니다. 나가시겠어요?') &&
+        !fn.includes('setTimeout(()=>flush()');
+    })()
+  ],
+  ['완료 기록 수정: 시작<종료 검증은 화면에서도 선제 확인하고, rpe는 최초 로드값과 실제로 달라졌을 때만 patch에 포함(내용만 수정 시 rpeUpdatedAt 불변)',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalWorkoutEditScreen'), app.indexOf('// 건강 탭 대시보드'));
+      return fn.includes('종료 시각은 시작 시각보다 늦어야 해요') &&
+        fn.includes('if(rpe!==initialRpeRef.current) patch.rpe=rpe;');
+    })()
+  ],
+  ['개인운동 카드: RPE 배지(PT의 sj-rpe-chip과 동일 톤이지만 개인운동 카드 내부에 표시되어 출처 혼동 없음) + 근육통 요약/미입력 안내 + "기록 관리" 메뉴(수정/근육통/삭제)',
+    (() => {
+      const fn = app.slice(app.indexOf('function MemberPersonalWorkoutCard'), app.indexOf('function MemberPersonalWorkoutEntry'));
+      return fn.includes('workout?.rpe!=null?`RPE ${workout.rpe}`:"RPE 미입력"') &&
+        fn.includes('운동 후 근육통을 아직 기록하지 않았어요.') &&
+        fn.includes('최종 운동 강도가 입력되지 않았어요.') &&
+        fn.includes('className="pw-manage-toggle"') &&
+        fn.includes('운동 기록 수정') && fn.includes('기록 삭제');
+    })()
+  ],
+  ['운동 종료 시 RPE 입력 단계: 필수가 아니며 "나중에 입력"으로도 완료 가능, 선택하면 저장 직전 값이 payload.rpe로 전달됨',
+    app.includes('오늘 개인운동은 전체적으로 얼마나 힘들었나요?') &&
+    app.includes('onClick={()=>saveCompleted(rpeChoice)}') &&
+    app.includes('onClick={()=>saveCompleted(null)}')
+  ],
+  ['개인운동 RPE·근육통은 PT 수업 RPE/근육통과 별도 활동 type(personalWorkoutRpe/personalWorkoutSoreness)으로 기록되어 통계·표시가 섞이지 않음',
+    db.includes('activities.push({ type: "personalWorkoutRpe", label: "개인운동 RPE"') &&
+    db.includes('type: "personalWorkoutSoreness", label: `개인운동 근육통 ${isFirstSave ? "입력" : "수정"}`')
+  ],
+  ['Firestore rules: personalWorkouts 완료 후 수정은 화이트리스트+시작<종료 검증을 통과해야 하고 completed→in_progress 역행이 차단됨',
+    firestoreRules.includes('완료된 기록의 재수정 — 회원 본인이 날짜·시작/종료시각·부위·종목·메모·집계·RPE를 화이트리스트로만 고칠 수 있다.') &&
+    firestoreRules.includes('function personalWorkoutTimeOrderValid(data) {') &&
+    firestoreRules.includes('resource.data.status == "completed"') &&
+    firestoreRules.includes('request.resource.data.status == "completed"')
+  ],
+  ['Firestore rules: personalWorkoutSoreness는 문서ID=workoutId 강제 + 참조 개인운동이 본인 소유의 완료 기록인지 서버측에서 대조(get())',
+    firestoreRules.includes('match /personalWorkoutSoreness/{workoutId} {') &&
+    firestoreRules.includes('request.resource.data.workoutId == workoutId') &&
+    firestoreRules.includes('get(/databases/$(database)/documents/members/$(memberId)/personalWorkouts/$(workoutId)).data.status == "completed"') &&
+    firestoreRules.includes('function personalWorkoutSorenessDataValid(data) {')
+  ],
+  ['Firestore rules 테스트: 완료 기록 수정/RPE/근육통 시나리오가 tests/rules에 존재(npm run test:rules로 검증됨)',
+    (() => {
+      const rulesTest = fs.readFileSync(path.join(root, "tests", "rules", "firestore.rules.test.mjs"), "utf8");
+      return rulesTest.includes('완료된 기록 화이트리스트 재수정 허용') &&
+        rulesTest.includes('personalWorkoutSoreness (개인운동 후 근육통') &&
+        rulesTest.includes('timing·daysAfterWorkout 불일치 차단');
+    })()
+  ],
+
   ['수업 기록 화면: 신규 기록 날짜·오늘의 운동 부위 초기값이 getInitialNewSessionValues 통합 헬퍼를 통해 계산됨',
     app.includes('const initialSessionValues = getInitialNewSessionValues({') &&
     app.includes('const [date,           setDate]           = useState(initialSessionValues.date);') &&

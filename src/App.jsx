@@ -32,6 +32,7 @@ import {
   getCardioLogs, saveCardioLog, deleteCardioLog,
   PERSONAL_WORKOUT_LIMITS, getPersonalWorkouts, getInProgressPersonalWorkouts,
   createPersonalWorkout, updatePersonalWorkoutProgress, completePersonalWorkout, deletePersonalWorkout,
+  editCompletedPersonalWorkout, getPersonalWorkoutSorenessMap, savePersonalWorkoutSoreness,
   CONSULT_STATUS_OPTIONS, getConsultations, addConsultation, updateConsultation, deleteConsultation, convertConsultationToMember,
   ONBOARDING_VERSION, saveMemberOnboardingDraft, syncOnboardingStatusToMember, markOnboardingReviewed, requestOnboardingUpdate,
   subscribeToMembers,
@@ -1513,6 +1514,14 @@ function MemberApp({ onLogout }) {
   const [personalWorkouts,setPersonalWorkouts]=useState([]);
   const [personalInProgress,setPersonalInProgress]=useState([]);
   const [personalBusy,setPersonalBusy]=useState(false);
+  // 개인운동 근육통 — workoutId를 key로 하는 맵. 문서ID가 workoutId와 1:1 고정이라 별도 정규화 없이 그대로 조회할 수 있다.
+  const [personalSorenessMap,setPersonalSorenessMap]=useState({});
+  const [personalEditBusy,setPersonalEditBusy]=useState(false);
+  const [personalSorenessBusy,setPersonalSorenessBusy]=useState(false);
+  // 근육통 입력 시트 대상 — 홈/운동 탭 어디서 열어도 같은 시트 하나만 쓴다(중복 상태 없음).
+  const [personalSorenessTarget,setPersonalSorenessTarget]=useState(null);
+  const openPersonalSoreness=useCallback((workout)=>{ if(workout?.id) setPersonalSorenessTarget(workout); },[]);
+  const closePersonalSoreness=useCallback(()=>setPersonalSorenessTarget(null),[]);
   const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg)),ms))]);
   const resetMemberScroll=useCallback(()=>scrollMemberAppToTop(pageRef),[]);
   const goMemberTab=useCallback(nextTab=>{setTab(nextTab); resetMemberScroll();},[resetMemberScroll]);
@@ -1711,8 +1720,17 @@ function MemberApp({ onLogout }) {
         PERSONAL_WORKOUT_TIMEOUT_MS,
         "개인운동 목록 재조회가 지연되고 있습니다."
       );
-      setPersonalWorkouts((list||[]).map(normalizePersonalWorkout).filter(Boolean));
+      const normalizedList=(list||[]).map(normalizePersonalWorkout).filter(Boolean);
+      setPersonalWorkouts(normalizedList);
       setPersonalInProgress((ip||[]).map(normalizePersonalWorkout).filter(Boolean).sort((a,b)=>String(b.workoutDate||"").localeCompare(String(a.workoutDate||""))));
+      // 근육통은 완료된 기록에만 존재할 수 있다 — 최근 목록(최대 30건)의 workoutId로 한 번에 조회한다(개별 조회 없음).
+      const completedIds=normalizedList.filter(w=>w.status==="completed").map(w=>w.id);
+      if(completedIds.length){
+        try{
+          const map=await getPersonalWorkoutSorenessMap(profile.id,completedIds);
+          setPersonalSorenessMap(map||{});
+        }catch(e){ console.error("[개인운동] 근육통 조회 실패",e); }
+      }else{ setPersonalSorenessMap({}); }
     }catch(e){ console.error("[개인운동] 목록 재조회 실패",e); }
   };
   const openPersonalWorkoutStart=()=>{
@@ -1726,7 +1744,7 @@ function MemberApp({ onLogout }) {
   };
   const resumePersonalWorkout=(workout,opts={})=>{
     if(!workout?.id) return;
-    setPersonalRecordTarget({workoutId:workout.id,openSummary:!!opts.openSummary});
+    setPersonalRecordTarget({workoutId:workout.id,openSummary:!!opts.openSummary,editMode:!!opts.editMode});
     resetMemberScroll();
   };
   const closePersonalWorkoutRecord=()=>{
@@ -1809,8 +1827,53 @@ function MemberApp({ onLogout }) {
       setPersonalWorkouts(prev=>prev.filter(w=>w.id!==workout.id));
       setPersonalInProgress(prev=>prev.filter(w=>w.id!==workout.id));
       setPersonalRecordTarget(prev=>prev?.workoutId===workout.id?null:prev);
+      setPersonalSorenessMap(prev=>{ if(!prev[workout.id]) return prev; const next={...prev}; delete next[workout.id]; return next; });
       reloadPersonalWorkouts();
     }catch(e){ console.error("[개인운동] 삭제 실패",e); alert(e?.message||"개인운동 기록 삭제에 실패했습니다."); }
+  };
+  // 완료된 기록 수정 — 날짜·시각·부위·종목·메모·RPE를 한 번에 저장한다(신규 생성/진행중 저장과 완전히 분리된 경로).
+  const saveCompletedPersonalWorkoutEdit=async(workoutId,patch)=>{
+    assertOwnMember();
+    setPersonalEditBusy(true);
+    try{
+      await withTimeout(
+        editCompletedPersonalWorkout(profile.id,workoutId,patch),
+        PERSONAL_WORKOUT_TIMEOUT_MS,
+        "개인운동 수정 저장이 지연되고 있습니다. 네트워크 상태를 확인해주세요."
+      );
+      const applyPatch=w=>w.id===workoutId?normalizePersonalWorkout({...w,...patch,updatedAt:new Date()}):w;
+      setPersonalWorkouts(prev=>prev.map(applyPatch));
+      setPersonalRecordTarget(null);
+      resetMemberScroll();
+      setPersonalWorkoutToast("개인운동 기록을 수정했어요");
+      reloadPersonalWorkouts();
+    }catch(e){
+      console.error("[개인운동] 완료 기록 수정 실패",e);
+      alert(e?.message||"개인운동 기록 수정에 실패했습니다.");
+      throw e;
+    }finally{ setPersonalEditBusy(false); }
+  };
+  // 개인운동 근육통 저장 — 문서ID가 workoutId로 고정돼 있어 신규 입력·수정 모두 이 함수 하나로 처리된다(중복 문서 없음).
+  const savePersonalSorenessRecord=async(workout,data)=>{
+    if(!workout?.id) return;
+    assertOwnMember();
+    setPersonalSorenessBusy(true);
+    try{
+      const saved=await withTimeout(
+        savePersonalWorkoutSoreness(profile.id,workout.id,{
+          ...data,
+          workoutDate:getPersonalWorkoutCompletionDateKey(workout)||workout.workoutDate,
+        }),
+        PERSONAL_WORKOUT_TIMEOUT_MS,
+        "근육통 저장이 지연되고 있습니다. 네트워크 상태를 확인해주세요."
+      );
+      setPersonalSorenessMap(prev=>({...prev,[workout.id]:normalizePersonalWorkoutSoreness(saved)}));
+      return saved;
+    }catch(e){
+      console.error("[개인운동] 근육통 저장 실패",e);
+      alert(e?.message||"근육통 저장에 실패했습니다.");
+      throw e;
+    }finally{ setPersonalSorenessBusy(false); }
   };
   // 운동 종목 후보 — 본인 PT 수업일지 + 본인 개인운동 + 코드 내장 분류 상수(별도 운동 사전 신설 없음)
   const personalExerciseCandidates=buildPersonalExerciseCandidates({sessions,personalWorkouts});
@@ -1818,9 +1881,19 @@ function MemberApp({ onLogout }) {
   const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
     personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
     personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
-    startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast};
+    startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast,
+    personalSorenessMap,personalEditBusy,personalSorenessBusy,saveCompletedPersonalWorkoutEdit,savePersonalSorenessRecord,
+    personalSorenessTarget,openPersonalSoreness,closePersonalSoreness};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{/* 하단 탭 표시 문구만 "수업"→"운동"으로 변경 — 내부 라우팅 key(workout), 딥링크, 앱 이용 현황(appUsage) 기록은 그대로 유지한다. */}
-    {[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"운동"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav></div>;
+    {[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"운동"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav>
+    <PersonalSorenessSheet
+      workout={personalSorenessTarget}
+      soreness={personalSorenessTarget?personalSorenessMap[personalSorenessTarget.id]:null}
+      busy={personalSorenessBusy}
+      onClose={closePersonalSoreness}
+      onSave={savePersonalSorenessRecord}
+      onGoToPain={()=>{ goMemberTab("health"); closePersonalSoreness(); }}
+    /></div>;
 }
 
 function CopyValueButton({value,label="복사"}){const [done,setDone]=useState(false); if(!value)return null; return <button onClick={async()=>{try{await navigator.clipboard?.writeText(value);setDone(true);setTimeout(()=>setDone(false),1500);}catch{}}} style={{marginLeft:6,padding:"2px 6px",borderRadius:5,border:"1px solid rgba(47,115,246,.25)",background:"rgba(47,115,246,.08)",color:"#2f73f6",fontSize:10}}>{done?"복사됨":label}</button>}
@@ -3297,6 +3370,7 @@ function MemberHome(p){
   return <div className="hm-wrap">
     <MemberHomeHero {...p}/>
     <ReviewReminderCard notice={reviewNotice}/>
+    <PersonalSorenessBanner {...p}/>
     <HomeGoalCard {...p}/>
     <HomeTodayCheckCard {...p}/>
     <HomeMetricsGrid {...p}/>
@@ -3341,6 +3415,17 @@ function MemberWorkout(p){
       : null;
     // 진행 중 문서를 찾지 못하면(삭제·재조회 지연) 목록으로 안전하게 되돌린다 — 잘못된 문서에 쓰지 않는다.
     if(target.workoutId&&!workout) return <div className="pw-screen"><p className="pw-empty-line">진행 중인 개인운동을 찾을 수 없어요.</p><button type="button" className="pw-btn ghost block" onClick={p.closePersonalWorkoutRecord}>운동 탭으로 돌아가기</button></div>;
+    // 완료된 기록은 별도의 "완료 기록 수정" 화면으로 — 자동저장(디바운스) 로직이 있는 진행 중 화면과 완전히 분리된 컴포넌트다.
+    if(workout&&workout.status==="completed"){
+      return <PersonalWorkoutEditScreen
+        workout={workout}
+        candidates={p.personalExerciseCandidates||[]}
+        busy={p.personalEditBusy}
+        onSave={p.saveCompletedPersonalWorkoutEdit}
+        onDelete={p.removePersonalWorkout}
+        onBack={p.closePersonalWorkoutRecord}
+      />;
+    }
     return <MemberPersonalWorkoutScreen
       workout={workout}
       personalWorkouts={p.personalWorkouts||[]}
@@ -3362,6 +3447,7 @@ function MemberWorkout(p){
     <p className="sub sj-page-sub">{view==="journal"?"대표님과 진행한 수업과 직접 기록한 개인운동을 확인해보세요.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
     <MemberSegment ariaLabel="운동 보기 전환" options={[["journal","운동 기록"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
     {view==="calendar"?<MemberCalendar {...p}/>:<>
+      <PersonalSorenessBanner {...p}/>
       <MemberPersonalWorkoutEntry
         inProgress={p.personalInProgress||[]}
         busy={p.personalBusy}
@@ -3382,7 +3468,7 @@ function MemberWorkout(p){
 // 주의: "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds)는 여기(sessionStorage/openId)와는 정책이 다르다 —
 // 기본은 항상 접힘이어야 하므로 sessionStorage로 이전 방문 상태를 복원하지 않는다. MemberApp의 state로 옮겨졌다.
 const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,personalWorkouts=[],removePersonalWorkout}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,personalWorkouts=[],removePersonalWorkout,personalSorenessMap={},resumePersonalWorkout,openPersonalSoreness}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
   // 개인운동 카드 펼침 상태 — PT 수업일지의 openId(sessionStorage 복원 + 최신 자동 펼침)와 완전히 별개로 관리한다.
   // 개인운동은 sessionReads(수업일지 회원 확인) 개념이 없으므로 펼쳐도 어떤 확인 기록도 남기지 않는다.
   const [openPersonalId,setOpenPersonalId]=useState(null);
@@ -3498,6 +3584,9 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
       open={openPersonalId===w.id}
       onToggle={()=>setOpenPersonalId(prev=>prev===w.id?null:w.id)}
       onDelete={removePersonalWorkout}
+      onEdit={resumePersonalWorkout?(workout)=>resumePersonalWorkout(workout,{editMode:true}):undefined}
+      onEditSoreness={openPersonalSoreness}
+      soreness={personalSorenessMap[w.id]||null}
       comparisonIndex={comparisonIndex}/>
   );
   const heroItems=[]; const prevItems=[];
@@ -3559,6 +3648,83 @@ function toPersonalWorkoutDate(value){
   const raw=typeof value?.toDate==="function"?value.toDate():value;
   const d=raw instanceof Date?raw:new Date(raw);
   return Number.isNaN(d.getTime())?null:d;
+}
+
+// 두 "YYYY-MM-DD" 문자열의 달력일수 차이(자정 UTC 기준으로 파싱 — 두 값 다 자정 기준이라 시간대 영향 없이 정확한 날짜差가 나온다).
+// ms/24h 나눗셈을 쓰지 않는 이유: 23시에 완료해도 다음날 오전이면 daysAfterWorkout=1이어야 하는데, 24h 나눗셈은 아직 0으로 계산해버린다.
+function koreaDateDaysDiff(fromDateStr,toDateStr){
+  const a=new Date(`${String(fromDateStr||"").slice(0,10)}T00:00:00Z`);
+  const b=new Date(`${String(toDateStr||"").slice(0,10)}T00:00:00Z`);
+  if(Number.isNaN(a.getTime())||Number.isNaN(b.getTime())) return null;
+  return Math.round((b.getTime()-a.getTime())/86400000);
+}
+
+// 개인운동 "완료 날짜" 우선순위 — endedAt → completedAt → workoutDate(기록된 운동 날짜) → updatedAt → createdAt.
+// 근육통 다음날/다다음날 안내는 이 날짜를 기준으로 계산한다(레거시 기록도 workoutDate만 있으면 안전하게 동작).
+function getPersonalWorkoutCompletionDateKey(workout){
+  for(const field of ["endedAt","completedAt"]){
+    const d=toPersonalWorkoutDate(workout?.[field]);
+    if(d) return getKoreaDateString(d);
+  }
+  if(workout?.workoutDate) return String(workout.workoutDate).slice(0,10);
+  for(const field of ["updatedAt","createdAt"]){
+    const d=toPersonalWorkoutDate(workout?.[field]);
+    if(d) return getKoreaDateString(d);
+  }
+  return null;
+}
+
+// 근육통 자동 안내 창(다음날/다다음날) 판정 — 당일(daysAfterWorkout=0)과 72시간 이후(2일 초과)는 timing이 null이 되어
+// 자동 안내·신규 입력 UI가 노출되지 않는다(기존 근육통 기록의 수정만 가능, 신규 추가는 제공하지 않음 — 최종 승인 정책).
+function getPersonalWorkoutSorenessWindow(workout,todayKey=getKoreaDateString()){
+  const doneKey=getPersonalWorkoutCompletionDateKey(workout);
+  if(!doneKey) return {daysAfterWorkout:null,timing:null,withinAutoWindow:false,isSameDay:false,isPast:false};
+  const days=koreaDateDaysDiff(doneKey,todayKey);
+  if(days==null) return {daysAfterWorkout:null,timing:null,withinAutoWindow:false,isSameDay:false,isPast:false};
+  const timing=days===1?"next_day":days===2?"two_days_later":null;
+  return {
+    daysAfterWorkout:days, timing,
+    withinAutoWindow:days===1||days===2,
+    isSameDay:days===0,
+    isPast:days>2,
+  };
+}
+
+// 저장된 근육통 문서를 화면에서 안전하게 다룰 수 있게 정규화(레거시/누락 필드 방어).
+function normalizePersonalWorkoutSoreness(raw){
+  if(!raw) return null;
+  const overallLevel=Number(raw.overallLevel);
+  return {
+    id:raw.id||raw.workoutId||"",
+    workoutId:raw.workoutId||raw.id||"",
+    workoutDate:String(raw.workoutDate||"").slice(0,10),
+    timing:raw.timing==="two_days_later"?"two_days_later":"next_day",
+    daysAfterWorkout:raw.daysAfterWorkout===2?2:1,
+    overallLevel:Number.isFinite(overallLevel)?Math.max(0,Math.min(5,Math.round(overallLevel))):0,
+    bodyParts:Array.isArray(raw.bodyParts)?raw.bodyParts.map(bp=>({part:String(bp?.part||""),level:Math.max(0,Math.min(5,Math.round(Number(bp?.level))||0))})).filter(bp=>bp.part):[],
+    memo:String(raw.memo||""),
+    source:"personalWorkout",
+  };
+}
+function sorenessTimingLabel(timing){ return timing==="two_days_later"?"다다음 날 근육통":"다음 날 근육통"; }
+function sorenessLevelDescription(level){
+  const n=Number(level);
+  if(!Number.isFinite(n)) return "";
+  if(n<=0) return "없음"; if(n===1) return "아주 약함"; if(n===2) return "약함"; if(n===3) return "보통"; if(n===4) return "심함"; return "매우 심함";
+}
+// 개인운동 RPE·근육통을 관리자 화면에서 "주의"로 표시할지 판정 — 모든 일반 입력을 긴급으로 쌓지 않기 위해
+// 값 기준으로만 판정한다(기존 PT rpe>=9/근육통"강함" 관례와 동일한 방식, 저장 시점에 별도 플래그를 만들지 않는다).
+const PAIN_LIKE_MEMO_PATTERN=/통증|아파|아픔|저림|찌르는|시큰|욱신|삐끗|결림|담(?!당)/;
+function getPersonalWorkoutAttentionReasons(workout,soreness){
+  const reasons=[];
+  if(Number.isFinite(workout?.rpe)&&workout.rpe>=9) reasons.push(`RPE ${workout.rpe}`);
+  if(soreness){
+    if(soreness.overallLevel>=4) reasons.push(`전체 근육통 ${soreness.overallLevel}/5`);
+    (soreness.bodyParts||[]).forEach(bp=>{ if(bp.level>=4) reasons.push(`${bp.part} 근육통 ${bp.level}/5`); });
+    if(PAIN_LIKE_MEMO_PATTERN.test(soreness.memo||"")) reasons.push("통증 의심 메모");
+  }
+  if(PAIN_LIKE_MEMO_PATTERN.test(workout?.memo||"")) reasons.push("통증 의심 메모");
+  return reasons;
 }
 
 // 개인운동 운동 시간(분) — 저장된 durationMinutes를 우선 사용하고, 없으면 startedAt~endedAt 차이로 계산한다.
@@ -3682,6 +3848,8 @@ function normalizePersonalWorkout(raw){
     totalExercises:Number(raw.totalExercises)||totals.totalExercises,
     totalSets:Number(raw.totalSets)||totals.totalSets,
     totalVolume:Number(raw.totalVolume)||totals.totalVolume,
+    // 레거시 기록엔 rpe 필드 자체가 없다 — 그 경우도 항상 null(RPE 미입력)로 안전하게 표시된다.
+    rpe:(raw.rpe==null)?null:(Number.isFinite(Number(raw.rpe))?Math.max(1,Math.min(10,Math.round(Number(raw.rpe)))):null),
   };
 }
 
@@ -4502,11 +4670,14 @@ function MemberExerciseComparison({comparison}){
 }
 
 // 목록 카드 — 접힘/펼침 한 컴포넌트. 펼침 상태는 상위(MemberJournal)가 관리한다.
-function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete,comparisonIndex=null}){
+function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete,onEdit,onEditSoreness,soreness=null,comparisonIndex=null}){
   const sum=buildPersonalWorkoutCardSummary(workout);
   const exercises=(workout?.exercises||[]).filter(e=>String(e?.name||"").trim());
   const startedLabel=formatLastSavedLabel(workout?.startedAt);
   const endedLabel=formatLastSavedLabel(workout?.endedAt);
+  const [manageOpen,setManageOpen]=useState(false);
+  const sorenessWindow=getPersonalWorkoutSorenessWindow(workout);
+  const canTouchSoreness=!!(soreness||sorenessWindow.withinAutoWindow);
   if(!open){
     return <button type="button" className="sj-prev-card pw-card" onClick={onToggle}>
       <span className="sj-prev-main">
@@ -4515,7 +4686,7 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
         <span><i className="sj-part">{sum.partsLabel}</i>{sum.durationLabel?` · ${sum.durationLabel}`:""}</span>
         <span className="pw-card-meta">{sum.metaLabel}</span>
       </span>
-      <span className="sj-prev-side"><i className="sj-chev"><SjIcon paths={SJ_PATHS.chevronDown} size={15}/></i></span>
+      <span className="sj-prev-side">{workout?.rpe!=null&&<em className="sj-rpe-chip">RPE {workout.rpe}</em>}<i className="sj-chev"><SjIcon paths={SJ_PATHS.chevronDown} size={15}/></i></span>
     </button>;
   }
   return <section className="sj-session-card pw-detail">
@@ -4532,7 +4703,20 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
       <span><b>{sum.totalExercises}</b>종목</span>
       <span><b>{sum.totalSets}</b>세트</span>
       {sum.volumeLabel&&<span>{sum.volumeLabel}</span>}
+      <span className={"sj-rpe-chip"+(workout?.rpe==null?" empty":"")}>{workout?.rpe!=null?`RPE ${workout.rpe}`:"RPE 미입력"}</span>
     </div>
+    {soreness&&<p className="pw-soreness-line">
+      <b>{sorenessTimingLabel(soreness.timing)} {soreness.overallLevel>0?`${soreness.overallLevel}/5`:"없음"}</b>
+      {soreness.overallLevel>0&&soreness.bodyParts.length>0&&<span> · {soreness.bodyParts.map(bp=>`${bp.part} ${bp.level}`).join(" · ")}</span>}
+    </p>}
+    {!soreness&&sorenessWindow.withinAutoWindow&&<div className="pw-inline-cta">
+      <span>운동 후 근육통을 아직 기록하지 않았어요.</span>
+      <button type="button" onClick={()=>onEditSoreness?.(workout)}>지금 기록</button>
+    </div>}
+    {workout?.rpe==null&&<div className="pw-inline-cta">
+      <span>최종 운동 강도가 입력되지 않았어요.</span>
+      <button type="button" onClick={()=>onEdit?.(workout)}>입력하기</button>
+    </div>}
     {exercises.length===0
       ? <p className="pw-empty-line">기록된 운동이 없어요.</p>
       : <ul className="pw-ex-list">{exercises.map((e,i)=>{
@@ -4552,7 +4736,14 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
           </li>;
         })}</ul>}
     {String(workout?.memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{workout.memo}</p></div>}
-    {onDelete&&<button type="button" className="pw-danger-link" onClick={()=>onDelete(workout)}>이 개인운동 기록 삭제</button>}
+    <div className="pw-manage">
+      <button type="button" className="pw-manage-toggle" onClick={()=>setManageOpen(v=>!v)} aria-expanded={manageOpen}>기록 관리 <SjIcon paths={manageOpen?SJ_PATHS.chevronUp:SJ_PATHS.chevronDown} size={13}/></button>
+      {manageOpen&&<div className="pw-manage-menu" role="menu">
+        {onEdit&&<button type="button" role="menuitem" onClick={()=>{setManageOpen(false); onEdit(workout);}}>운동 기록 수정</button>}
+        {onEditSoreness&&canTouchSoreness&&<button type="button" role="menuitem" onClick={()=>{setManageOpen(false); onEditSoreness(workout);}}>{soreness?"근육통 수정":"근육통 기록하기"}</button>}
+        {onDelete&&<button type="button" role="menuitem" className="danger" onClick={()=>{setManageOpen(false); onDelete(workout);}}>기록 삭제</button>}
+      </div>}
+    </div>
   </section>;
 }
 
@@ -4582,6 +4773,98 @@ function MemberPersonalWorkoutEntry({inProgress=[],onStart,onResume,onDelete,bus
     <span className="pw-start-text"><b>개인운동 시작</b><small>혼자 한 운동을 기록하면 대표님이 다음 수업에 반영해요</small></span>
     <i className="pw-start-arrow"><SjIcon paths={SJ_PATHS.arrowRight} size={18}/></i>
   </button>;
+}
+
+// 홈/운동 탭 상단 근육통 안내 대상 — 완료된 개인운동 중 다음날/다다음날 창 안에 있고 아직 근육통을 입력하지 않은 것만 고른다.
+// 여러 건이 동시에 대상이어도 최신 운동을 우선 보여주고, 나머지는 개수만 안내한다(순서대로 확인 가능).
+function buildPersonalSorenessPrompts(personalWorkouts=[],sorenessMap={}){
+  return personalWorkouts
+    .filter(w=>w?.status==="completed"&&!sorenessMap[w.id])
+    .map(w=>({workout:w,window:getPersonalWorkoutSorenessWindow(w)}))
+    .filter(x=>x.window.withinAutoWindow)
+    .sort((a,b)=>String(b.workout.workoutDate||"").localeCompare(String(a.workout.workoutDate||"")));
+}
+// 홈/운동 탭 공용 근육통 안내 카드 — 공통 props(p)를 그대로 받아 어디서 렌더하든 동일하게 동작한다.
+function PersonalSorenessBanner(p){
+  const prompts=buildPersonalSorenessPrompts(p.allPersonalWorkouts||p.personalWorkouts||[],p.personalSorenessMap||{});
+  if(!prompts.length) return null;
+  const {workout,window}=prompts[0];
+  const sum=buildPersonalWorkoutCardSummary(workout);
+  const skip=async()=>{
+    try{ await p.savePersonalSorenessRecord?.(workout,{timing:window.timing,overallLevel:0,bodyParts:(workout.workoutParts||[]).map(part=>({part,level:0}))}); }catch{}
+  };
+  return <section className="pw-soreness-prompt">
+    <b>{window.timing==="two_days_later"?"이틀 전 개인운동 후 근육통은 어떠셨나요?":"어제 개인운동 후 근육통은 어떠셨나요?"}</b>
+    <p>{sum.dateLabel} · {sum.partsLabel} · {sum.metaLabel}</p>
+    <div className="pw-soreness-prompt-actions">
+      <button type="button" className="pw-btn primary" disabled={p.personalSorenessBusy} onClick={()=>p.openPersonalSoreness?.(workout)}>근육통 기록하기</button>
+      <button type="button" className="pw-btn ghost" disabled={p.personalSorenessBusy} onClick={skip}>근육통 없음</button>
+    </div>
+    {prompts.length>1&&<small className="pw-hint">확인할 기록이 {prompts.length}건 더 있어요.</small>}
+  </section>;
+}
+
+// 개인운동 근육통 입력/수정 시트 — 완료된 개인운동 하나에 연결된 근육통 1건을 만들거나 고친다(문서ID=workoutId 고정).
+function PersonalSorenessSheet({workout,soreness,busy,onClose,onSave,onGoToPain}){
+  const win=getPersonalWorkoutSorenessWindow(workout||{});
+  const timing=soreness?.timing||(win.timing||"next_day");
+  const [overall,setOverall]=useState(0);
+  const [parts,setParts]=useState([]);
+  const [memo,setMemo]=useState("");
+  useLockBodyScroll(!!workout);
+  useEffect(()=>{
+    if(!workout) return;
+    if(soreness){
+      setOverall(soreness.overallLevel||0);
+      setParts(soreness.bodyParts?.length?soreness.bodyParts:(workout.workoutParts||[]).map(part=>({part,level:0})));
+      setMemo(soreness.memo||"");
+    }else{
+      setOverall(0);
+      setParts((workout.workoutParts||[]).map(part=>({part,level:0})));
+      setMemo("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[workout?.id,soreness]);
+  if(!workout) return null;
+  const remainingParts=getPersonalWorkoutPartChipOptions(parts.map(p=>p.part)).filter(opt=>!parts.some(p=>p.part===opt));
+  const setPartLevel=(part,level)=>setParts(prev=>prev.map(p=>p.part===part?{...p,level}:p));
+  const addBodyPart=(part)=>{ if(!part||parts.some(p=>p.part===part)) return; setParts(prev=>[...prev,{part,level:0}]); };
+  const removePart=(part)=>setParts(prev=>prev.filter(p=>p.part!==part));
+  const save=async()=>{ await onSave?.(workout,{timing,overallLevel:overall,bodyParts:parts,memo}); onClose?.(); };
+  return <MemberBottomSheet open={!!workout} onClose={onClose} title={sorenessTimingLabel(timing)}>
+    <p className="pw-soreness-note">
+      {formatKoreanDateLabel(workout.workoutDate)} 개인운동 후 근육통은 어느 정도였나요? 찌르는 통증·관절 통증·일상생활이 어려운 불편감은 근육통이 아닌 통증으로 기록해주세요.
+      {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>통증은 건강 탭에서 기록</button>}
+    </p>
+    <section className="pw-block">
+      <span className="pw-block-title">전체 근육통 정도</span>
+      <div className="pw-level-grid">{[0,1,2,3,4,5].map(lv=>(
+        <button key={lv} type="button" className={overall===lv?"active":""} onClick={()=>setOverall(lv)}>{lv}</button>
+      ))}</div>
+      <small className="pw-hint">{sorenessLevelDescription(overall)}</small>
+    </section>
+    <section className="pw-block">
+      <span className="pw-block-title">부위별 근육통</span>
+      {parts.map(p=>(
+        <div key={p.part} className="pw-soreness-part-row">
+          <b>{p.part}</b>
+          <div className="pw-level-grid sm">{[0,1,2,3,4,5].map(lv=>(
+            <button key={lv} type="button" className={p.level===lv?"active":""} onClick={()=>setPartLevel(p.part,lv)}>{lv}</button>
+          ))}</div>
+          <button type="button" className="pw-part-remove" onClick={()=>removePart(p.part)} aria-label={`${p.part} 삭제`}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
+        </div>
+      ))}
+      {remainingParts.length>0&&<select className="pw-part-add-select" value="" onChange={e=>addBodyPart(e.target.value)}>
+        <option value="">+ 다른 부위 추가</option>
+        {remainingParts.map(part=><option key={part} value={part}>{part}</option>)}
+      </select>}
+    </section>
+    <section className="pw-block">
+      <span className="pw-block-title">메모 <em>(선택)</em></span>
+      <textarea className="pw-memo" rows={2} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength} placeholder="움직일 때 불편했던 점이나 특이사항이 있다면 적어주세요." value={memo} onChange={e=>setMemo(e.target.value)}/>
+    </section>
+    <button type="button" className="pw-btn primary block" disabled={busy} onClick={save}>{busy?"저장 중...":"근육통 저장"}</button>
+  </MemberBottomSheet>;
 }
 
 // 운동 종목 선택 시트 — 기존 데이터·상수에서 만든 후보 목록(buildPersonalExerciseCandidates)을 검색/선택한다.
@@ -4682,6 +4965,8 @@ function MemberPersonalWorkoutScreen({
   const [memo,setMemo]=useState(()=>String(workout?.memo||""));
   const [pickerOpen,setPickerOpen]=useState(false);
   const [summaryOpen,setSummaryOpen]=useState(false);
+  const [summaryStep,setSummaryStep]=useState("list");   // "list"(운동 요약) → "rpe"(최종 강도 선택)
+  const [rpeChoice,setRpeChoice]=useState(null);
   const [errorMsg,setErrorMsg]=useState("");
   const [saveState,setSaveState]=useState("");      // "" | "saving" | "saved" | "failed"
   const [completing,setCompleting]=useState(false);
@@ -4869,9 +5154,12 @@ function MemberPersonalWorkoutScreen({
     const check=validatePersonalWorkoutForComplete({workoutParts:parts,exercises:normalized,startedAt:workout.startedAt,endedAtMs:Date.now(),memo});
     if(!check.ok){ setErrorMsg(check.message); return; }
     setErrorMsg("");
+    setSummaryStep("list");
+    setRpeChoice(null);
     setSummaryOpen(true);
   };
-  const saveCompleted=async()=>{
+  // rpeValue: null이면 "나중에 입력"(RPE 미입력으로 저장), 1~10이면 선택한 값 그대로 저장.
+  const saveCompleted=async(rpeValue)=>{
     if(completing) return;
     const normalized=exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i));
     const endedAtMs=Date.now();
@@ -4887,6 +5175,7 @@ function MemberPersonalWorkoutScreen({
         workoutDate:workout.workoutDate, workoutParts:parts, exercises:normalized, memo,
         exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized),
         durationMinutes:check.durationMinutes, ...totals,
+        rpe:rpeValue??null,
       });
       setSummaryOpen(false);
     }catch(e){
@@ -4980,25 +5269,230 @@ function MemberPersonalWorkoutScreen({
 
     <MemberPersonalExercisePicker open={pickerOpen} onClose={()=>setPickerOpen(false)} candidates={candidates} onPick={addExercise}/>
 
-    <MemberBottomSheet open={summaryOpen} onClose={()=>setSummaryOpen(false)} title="오늘 개인운동">
-      <div className="pw-summary-head">
-        <b>{summaryPreview.partsLabel}</b>
-        <span>{[summaryPreview.durationLabel,`운동 ${summaryPreview.totalExercises}종목`,`총 ${summaryPreview.totalSets}세트`].filter(Boolean).join(" · ")}</span>
-      </div>
-      <ul className="pw-ex-list">{exercises.map((e,i)=>{
-        const norm=normalizePersonalWorkoutExercise(e,i);
-        const s=summarizePersonalWorkoutExercise(norm);
-        if(!s.setCount) return null;
-        return <li key={e.uid} className="pw-ex-item">
-          <div className="pw-ex-head"><b>{norm.name}</b></div>
-          {s.uniform?<span className="pw-ex-sum">{s.text}</span>
-            :<div className="pw-ex-lines">{s.lines.map((line,li)=><span key={li}>{li+1}세트 {line}</span>)}</div>}
-        </li>;
-      })}</ul>
-      {String(memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{memo}</p></div>}
-      <button type="button" className="pw-btn primary block" disabled={completing} onClick={saveCompleted}>{completing?"저장 중...":"운동 저장"}</button>
-      <button type="button" className="pw-btn ghost block" onClick={()=>setSummaryOpen(false)}>계속 기록하기</button>
+    <MemberBottomSheet open={summaryOpen} onClose={()=>setSummaryOpen(false)} title={summaryStep==="rpe"?"오늘 개인운동은 어떠셨나요?":"오늘 개인운동"}>
+      {summaryStep==="list"?<>
+        <div className="pw-summary-head">
+          <b>{summaryPreview.partsLabel}</b>
+          <span>{[summaryPreview.durationLabel,`운동 ${summaryPreview.totalExercises}종목`,`총 ${summaryPreview.totalSets}세트`].filter(Boolean).join(" · ")}</span>
+        </div>
+        <ul className="pw-ex-list">{exercises.map((e,i)=>{
+          const norm=normalizePersonalWorkoutExercise(e,i);
+          const s=summarizePersonalWorkoutExercise(norm);
+          if(!s.setCount) return null;
+          return <li key={e.uid} className="pw-ex-item">
+            <div className="pw-ex-head"><b>{norm.name}</b></div>
+            {s.uniform?<span className="pw-ex-sum">{s.text}</span>
+              :<div className="pw-ex-lines">{s.lines.map((line,li)=><span key={li}>{li+1}세트 {line}</span>)}</div>}
+          </li>;
+        })}</ul>
+        {String(memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{memo}</p></div>}
+        <button type="button" className="pw-btn primary block" onClick={()=>setSummaryStep("rpe")}>다음</button>
+        <button type="button" className="pw-btn ghost block" onClick={()=>setSummaryOpen(false)}>계속 기록하기</button>
+      </>:<>
+        <p className="pw-rpe-question">오늘 개인운동은 전체적으로 얼마나 힘들었나요?</p>
+        <div className="sj-rpe-grid">
+          {Array.from({length:10},(_,i)=>i+1).map(n=>(
+            <button key={n} type="button" className={rpeChoice===n?"active":""} onClick={()=>setRpeChoice(n)}>{n}</button>
+          ))}
+        </div>
+        <small className="pw-hint">{rpeChoice!=null?rpeDescription(rpeChoice):"1~3 여유로웠어요 · 4~6 적당했어요 · 7~8 힘들었어요 · 9 매우 힘들었어요 · 10 한계였어요"}</small>
+        <button type="button" className="pw-btn primary block" disabled={completing||rpeChoice==null} onClick={()=>saveCompleted(rpeChoice)}>{completing?"저장 중...":"RPE 저장하고 완료"}</button>
+        <button type="button" className="pw-btn ghost block" disabled={completing} onClick={()=>saveCompleted(null)}>나중에 입력</button>
+        <button type="button" className="pw-link" onClick={()=>setSummaryStep("list")}>이전으로</button>
+      </>}
     </MemberBottomSheet>
+  </div>;
+}
+
+// "HH:MM" 입력창 값 ↔ Date 변환 — 표시는 브라우저 로컬 시간대(기존 formatLastSavedLabel 등과 동일한 관례)를 그대로 쓴다.
+function toTimeInputValue(value){
+  const d=toPersonalWorkoutDate(value);
+  if(!d) return "";
+  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+}
+function combineDateAndTime(dateStr,timeStr){
+  if(!dateStr||!timeStr) return null;
+  const d=new Date(`${dateStr}T${timeStr}:00`);
+  return Number.isNaN(d.getTime())?null:d;
+}
+
+// 완료된 개인운동 기록 수정 화면 — 날짜·시작/종료시각·부위·종목·메모·RPE를 한 화면에서 고친다.
+// 진행 중 기록(MemberPersonalWorkoutScreen)과 달리 자동저장(디바운스)을 쓰지 않고 명시적 "수정 저장" 버튼 1회로 확정한다.
+// 종목/세트 편집 UI(추가·삭제·불러오기 제외)는 진행 중 화면과 동일한 클래스·상호작용을 그대로 재사용한다.
+function PersonalWorkoutEditScreen({workout,candidates=[],busy=false,onSave,onDelete,onBack}){
+  const [date,setDate]=useState(()=>String(workout?.workoutDate||"").slice(0,10));
+  const [startTime,setStartTime]=useState(()=>toTimeInputValue(workout?.startedAt));
+  const [endTime,setEndTime]=useState(()=>toTimeInputValue(workout?.endedAt));
+  const [parts,setParts]=useState(()=>workout?.workoutParts?.filter(Boolean)||[]);
+  const [exercises,setExercises]=useState(()=>toEditablePersonalExercises(workout?.exercises));
+  const [memo,setMemo]=useState(()=>String(workout?.memo||""));
+  const [rpe,setRpe]=useState(()=>workout?.rpe??null);
+  const [pickerOpen,setPickerOpen]=useState(false);
+  const [errorMsg,setErrorMsg]=useState("");
+  const [saving,setSaving]=useState(false);
+  const uidRef=useRef(1);
+  const nextUid=()=>`edit${uidRef.current++}`;
+  const initialRpeRef=useRef(workout?.rpe??null);
+  const initialSnapshotRef=useRef(JSON.stringify({date,startTime,endTime,parts,exercises,memo,rpe}));
+  useLockBodyScroll(true);
+
+  const isDirty=()=>JSON.stringify({date,startTime,endTime,parts,exercises,memo,rpe})!==initialSnapshotRef.current;
+  const handleBack=()=>{
+    if(isDirty()&&!window.confirm("수정 중인 내용이 저장되지 않았습니다. 나가시겠어요?")) return;
+    onBack?.();
+  };
+
+  const togglePart=(part)=>{
+    setParts(prev=>{
+      const next=prev.includes(part)?prev.filter(x=>x!==part):[...prev,part];
+      if(next.length>PERSONAL_WORKOUT_LIMITS.maxParts){ setErrorMsg(`운동 부위는 최대 ${PERSONAL_WORKOUT_LIMITS.maxParts}개까지 선택할 수 있어요.`); return prev; }
+      setErrorMsg(""); return next;
+    });
+  };
+  const addExercise=(candidate)=>{
+    setPickerOpen(false);
+    if(exercises.length>=PERSONAL_WORKOUT_LIMITS.maxExercises){ setErrorMsg(`운동 종목은 최대 ${PERSONAL_WORKOUT_LIMITS.maxExercises}개까지 추가할 수 있어요.`); return; }
+    const name=String(candidate?.name||"").trim();
+    if(!name) return;
+    const guessed=suggestMuscle(name,{});
+    setErrorMsg("");
+    setExercises(prev=>[...prev,{
+      uid:nextUid(), name,
+      exerciseKey:canonicalExerciseKey(name)||"",
+      muscleTop:(candidate?.muscleTop||guessed?.top||"")==="기능"?"기타":(candidate?.muscleTop||guessed?.top||""),
+      muscleSub:candidate?.muscleSub||guessed?.sub||"",
+      equipment:(suggestEquipment(name,{})||"")==="기능"?"":(suggestEquipment(name,{})||""),
+      sets:[{weight:"",reps:""}],
+    }]);
+  };
+  const removeExercise=(uid)=>{
+    const target=exercises.find(e=>e.uid===uid);
+    if(target&&!window.confirm(`"${target.name}" 종목을 삭제할까요? 입력한 세트도 함께 삭제돼요.`)) return;
+    setExercises(prev=>prev.filter(e=>e.uid!==uid));
+  };
+  const addSet=(uid)=>{
+    setExercises(prev=>prev.map(e=>{
+      if(e.uid!==uid) return e;
+      if(e.sets.length>=PERSONAL_WORKOUT_LIMITS.maxSetsPerExercise){ setErrorMsg(`한 종목의 세트는 최대 ${PERSONAL_WORKOUT_LIMITS.maxSetsPerExercise}개까지 기록할 수 있어요.`); return e; }
+      const lastSet=e.sets[e.sets.length-1]||{weight:"",reps:""};
+      return {...e,sets:[...e.sets,{weight:lastSet.weight||"",reps:lastSet.reps||""}]};
+    }));
+  };
+  const removeSet=(uid,idx)=>setExercises(prev=>prev.map(e=>e.uid===uid?{...e,sets:e.sets.filter((_,i)=>i!==idx)}:e));
+  const editSet=(uid,idx,field,value)=>{
+    const cleaned=field==="weight"
+      ? String(value).replace(/[^0-9.]/g,"").replace(/(\..*)\./g,"$1").slice(0,6)
+      : String(value).replace(/[^0-9]/g,"").slice(0,3);
+    setExercises(prev=>prev.map(e=>e.uid===uid?{...e,sets:e.sets.map((s,i)=>i===idx?{...s,[field]:cleaned}:s)}:e));
+  };
+
+  const save=async()=>{
+    if(saving||busy) return;
+    if(!parts.length){ setErrorMsg("운동 부위를 1개 이상 선택해주세요."); return; }
+    const normalized=exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i));
+    const startDate=combineDateAndTime(date,startTime)||toPersonalWorkoutDate(workout?.startedAt);
+    const endDate=combineDateAndTime(date,endTime)||toPersonalWorkoutDate(workout?.endedAt);
+    if(startDate&&endDate&&startDate.getTime()>=endDate.getTime()){ setErrorMsg("종료 시각은 시작 시각보다 늦어야 해요."); return; }
+    const totals=calculatePersonalWorkoutTotals(normalized);
+    setErrorMsg("");
+    setSaving(true);
+    try{
+      const durationMinutes=(startDate&&endDate)?Math.max(0,Math.round((endDate.getTime()-startDate.getTime())/60000)):(workout.durationMinutes||0);
+      const patch={
+        workoutDate:date, startedAt:startDate||workout.startedAt, endedAt:endDate||workout.endedAt,
+        workoutParts:parts, exercises:normalized, exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized),
+        memo, durationMinutes, ...totals,
+      };
+      // rpe는 실제로 값이 바뀌었을 때만 patch에 넣는다 — 내용만 고친 저장에서 rpeUpdatedAt이 함께 갱신되지 않게(Rules와 합의된 규칙).
+      if(rpe!==initialRpeRef.current) patch.rpe=rpe;
+      await onSave(workout.id,patch);
+    }catch(e){
+      setErrorMsg(e?.message||"저장에 실패했습니다.");
+    }finally{ setSaving(false); }
+  };
+
+  return <div className="pw-screen">
+    <div className="pw-screen-head">
+      <button type="button" className="pw-back" onClick={handleBack} aria-label="뒤로">← 취소</button>
+      <h1>개인운동 기록 수정</h1>
+    </div>
+
+    <section className="pw-block">
+      <span className="pw-block-title">운동 날짜</span>
+      <input type="date" className="pw-input" value={date} onChange={e=>setDate(e.target.value)}/>
+    </section>
+    <section className="pw-block">
+      <span className="pw-block-title">시작 · 종료 시각</span>
+      <div className="pw-time-row">
+        <input type="time" className="pw-input" value={startTime} onChange={e=>setStartTime(e.target.value)} aria-label="시작 시각"/>
+        <span>~</span>
+        <input type="time" className="pw-input" value={endTime} onChange={e=>setEndTime(e.target.value)} aria-label="종료 시각"/>
+      </div>
+    </section>
+
+    <section className="pw-block">
+      <span className="pw-block-title">운동 부위</span>
+      <div className="pw-part-chips">
+        {getPersonalWorkoutPartChipOptions(parts).map(part=>(
+          <button key={part} type="button" className={parts.includes(part)?"active":""} onClick={()=>togglePart(part)}>{part}</button>
+        ))}
+      </div>
+    </section>
+
+    <section className="pw-block">
+      <span className="pw-block-title">운동 종목</span>
+      {exercises.length===0&&<p className="pw-empty-line">아래 버튼으로 운동 종목을 추가해주세요.</p>}
+      {exercises.map(ex=>(
+        <div key={ex.uid} className="pw-ex-card">
+          <div className="pw-ex-card-head">
+            <div className="pw-ex-card-title">
+              <b>{ex.name}</b>
+              <span>{[ex.muscleTop?muscleTopBadgeLabel(ex.muscleTop):null,ex.equipment||null].filter(Boolean).join(" · ")||"기타"}</span>
+            </div>
+            <button type="button" className="pw-ex-remove" onClick={()=>removeExercise(ex.uid)} aria-label={`${ex.name} 종목 삭제`}><SjIcon paths={SJ_PATHS.x} size={15}/></button>
+          </div>
+          <div className="pw-set-table">
+            <div className="pw-set-row head"><span>세트</span><span>중량(kg)</span><span>횟수</span><span/></div>
+            {ex.sets.map((s,i)=>(
+              <div key={i} className="pw-set-row">
+                <span className="pw-set-no">{i+1}</span>
+                <input type="text" inputMode="decimal" value={s.weight} placeholder="-" onChange={e=>editSet(ex.uid,i,"weight",e.target.value)} aria-label={`${i+1}세트 중량`}/>
+                <input type="text" inputMode="numeric" value={s.reps} placeholder="0" onChange={e=>editSet(ex.uid,i,"reps",e.target.value)} aria-label={`${i+1}세트 횟수`}/>
+                <button type="button" className="pw-set-remove" onClick={()=>removeSet(ex.uid,i)} aria-label={`${i+1}세트 삭제`} disabled={ex.sets.length<=1}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="pw-add-set" onClick={()=>addSet(ex.uid)}>+ 세트 추가</button>
+        </div>
+      ))}
+      <button type="button" className="pw-add-ex" onClick={()=>setPickerOpen(true)}>+ 운동 종목 추가</button>
+    </section>
+
+    <section className="pw-block">
+      <span className="pw-block-title">메모 <em>(선택)</em></span>
+      <textarea className="pw-memo" rows={3} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength} value={memo} onChange={e=>setMemo(e.target.value)}/>
+      <small className="pw-hint">{memo.length}/{PERSONAL_WORKOUT_LIMITS.maxMemoLength}자</small>
+    </section>
+
+    <section className="pw-block">
+      <span className="pw-block-title">최종 운동 강도(RPE)</span>
+      <div className="sj-rpe-grid">
+        {Array.from({length:10},(_,i)=>i+1).map(n=>(
+          <button key={n} type="button" className={rpe===n?"active":""} onClick={()=>setRpe(n)}>{n}</button>
+        ))}
+      </div>
+      <small className="pw-hint">{rpe!=null?rpeDescription(rpe):"선택하지 않으면 RPE 미입력으로 저장돼요."}</small>
+      {rpe!=null&&<button type="button" className="pw-link" onClick={()=>setRpe(null)}>RPE 지우기</button>}
+    </section>
+
+    {errorMsg&&<p className="pw-error">{errorMsg}</p>}
+
+    <div className="pw-sticky-bar">
+      {onDelete&&<button type="button" className="pw-btn danger" onClick={()=>onDelete(workout)}>기록 삭제</button>}
+      <button type="button" className="pw-btn primary grow" disabled={saving||busy} onClick={save}>{saving||busy?"저장 중...":"수정 저장"}</button>
+    </div>
+
+    <MemberPersonalExercisePicker open={pickerOpen} onClose={()=>setPickerOpen(false)} candidates={candidates} onPick={addExercise}/>
   </div>;
 }
 
@@ -7790,6 +8284,43 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pw-memo{width:100%;min-height:88px;border:1px solid #E8ECF1;border-radius:14px;background:#fff;color:#20242A;font-size:15px;font-weight:600;line-height:1.6;padding:13px;resize:vertical}
 .pw-sticky-bar{position:sticky;bottom:calc(var(--mb-h-tab, 60px) + env(safe-area-inset-bottom, 0px) + 8px);display:flex;gap:8px;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-radius:18px;padding:8px;box-shadow:0 -4px 18px rgba(15,23,42,.08)}
 .pw-sticky-bar .pw-btn.block{margin-top:0}
+/* 날짜/시각 입력(완료 기록 수정 화면) */
+.pw-input{width:100%;height:46px;border:1px solid #E8ECF1;border-radius:12px;background:#fff;color:#20242A;font-size:15px;font-weight:800;padding:0 12px;box-sizing:border-box}
+.pw-time-row{display:flex;align-items:center;gap:8px}
+.pw-time-row .pw-input{flex:1;min-width:0}
+.pw-time-row span{color:#8B949E;font-weight:800}
+.pw-link{border:0;background:none;padding:0;margin-top:8px;color:#2F73F6;font-size:12.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-rpe-question{margin:0 2px 4px;font-size:15.5px;font-weight:800;color:#1D2430;line-height:1.4}
+/* 완료 기록 상세 — RPE 배지·근육통 표시·미입력 안내·기록 관리 메뉴 */
+.pw-inline-cta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding:10px 13px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:14px}
+.pw-inline-cta span{font-size:12.5px;font-weight:800;color:#C2410C;line-height:1.4}
+.pw-inline-cta button{flex-shrink:0;border:1px solid #F97316;background:#fff;color:#EA580C;border-radius:10px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap}
+.pw-soreness-line{margin:10px 0 0;font-size:12.5px;font-weight:700;color:#334155}
+.pw-soreness-line b{color:#1D2430;font-weight:800}
+.pw-manage{margin-top:14px;position:relative}
+.pw-manage-toggle{display:inline-flex;align-items:center;gap:5px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:9px 13px;font-size:12.5px;font-weight:800;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pw-manage-menu{display:grid;margin-top:6px;background:#fff;border:1px solid #EEF1F4;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.08);overflow:hidden}
+.pw-manage-menu button{border:0;background:none;text-align:left;padding:12px 14px;font-size:13.5px;font-weight:700;color:#20242A;cursor:pointer;-webkit-tap-highlight-color:transparent;border-top:1px solid #F1F4F8}
+.pw-manage-menu button:first-child{border-top:0}
+.pw-manage-menu button:active{background:#F8FAFC}
+.pw-manage-menu button.danger{color:#FF5A5F}
+/* 근육통 안내 배너(홈·운동 탭 상단) */
+.pw-soreness-prompt{background:#fff;border:1px solid #D9E7FF;border-radius:20px;padding:15px 16px;margin:0 0 14px;box-shadow:0 2px 12px rgba(47,115,246,.08)}
+.pw-soreness-prompt b{display:block;font-size:15px;font-weight:800;color:#1D2430;letter-spacing:-.2px}
+.pw-soreness-prompt p{margin:6px 0 12px;font-size:12.5px;font-weight:700;color:#66717C}
+.pw-soreness-prompt-actions{display:flex;gap:7px;flex-wrap:wrap}
+/* 근육통 입력 시트 */
+.pw-soreness-note{margin:0 0 4px;font-size:12.5px;font-weight:700;color:#66717C;line-height:1.6}
+.pw-level-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:2px}
+.pw-level-grid button{height:40px;min-width:0;padding:0;border:1px solid #E8ECF1;background:#F8F9FB;border-radius:10px;font-family:inherit;font-size:14px;font-weight:700;color:#64748B;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
+.pw-level-grid button.active{border-color:#2F73F6;background:#fff;color:#2F73F6;font-weight:800;box-shadow:0 1px 5px rgba(47,115,246,.14)}
+.pw-level-grid.sm{grid-template-columns:repeat(6,1fr);margin-top:6px}
+.pw-level-grid.sm button{height:34px;font-size:12.5px}
+.pw-soreness-part-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.pw-soreness-part-row>b{flex:1;min-width:0;font-size:13.5px;font-weight:800;color:#20242A}
+.pw-soreness-part-row .pw-level-grid{flex-basis:100%}
+.pw-part-remove{border:0;background:#F1F3F6;color:#8B949E;width:24px;height:24px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+.pw-part-add-select{width:100%;height:44px;margin-top:10px;border:1px dashed #C7D2E0;border-radius:13px;background:#fff;color:#2F73F6;font-size:13.5px;font-weight:800;padding:0 12px}
 /* 종목 선택 시트 */
 .pw-picker-search{margin-bottom:12px}
 .pw-picker-custom{width:100%;display:grid;gap:3px;text-align:left;border:1px solid #2F73F6;background:#EEF5FF;border-radius:14px;padding:12px 14px;margin-bottom:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -8068,6 +8599,7 @@ export default function App() {
   const [nutritionData, setNutritionData] = useState(null);
   const [cardioLogs, setCardioLogs] = useState([]);
   const [memberPersonalWorkouts, setMemberPersonalWorkouts] = useState([]); // 회원 개인운동(조회 전용) — 회원 상세 "최근 개인운동" 카드
+  const [memberPersonalSorenessMap, setMemberPersonalSorenessMap] = useState({}); // workoutId → 근육통(위와 같은 카드에서 조회만)
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
   const [exerciseClassifications, setExerciseClassifications] = useState({}); // 운동 종목 자동 분류 전체 회원 공통 학습 데이터 ({ [정규화된운동명]: {equipment,muscleTop,muscleSub} })
@@ -8365,6 +8897,13 @@ export default function App() {
       setSessionReadsMap(srm);
       setMemberAppUsage(au);
       setMemberPersonalWorkouts((pw || []).map(normalizePersonalWorkout).filter(Boolean));
+      const completedIds = (pw || []).filter(w => w?.status === "completed").map(w => w.id);
+      if (completedIds.length) {
+        try { setMemberPersonalSorenessMap(await getPersonalWorkoutSorenessMap(memberId, completedIds)); }
+        catch (e) { console.error("[TEO GYM] getPersonalWorkoutSorenessMap error:", e); setMemberPersonalSorenessMap({}); }
+      } else {
+        setMemberPersonalSorenessMap({});
+      }
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -8384,6 +8923,7 @@ export default function App() {
     setMemberPrivateData(null);
     setCardioLogs([]);
     setMemberPersonalWorkouts([]);
+    setMemberPersonalSorenessMap({});
     setHealthHubInitialTab(opts.healthHubTab || "대시보드");
     setHubScrollTarget(opts.scrollTarget || null);
     setTrendInitialDate(opts.initialDate || null);
@@ -9089,8 +9629,8 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
-        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
@@ -10809,9 +11349,10 @@ const TEST_MEMBER_PRESETS = [
 ];
 
 // 회원 카드 "오늘 입력" 배지/최근 활동 표시 우선순위 (스펙: 메모>근육통>RPE>체중>유산소>칼로리>걸음수)
-const ACTIVITY_PRIORITY = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps","goal_update"];
-const ACTIVITY_ICON = { memo:"📝", pain:"📍", soreness:"💪", rpe:"😊", condition:"🙂", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟", goal_update:"🎯" };
-const ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통", rpe:"RPE", condition:"컨디션", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수", goal_update:"목표 변경" };
+// personalWorkout* 3종은 PT 수업의 soreness/rpe와 절대 같은 type을 쓰지 않는다(집계·문구가 섞이면 출처 구분이 깨짐).
+const ACTIVITY_PRIORITY = ["memo","pain","soreness","rpe","personalWorkoutSoreness","personalWorkoutRpe","condition","personalWorkout","weight","cardio","kcal","steps","goal_update"];
+const ACTIVITY_ICON = { memo:"📝", pain:"📍", soreness:"💪", rpe:"😊", condition:"🙂", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟", goal_update:"🎯", personalWorkout:"🏋️", personalWorkoutRpe:"🏋️", personalWorkoutSoreness:"🦵" };
+const ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통", rpe:"RPE", condition:"컨디션", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수", goal_update:"목표 변경", personalWorkout:"개인운동", personalWorkoutRpe:"개인운동 RPE", personalWorkoutSoreness:"개인운동 근육통" };
 function sortByActivityPriority(types) {
   return [...types].sort((a,b) => ACTIVITY_PRIORITY.indexOf(a) - ACTIVITY_PRIORITY.indexOf(b));
 }
@@ -14264,7 +14805,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   );
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -14907,6 +15448,28 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                     {sum.durationLabel&&<span style={{fontSize:11.5,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>· {sum.durationLabel}</span>}
                     <span style={{marginLeft:"auto",fontSize:11,color:DB.faint,fontVariantNumeric:"tabular-nums"}}>{sum.metaLabel}</span>
                   </div>
+                  {(() => {
+                    // RPE·근육통은 회원앱에서 회원이 직접 입력한 값을 조회만 한다(여기서 계산·저장하지 않음).
+                    const soreness = normalizePersonalWorkoutSoreness(personalSorenessMap[w.id]);
+                    const sorenessWindow = getPersonalWorkoutSorenessWindow(w);
+                    const reasons = getPersonalWorkoutAttentionReasons(w, soreness);
+                    return (
+                      <div style={{display:"flex",flexWrap:"wrap",gap:"4px 10px",alignItems:"center",marginBottom:8}}>
+                        <span style={{fontSize:11.5,fontWeight:800,color:w.rpe!=null?DB.text:DB.faint}}>{w.rpe!=null?`RPE ${w.rpe}`:"RPE 미입력"}</span>
+                        {soreness && (
+                          <span style={{fontSize:11.5,fontWeight:700,color:DB.sub}}>
+                            {sorenessTimingLabel(soreness.timing)} {soreness.overallLevel>0?`${soreness.overallLevel}/5`:"없음"}
+                            {soreness.overallLevel>0&&soreness.bodyParts.length>0&&` · ${soreness.bodyParts.map(bp=>`${bp.part} ${bp.level}`).join(" · ")}`}
+                          </span>
+                        )}
+                        {/* 운동 당일에는 미입력을 주의사항처럼 노출하지 않는다 — withinAutoWindow는 다음날/다다음날에만 true */}
+                        {!soreness && sorenessWindow.withinAutoWindow && <span style={{fontSize:11.5,fontWeight:700,color:DB.faint}}>근육통 미입력</span>}
+                        {reasons.length>0 && (
+                          <span style={{fontSize:10.5,fontWeight:800,color:"#fff",background:DB.warning,borderRadius:999,padding:"2px 8px"}}>주의 · {reasons.join(" · ")}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {exercises.map((e,ei)=>{
                     const s = summarizePersonalWorkoutExercise(e);
                     // 같은 운동의 최근 PT 수업 기록이 있을 때만 비교 줄을 덧붙인다(없으면 null → 기존 표시 그대로).
@@ -15183,6 +15746,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setPtSaving(false); }
   };
   const lastPrepSavedLabel = formatLastSavedLabel(member.nextWorkoutDateUpdatedAt);
+  // 다음 수업 준비 참고용 — PT 수업 통계에는 절대 합산하지 않고, "참고" 한 줄로만 보여준다(출처 혼동 방지).
+  const latestPersonalWorkoutForPrep = getCompletedPersonalWorkoutsLatestFirst(personalWorkouts)[0] || null;
+  const latestPersonalSorenessForPrep = latestPersonalWorkoutForPrep ? normalizePersonalWorkoutSoreness(personalSorenessMap[latestPersonalWorkoutForPrep.id]) : null;
   const secPrep = (
           <section id="hub-next-session" className="hub-sec-prep" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12,flexWrap:"wrap"}}>
@@ -15240,6 +15806,16 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                 </div>
               </div>
             </div>
+            {latestPersonalWorkoutForPrep && (
+              <div style={{marginTop:12,padding:"9px 11px",background:DB.bg,borderRadius:DB.radiusSm,display:"flex",flexWrap:"wrap",gap:"3px 10px",alignItems:"baseline"}}>
+                <span style={{fontSize:10.5,fontWeight:800,color:DB.faint,fontFamily:DB.font}}>최근 개인운동 참고</span>
+                <span style={{fontSize:12,fontWeight:700,color:DB.text}}>
+                  {formatMonthDayKo(latestPersonalWorkoutForPrep.workoutDate)} {buildPersonalWorkoutCardSummary(latestPersonalWorkoutForPrep).partsLabel}
+                  {latestPersonalWorkoutForPrep.rpe!=null?` · RPE ${latestPersonalWorkoutForPrep.rpe}`:""}
+                  {latestPersonalSorenessForPrep&&latestPersonalSorenessForPrep.overallLevel>0?` · ${sorenessTimingLabel(latestPersonalSorenessForPrep.timing)} ${latestPersonalSorenessForPrep.overallLevel}/5`:""}
+                </span>
+              </div>
+            )}
             <div style={{marginTop:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <button className="hub-cta-compact" onClick={handleSavePrep} disabled={ptSaving} style={{border:"none",borderRadius:12,padding:"10px 22px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 4px 12px rgba(57,199,184,.28)",cursor:ptSaving?"default":"pointer"}}>저장</button>
               <span style={{fontSize:11.5,fontWeight:600,color:DB.sub}}>{lastPrepSavedLabel ? `마지막 저장: ${lastPrepSavedLabel}` : "저장 기록 없음"}</span>

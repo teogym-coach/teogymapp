@@ -712,16 +712,69 @@ describe("TEO GYM Firestore Rules v8", function () {
       );
     });
 
-    it("[진행중 회원] 진행 중 → 완료 전환 허용 + 완료된 기록 재수정 차단", async () => {
+    it("[진행중 회원] 진행 중 → 완료 전환 허용(시작시각 불변) + 완료된 기록 화이트리스트 재수정 허용", async () => {
       const db = asUser(testEnv, MEMBER_A_UID);
       const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      // 완료 전환 자체는 기존 경로 그대로 — 이 전환 한 번만은 startedAt이 여전히 불변이다(재수정은 그 다음 write부터).
       await assertSucceeds(ref.update({
         status: "completed", endedAt: new Date(), completedAt: new Date(), durationMinutes: 52,
         exercises: [{ name: "바벨 벤치프레스", sets: [{ setNumber: 1, weight: 20, reps: 15, volume: 300 }] }],
         totalExercises: 1, totalSets: 1, totalVolume: 300, updatedAt: new Date(),
       }));
-      // 완료된 기록은 내용 수정 불가(1차 정책) — 삭제만 가능
-      await assertFails(ref.update({ memo: "완료 후 수정 시도", updatedAt: new Date() }));
+      // 완료 후 내용 수정 — 화이트리스트 필드(메모/집계 등)는 허용
+      await assertSucceeds(ref.update({ memo: "완료 후 수정", totalExercises: 1, totalSets: 1, totalVolume: 300, updatedAt: new Date() }));
+      // 완료 후에는 별도 write로 날짜·시작/종료시각도 재수정 가능(신규 완료-수정 경로)
+      await assertSucceeds(ref.update({
+        workoutDate: "2026-07-29",
+        startedAt: new Date("2026-07-29T10:00:00Z"), endedAt: new Date("2026-07-29T11:00:00Z"),
+        updatedAt: new Date(),
+      }));
+    });
+
+    it("[진행중 회원] 완료 전환과 같은 write에서 RPE 함께 저장 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      await assertSucceeds(ref.update({
+        status: "completed", endedAt: new Date(), completedAt: new Date(), durationMinutes: 40,
+        rpe: 7, rpeUpdatedAt: new Date(), updatedAt: new Date(),
+      }));
+      // 완료 전환과 같은 write에서도 rpeUpdatedAt만 단독으로 보내면 차단
+      await seedSubcollection("member_a", "personalWorkouts", "pw2", inProgressDoc());
+      const ref2 = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw2");
+      await assertFails(ref2.update({
+        status: "completed", endedAt: new Date(), completedAt: new Date(),
+        rpeUpdatedAt: new Date(), updatedAt: new Date(),
+      }));
+    });
+
+    it("[진행중 회원] 완료된 기록에서 RPE 입력·수정 허용 + rpeUpdatedAt 단독 조작 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      await ref.update({ status: "completed", endedAt: new Date(), completedAt: new Date(), updatedAt: new Date() });
+      const trainerDb = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(trainerDb.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").get());
+      await assertSucceeds(ref.update({ rpe: 8, rpeUpdatedAt: new Date(), updatedAt: new Date() }));
+      await assertSucceeds(ref.update({ rpe: null, rpeUpdatedAt: new Date(), updatedAt: new Date() })); // 미입력으로 되돌리기
+      await assertFails(ref.update({ rpe: 11, rpeUpdatedAt: new Date(), updatedAt: new Date() })); // 범위 초과
+      await assertFails(ref.update({ rpe: "8", rpeUpdatedAt: new Date(), updatedAt: new Date() })); // 타입 오류
+      // rpe는 그대로 두고 rpeUpdatedAt만 바꾸는 것은 차단(입력 시각 위조 방지)
+      await assertFails(ref.update({ rpeUpdatedAt: new Date(), updatedAt: new Date() }));
+      // 일반 내용 수정만 했을 때는 rpe/rpeUpdatedAt에 손대지 않아도 통과해야 한다
+      await assertSucceeds(ref.update({ memo: "내용만 수정", updatedAt: new Date() }));
+    });
+
+    it("[진행중 회원] 완료된 기록 수정 시 시작<종료 위반·화이트리스트 밖 필드·역행 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      await ref.update({ status: "completed", endedAt: new Date("2026-07-30T11:00:00Z"), completedAt: new Date(), updatedAt: new Date() });
+      // 종료 시각(2026-07-30T11:00Z)보다 늦은 시작 시각으로 바꾸면 차단(운동 시간 음수 방지)
+      await assertFails(ref.update({ startedAt: new Date("2026-07-30T12:00:00Z"), updatedAt: new Date() }));
+      // 화이트리스트 밖 필드(memberId/createdAt/completedAt 재조작) 차단
+      await assertFails(ref.update({ memberId: "member_b", updatedAt: new Date() }));
+      await assertFails(ref.update({ createdAt: new Date("2020-01-01"), updatedAt: new Date() }));
+      await assertFails(ref.update({ completedAt: new Date("2020-01-01"), updatedAt: new Date() }));
+      // completed → in_progress 역행 차단
+      await assertFails(ref.update({ status: "in_progress", updatedAt: new Date() }));
     });
 
     it("[진행중 회원] completed 상태로 바로 생성 차단(관리자 화면 우회 기록 방지)", async () => {
@@ -808,6 +861,152 @@ describe("TEO GYM Firestore Rules v8", function () {
       const db = asAnon(testEnv);
       await assertFails(db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1").get());
       await assertFails(db.collection("members").doc("member_a").collection("personalWorkouts").add(inProgressDoc()));
+    });
+  });
+
+  describe("6-4. personalWorkoutSoreness (개인운동 후 근육통 — 문서ID=workoutId 고정, PT soreness와 분리)", () => {
+    const completedDoc = (memberId = "member_a") => ({
+      memberId, workoutDate: "2026-07-30", workoutParts: ["가슴"], exercises: [], exerciseKeys: [],
+      memo: "", totalExercises: 0, totalSets: 0, totalVolume: 0, status: "completed", source: "memberApp",
+      startedAt: new Date(), endedAt: new Date(), completedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+    });
+    const sorenessDoc = (overrides = {}) => ({
+      memberId: "member_a", workoutId: "pw1", workoutDate: "2026-07-30",
+      timing: "next_day", daysAfterWorkout: 1, overallLevel: 3,
+      bodyParts: [{ part: "가슴", level: 4 }], memo: "", source: "personalWorkout",
+      recordedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+      ...overrides,
+    });
+
+    beforeEach(async () => {
+      await seedMembers({ "member_a": memberActive, "member_b": memberB, "member_paused": memberPaused });
+      await seedSubcollection("member_a", "personalWorkouts", "pw1", completedDoc());
+    });
+
+    it("[진행중 회원] 완료된 본인 개인운동에 근육통 생성(다음날) 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1").set(sorenessDoc())
+      );
+    });
+
+    it("[진행중 회원] 다다음날 근육통(daysAfterWorkout=2) 생성 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1")
+          .set(sorenessDoc({ timing: "two_days_later", daysAfterWorkout: 2 }))
+      );
+    });
+
+    it("[진행중 회원] timing·daysAfterWorkout 불일치 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1");
+      await assertFails(ref.set(sorenessDoc({ timing: "next_day", daysAfterWorkout: 2 })));
+      await assertFails(ref.set(sorenessDoc({ timing: "two_days_later", daysAfterWorkout: 1 })));
+    });
+
+    it("[진행중 회원] 허용되지 않은 timing 값(당일·3일후 등) 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1");
+      await assertFails(ref.set(sorenessDoc({ timing: "same_day", daysAfterWorkout: 0 })));
+      await assertFails(ref.set(sorenessDoc({ timing: "three_days_later", daysAfterWorkout: 3 })));
+    });
+
+    it("[진행중 회원] 근육통 레벨 범위·타입 위반 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1");
+      await assertFails(ref.set(sorenessDoc({ overallLevel: 6 })));
+      await assertFails(ref.set(sorenessDoc({ overallLevel: -1 })));
+      await assertFails(ref.set(sorenessDoc({ overallLevel: 3.5 })));
+      await assertFails(ref.set(sorenessDoc({ overallLevel: "3" })));
+    });
+
+    it("[진행중 회원] source 위조 차단(personalWorkout 고정)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1")
+          .set(sorenessDoc({ source: "session" }))
+      );
+    });
+
+    it("[진행중 회원] workoutId 위조(문서ID와 불일치) 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1")
+          .set(sorenessDoc({ workoutId: "pw-other" }))
+      );
+    });
+
+    it("[진행중 회원] 존재하지 않거나 진행 중인 개인운동을 참조하면 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      // 존재하지 않는 workoutId
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw-none")
+          .set(sorenessDoc({ workoutId: "pw-none" }))
+      );
+      // 아직 진행 중(completed 아님)인 개인운동
+      await seedSubcollection("member_a", "personalWorkouts", "pw-inprogress", { ...completedDoc(), status: "in_progress" });
+      await assertFails(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw-inprogress")
+          .set(sorenessDoc({ workoutId: "pw-inprogress" }))
+      );
+    });
+
+    it("[진행중 회원] 근육통 없음(0) 저장 허용", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1")
+          .set(sorenessDoc({ overallLevel: 0, bodyParts: [{ part: "가슴", level: 0 }] }))
+      );
+    });
+
+    it("[관리자] 근육통 read 허용, [진행중 회원] 본인 근육통 read 허용", async () => {
+      await seedSubcollection("member_a", "personalWorkoutSoreness", "pw1", sorenessDoc());
+      const trainerDb = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(trainerDb.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1").get());
+      const memberDb = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(memberDb.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1").get());
+    });
+
+    it("[진행중 회원] 본인 근육통 수정 허용(다음날→다다음날 재입력 아님, 값만 갱신) + createdAt/workoutId/source 위조 차단", async () => {
+      await seedSubcollection("member_a", "personalWorkoutSoreness", "pw1", sorenessDoc());
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1");
+      await assertSucceeds(ref.update({ overallLevel: 5, bodyParts: [{ part: "가슴", level: 5 }], memo: "더 아파요", updatedAt: new Date() }));
+      await assertFails(ref.update({ createdAt: new Date("2020-01-01"), updatedAt: new Date() }));
+      await assertFails(ref.update({ workoutId: "pw-other", updatedAt: new Date() }));
+      await assertFails(ref.update({ source: "session", updatedAt: new Date() }));
+      await assertFails(ref.update({ memberId: "member_b", updatedAt: new Date() }));
+    });
+
+    it("[회원 A] 회원 B의 근육통 read/write 차단", async () => {
+      await seedSubcollection("member_b", "personalWorkouts", "pwB", completedDoc("member_b"));
+      await seedSubcollection("member_b", "personalWorkoutSoreness", "pwB", sorenessDoc({ memberId: "member_b", workoutId: "pwB" }));
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkoutSoreness").doc("pwB").get());
+      await assertFails(
+        db.collection("members").doc("member_b").collection("personalWorkoutSoreness").doc("pwB")
+          .set(sorenessDoc({ memberId: "member_b", workoutId: "pwB" }))
+      );
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkoutSoreness").doc("pwB").update({ overallLevel: 5 }));
+      await assertFails(db.collection("members").doc("member_b").collection("personalWorkoutSoreness").doc("pwB").delete());
+    });
+
+    it("[진행중 회원] 본인 근육통 delete 허용", async () => {
+      await seedSubcollection("member_a", "personalWorkoutSoreness", "pw1", sorenessDoc());
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1").delete());
+    });
+
+    it("[휴식중/비로그인] 근육통 read/write 차단", async () => {
+      await seedSubcollection("member_paused", "personalWorkouts", "pwP", completedDoc("member_paused"));
+      const pausedDb = asUser(testEnv, "paused_uid");
+      await assertFails(
+        pausedDb.collection("members").doc("member_paused").collection("personalWorkoutSoreness").doc("pwP")
+          .set(sorenessDoc({ memberId: "member_paused", workoutId: "pwP" }))
+      );
+      const anonDb = asAnon(testEnv);
+      await assertFails(anonDb.collection("members").doc("member_a").collection("personalWorkoutSoreness").doc("pw1").get());
     });
   });
 

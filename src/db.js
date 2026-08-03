@@ -10,6 +10,7 @@
 //    /members/{id}/counselNotes/main      ← 상담 리포트: 대표 상담 메모(트레이너 전용)
 //    /members/{id}/memberOnboarding/main  ← 회원앱 온보딩 답변(v2 맵 포함) — 사전 문진의 단일 원본
 //    /members/{id}/personalWorkouts/{id}  ← 개인운동 기록(회원이 직접 작성, 트레이너는 읽기만)
+//    /members/{id}/personalWorkoutSoreness/{workoutId} ← 개인운동 후 근육통(문서ID=workoutId로 1:1 고정, 회원이 직접 작성)
 //    /consultations/{id}                  ← 상담 고객(리드). 정식 회원 전환 전까지 members를 만들지 않는다
 //    /trainerNotificationReads/{trainerUid} ← 트레이너별 "오늘 회원 입력 피드" 읽음 상태
 //    /exerciseClassifications/{trainerUid} ← 센터 공통 운동 라이브러리(운동명→기구/부위/세부부위 마스터 데이터)
@@ -22,7 +23,7 @@
 import {
   collection, doc, getDocs, addDoc, updateDoc, deleteDoc,
   query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit, deleteField,
-  onSnapshot,
+  onSnapshot, documentId,
 } from "firebase/firestore";
 import { db, auth } from "./firebase-config";
 import { isMemberMode } from "./app-mode";
@@ -2638,6 +2639,7 @@ export async function updatePersonalWorkoutProgress(memberId, workoutId, patch =
 }
 
 // 운동 종료 확정 — endedAt/completedAt은 이 호출에서만 서버 시각으로 1회 기록되어 이후 변경되지 않는다.
+// rpe는 선택 입력 — 종료 화면에서 "RPE 저장하고 완료"를 누르면 함께, "나중에 입력"을 누르면 null(미입력)로 저장된다.
 export async function completePersonalWorkout(memberId, workoutId, payload = {}) {
   requireUid();
   const body = clean({
@@ -2651,23 +2653,155 @@ export async function completePersonalWorkout(memberId, workoutId, payload = {})
     durationMinutes: Number(payload.durationMinutes) || 0,
     status: "completed",
   });
+  const dateKey = String(payload.workoutDate || koreaDateKey()).slice(0, 10);
+  const extra = {};
+  let rpeValue = null;
+  if (payload.rpe !== undefined) {
+    const n = Number(payload.rpe);
+    rpeValue = Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : null;
+    extra.rpe = rpeValue;
+    extra.rpeUpdatedAt = serverTimestamp();
+  }
   await updateDoc(doc(db, "members", memberId, "personalWorkouts", workoutId), {
     ...body,
+    ...extra,
     endedAt: serverTimestamp(),
     completedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
   // 관리자 "오늘 회원 입력" 피드 — 완료 시점 1회만 기록한다(유산소 saveCardioLog와 동일한 기존 경로 재사용).
   // 진행 중 자동 저장에서는 호출하지 않아 Firestore 쓰기가 늘지 않는다.
-  await touchMemberActivities(memberId, [{
+  const activities = [{
     type: "personalWorkout", label: "개인운동",
     value: body.totalExercises ? `${body.totalExercises}종목 · ${body.totalSets}세트` : "기록됨",
-    dateKey: String(payload.workoutDate || koreaDateKey()).slice(0, 10),
-  }]);
-  return { id: workoutId, ...body };
+    dateKey,
+  }];
+  // PT 수업 RPE(type:"rpe")와 절대 섞이지 않도록 개인운동 전용 활동 type을 분리한다.
+  if (rpeValue != null) {
+    activities.push({ type: "personalWorkoutRpe", label: "개인운동 RPE", value: `RPE ${rpeValue}`, dateKey });
+  }
+  await touchMemberActivities(memberId, activities);
+  return { id: workoutId, ...body, ...extra };
 }
 
 export async function deletePersonalWorkout(memberId, workoutId) {
   requireUid();
+  // personalWorkoutSoreness는 문서ID가 workoutId와 동일해 별도 조회 없이 바로 지울 수 있다(존재하지 않아도 no-op).
   await deleteDoc(doc(db, "members", memberId, "personalWorkouts", workoutId));
+  try {
+    await deleteDoc(doc(db, "members", memberId, "personalWorkoutSoreness", workoutId));
+  } catch (e) {
+    console.error("[DB:deletePersonalWorkout] soreness 정리 실패(고아 문서 남을 수 있음):", { workoutId, ...describeFirestoreError(e) });
+  }
+}
+
+// 완료된 기록 수정 — 회원이 날짜·시각·부위·종목·메모·RPE를 나중에 고칠 때 사용한다.
+// createPersonalWorkout(생성)·updatePersonalWorkoutProgress(진행 중 자동저장)와는 완전히 분리된 경로다:
+//   같은 문서ID를 유지하고 memberId/createdAt은 절대 건드리지 않으며, status는 completed로 고정한다(역행 없음).
+// startedAt/endedAt/workoutDate도 화이트리스트에 포함해 함께 고칠 수 있게 한다(Rules와 합의된 범위).
+export async function editCompletedPersonalWorkout(memberId, workoutId, patch = {}) {
+  requireUid();
+  const body = clean({
+    workoutDate: patch.workoutDate !== undefined ? String(patch.workoutDate || "").slice(0, 10) : undefined,
+    workoutParts: patch.workoutParts !== undefined ? patch.workoutParts.slice(0, PERSONAL_WORKOUT_LIMITS.maxParts) : undefined,
+    exercises: patch.exercises,
+    exerciseKeys: patch.exerciseKeys,
+    memo: patch.memo !== undefined ? String(patch.memo || "").slice(0, PERSONAL_WORKOUT_LIMITS.maxMemoLength) : undefined,
+    totalExercises: patch.totalExercises !== undefined ? Number(patch.totalExercises) || 0 : undefined,
+    totalSets: patch.totalSets !== undefined ? Number(patch.totalSets) || 0 : undefined,
+    totalVolume: patch.totalVolume !== undefined ? Number(patch.totalVolume) || 0 : undefined,
+    durationMinutes: patch.durationMinutes !== undefined ? Number(patch.durationMinutes) || 0 : undefined,
+  });
+  if (patch.startedAt !== undefined && patch.startedAt !== null) body.startedAt = patch.startedAt;
+  if (patch.endedAt !== undefined && patch.endedAt !== null) body.endedAt = patch.endedAt;
+  // rpe는 명시적으로 null을 저장할 수 있어야 하므로 clean()을 거치지 않고 직접 다룬다(clean은 null을 제거함).
+  // 일반 내용 수정만 했을 때는 rpe/rpeUpdatedAt에 아예 손대지 않는다 — patch에 rpe가 없으면 기존 값 그대로 유지된다.
+  if (patch.rpe !== undefined) {
+    const n = Number(patch.rpe);
+    body.rpe = Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : null;
+    body.rpeUpdatedAt = serverTimestamp();
+  }
+  if (!Object.keys(body).length) return { id: workoutId };
+  await updateDoc(doc(db, "members", memberId, "personalWorkouts", workoutId), {
+    ...body,
+    updatedAt: serverTimestamp(),
+  });
+  // rpe를 실제로 고쳤을 때만 회원 입력 변화 피드에 남긴다 — 내용만 고친 일반 수정은 여기서 기록하지 않는다
+  // (개인운동 자체의 최근 활동은 완료 시점에 이미 1건 기록돼 있어 중복 노출을 막는다).
+  if ("rpe" in body) {
+    const dateKey = body.workoutDate || String(patch.workoutDate || "").slice(0, 10) || koreaDateKey();
+    await touchMemberActivities(memberId, [{
+      type: "personalWorkoutRpe", label: "개인운동 RPE",
+      value: body.rpe != null ? `RPE ${body.rpe} (수정)` : "RPE 삭제", dateKey,
+    }]);
+  }
+  return { id: workoutId, ...body };
+}
+
+function clampSorenessLevel(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.max(0, Math.min(5, n)) : 0;
+}
+
+export async function getPersonalWorkoutSoreness(memberId, workoutId) {
+  requireUid();
+  const snap = await getDoc(doc(db, "members", memberId, "personalWorkoutSoreness", workoutId));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+// 여러 개인운동의 근육통을 한 번에 조회(최근 목록·관리자 카드용) — documentId() "in" 쿼리는 최대 10개까지만 허용돼 청크로 나눈다.
+export async function getPersonalWorkoutSorenessMap(memberId, workoutIds = []) {
+  requireUid();
+  const ids = [...new Set((workoutIds || []).filter(Boolean))].slice(0, 30);
+  if (!ids.length) return {};
+  const map = {};
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const snap = await getDocs(query(collection(db, "members", memberId, "personalWorkoutSoreness"), where(documentId(), "in", chunk)));
+    snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
+  }
+  return map;
+}
+
+// 개인운동 근육통 저장 — 문서ID를 workoutId와 동일하게 고정해 "개인운동 1건당 근육통 1건"을 구조적으로 보장한다.
+// 신규 저장이든 수정이든 이 함수 하나만 쓰면 되고(연속 클릭도 같은 문서를 덮어쓸 뿐 중복 문서가 생기지 않는다),
+// timing은 next_day/two_days_later만 허용하며 daysAfterWorkout은 timing에서 그대로 파생시켜 값이 어긋나지 않게 한다.
+export async function savePersonalWorkoutSoreness(memberId, workoutId, data = {}) {
+  requireUid();
+  const ref = doc(db, "members", memberId, "personalWorkoutSoreness", workoutId);
+  const timing = data.timing === "two_days_later" ? "two_days_later" : "next_day";
+  const seenParts = new Set();
+  const bodyParts = (data.bodyParts || [])
+    .map(bp => ({ part: String(bp?.part || "").trim().slice(0, 20), level: clampSorenessLevel(bp?.level) }))
+    .filter(bp => bp.part && !seenParts.has(bp.part) && seenParts.add(bp.part))
+    .slice(0, PERSONAL_WORKOUT_LIMITS.maxParts);
+  const body = clean({
+    memberId,
+    workoutId,
+    workoutDate: String(data.workoutDate || "").slice(0, 10),
+    timing,
+    daysAfterWorkout: timing === "two_days_later" ? 2 : 1,
+    overallLevel: clampSorenessLevel(data.overallLevel),
+    bodyParts,
+    memo: String(data.memo || "").slice(0, PERSONAL_WORKOUT_LIMITS.maxMemoLength),
+    source: "personalWorkout",
+  });
+  const existing = await getDoc(ref);
+  const isFirstSave = !existing.exists();
+  if (isFirstSave) {
+    await setDoc(ref, { ...body, recordedAt: serverTimestamp(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+  } else {
+    await updateDoc(ref, { ...body, updatedAt: serverTimestamp() });
+  }
+  // PT 수업 근육통(type:"soreness")과 절대 섞이지 않도록 개인운동 전용 활동 type으로 남긴다.
+  // 관리자 주의 표시(근육통 4 이상 등)는 이 로그가 아니라 화면 표시 시점에 값을 보고 판정한다(기존 rpe>=9 관례와 동일).
+  const timingLabel = timing === "two_days_later" ? "다다음 날" : "다음 날";
+  const value = body.overallLevel > 0
+    ? `${timingLabel} ${body.overallLevel}/5${bodyParts.length ? " · " + bodyParts.map(bp => `${bp.part} ${bp.level}`).join(" · ") : ""}`
+    : `${timingLabel} 근육통 없음`;
+  await touchMemberActivities(memberId, [{
+    type: "personalWorkoutSoreness", label: `개인운동 근육통 ${isFirstSave ? "입력" : "수정"}`,
+    value, dateKey: body.workoutDate,
+  }]);
+  return { id: workoutId, ...body };
 }

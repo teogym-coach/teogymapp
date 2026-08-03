@@ -1517,11 +1517,6 @@ function MemberApp({ onLogout }) {
   // 개인운동 근육통 — workoutId를 key로 하는 맵. 문서ID가 workoutId와 1:1 고정이라 별도 정규화 없이 그대로 조회할 수 있다.
   const [personalSorenessMap,setPersonalSorenessMap]=useState({});
   const [personalEditBusy,setPersonalEditBusy]=useState(false);
-  const [personalSorenessBusy,setPersonalSorenessBusy]=useState(false);
-  // 근육통 입력 시트 대상 — 홈/운동 탭 어디서 열어도 같은 시트 하나만 쓴다(중복 상태 없음).
-  const [personalSorenessTarget,setPersonalSorenessTarget]=useState(null);
-  const openPersonalSoreness=useCallback((workout)=>{ if(workout?.id) setPersonalSorenessTarget(workout); },[]);
-  const closePersonalSoreness=useCallback(()=>setPersonalSorenessTarget(null),[]);
   const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg)),ms))]);
   const resetMemberScroll=useCallback(()=>scrollMemberAppToTop(pageRef),[]);
   const goMemberTab=useCallback(nextTab=>{setTab(nextTab); resetMemberScroll();},[resetMemberScroll]);
@@ -1832,7 +1827,10 @@ function MemberApp({ onLogout }) {
     }catch(e){ console.error("[개인운동] 삭제 실패",e); alert(e?.message||"개인운동 기록 삭제에 실패했습니다."); }
   };
   // 완료된 기록 수정 — 날짜·시각·부위·종목·메모·RPE를 한 번에 저장한다(신규 생성/진행중 저장과 완전히 분리된 경로).
-  const saveCompletedPersonalWorkoutEdit=async(workoutId,patch)=>{
+  // opts.inline=true — 개인운동 카드 안 "운동 후 상태"에서 RPE만 저장할 때 쓰는 경량 경로다.
+  // 전체 수정 화면(personalRecordTarget)을 닫거나 스크롤을 최상단으로 리셋하지 않고(카드 목록 스크롤 위치 유지),
+  // 실패해도 alert()를 띄우지 않는다 — 호출자(카드 컴포넌트)가 입력값을 유지한 채 자체 오류 문구를 보여준다.
+  const saveCompletedPersonalWorkoutEdit=async(workoutId,patch,opts={})=>{
     assertOwnMember();
     setPersonalEditBusy(true);
     try{
@@ -1843,21 +1841,25 @@ function MemberApp({ onLogout }) {
       );
       const applyPatch=w=>w.id===workoutId?normalizePersonalWorkout({...w,...patch,updatedAt:new Date()}):w;
       setPersonalWorkouts(prev=>prev.map(applyPatch));
-      setPersonalRecordTarget(null);
-      resetMemberScroll();
-      setPersonalWorkoutToast("개인운동 기록을 수정했어요");
+      if(opts.inline){
+        setPersonalWorkoutToast(opts.toast||"저장됐어요");
+      }else{
+        setPersonalRecordTarget(null);
+        resetMemberScroll();
+        setPersonalWorkoutToast("개인운동 기록을 수정했어요");
+      }
       reloadPersonalWorkouts();
     }catch(e){
       console.error("[개인운동] 완료 기록 수정 실패",e);
-      alert(e?.message||"개인운동 기록 수정에 실패했습니다.");
+      if(!opts.inline) alert(e?.message||"개인운동 기록 수정에 실패했습니다.");
       throw e;
     }finally{ setPersonalEditBusy(false); }
   };
   // 개인운동 근육통 저장 — 문서ID가 workoutId로 고정돼 있어 신규 입력·수정 모두 이 함수 하나로 처리된다(중복 문서 없음).
+  // 호출자는 카드 안 "운동 후 상태" 섹션뿐이라 실패 시 alert() 대신 예외만 던지고, 성공 시 공용 토스트로 안내한다.
   const savePersonalSorenessRecord=async(workout,data)=>{
     if(!workout?.id) return;
     assertOwnMember();
-    setPersonalSorenessBusy(true);
     try{
       const saved=await withTimeout(
         savePersonalWorkoutSoreness(profile.id,workout.id,{
@@ -1868,12 +1870,12 @@ function MemberApp({ onLogout }) {
         "근육통 저장이 지연되고 있습니다. 네트워크 상태를 확인해주세요."
       );
       setPersonalSorenessMap(prev=>({...prev,[workout.id]:normalizePersonalWorkoutSoreness(saved)}));
+      setPersonalWorkoutToast("근육통이 저장됐어요");
       return saved;
     }catch(e){
       console.error("[개인운동] 근육통 저장 실패",e);
-      alert(e?.message||"근육통 저장에 실패했습니다.");
       throw e;
-    }finally{ setPersonalSorenessBusy(false); }
+    }
   };
   // 운동 종목 후보 — 본인 PT 수업일지 + 본인 개인운동 + 코드 내장 분류 상수(별도 운동 사전 신설 없음)
   const personalExerciseCandidates=buildPersonalExerciseCandidates({sessions,personalWorkouts});
@@ -1882,18 +1884,10 @@ function MemberApp({ onLogout }) {
     personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
     personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
     startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast,
-    personalSorenessMap,personalEditBusy,personalSorenessBusy,saveCompletedPersonalWorkoutEdit,savePersonalSorenessRecord,
-    personalSorenessTarget,openPersonalSoreness,closePersonalSoreness};
+    personalSorenessMap,personalEditBusy,saveCompletedPersonalWorkoutEdit,savePersonalSorenessRecord};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{/* 하단 탭 표시 문구만 "수업"→"운동"으로 변경 — 내부 라우팅 key(workout), 딥링크, 앱 이용 현황(appUsage) 기록은 그대로 유지한다. */}
     {[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"운동"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav>
-    <PersonalSorenessSheet
-      workout={personalSorenessTarget}
-      soreness={personalSorenessTarget?personalSorenessMap[personalSorenessTarget.id]:null}
-      busy={personalSorenessBusy}
-      onClose={closePersonalSoreness}
-      onSave={savePersonalSorenessRecord}
-      onGoToPain={()=>{ goMemberTab("health"); closePersonalSoreness(); }}
-    /></div>;
+    </div>;
 }
 
 function CopyValueButton({value,label="복사"}){const [done,setDone]=useState(false); if(!value)return null; return <button onClick={async()=>{try{await navigator.clipboard?.writeText(value);setDone(true);setTimeout(()=>setDone(false),1500);}catch{}}} style={{marginLeft:6,padding:"2px 6px",borderRadius:5,border:"1px solid rgba(47,115,246,.25)",background:"rgba(47,115,246,.08)",color:"#2f73f6",fontSize:10}}>{done?"복사됨":label}</button>}
@@ -3370,7 +3364,6 @@ function MemberHome(p){
   return <div className="hm-wrap">
     <MemberHomeHero {...p}/>
     <ReviewReminderCard notice={reviewNotice}/>
-    <PersonalSorenessBanner {...p}/>
     <HomeGoalCard {...p}/>
     <HomeTodayCheckCard {...p}/>
     <HomeMetricsGrid {...p}/>
@@ -3447,7 +3440,6 @@ function MemberWorkout(p){
     <p className="sub sj-page-sub">{view==="journal"?"대표님과 진행한 수업과 직접 기록한 개인운동을 확인해보세요.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
     <MemberSegment ariaLabel="운동 보기 전환" options={[["journal","운동 기록"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
     {view==="calendar"?<MemberCalendar {...p}/>:<>
-      <PersonalSorenessBanner {...p}/>
       <MemberPersonalWorkoutEntry
         inProgress={p.personalInProgress||[]}
         busy={p.personalBusy}
@@ -3468,7 +3460,7 @@ function MemberWorkout(p){
 // 주의: "수업 후 몸 상태" 피드백 카드 펼침 상태(expandedFeedbackIds)는 여기(sessionStorage/openId)와는 정책이 다르다 —
 // 기본은 항상 접힘이어야 하므로 sessionStorage로 이전 방문 상태를 복원하지 않는다. MemberApp의 state로 옮겨졌다.
 const JOURNAL_OPEN_ID_KEY="teogym_journal_openId";
-function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,personalWorkouts=[],removePersonalWorkout,personalSorenessMap={},resumePersonalWorkout,openPersonalSoreness}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
+function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,markSessionDetailRead,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,personalWorkouts=[],removePersonalWorkout,personalSorenessMap={},resumePersonalWorkout,saveCompletedPersonalWorkoutEdit,savePersonalSorenessRecord,setTab}){const [q,setQ]=useState(""); const [openKeys,setOpenKeys]=useState(()=>new Set());
   // 개인운동 카드 펼침 상태 — PT 수업일지의 openId(sessionStorage 복원 + 최신 자동 펼침)와 완전히 별개로 관리한다.
   // 개인운동은 sessionReads(수업일지 회원 확인) 개념이 없으므로 펼쳐도 어떤 확인 기록도 남기지 않는다.
   const [openPersonalId,setOpenPersonalId]=useState(null);
@@ -3585,9 +3577,11 @@ function MemberJournal({sessions,saveFeedback,readSessionIds,markSessionsAsRead,
       onToggle={()=>setOpenPersonalId(prev=>prev===w.id?null:w.id)}
       onDelete={removePersonalWorkout}
       onEdit={resumePersonalWorkout?(workout)=>resumePersonalWorkout(workout,{editMode:true}):undefined}
-      onEditSoreness={openPersonalSoreness}
       soreness={personalSorenessMap[w.id]||null}
-      comparisonIndex={comparisonIndex}/>
+      comparisonIndex={comparisonIndex}
+      onSaveRpe={(workoutId,rpeValue)=>saveCompletedPersonalWorkoutEdit(workoutId,{rpe:rpeValue},{inline:true,toast:`RPE ${rpeValue} 저장 완료`})}
+      onSaveSoreness={savePersonalSorenessRecord}
+      onGoToPain={()=>setTab?.("health")}/>
   );
   const heroItems=[]; const prevItems=[];
   // "최근 수업 · 부위 · PR" 표시는 카드 밖 별도 라벨이 아니라 카드 내부 최상단 통합 메타(sj-card-meta, renderExpanded 참고)로 표시한다.
@@ -4670,14 +4664,13 @@ function MemberExerciseComparison({comparison}){
 }
 
 // 목록 카드 — 접힘/펼침 한 컴포넌트. 펼침 상태는 상위(MemberJournal)가 관리한다.
-function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete,onEdit,onEditSoreness,soreness=null,comparisonIndex=null}){
+function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onDelete,onEdit,soreness=null,comparisonIndex=null,onSaveRpe,onSaveSoreness,onGoToPain}){
   const sum=buildPersonalWorkoutCardSummary(workout);
   const exercises=(workout?.exercises||[]).filter(e=>String(e?.name||"").trim());
   const startedLabel=formatLastSavedLabel(workout?.startedAt);
   const endedLabel=formatLastSavedLabel(workout?.endedAt);
   const [manageOpen,setManageOpen]=useState(false);
   const sorenessWindow=getPersonalWorkoutSorenessWindow(workout);
-  const canTouchSoreness=!!(soreness||sorenessWindow.withinAutoWindow);
   if(!open){
     return <button type="button" className="sj-prev-card pw-card" onClick={onToggle}>
       <span className="sj-prev-main">
@@ -4705,18 +4698,6 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
       {sum.volumeLabel&&<span>{sum.volumeLabel}</span>}
       <span className={"sj-rpe-chip"+(workout?.rpe==null?" empty":"")}>{workout?.rpe!=null?`RPE ${workout.rpe}`:"RPE 미입력"}</span>
     </div>
-    {soreness&&<p className="pw-soreness-line">
-      <b>{sorenessTimingLabel(soreness.timing)} {soreness.overallLevel>0?`${soreness.overallLevel}/5`:"없음"}</b>
-      {soreness.overallLevel>0&&soreness.bodyParts.length>0&&<span> · {soreness.bodyParts.map(bp=>`${bp.part} ${bp.level}`).join(" · ")}</span>}
-    </p>}
-    {!soreness&&sorenessWindow.withinAutoWindow&&<div className="pw-inline-cta">
-      <span>운동 후 근육통을 아직 기록하지 않았어요.</span>
-      <button type="button" onClick={()=>onEditSoreness?.(workout)}>지금 기록</button>
-    </div>}
-    {workout?.rpe==null&&<div className="pw-inline-cta">
-      <span>최종 운동 강도가 입력되지 않았어요.</span>
-      <button type="button" onClick={()=>onEdit?.(workout)}>입력하기</button>
-    </div>}
     {exercises.length===0
       ? <p className="pw-empty-line">기록된 운동이 없어요.</p>
       : <ul className="pw-ex-list">{exercises.map((e,i)=>{
@@ -4736,11 +4717,11 @@ function MemberPersonalWorkoutCard({workout,showKindBadge=true,open,onToggle,onD
           </li>;
         })}</ul>}
     {String(workout?.memo||"").trim()&&<div className="pw-memo-view"><span>메모</span><p>{workout.memo}</p></div>}
+    <PersonalWorkoutStatusSection workout={workout} soreness={soreness} sorenessWindow={sorenessWindow} onSaveRpe={onSaveRpe} onSaveSoreness={onSaveSoreness} onGoToPain={onGoToPain}/>
     <div className="pw-manage">
       <button type="button" className="pw-manage-toggle" onClick={()=>setManageOpen(v=>!v)} aria-expanded={manageOpen}>기록 관리 <SjIcon paths={manageOpen?SJ_PATHS.chevronUp:SJ_PATHS.chevronDown} size={13}/></button>
       {manageOpen&&<div className="pw-manage-menu" role="menu">
         {onEdit&&<button type="button" role="menuitem" onClick={()=>{setManageOpen(false); onEdit(workout);}}>운동 기록 수정</button>}
-        {onEditSoreness&&canTouchSoreness&&<button type="button" role="menuitem" onClick={()=>{setManageOpen(false); onEditSoreness(workout);}}>{soreness?"근육통 수정":"근육통 기록하기"}</button>}
         {onDelete&&<button type="button" role="menuitem" className="danger" onClick={()=>{setManageOpen(false); onDelete(workout);}}>기록 삭제</button>}
       </div>}
     </div>
@@ -4775,96 +4756,115 @@ function MemberPersonalWorkoutEntry({inProgress=[],onStart,onResume,onDelete,bus
   </button>;
 }
 
-// 홈/운동 탭 상단 근육통 안내 대상 — 완료된 개인운동 중 다음날/다다음날 창 안에 있고 아직 근육통을 입력하지 않은 것만 고른다.
-// 여러 건이 동시에 대상이어도 최신 운동을 우선 보여주고, 나머지는 개수만 안내한다(순서대로 확인 가능).
-function buildPersonalSorenessPrompts(personalWorkouts=[],sorenessMap={}){
-  return personalWorkouts
-    .filter(w=>w?.status==="completed"&&!sorenessMap[w.id])
-    .map(w=>({workout:w,window:getPersonalWorkoutSorenessWindow(w)}))
-    .filter(x=>x.window.withinAutoWindow)
-    .sort((a,b)=>String(b.workout.workoutDate||"").localeCompare(String(a.workout.workoutDate||"")));
+// 개인운동 카드 접힘 상태 요약 — "RPE n · 부위 정도 · 부위 정도" 형식. 둘 다 미입력이면 안내 문구 한 줄만 보여준다.
+function buildPersonalWorkoutStatusSummary(workout,soreness){
+  const rpeText=workout?.rpe!=null?`RPE ${workout.rpe}`:"RPE 미입력";
+  let sorenessText;
+  if(!soreness){
+    sorenessText="근육통 미입력";
+  }else{
+    const feltParts=(soreness.bodyParts||[]).filter(bp=>bp.level>0);
+    sorenessText=feltParts.length
+      ? feltParts.map(bp=>`${bp.part} ${sorenessLevelDescription(bp.level)}`).join(" · ")
+      : (soreness.overallLevel>0?`근육통 ${sorenessLevelDescription(soreness.overallLevel)}`:"근육통 없음");
+  }
+  const hasAny=workout?.rpe!=null||!!soreness;
+  return {hasAny,text:hasAny?`${rpeText} · ${sorenessText}`:"운동 후 상태를 기록해주세요"};
 }
-// 홈/운동 탭 공용 근육통 안내 카드 — 공통 props(p)를 그대로 받아 어디서 렌더하든 동일하게 동작한다.
-function PersonalSorenessBanner(p){
-  const prompts=buildPersonalSorenessPrompts(p.allPersonalWorkouts||p.personalWorkouts||[],p.personalSorenessMap||{});
-  if(!prompts.length) return null;
-  const {workout,window}=prompts[0];
-  const sum=buildPersonalWorkoutCardSummary(workout);
-  const skip=async()=>{
-    try{ await p.savePersonalSorenessRecord?.(workout,{timing:window.timing,overallLevel:0,bodyParts:(workout.workoutParts||[]).map(part=>({part,level:0}))}); }catch{}
-  };
-  return <section className="pw-soreness-prompt">
-    <b>{window.timing==="two_days_later"?"이틀 전 개인운동 후 근육통은 어떠셨나요?":"어제 개인운동 후 근육통은 어떠셨나요?"}</b>
-    <p>{sum.dateLabel} · {sum.partsLabel} · {sum.metaLabel}</p>
-    <div className="pw-soreness-prompt-actions">
-      <button type="button" className="pw-btn primary" disabled={p.personalSorenessBusy} onClick={()=>p.openPersonalSoreness?.(workout)}>근육통 기록하기</button>
-      <button type="button" className="pw-btn ghost" disabled={p.personalSorenessBusy} onClick={skip}>근육통 없음</button>
-    </div>
-    {prompts.length>1&&<small className="pw-hint">확인할 기록이 {prompts.length}건 더 있어요.</small>}
-  </section>;
-}
-
-// 개인운동 근육통 입력/수정 시트 — 완료된 개인운동 하나에 연결된 근육통 1건을 만들거나 고친다(문서ID=workoutId 고정).
-function PersonalSorenessSheet({workout,soreness,busy,onClose,onSave,onGoToPain}){
-  const win=getPersonalWorkoutSorenessWindow(workout||{});
-  const timing=soreness?.timing||(win.timing||"next_day");
-  const [overall,setOverall]=useState(0);
-  const [parts,setParts]=useState([]);
-  const [memo,setMemo]=useState("");
-  useLockBodyScroll(!!workout);
+// 개인운동 카드 내부 "운동 후 상태" — PT 수업일지 MemberFeedbackForm(수업 후 몸 상태)과 동일한 패턴으로,
+// 기본 접힘 + 펼치면 RPE·근육통을 각자 독립된 저장 버튼으로 저장한다(선택 즉시 저장 아님). 완료된 기록에서만 렌더된다.
+// 근육통 새 입력은 기존 자동 안내 창(다음날/다다음날, getPersonalWorkoutSorenessWindow) 안에서만 허용하는 기존 정책을 그대로 따르고,
+// 이미 저장된 기록은 창이 지나도 계속 수정할 수 있다 — 창 판정과 데이터 재사용 로직은 옛 PersonalSorenessSheet에서 그대로 옮겨왔다.
+function PersonalWorkoutStatusSection({workout,soreness,sorenessWindow,onSaveRpe,onSaveSoreness,onGoToPain}){
+  const [open,setOpen]=useState(false);
+  const [rpe,setRpe]=useState(()=>workout?.rpe??null);
+  const [savingRpe,setSavingRpe]=useState(false);
+  const [rpeError,setRpeError]=useState("");
+  useEffect(()=>{ setRpe(workout?.rpe??null); },[workout?.rpe]);
+  const canEditSoreness=!!soreness||sorenessWindow.withinAutoWindow;
+  const timing=soreness?.timing||(sorenessWindow.timing||"next_day");
+  const sorenessPartsKey=JSON.stringify(soreness?.bodyParts||[]);
+  const [overall,setOverall]=useState(()=>soreness?.overallLevel||0);
+  const [parts,setParts]=useState(()=>soreness?.bodyParts?.length?soreness.bodyParts:(workout?.workoutParts||[]).map(part=>({part,level:0})));
+  const [memo,setMemo]=useState(()=>soreness?.memo||"");
+  const [savingSoreness,setSavingSoreness]=useState(false);
+  const [sorenessError,setSorenessError]=useState("");
   useEffect(()=>{
-    if(!workout) return;
-    if(soreness){
-      setOverall(soreness.overallLevel||0);
-      setParts(soreness.bodyParts?.length?soreness.bodyParts:(workout.workoutParts||[]).map(part=>({part,level:0})));
-      setMemo(soreness.memo||"");
-    }else{
-      setOverall(0);
-      setParts((workout.workoutParts||[]).map(part=>({part,level:0})));
-      setMemo("");
-    }
+    setOverall(soreness?.overallLevel||0);
+    setParts(soreness?.bodyParts?.length?soreness.bodyParts:(workout?.workoutParts||[]).map(part=>({part,level:0})));
+    setMemo(soreness?.memo||"");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[workout?.id,soreness]);
-  if(!workout) return null;
+  },[soreness?.overallLevel,sorenessPartsKey,soreness?.memo]);
   const remainingParts=getPersonalWorkoutPartChipOptions(parts.map(p=>p.part)).filter(opt=>!parts.some(p=>p.part===opt));
   const setPartLevel=(part,level)=>setParts(prev=>prev.map(p=>p.part===part?{...p,level}:p));
   const addBodyPart=(part)=>{ if(!part||parts.some(p=>p.part===part)) return; setParts(prev=>[...prev,{part,level:0}]); };
   const removePart=(part)=>setParts(prev=>prev.filter(p=>p.part!==part));
-  const save=async()=>{ await onSave?.(workout,{timing,overallLevel:overall,bodyParts:parts,memo}); onClose?.(); };
-  return <MemberBottomSheet open={!!workout} onClose={onClose} title={sorenessTimingLabel(timing)}>
-    <p className="pw-soreness-note">
-      {formatKoreanDateLabel(workout.workoutDate)} 개인운동 후 근육통은 어느 정도였나요? 찌르는 통증·관절 통증·일상생활이 어려운 불편감은 근육통이 아닌 통증으로 기록해주세요.
-      {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>통증은 건강 탭에서 기록</button>}
-    </p>
-    <section className="pw-block">
-      <span className="pw-block-title">전체 근육통 정도</span>
-      <div className="pw-level-grid">{[0,1,2,3,4,5].map(lv=>(
-        <button key={lv} type="button" className={overall===lv?"active":""} onClick={()=>setOverall(lv)}>{lv}</button>
-      ))}</div>
-      <small className="pw-hint">{sorenessLevelDescription(overall)}</small>
-    </section>
-    <section className="pw-block">
-      <span className="pw-block-title">부위별 근육통</span>
-      {parts.map(p=>(
-        <div key={p.part} className="pw-soreness-part-row">
-          <b>{p.part}</b>
-          <div className="pw-level-grid sm">{[0,1,2,3,4,5].map(lv=>(
-            <button key={lv} type="button" className={p.level===lv?"active":""} onClick={()=>setPartLevel(p.part,lv)}>{lv}</button>
-          ))}</div>
-          <button type="button" className="pw-part-remove" onClick={()=>removePart(p.part)} aria-label={`${p.part} 삭제`}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
+  const summary=buildPersonalWorkoutStatusSummary(workout,soreness);
+  const saveRpeSection=async()=>{
+    if(savingRpe||rpe==null) return;
+    setSavingRpe(true); setRpeError("");
+    try{ await onSaveRpe?.(workout.id,rpe); }
+    catch(e){ setRpeError(e?.message||"RPE 저장에 실패했습니다."); }
+    finally{ setSavingRpe(false); }
+  };
+  const saveSorenessSection=async()=>{
+    if(savingSoreness) return;
+    setSavingSoreness(true); setSorenessError("");
+    try{ await onSaveSoreness?.(workout,{timing,overallLevel:overall,bodyParts:parts,memo}); }
+    catch(e){ setSorenessError(e?.message||"근육통 저장에 실패했습니다."); }
+    finally{ setSavingSoreness(false); }
+  };
+  return <div className="sj-feedback-card">
+    <div className="sj-fb-head">
+      <i className="sj-fb-ico"><SjIcon paths={SJ_PATHS.squarePen} size={15}/></i>
+      <b>운동 후 상태</b>
+      <button type="button" className="sj-fb-toggle" onClick={()=>setOpen(v=>!v)} aria-expanded={open}>{open?<>접기 <SjIcon paths={SJ_PATHS.chevronUp} size={13}/></>:<>{summary.hasAny?"수정하기":"펼치기"} <SjIcon paths={SJ_PATHS.chevronDown} size={13}/></>}</button>
+    </div>
+    {!open&&<span className={"pw-fb-summary"+(summary.hasAny?"":" empty")}>{summary.text}</span>}
+    {open&&<div className="sj-fb-edit">
+      <div className="sj-fb-section">
+        <div className="sj-fb-label-row">
+          <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.activity} size={14}/> 운동 강도 (RPE)</label>
+          <span className="sj-fb-hint">{rpe!=null?rpeDescription(rpe):"선택해주세요"}</span>
         </div>
-      ))}
-      {remainingParts.length>0&&<select className="pw-part-add-select" value="" onChange={e=>addBodyPart(e.target.value)}>
-        <option value="">+ 다른 부위 추가</option>
-        {remainingParts.map(part=><option key={part} value={part}>{part}</option>)}
-      </select>}
-    </section>
-    <section className="pw-block">
-      <span className="pw-block-title">메모 <em>(선택)</em></span>
-      <textarea className="pw-memo" rows={2} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength} placeholder="움직일 때 불편했던 점이나 특이사항이 있다면 적어주세요." value={memo} onChange={e=>setMemo(e.target.value)}/>
-    </section>
-    <button type="button" className="pw-btn primary block" disabled={busy} onClick={save}>{busy?"저장 중...":"근육통 저장"}</button>
-  </MemberBottomSheet>;
+        <div className="sj-rpe-grid" aria-label="운동 강도 RPE 1에서 10">
+          {Array.from({length:10},(_,i)=>i+1).map(n=><button type="button" key={n} className={rpe===n?"active":""} aria-pressed={rpe===n} onClick={()=>setRpe(n)}>{n}</button>)}
+        </div>
+        {rpeError&&<p className="pw-error">{rpeError}</p>}
+        <div className="sj-fb-save-row"><button type="button" className="sj-fb-section-save" disabled={savingRpe||rpe==null} onClick={saveRpeSection}>{savingRpe?"저장 중...":"RPE 저장"}</button></div>
+      </div>
+      <div className="sj-fb-section">
+        <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 운동 후 근육통</label>
+        {canEditSoreness?<>
+          <span className="sj-fb-instruction">{sorenessTimingLabel(timing)} 기준으로 정도를 선택해주세요.</span>
+          <span className="sj-fb-sublabel">전체 근육통 정도</span>
+          <div className="pw-level-grid">{[0,1,2,3,4,5].map(lv=>(
+            <button key={lv} type="button" className={overall===lv?"active":""} onClick={()=>setOverall(lv)}>{lv}</button>
+          ))}</div>
+          <small className="pw-hint">{sorenessLevelDescription(overall)}</small>
+          <span className="sj-fb-sublabel">부위별 근육통</span>
+          {parts.map(p=>(
+            <div key={p.part} className="pw-soreness-part-row">
+              <b>{p.part}</b>
+              <div className="pw-level-grid sm">{[0,1,2,3,4,5].map(lv=>(
+                <button key={lv} type="button" className={p.level===lv?"active":""} onClick={()=>setPartLevel(p.part,lv)}>{lv}</button>
+              ))}</div>
+              <button type="button" className="pw-part-remove" onClick={()=>removePart(p.part)} aria-label={`${p.part} 삭제`}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
+            </div>
+          ))}
+          {remainingParts.length>0&&<select className="pw-part-add-select" value="" onChange={e=>addBodyPart(e.target.value)}>
+            <option value="">+ 다른 부위 추가</option>
+            {remainingParts.map(part=><option key={part} value={part}>{part}</option>)}
+          </select>}
+          <span className="sj-fb-sublabel">메모 <em>(선택)</em></span>
+          <textarea className="pw-memo" rows={2} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength} placeholder="움직일 때 불편했던 점이나 특이사항이 있다면 적어주세요." value={memo} onChange={e=>setMemo(e.target.value)}/>
+          {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>통증은 건강 탭에서 기록</button>}
+          {sorenessError&&<p className="pw-error">{sorenessError}</p>}
+          <div className="sj-fb-save-row"><button type="button" className="sj-fb-section-save" disabled={savingSoreness} onClick={saveSorenessSection}>{savingSoreness?"저장 중...":"근육통 저장"}</button></div>
+        </>:<span className="pw-hint">근육통 입력 가능 기간(다음날~다다음날)이 지나 새로 기록할 수 없어요.</span>}
+      </div>
+    </div>}
+  </div>;
 }
 
 // 운동 종목 선택 시트 — 기존 데이터·상수에서 만든 후보 목록(buildPersonalExerciseCandidates)을 검색/선택한다.
@@ -8291,12 +8291,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pw-time-row span{color:#8B949E;font-weight:800}
 .pw-link{border:0;background:none;padding:0;margin-top:8px;color:#2F73F6;font-size:12.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .pw-rpe-question{margin:0 2px 4px;font-size:15.5px;font-weight:800;color:#1D2430;line-height:1.4}
-/* 완료 기록 상세 — RPE 배지·근육통 표시·미입력 안내·기록 관리 메뉴 */
-.pw-inline-cta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding:10px 13px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:14px}
-.pw-inline-cta span{font-size:12.5px;font-weight:800;color:#C2410C;line-height:1.4}
-.pw-inline-cta button{flex-shrink:0;border:1px solid #F97316;background:#fff;color:#EA580C;border-radius:10px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap}
-.pw-soreness-line{margin:10px 0 0;font-size:12.5px;font-weight:700;color:#334155}
-.pw-soreness-line b{color:#1D2430;font-weight:800}
+/* 완료 기록 상세 — RPE 배지·기록 관리 메뉴 */
 .pw-manage{margin-top:14px;position:relative}
 .pw-manage-toggle{display:inline-flex;align-items:center;gap:5px;border:1px solid #E8ECF1;background:#fff;border-radius:12px;padding:9px 13px;font-size:12.5px;font-weight:800;color:#66717C;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .pw-manage-menu{display:grid;margin-top:6px;background:#fff;border:1px solid #EEF1F4;border-radius:14px;box-shadow:0 4px 16px rgba(15,23,42,.08);overflow:hidden}
@@ -8304,13 +8299,10 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pw-manage-menu button:first-child{border-top:0}
 .pw-manage-menu button:active{background:#F8FAFC}
 .pw-manage-menu button.danger{color:#FF5A5F}
-/* 근육통 안내 배너(홈·운동 탭 상단) */
-.pw-soreness-prompt{background:#fff;border:1px solid #D9E7FF;border-radius:20px;padding:15px 16px;margin:0 0 14px;box-shadow:0 2px 12px rgba(47,115,246,.08)}
-.pw-soreness-prompt b{display:block;font-size:15px;font-weight:800;color:#1D2430;letter-spacing:-.2px}
-.pw-soreness-prompt p{margin:6px 0 12px;font-size:12.5px;font-weight:700;color:#66717C}
-.pw-soreness-prompt-actions{display:flex;gap:7px;flex-wrap:wrap}
-/* 근육통 입력 시트 */
-.pw-soreness-note{margin:0 0 4px;font-size:12.5px;font-weight:700;color:#66717C;line-height:1.6}
+/* 개인운동 카드 내부 "운동 후 상태"(sj-feedback-card 재사용) 접힘 요약 줄 */
+.pw-fb-summary{display:block;margin-top:8px;font-size:12.5px;font-weight:700;color:#66717C}
+.pw-fb-summary.empty{color:#94A3B8;font-weight:600}
+/* 근육통 입력(카드 내부 "운동 후 상태" 섹션에서 재사용) */
 .pw-level-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:2px}
 .pw-level-grid button{height:40px;min-width:0;padding:0;border:1px solid #E8ECF1;background:#F8F9FB;border-radius:10px;font-family:inherit;font-size:14px;font-weight:700;color:#64748B;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
 .pw-level-grid button.active{border-color:#2F73F6;background:#fff;color:#2F73F6;font-weight:800;box-shadow:0 1px 5px rgba(47,115,246,.14)}

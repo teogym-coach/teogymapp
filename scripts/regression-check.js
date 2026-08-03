@@ -4194,24 +4194,30 @@ const checks = [
         fn.indexOf('workout?.workoutDate') < fn.indexOf('"updatedAt","createdAt"');
     })()
   ],
-  ['근육통 없음 선택: overallLevel 0 + 부위별 level 0으로 명시 저장(미입력과 구분), 홈/운동탭 배너에서 skip 시 재촉하지 않음',
+  ['홈/운동 탭 상단 근육통·RPE 입력 배너 제거: 개인운동 카드 내부 입력으로 통합되어 더 이상 별도 배너 컴포넌트가 존재하지 않음',
+    !app.includes('function PersonalSorenessBanner') &&
+    !app.includes('function buildPersonalSorenessPrompts') &&
+    !app.includes('function PersonalSorenessSheet') &&
+    !app.includes('<PersonalSorenessBanner')
+  ],
+  ['개인운동 카드 접힘 요약: RPE·근육통 모두 있으면 "RPE n · 부위 정도" 조합, 부분 입력/미입력도 각각 다른 문구',
     (() => {
-      const fn = app.slice(app.indexOf('function PersonalSorenessBanner'), app.indexOf('function PersonalSorenessSheet'));
-      return fn.includes('overallLevel:0,bodyParts:(workout.workoutParts||[]).map(part=>({part,level:0}))');
+      const fn = app.slice(app.indexOf('function buildPersonalWorkoutStatusSummary'), app.indexOf('function PersonalWorkoutStatusSection'));
+      return fn.includes('"RPE 미입력"') &&
+        fn.includes('"근육통 미입력"') &&
+        fn.includes('"운동 후 상태를 기록해주세요"') &&
+        fn.includes('sorenessLevelDescription(bp.level)');
     })()
   ],
-  ['근육통 안내 대상: 완료된 기록 중 자동 안내 창(1~2일) 안이고 아직 근육통이 없는 것만, 최신순 정렬',
+  ['개인운동 카드 "운동 후 상태": RPE·근육통 각각 독립된 저장 버튼(PT 수업 후 몸 상태와 동일 패턴), 근육통 신규 입력은 기존 자동 안내 창 정책을 그대로 따름(창이 지나면 기존 기록 수정만 허용)',
     (() => {
-      const fn = app.slice(app.indexOf('function buildPersonalSorenessPrompts'), app.indexOf('function PersonalSorenessBanner'));
-      return fn.includes('!sorenessMap[w.id]') && fn.includes('.filter(x=>x.window.withinAutoWindow)') &&
-        fn.includes('.sort((a,b)=>String(b.workout.workoutDate||"").localeCompare(String(a.workout.workoutDate||"")));');
-    })()
-  ],
-  ['근육통 입력 시트: timing은 창(window)에서 자동 결정되고 회원이 직접 선택하지 않음(선택 UI 없음) + 기존 통증 기록 화면 이동 안내 포함',
-    (() => {
-      const fn = app.slice(app.indexOf('function PersonalSorenessSheet'), app.indexOf('// 운동 종목 선택 시트'));
-      return fn.includes('const timing=soreness?.timing||(win.timing||"next_day");') &&
-        !fn.includes('setTiming') &&
+      const fn = app.slice(app.indexOf('function PersonalWorkoutStatusSection'), app.indexOf('// 운동 종목 선택 시트'));
+      return fn.includes('className="sj-feedback-card"') &&
+        fn.includes('const canEditSoreness=!!soreness||sorenessWindow.withinAutoWindow;') &&
+        fn.includes('const timing=soreness?.timing||(sorenessWindow.timing||"next_day");') &&
+        fn.includes('onSaveRpe?.(workout.id,rpe)') &&
+        fn.includes('onSaveSoreness?.(workout,{timing,overallLevel:overall,bodyParts:parts,memo})') &&
+        fn.includes('근육통 입력 가능 기간(다음날~다다음날)이 지나 새로 기록할 수 없어요.') &&
         fn.includes('통증은 건강 탭에서 기록');
     })()
   ],
@@ -4232,14 +4238,28 @@ const checks = [
         fn.includes('if(rpe!==initialRpeRef.current) patch.rpe=rpe;');
     })()
   ],
-  ['개인운동 카드: RPE 배지(PT의 sj-rpe-chip과 동일 톤이지만 개인운동 카드 내부에 표시되어 출처 혼동 없음) + 근육통 요약/미입력 안내 + "기록 관리" 메뉴(수정/근육통/삭제)',
+  ['개인운동 카드 내부 RPE 저장(inline): 전체 수정 화면을 닫거나 스크롤을 리셋하지 않고, 실패해도 alert()를 띄우지 않음(카드가 자체 오류 문구 표시)',
+    (() => {
+      const fn = app.slice(app.indexOf('const saveCompletedPersonalWorkoutEdit=async'), app.indexOf('const savePersonalSorenessRecord=async'));
+      return fn.includes('if(opts.inline){') &&
+        fn.includes('setPersonalWorkoutToast(opts.toast||"저장됐어요");') &&
+        fn.includes('if(!opts.inline) alert(');
+    })()
+  ],
+  ['개인운동 근육통 저장(savePersonalSorenessRecord): 실패해도 alert()를 띄우지 않고 예외만 던져 호출자(카드)가 처리, 성공 시 공용 토스트로 안내',
+    (() => {
+      const fn = app.slice(app.indexOf('const savePersonalSorenessRecord=async'), app.indexOf('// 운동 종목 후보 —'));
+      return fn.includes('setPersonalWorkoutToast("근육통이 저장됐어요");') && !fn.includes('alert(');
+    })()
+  ],
+  ['개인운동 카드: RPE 배지(PT의 sj-rpe-chip과 동일 톤이지만 개인운동 카드 내부에 표시되어 출처 혼동 없음) + 카드 내부 "운동 후 상태" 섹션 + "기록 관리" 메뉴(수정/삭제, 근육통 메뉴는 운동 후 상태 섹션으로 통합되어 제거됨)',
     (() => {
       const fn = app.slice(app.indexOf('function MemberPersonalWorkoutCard'), app.indexOf('function MemberPersonalWorkoutEntry'));
       return fn.includes('workout?.rpe!=null?`RPE ${workout.rpe}`:"RPE 미입력"') &&
-        fn.includes('운동 후 근육통을 아직 기록하지 않았어요.') &&
-        fn.includes('최종 운동 강도가 입력되지 않았어요.') &&
+        fn.includes('<PersonalWorkoutStatusSection ') &&
         fn.includes('className="pw-manage-toggle"') &&
-        fn.includes('운동 기록 수정') && fn.includes('기록 삭제');
+        fn.includes('운동 기록 수정') && fn.includes('기록 삭제') &&
+        !fn.includes('근육통 기록하기') && !fn.includes('onEditSoreness');
     })()
   ],
   ['운동 종료 시 RPE 입력 단계: 필수가 아니며 "나중에 입력"으로도 완료 가능, 선택하면 저장 직전 값이 payload.rpe로 전달됨',

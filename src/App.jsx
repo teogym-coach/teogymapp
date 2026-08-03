@@ -8212,12 +8212,21 @@ export default function App() {
   // 관리자앱 전용 안정된 layout 높이 — 키보드가 열리면 visualViewport.height는 줄어들지만
   // 관리자 shell 전체 높이는 그 값을 절대 따라가면 안 된다(따라가면 앱이 키보드 위쪽으로 쪼그라들고
   // 아래에 검은 배경이 남는다). 그래서 window.innerHeight(키보드에 영향받지 않는 layout viewport)를
-  // 마운트 시점과 orientationchange 때만 --admin-layout-height로 저장해 shell 높이로 고정한다.
+  // 마운트·orientationchange·resize 시점에 --admin-layout-height로 저장해 shell 높이로 고정한다.
   // 키보드 열림/닫힘 자체의 처리(문서 스크롤 잠금)는 회원 검색 input에서 focus/blur로 직접 다룬다(아래 HomeScreen 참고).
+  // resize도 반영하는 이유: Safari 주소창(툴바)이 스크롤 중 자동으로 접히고 펴지면서 회전 없이도
+  // window.innerHeight가 바뀌는데, 마운트 시점 값에 고정해 두면 이후 실제로 보이는 높이가 더 커져도
+  // shell이 계속 예전(더 작은) 높이에 잠긴 채라 하단 "빠른 실행" 등이 화면 밖으로 밀려 스크롤로도
+  // 닿지 않는 문제가 있었다(PC에서 브라우저 창 높이를 줄이는 경우도 동일). 단, 키보드가 열려 있는
+  // 동안(텍스트 입력에 포커스가 있는 동안)의 resize는 키보드로 인한 축소이므로 절대 반영하지 않는다.
   const adminAppRef = useRef(null);
   useEffect(() => {
     if (!adminVerified || memberMode) return;
     const root = document.documentElement;
+    const isTextFieldFocused = () => {
+      const el = document.activeElement;
+      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+    };
     const setStableAdminHeight = () => {
       root.style.setProperty("--admin-layout-height", `${window.innerHeight}px`);
     };
@@ -8226,10 +8235,16 @@ export default function App() {
       // iOS가 회전 직후 innerHeight를 갱신하는 데 한 프레임 이상 걸릴 수 있어 한 번 더 보정
       setTimeout(setStableAdminHeight, 300);
     };
+    const onResize = () => {
+      if (isTextFieldFocused()) return; // 키보드로 인한 축소는 무시
+      setStableAdminHeight();
+    };
     setStableAdminHeight();
     window.addEventListener("orientationchange", onOrientationChange);
+    window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("orientationchange", onOrientationChange);
+      window.removeEventListener("resize", onResize);
       root.style.removeProperty("--admin-layout-height");
     };
   }, [adminVerified, memberMode]);

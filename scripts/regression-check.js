@@ -4304,6 +4304,28 @@ const checks = [
         fn.includes('if(rpe!==initialRpeRef.current) patch.rpe=rpe;');
     })()
   ],
+  ['완료 기록 수정 화면 모바일 스크롤: 바텀시트가 아니라 하단 내비게이션 유지된 전체 페이지라 body 스크롤을 잠그지 않고(useLockBodyScroll 호출 없음), 하단 저장바는 sticky로 안전영역까지 반영한다',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalWorkoutEditScreen'), app.indexOf('// 건강 탭 대시보드'));
+      const pwSticky = app.slice(app.indexOf('.pw-sticky-bar{'), app.indexOf('.pw-sticky-bar{')+300);
+      return !fn.includes('useLockBodyScroll(true);') &&
+        fn.includes('className="pw-screen"') &&
+        pwSticky.includes('position:sticky') &&
+        pwSticky.includes('env(safe-area-inset-bottom, 0px)') &&
+        pwSticky.includes('var(--mb-h-tab, 60px)');
+    })()
+  ],
+  ['운동 종목 추가 바텀시트(MemberPersonalExercisePicker)는 open 상태와 연동해 body 스크롤을 잠그고 닫히면 정확히 해제한다(useLockBodyScroll(open) + cleanup에서 이전 값 복원)',
+    (() => {
+      const fn = app.slice(app.indexOf('function MemberPersonalExercisePicker'), app.indexOf('function MemberPersonalExercisePicker')+2000);
+      const hook = app.slice(app.indexOf('function useLockBodyScroll'), app.indexOf('function useLockBodyScroll')+1200);
+      return fn.includes('useLockBodyScroll(open);') &&
+        hook.includes('if(!active) return;') &&
+        hook.includes('body.style.position=prev.position;') &&
+        hook.includes('body.style.overflow=prev.overflow;') &&
+        hook.includes('window.scrollTo(0,scrollY);');
+    })()
+  ],
   ['개인운동 카드 내부 RPE 저장(inline): 전체 수정 화면을 닫거나 스크롤을 리셋하지 않고, 실패해도 alert()를 띄우지 않음(카드가 자체 오류 문구 표시)',
     (() => {
       const fn = app.slice(app.indexOf('const saveCompletedPersonalWorkoutEdit=async'), app.indexOf('const savePersonalSorenessRecord=async'));

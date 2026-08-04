@@ -5366,7 +5366,8 @@ function PersonalWorkoutEditScreen({workout,candidates=[],busy=false,onSave,onDe
   const nextUid=()=>`edit${uidRef.current++}`;
   const initialRpeRef=useRef(workout?.rpe??null);
   const initialSnapshotRef=useRef(JSON.stringify({date,startTime,endTime,parts,exercises,memo,rpe}));
-  useLockBodyScroll(true);
+  // 이 화면은 바텀시트가 아니라 운동 탭 안의 전체 페이지(하단 내비게이션 유지)라 body 스크롤을 잠그면 안 된다.
+  // 예전에 useLockBodyScroll(true)를 넣었던 게 페이지 자체의 유일한 스크롤 수단을 없애버려 본문이 전혀 스크롤되지 않는 버그였다.
 
   const isDirty=()=>JSON.stringify({date,startTime,endTime,parts,exercises,memo,rpe})!==initialSnapshotRef.current;
   const handleBack=()=>{

@@ -2471,8 +2471,19 @@ function computeKeyboardSheetLayout({layoutHeight,viewportHeight,offsetTop,topGa
 
 // iOS/Android 키보드가 열렸을 때 visualViewport를 추적해 (키보드에 가려진 높이, 시트 가용 높이)를 반환하는 훅.
 // active=false이거나 visualViewport 미지원 환경에서는 항상 {keyboardInset:0,availableHeight:null}(기존 레이아웃 그대로) — 안전한 fallback.
+// 값이 실질적으로 달라졌을 때만 true — iOS 주소창 접힘/키보드 애니메이션이 겹치는 동안 1~2px 단위로
+// 여러 번 발생하는 visualViewport 이벤트를 걸러내 시트가 미세하게 떨리는 것을 막는다(임계값 8px).
+const KEYBOARD_SHEET_CHANGE_THRESHOLD=8;
+function keyboardSheetLayoutChanged(prev,next){
+  if(Math.abs(next.keyboardInset-prev.keyboardInset)>=KEYBOARD_SHEET_CHANGE_THRESHOLD) return true;
+  if((next.availableHeight==null)!==(prev.availableHeight==null)) return true;
+  if(next.availableHeight!=null&&prev.availableHeight!=null&&Math.abs(next.availableHeight-prev.availableHeight)>=KEYBOARD_SHEET_CHANGE_THRESHOLD) return true;
+  return false;
+}
 function useKeyboardAwareViewport(active){
   const [state,setState]=useState({keyboardInset:0,availableHeight:null});
+  const stateRef=useRef(state);
+  stateRef.current=state;
   useEffect(()=>{
     if(!active){ setState({keyboardInset:0,availableHeight:null}); return; }
     const vv=typeof window!=="undefined"?window.visualViewport:null;
@@ -2481,11 +2492,12 @@ function useKeyboardAwareViewport(active){
     const update=()=>{
       if(raf!=null) cancelAnimationFrame(raf);
       raf=requestAnimationFrame(()=>{
-        setState(computeKeyboardSheetLayout({
+        const next=computeKeyboardSheetLayout({
           layoutHeight:window.innerHeight||vv.height,
           viewportHeight:vv.height,
           offsetTop:vv.offsetTop,
-        }));
+        });
+        if(keyboardSheetLayoutChanged(stateRef.current,next)) setState(next);
       });
     };
     update();
@@ -4801,10 +4813,14 @@ function PersonalWorkoutStatusSection({workout,soreness,sorenessWindow,onSaveRpe
   const removePart=(part)=>setParts(prev=>prev.filter(p=>p.part!==part));
   const summary=buildPersonalWorkoutStatusSummary(workout,soreness);
   const saveRpeSection=async()=>{
-    if(savingRpe||rpe==null) return;
+    if(savingRpe||rpe==null) return;      // 연속 클릭 방지 — 버튼도 savingRpe 동안 disabled
     setSavingRpe(true); setRpeError("");
     try{ await onSaveRpe?.(workout.id,rpe); }
-    catch(e){ setRpeError(e?.message||"RPE 저장에 실패했습니다."); }
+    catch(e){
+      // Firebase 원문(영어) 오류를 그대로 노출하지 않는다 — 콘솔에는 원인을 남기고 화면에는 고정 한글 안내만 보여준다.
+      console.error("[개인운동] 종료 후 RPE 저장 실패",e);
+      setRpeError("운동 기록을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
     finally{ setSavingRpe(false); }
   };
   const saveSorenessSection=async()=>{
@@ -4887,7 +4903,12 @@ function MemberPersonalExercisePicker({open,onClose,candidates=[],onPick}){
   const sheetStyle=useMemo(()=>{
     const style={};
     if(keyboardInset>0) style["--pw-keyboard-offset"]=`${keyboardInset}px`;
-    if(availableHeight!=null) style["--pw-sheet-max-h"]=`${availableHeight}px`;
+    if(availableHeight!=null){
+      style["--pw-sheet-max-h"]=`${availableHeight}px`;
+      // 키보드가 열려 있는 동안은 max-height뿐 아니라 height도 같은 값으로 고정한다 — max-height만 쓰면
+      // 검색 결과가 1~3개로 바뀔 때 시트가 콘텐츠 높이에 맞춰 매번 줄었다 늘었다 한다(흔들림의 원인).
+      style["--pw-sheet-h"]=`${availableHeight}px`;
+    }
     return style;
   },[keyboardInset,availableHeight]);
   const query=q.trim();
@@ -4996,6 +5017,9 @@ function MemberPersonalWorkoutScreen({
   stateRef.current={parts,exercises,memo};
   const pendingRef=useRef(false);
   const timerRef=useRef(null);
+  // 완료 저장 직전 진행 중이던 자동 저장(flush)이 아직 네트워크 응답을 기다리는 중일 수 있다 —
+  // 두 write가 같은 문서에 동시에 도착해 순서가 뒤바뀌는 것을 막기 위해, 완료 저장은 이 참조를 먼저 기다린다.
+  const flushInFlightRef=useRef(null);
 
   const flush=useCallback(async()=>{
     if(timerRef.current){ clearTimeout(timerRef.current); timerRef.current=null; }
@@ -5005,17 +5029,21 @@ function MemberPersonalWorkoutScreen({
     const normalized=cur.exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i,{keepEmptySets:true}));
     const totals=calculatePersonalWorkoutTotals(normalized);
     setSaveState("saving");
-    try{
-      await onSaveProgress(workoutId,{
-        workoutParts:cur.parts, exercises:normalized, memo:cur.memo,
-        exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized), ...totals,
-      });
-      setSaveState("saved");
-    }catch(e){
-      console.error("[개인운동] 진행 중 저장 실패",e);
-      pendingRef.current=true;      // 다음 기회에 다시 시도
-      setSaveState("failed");
-    }
+    const run=(async()=>{
+      try{
+        await onSaveProgress(workoutId,{
+          workoutParts:cur.parts, exercises:normalized, memo:cur.memo,
+          exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized), ...totals,
+        });
+        setSaveState("saved");
+      }catch(e){
+        console.error("[개인운동] 진행 중 저장 실패",e);
+        pendingRef.current=true;      // 다음 기회에 다시 시도
+        setSaveState("failed");
+      }
+    })();
+    flushInFlightRef.current=run;
+    try{ await run; } finally{ if(flushInFlightRef.current===run) flushInFlightRef.current=null; }
   },[workoutId,onSaveProgress]);
 
   const markDirty=useCallback((immediate=false)=>{
@@ -5160,7 +5188,7 @@ function MemberPersonalWorkoutScreen({
   };
   // rpeValue: null이면 "나중에 입력"(RPE 미입력으로 저장), 1~10이면 선택한 값 그대로 저장.
   const saveCompleted=async(rpeValue)=>{
-    if(completing) return;
+    if(completing) return;      // 연속 클릭 방지 — 버튼도 completing 동안 disabled
     const normalized=exercises.map((e,i)=>normalizePersonalWorkoutExercise(e,i));
     const endedAtMs=Date.now();
     const check=validatePersonalWorkoutForComplete({workoutParts:parts,exercises:normalized,startedAt:workout.startedAt,endedAtMs,memo});
@@ -5171,6 +5199,9 @@ function MemberPersonalWorkoutScreen({
     pendingRef.current=false;
     if(timerRef.current){ clearTimeout(timerRef.current); timerRef.current=null; }
     try{
+      // 이미 네트워크로 나간 자동 저장(flush)이 있다면 먼저 끝나길 기다린다 — 완료 저장과 동시에
+      // 같은 문서에 두 write가 도착해 순서가 꼬이거나 권한 오류가 나는 것을 막는다.
+      if(flushInFlightRef.current) await flushInFlightRef.current;
       await onComplete(workout.id,{
         workoutDate:workout.workoutDate, workoutParts:parts, exercises:normalized, memo,
         exerciseKeys:collectPersonalWorkoutExerciseKeys(normalized),
@@ -5179,8 +5210,9 @@ function MemberPersonalWorkoutScreen({
       });
       setSummaryOpen(false);
     }catch(e){
+      // Firebase 원문(영어) 오류를 그대로 노출하지 않는다 — 콘솔에는 원인을 남기고 화면에는 고정 한글 안내만 보여준다.
       console.error("[개인운동] 완료 저장 실패",e);
-      setErrorMsg(e?.message||"개인운동 저장에 실패했습니다. 잠시 후 다시 시도해주세요.");
+      setErrorMsg("운동 기록을 저장하지 못했습니다.\n잠시 후 다시 시도해주세요.");
       setSummaryOpen(false);
     }finally{ setCompleting(false); }
   };
@@ -7752,7 +7784,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .pw-picker-fixed{flex-shrink:0}
 .pw-picker-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 @media(max-width:699.98px){
-  .pw-picker-sheet{bottom:var(--pw-keyboard-offset,0px);max-height:var(--pw-sheet-max-h,88dvh)}
+  .pw-picker-sheet{bottom:var(--pw-keyboard-offset,0px);max-height:var(--pw-sheet-max-h,88dvh);height:var(--pw-sheet-h,auto)}
 }
 /* 섹션 헤더 */
 .mv2-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:4px 2px 12px}

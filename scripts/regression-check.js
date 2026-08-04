@@ -123,8 +123,10 @@ function pwScenario(name, fn) {
 // 원본 소스를 그대로 슬라이스해 실행한다.
 let keyboardSheetLib = null;
 try {
+  // 이 슬라이스에는 computeKeyboardSheetLayout뿐 아니라 변화 임계값 판정 함수(keyboardSheetLayoutChanged)도
+  // 함께 들어 있다 — 검색 결과 개수 변화로 인한 미세한 값 흔들림이 리렌더로 이어지지 않는지 그대로 검증한다.
   const sliceCompute = app.slice(app.indexOf('function computeKeyboardSheetLayout'), app.indexOf('function useKeyboardAwareViewport'));
-  keyboardSheetLib = new Function(`${sliceCompute}\nreturn { computeKeyboardSheetLayout };`)();
+  keyboardSheetLib = new Function(`${sliceCompute}\nreturn { computeKeyboardSheetLayout, keyboardSheetLayoutChanged, KEYBOARD_SHEET_CHANGE_THRESHOLD };`)();
 } catch (e) {
   console.error('[regression] 키보드 시트 레이아웃 헬퍼 추출 실패:', e.message);
 }
@@ -2783,6 +2785,35 @@ const checks = [
         !/disabled=\{completing\|\|rpeChoice==null\}[^>]*>나중에 입력/.test(sheet);
     })()
   ],
+  ['개인운동 종료: 완료 저장 전 진행 중이던 자동 저장(flush)이 있으면 먼저 기다려 같은 문서에 write가 동시에 도착하지 않게 함',
+    (() => {
+      const flushFn = app.slice(app.indexOf('const flush=useCallback(async()=>{'), app.indexOf('const markDirty=useCallback'));
+      const saveFn = app.slice(app.indexOf('const saveCompleted=async(rpeValue)=>{'), app.indexOf('const summaryPreview='));
+      return flushFn.includes('flushInFlightRef.current=run;') &&
+        saveFn.includes('if(flushInFlightRef.current) await flushInFlightRef.current;') &&
+        // 완료 저장 호출보다 먼저 대기해야 한다(순서가 바뀌면 동시 write 문제가 재발함)
+        saveFn.indexOf('if(flushInFlightRef.current) await flushInFlightRef.current;') < saveFn.indexOf('await onComplete(workout.id,{');
+    })()
+  ],
+  ['개인운동 종료: 저장 실패해도 Firebase 원문(영어) 오류를 그대로 노출하지 않고 고정 한글 안내만 표시 + finally에서 저장 상태 해제 + 연속 클릭 방지',
+    (() => {
+      const saveFn = app.slice(app.indexOf('const saveCompleted=async(rpeValue)=>{'), app.indexOf('const summaryPreview='));
+      return saveFn.includes('if(completing) return;') &&
+        saveFn.includes('setErrorMsg("운동 기록을 저장하지 못했습니다.\\n잠시 후 다시 시도해주세요.");') &&
+        !saveFn.includes('setErrorMsg(e?.message') &&
+        saveFn.includes('finally{ setCompleting(false); }');
+    })()
+  ],
+  ['개인운동 종료 후 RPE 저장(운동 후 상태 카드): 실패해도 Firebase 원문을 노출하지 않고 finally에서 저장 상태를 해제하며, 저장 중에는 버튼이 비활성화됨',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalWorkoutStatusSection'), app.indexOf('function MemberPersonalExercisePicker'));
+      return fn.includes('if(savingRpe||rpe==null) return;') &&
+        fn.includes('setRpeError("운동 기록을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");') &&
+        !fn.includes('setRpeError(e?.message') &&
+        fn.includes('finally{ setSavingRpe(false); }') &&
+        fn.includes('disabled={savingRpe||rpe==null}');
+    })()
+  ],
   ['관리자 회원 상세: "최근 개인운동" 카드가 최근 수업 카드 아래에 배치되고 조회 전용(수정·삭제 없음)',
     app.includes('const secPersonalWorkout = canUseMemberLinkedFeatures(member) ? (() => {') &&
     app.includes('<span style={cardTitle}>최근 개인운동</span>') &&
@@ -3048,6 +3079,41 @@ const checks = [
       const comp = app.slice(app.indexOf('function MemberPersonalExercisePicker'), app.indexOf('// 개인운동 기록 화면 — 시작(부위 선택)'));
       return comp.includes('name="exercise-query"') && comp.includes('autoComplete="off"') &&
         comp.includes('autoCapitalize="none"') && comp.includes('enterKeyHint="search"');
+    })()
+  ],
+  ['키보드 시트 레이아웃: 값 변화가 임계값(8px) 미만이면 리렌더 신호를 보내지 않아 미세 진동으로 흔들리지 않음',
+    ksScenario('임계값 미만 변화 무시', lib => {
+      const prev = { keyboardInset: 364, availableHeight: 468 };
+      const next = { keyboardInset: 366, availableHeight: 470 }; // 2px 차이 — iOS 애니메이션 중 흔한 미세 변화
+      return lib.keyboardSheetLayoutChanged(prev, next) === false;
+    })[1]
+  ],
+  ['키보드 시트 레이아웃: 값 변화가 임계값(8px) 이상이면 리렌더 신호를 보냄',
+    ksScenario('임계값 이상 변화 반영', lib => {
+      const prev = { keyboardInset: 364, availableHeight: 468 };
+      const next = { keyboardInset: 300, availableHeight: 530 }; // 검색 결과 변화가 아니라 실제 키보드 높이 변화
+      return lib.keyboardSheetLayoutChanged(prev, next) === true;
+    })[1]
+  ],
+  ['키보드 시트 레이아웃: 키보드가 열림/닫힘으로 전환될 때(availableHeight null↔값)는 임계값과 무관하게 항상 반영',
+    ksScenario('열림/닫힘 전환', lib => {
+      const closed = { keyboardInset: 0, availableHeight: null };
+      const opened = { keyboardInset: 364, availableHeight: 468 };
+      return lib.keyboardSheetLayoutChanged(closed, opened) === true && lib.keyboardSheetLayoutChanged(opened, closed) === true;
+    })[1]
+  ],
+  ['운동 종목 검색 시트: 키보드가 열리면 max-height뿐 아니라 height도 동일 값으로 고정해, 검색 결과 개수가 바뀌어도 시트 외곽 크기가 변하지 않음',
+    (() => {
+      const comp = app.slice(app.indexOf('function MemberPersonalExercisePicker'), app.indexOf('// 개인운동 기록 화면 — 시작(부위 선택)'));
+      const css = app.slice(app.indexOf('/* 운동 종목 검색 시트 — iOS 키보드 대응'), app.indexOf('/* 섹션 헤더 */'));
+      return comp.includes('style["--pw-sheet-h"]') && css.includes('height:var(--pw-sheet-h,auto)');
+    })()
+  ],
+  ['운동 종목 검색 시트: 시트 본문(pw-picker-body)은 자체 스크롤을 막고 결과 목록(pw-picker-scroll)만 flex:1로 남는 공간을 채워 스크롤',
+    (() => {
+      const css = app.slice(app.indexOf('/* 운동 종목 검색 시트 — iOS 키보드 대응'), app.indexOf('/* 섹션 헤더 */'));
+      return css.includes('.mv2-sheet-body.pw-picker-body{display:flex;flex-direction:column;min-height:0;overflow-y:hidden}') &&
+        css.includes('.pw-picker-scroll{flex:1;min-height:0;overflow-y:auto');
     })()
   ],
 

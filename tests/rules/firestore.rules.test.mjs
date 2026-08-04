@@ -22,6 +22,7 @@ import {
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import assert from "node:assert/strict";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -729,6 +730,31 @@ describe("TEO GYM Firestore Rules v8", function () {
         startedAt: new Date("2026-07-29T10:00:00Z"), endedAt: new Date("2026-07-29T11:00:00Z"),
         updatedAt: new Date(),
       }));
+    });
+
+    it("[진행중 회원] RPE 없이도 종료 가능 + 완료 시 집계 필드(endedAt/completedAt/totals/status)가 실제로 저장됨(readback 확인)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      const ref = db.collection("members").doc("member_a").collection("personalWorkouts").doc("pw1");
+      // completePersonalWorkout()과 동일하게 rpe 필드 자체를 보내지 않는 "나중에 입력" 종료 — 권한 오류 없이 완료돼야 한다.
+      await assertSucceeds(ref.update({
+        status: "completed", endedAt: new Date(), completedAt: new Date(), durationMinutes: 40,
+        exercises: [{ name: "스쿼트", sets: [{ setNumber: 1, weight: 40, reps: 20, volume: 800 }] }],
+        exerciseKeys: ["스쿼트"], totalExercises: 1, totalSets: 1, totalVolume: 800, updatedAt: new Date(),
+      }));
+      const snap = await ref.get();
+      const saved = snap.data();
+      assert.equal(saved.status, "completed");
+      assert.equal(saved.totalExercises, 1);
+      assert.equal(saved.totalSets, 1);
+      assert.equal(saved.totalVolume, 800);
+      assert.equal(saved.durationMinutes, 40);
+      assert.ok(saved.endedAt);
+      assert.ok(saved.completedAt);
+      assert.equal("rpe" in saved, false); // RPE를 나중에 입력하는 경우, 완료 시점엔 rpe 필드 자체가 없어야 한다
+      // 종료 후 RPE 추가 — 완료된 기록 재수정 브랜치에서 정상 허용돼야 한다.
+      await assertSucceeds(ref.update({ rpe: 6, rpeUpdatedAt: new Date(), updatedAt: new Date() }));
+      const snap2 = await ref.get();
+      assert.equal(snap2.data().rpe, 6);
     });
 
     it("[진행중 회원] 완료 전환과 같은 write에서 RPE 함께 저장 허용", async () => {

@@ -121,13 +121,37 @@ function logMemberRulesEvaluation(fn, memberId, memberData) {
 
 
 // ════════════════════════════════════════════════════
-// 공지사항 (notices)
+// 공지사항 (notices) — "공지센터"
+//
+// 읽음 기록은 방향이 다른 두 곳에 이중 기록된다(하위 호환 유지 목적):
+//   - members/{memberId}/noticeReads/{noticeId} : 기존 구조. 회원앱이 "내가 읽었는지"만 빠르게 확인할 때 사용.
+//   - notices/{noticeId}/reads/{memberId}       : 신규 구조. 관리자가 "이 공지를 누가 읽었는지" 조회할 때 사용
+//     (기존 방향으로는 회원 전체를 순회해야 해서 비효율적이라 별도 서브컬렉션으로 분리).
+//
+// audienceMemberIds — "게시 시점 대상 회원 스냅샷". 최초 게시(firstPublishedAt) 시점 1회만 계산해 고정한다.
+//   전체회원 대상 공지라도 이후 새로 등록된 회원은 이 배열에 없으므로 자동으로 대상에서 제외된다.
+//   재공지(republishNotice)를 실행하면 이 시점에 다시 계산되어 갱신된다.
+//   레거시 문서(이 필드가 없는 기존 공지)는 필드 부재 시 필터를 적용하지 않아 기존 노출 범위를 그대로 유지한다(마이그레이션 불필요).
 // ════════════════════════════════════════════════════
 function sortNotices(rows){
   return [...rows].sort((a,b)=>{
     const at=v=>v?.toDate?.()?.getTime?.()||Date.parse(v)||0;
     return at(b.createdAt)-at(a.createdAt);
   });
+}
+
+function toMillis(v){
+  if(!v) return 0;
+  return v?.toDate?.()?.getTime?.()||Date.parse(v)||0;
+}
+
+// 공개 시작일/종료일 안에 있는지(둘 다 없으면 항상 공개) — 회원앱 노출 필터 전용
+function isWithinPublishWindow(n, now=Date.now()){
+  const startAt=toMillis(n.publishedStartAt);
+  const endAt=toMillis(n.publishedEndAt);
+  if(startAt && now<startAt) return false;
+  if(endAt && now>endAt) return false;
+  return true;
 }
 
 export async function getNotices(){
@@ -137,7 +161,7 @@ export async function getNotices(){
   return sortNotices(snap.docs.map(d=>({id:d.id,...d.data()})));
 }
 
-export async function saveNotice(data,id=null){
+export async function saveNotice(data,id=null,options={}){
   const uid=requireUid();
   const targetType=data.targetType==="member"?"member":"all";
   const rawIds=targetType==="member"?(Array.isArray(data.targetMemberIds)&&data.targetMemberIds.length?data.targetMemberIds:data.targetMemberId?[String(data.targetMemberId).trim()]:[]):[];
@@ -154,8 +178,11 @@ export async function saveNotice(data,id=null){
     targetMemberName,
     targetMemberIds,
     targetMemberNames,
-    isImportant:!!data.isImportant,
-    isPublished:data.isPublished!==false,
+    isImportant:!!data.isImportant,       // 고정(Pinned) 겸 "중요 공지" 표시 — 필드 하나로 겸용, 신규 필드 추가하지 않음
+    isNewManual:!!data.isNewManual,       // NEW 배지 수동 지정(작성 7일 이내 자동 표시와는 별개)
+    isPublished:data.isPublished!==false, // 활성/비활성(게시/숨김) 토글
+    publishedStartAt:data.publishedStartAt||null,
+    publishedEndAt:data.publishedEndAt||null,
     createdBy:uid,
     trainerUid:uid,
     updatedAt:serverTimestamp(),
@@ -167,12 +194,29 @@ export async function saveNotice(data,id=null){
     const ref=doc(db,"notices",id);
     const snap=await getDoc(ref);
     if(!snap.exists()) throw new Error("공지를 찾을 수 없습니다.");
-    if(snap.data().trainerUid!==uid) throw new Error("권한이 없습니다.");
-    await updateDoc(ref,payload);
-    return {id,...snap.data(),...payload};
+    const before=snap.data();
+    if(before.trainerUid!==uid) throw new Error("권한이 없습니다.");
+    const update={...payload};
+    // "전체 회원" 공지만 최초 게시 시점에 대상 스냅샷을 고정한다(신규 등록 회원 자동 제외 목적, §공지센터 6).
+    // "특정 회원" 공지는 선택 자체가 곧 대상이므로 관리자가 선택을 바꾸면(=재선택 저장) 매번 그대로 반영한다 — 여기엔 얼릴 이유가 없다.
+    const alreadyPublishedBefore=!!before.firstPublishedAt || (Array.isArray(before.audienceMemberIds)&&before.audienceMemberIds.length>0);
+    const shouldRefreshAudience = payload.targetType==="member" || !alreadyPublishedBefore;
+    if(payload.isPublished && shouldRefreshAudience && Array.isArray(options.audienceMemberIds)){
+      update.audienceMemberIds=options.audienceMemberIds;
+      update.targetMemberCount=options.audienceMemberIds.length;
+      if(!before.firstPublishedAt) update.firstPublishedAt=serverTimestamp();
+    }
+    await updateDoc(ref,update);
+    return {id,...before,...update};
   }
-  const ref=await addDoc(collection(db,"notices"),{...payload,createdAt:serverTimestamp()});
-  return {id:ref.id,...payload};
+  const createPayload={...payload,createdAt:serverTimestamp(),version:1};
+  if(payload.isPublished && Array.isArray(options.audienceMemberIds)){
+    createPayload.audienceMemberIds=options.audienceMemberIds;
+    createPayload.targetMemberCount=options.audienceMemberIds.length;
+    createPayload.firstPublishedAt=serverTimestamp();
+  }
+  const ref=await addDoc(collection(db,"notices"),createPayload);
+  return {id:ref.id,...createPayload};
 }
 
 export async function deleteNotice(id){
@@ -182,6 +226,55 @@ export async function deleteNotice(id){
   if(!snap.exists()) return;
   if(snap.data().trainerUid!==uid) throw new Error("권한이 없습니다.");
   await deleteDoc(ref);
+}
+
+// "읽음 기록 초기화 후 재공지" — 대상 스냅샷을 현재 시점으로 다시 계산하고 버전을 올리며,
+// 신구 대상 회원 전원의 읽음 기록(양쪽 방향 모두)을 초기화해 다시 "미확인"으로 만든다.
+// 오탈자 등 경미한 수정은 이 함수를 타지 않고 saveNotice()만 호출해 기존 읽음 기록을 그대로 유지한다.
+export async function republishNotice(id, nextAudienceMemberIds){
+  const uid=requireUid();
+  const ref=doc(db,"notices",id);
+  const snap=await getDoc(ref);
+  if(!snap.exists()) throw new Error("공지를 찾을 수 없습니다.");
+  const before=snap.data();
+  if(before.trainerUid!==uid) throw new Error("권한이 없습니다.");
+  const prevAudience=Array.isArray(before.audienceMemberIds)?before.audienceMemberIds:[];
+  const resetTargetIds=Array.from(new Set([...prevAudience,...(nextAudienceMemberIds||[])]));
+  const now=serverTimestamp();
+
+  // 1) notices/{id}/reads 서브컬렉션 전체 삭제(관리자 통계 초기화)
+  const readsSnap=await getDocs(collection(db,"notices",id,"reads"));
+  const batches=[];
+  let batch=writeBatch(db); let ops=0;
+  const flushIfNeeded=()=>{ if(ops>=400){ batches.push(batch); batch=writeBatch(db); ops=0; } };
+  readsSnap.docs.forEach(d=>{ batch.delete(d.ref); ops++; flushIfNeeded(); });
+  // 2) 대상 회원 전원의 members/{memberId}/noticeReads/{id} 삭제(회원앱 미확인 배지 초기화)
+  resetTargetIds.forEach(memberId=>{ batch.delete(doc(db,"members",memberId,"noticeReads",id)); ops++; flushIfNeeded(); });
+  batches.push(batch);
+  await Promise.all(batches.map(b=>b.commit()));
+
+  const update={
+    audienceMemberIds:nextAudienceMemberIds||[],
+    targetMemberCount:(nextAudienceMemberIds||[]).length,
+    version:(Number(before.version)||1)+1,
+    lastRepublishedAt:now,
+    readsResetAt:now,
+    isPublished:true,
+    firstPublishedAt:before.firstPublishedAt||now,
+    updatedAt:now,
+  };
+  await updateDoc(ref,update);
+  return {id,...before,...update};
+}
+
+// 관리자 — 공지 1건의 읽은 회원 명단(통계 원본). 대상/미확인 계산은 호출부(App.jsx)에서 audienceMemberIds와 대조한다.
+export async function getNoticeReads(noticeId){
+  const uid=requireUid();
+  const noticeSnap=await getDoc(doc(db,"notices",noticeId));
+  if(!noticeSnap.exists()) return [];
+  if(noticeSnap.data().trainerUid!==uid) throw new Error("권한이 없습니다.");
+  const snap=await getDocs(collection(db,"notices",noticeId,"reads"));
+  return snap.docs.map(d=>({id:d.id,...d.data()}));
 }
 
 export async function getMemberNotices(memberId){
@@ -209,7 +302,14 @@ export async function getMemberNotices(memberId){
   } catch(e) {
     console.warn("[DB:getMemberNotices] targetMemberIds query failed (index may not exist)", { memberId, code:e?.code, message:e?.message });
   }
-  const rows=sortNotices([...map.values()]).slice(0,30);
+  const now=Date.now();
+  let rows=[...map.values()].filter(n=>{
+    if(!isWithinPublishWindow(n,now)) return false; // 공개 시작 전/종료 후 — 회원앱에서만 숨김(관리자는 getNotices로 그대로 조회)
+    // 대상 스냅샷이 있는 공지는 스냅샷에 포함된 회원에게만 노출(신규 등록 회원 자동 제외). 스냅샷 없는 레거시 공지는 필터 없이 그대로 노출.
+    if(Array.isArray(n.audienceMemberIds)&&n.audienceMemberIds.length&&!n.audienceMemberIds.includes(memberId)) return false;
+    return true;
+  });
+  rows=sortNotices(rows).slice(0,30);
   let readIds=new Set();
   try {
     const readsSnap=await getDocs(collection(db,"members",memberId,"noticeReads"));
@@ -220,9 +320,31 @@ export async function getMemberNotices(memberId){
   return rows.map(n=>({...n,isRead:readIds.has(n.id)}));
 }
 
-export async function markNoticeRead(memberId,noticeId){
-  requireUid();
-  await setDoc(doc(db,"members",memberId,"noticeReads",noticeId),{noticeId,readAt:serverTimestamp()},{merge:true});
+// 상세를 실제로 열었을 때만 호출(목록 노출만으로는 호출하지 않음 — App.jsx openNotice 참고).
+// 동일 회원이 여러 번 열어도 firstReadAt/읽은 회원 수는 늘지 않고 lastReadAt/readCount만 갱신된다.
+export async function markNoticeRead(memberId,noticeId,memberName){
+  const uid=requireUid();
+  const now=serverTimestamp();
+  await setDoc(doc(db,"members",memberId,"noticeReads",noticeId),{noticeId,readAt:now},{merge:true});
+  try {
+    const statsRef=doc(db,"notices",noticeId,"reads",memberId);
+    const existing=await getDoc(statsRef);
+    if(existing.exists()){
+      await updateDoc(statsRef,{
+        lastReadAt:now,
+        readCount:(Number(existing.data()?.readCount)||1)+1,
+        memberNameSnapshot:memberName||existing.data()?.memberNameSnapshot||"",
+      });
+    } else {
+      await setDoc(statsRef,{
+        memberId, authUid:uid,
+        memberNameSnapshot:memberName||"",
+        firstReadAt:now, lastReadAt:now, readCount:1,
+      });
+    }
+  } catch(e) {
+    console.warn("[DB:markNoticeRead] 읽음 통계 기록 실패", { memberId, noticeId, code:e?.code, message:e?.message });
+  }
 }
 
 // ════════════════════════════════════════════════════

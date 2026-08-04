@@ -747,16 +747,25 @@ export async function markMemberNotificationRead(memberId, notificationId) {
   });
 }
 
+// 핵심 저장(수업일지 본문·공개 상태·회원 ID·전송 시각을 한 번의 updateDoc으로 원자적 반영)이 성공하면
+// 그 자체로 전송 성공으로 확정한다. 알림 생성은 회원이 일지를 확인하는 데 필수가 아닌 부가 작업이므로
+// await하지 않고 별도로 흘려보내며, 실패해도 전송 자체(핵심 저장)에는 영향을 주지 않는다.
 export async function publishSession(memberId, sessionId) {
   await verifyMemberOwnership(memberId);
   dbLog("publishSession", `memberId=${memberId} sessionId=${sessionId}`);
-  await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
-    status: "published",
-    isPublished: true,
-    publishedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  createMemberNotification(memberId, { type: "workout_log", title: "새 수업일지가 도착했어요", body: "오늘 수업 기록이 회원앱에 공개됐어요." }).catch(() => {});
+  try {
+    await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+      status: "published",
+      isPublished: true,
+      publishedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch(e) {
+    dbLog("publishSession", `session-save 실패: ${e.message}`);
+    throw e;
+  }
+  createMemberNotification(memberId, { type: "workout_log", title: "새 수업일지가 도착했어요", body: "오늘 수업 기록이 회원앱에 공개됐어요." })
+    .catch(e => console.warn("[TEO GYM] publishSession 알림 생성 실패(부가 작업 — 전송 결과에는 영향 없음):", e?.message));
   dbLog("publishSession", "완료");
 }
 

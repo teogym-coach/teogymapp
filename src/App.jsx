@@ -9361,15 +9361,33 @@ export default function App() {
     return newSessions;
   }
 
+  // 전송(publishSession) 실패·지연 시 버튼이 "전송 중..."에 영구히 멈추지 않도록
+  // 오프라인 즉시 차단 + 15초 타임아웃 + 항상 throw(호출부가 재시도 UI를 그릴 수 있도록)로 구성한다.
+  // 핵심 저장(publishSession)이 성공하면 이미 전송은 완료된 것으로 보고, 뒤이은 목록 재조회는
+  // 부가 작업으로 취급해 실패/지연이 있어도 "전송 완료" 처리 자체를 뒤집지 않는다.
   async function handlePublishSession(s) {
     if (!member?.id || !s?.id) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      const offlineErr = new Error("인터넷 연결이 원활하지 않습니다. 연결 후 다시 전송해주세요.");
+      showToast(offlineErr.message, "err");
+      throw offlineErr;
+    }
     setLoading(true);
     try {
-      await publishSession(member.id, s.id);
-      await refreshSessionsForMember(member.id);
+      const publishPromise = publishSession(member.id, s.id);
+      publishPromise.catch(() => {}); // 타임아웃으로 먼저 실패 처리된 뒤 늦게 도착하는 응답이 unhandled rejection을 남기지 않도록
+      await withTimeout(publishPromise, 15000, "전송이 지연되고 있습니다. 인터넷 연결을 확인한 후 다시 시도해주세요.");
+      try {
+        await withTimeout(refreshSessionsForMember(member.id), 15000, "목록 새로고침이 지연되고 있습니다.");
+      } catch(refreshErr) {
+        console.warn("[TEO GYM] 전송 후 세션 목록 새로고침 실패(핵심 전송은 이미 완료됨):", refreshErr.message);
+      }
       showToast("회원에게 전송 완료 ✓");
-    } catch(e) { showToast(e.message || "전송 실패", "err"); }
-    finally { setLoading(false); }
+    } catch(e) {
+      console.warn("[TEO GYM] handlePublishSession 실패[session-save]:", e.message);
+      showToast(e.message || "전송 실패", "err");
+      throw e;
+    } finally { setLoading(false); }
   }
 
   async function handleUnpublishSession(s) {
@@ -15002,12 +15020,31 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const otherUnsentTodaySessions = todayUnsentSessions.filter(s => s.id !== todaySession?.id);
   const [showOtherUnsent, setShowOtherUnsent] = useState(false);
   const [sendingToday, setSendingToday] = useState(false);
+  const [sendTodayError, setSendTodayError] = useState(null);
+  // 언마운트 후(모달 닫힘·화면 전환 도중 응답 도착) setState를 막아 React 경고와 잔여 상태 반영을 방지한다.
+  const hubMountedRef = useRef(true);
+  useEffect(() => { hubMountedRef.current = true; return () => { hubMountedRef.current = false; }; }, []);
+  // 회원을 바꿔서 같은 HubScreen 인스턴스가 재사용되는 경우, 이전 회원의 전송 중·전송 실패 상태가
+  // 다음 회원 모달에 남지 않도록 회원이 바뀔 때마다 전송 관련 상태를 초기화한다.
+  useEffect(() => { setSendingToday(false); setSendTodayError(null); setShowPreview(false); }, [member.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 실제 오류 메시지(오프라인·타임아웃)만 그대로 노출하고, 그 외 알 수 없는 오류는 기술적 세부 없이 일반 안내로 통일한다.
+  const SEND_FRIENDLY_ERRORS = ["인터넷 연결이 원활하지 않습니다. 연결 후 다시 전송해주세요.", "전송이 지연되고 있습니다. 인터넷 연결을 확인한 후 다시 시도해주세요."];
   const handleSendToday = async() => {
     if (!todaySession || sendingToday) return;
     setSendingToday(true);
-    try { await onPublish?.(todaySession); setShowPreview(false); }
-    finally { setSendingToday(false); }
+    setSendTodayError(null);
+    try {
+      await onPublish?.(todaySession);
+      if (hubMountedRef.current) setShowPreview(false);
+    } catch(e) {
+      if (hubMountedRef.current) {
+        setSendTodayError(SEND_FRIENDLY_ERRORS.includes(e?.message) ? e.message : "수업일지를 전송하지 못했습니다. 잠시 후 다시 시도해주세요.");
+      }
+    } finally {
+      if (hubMountedRef.current) setSendingToday(false);
+    }
   };
+  const openTodayPreview = () => { setSendTodayError(null); setShowPreview(true); };
   const handleUnpublishToday = async() => {
     if (!todaySession || sendingToday) return;
     setSendingToday(true);
@@ -15671,14 +15708,17 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                   </div>
                 </div>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                  <button onClick={()=>setShowPreview(true)} style={{minHeight:48,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>회원앱 미리보기</button>
+                  <button onClick={openTodayPreview} style={{minHeight:48,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>회원앱 미리보기</button>
                   {is2to1Unsent ? (
                     <button onClick={handleSendPairToday} disabled={sendingToday} style={{flex:"1 1 auto",minHeight:48,border:"none",borderRadius:14,padding:"13px 24px",fontSize:14,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:sendingToday?"default":"pointer",opacity:sendingToday?.7:1}}>{sendingToday?"처리 중...":"나눠서 기록 (B 회원에게)"}</button>
                   ) : (
-                    <button onClick={handleSendToday} disabled={sendingToday} style={{flex:"1 1 auto",minHeight:48,border:"none",borderRadius:14,padding:"13px 24px",fontSize:14,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:sendingToday?"default":"pointer",opacity:sendingToday?.7:1}}>{sendingToday?"전송 중...":"회원에게 보내기"}</button>
+                    <button onClick={handleSendToday} disabled={sendingToday} style={{flex:"1 1 auto",minHeight:48,border:"none",borderRadius:14,padding:"13px 24px",fontSize:14,fontWeight:800,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:sendingToday?"default":"pointer",opacity:sendingToday?.7:1}}>{sendingToday?"전송 중...":sendTodayError?"다시 전송":"회원에게 보내기"}</button>
                   )}
                   <button onClick={handleEditToday} style={{minHeight:48,border:`1px solid ${DB.border}`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>이어 기록</button>
                 </div>
+                {sendTodayError && !is2to1Unsent && (
+                  <div style={{marginTop:9,padding:"9px 13px",borderRadius:DB.radiusSm,background:"rgba(239,68,68,.08)",color:"#B02A2A",fontSize:11.5,fontWeight:600,lineHeight:1.5}}>{sendTodayError}</div>
+                )}
                 <div style={{fontSize:11,color:DB.sub,marginTop:9}}>보내기 전까지 회원앱에는 표시되지 않습니다. 내부 메모 · 통증 기록 · 세트 RPE는 전송되지 않습니다.</div>
                 {newRecordBlock}
               </>
@@ -15694,7 +15734,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                   </div>
                 </div>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                  <button onClick={()=>setShowPreview(true)} style={{minHeight:48,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>회원앱 표시 확인</button>
+                  <button onClick={openTodayPreview} style={{minHeight:48,border:`1px solid rgba(57,199,184,.4)`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.mintSoft,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>회원앱 표시 확인</button>
                   <button onClick={handleEditToday} style={{minHeight:48,border:`1px solid ${DB.border}`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:"pointer"}}>수정하기</button>
                   <button onClick={handleUnpublishToday} disabled={sendingToday} style={{minHeight:48,border:`1px solid ${DB.border}`,borderRadius:14,padding:"13px 18px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,boxShadow:DB.shadow,cursor:sendingToday?"default":"pointer"}}>공개 취소</button>
                 </div>
@@ -16106,12 +16146,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
 
       {/* ── 회원앱 미리보기 모달 ── */}
       {showPreview && todaySession && (
-        <div role="dialog" aria-modal="true" aria-label="회원앱 미리보기" onClick={e=>e.target===e.currentTarget&&setShowPreview(false)}
+        <div role="dialog" aria-modal="true" aria-label="회원앱 미리보기" onClick={e=>{ if (e.target===e.currentTarget && !sendingToday) setShowPreview(false); }}
           style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"36px 16px",overflowY:"auto"}}>
           <div style={{width:"100%",maxWidth:420,background:DB.bg,borderRadius:26,overflow:"hidden",boxShadow:"0 30px 80px rgba(15,23,42,.35)"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 18px",background:DB.card,borderBottom:`1px solid ${DB.border}`}}>
               <b style={{fontSize:13,fontWeight:800}}>회원앱 미리보기 — 회원에게 이렇게 보입니다</b>
-              <button onClick={()=>setShowPreview(false)} style={{border:`1px solid ${DB.border}`,background:DB.card,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:DB.sub,cursor:"pointer",fontFamily:DB.font}}>닫기</button>
+              <button onClick={()=>{ if (!sendingToday) setShowPreview(false); }} disabled={sendingToday} title={sendingToday?"전송이 끝난 후 닫을 수 있습니다":undefined} style={{border:`1px solid ${DB.border}`,background:DB.card,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:DB.sub,cursor:sendingToday?"default":"pointer",opacity:sendingToday?.5:1,fontFamily:DB.font}}>닫기</button>
             </div>
             <div style={{padding:16}}>
               <div style={{background:DB.card,border:`1px solid ${DB.border}`,borderRadius:20,padding:"16px 17px"}}>
@@ -16161,9 +16201,14 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               </div>
             </div>
             {!todaySession.isPublished && (
-              <div style={{display:"flex",gap:8,padding:"12px 16px 16px",background:DB.bg}}>
-                <button onClick={()=>setShowPreview(false)} style={{border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,borderRadius:13,padding:"13px 18px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>뒤로</button>
-                <button onClick={handleSendToday} disabled={sendingToday} style={{flex:1,border:"none",borderRadius:13,padding:13,fontSize:13.5,fontWeight:800,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:sendingToday?"default":"pointer",fontFamily:DB.font}}>{sendingToday?"전송 중...":"이대로 회원에게 보내기"}</button>
+              <div style={{padding:"12px 16px 16px",background:DB.bg}}>
+                {sendTodayError && (
+                  <div style={{marginBottom:9,padding:"9px 13px",borderRadius:13,background:"rgba(239,68,68,.08)",color:"#B02A2A",fontSize:11.5,fontWeight:600,lineHeight:1.5}}>{sendTodayError}</div>
+                )}
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>{ if (!sendingToday) setShowPreview(false); }} disabled={sendingToday} style={{border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,borderRadius:13,padding:"13px 18px",fontSize:12.5,fontWeight:700,cursor:sendingToday?"default":"pointer",opacity:sendingToday?.5:1,fontFamily:DB.font}}>뒤로</button>
+                  <button onClick={handleSendToday} disabled={sendingToday} style={{flex:1,border:"none",borderRadius:13,padding:13,fontSize:13.5,fontWeight:800,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.32)",cursor:sendingToday?"default":"pointer",fontFamily:DB.font}}>{sendingToday?"전송 중...":sendTodayError?"다시 전송":"이대로 회원에게 보내기"}</button>
+                </div>
               </div>
             )}
           </div>
@@ -20069,6 +20114,7 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
   const [reportSession, setReportSession] = useState(null);
   const [confirmPair, setConfirmPair] = useState(null);
   const [splitting, setSplitting] = useState(false);
+  const [reportPublishing, setReportPublishing] = useState(false);
   const [cardMode, setCardMode] = useState("simple");
   const [sortMode, setSortMode] = useState("no"); // 기본: 회차별 내림차순
   const [filterPart, setFilterPart] = useState(null);
@@ -20186,7 +20232,16 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
           setCardMode={setCardMode}
           onClose={() => setReportSession(null)}
           onEdit={() => { onEdit(reportSession); setReportSession(null); }}
-          onPublish={async () => { await onPublish?.(reportSession); setReportSession(null); }}
+          publishing={reportPublishing}
+          onPublish={async () => {
+            if (reportPublishing) return;
+            setReportPublishing(true);
+            // 실패 시 토스트는 handlePublishSession(App.jsx)이 이미 표시하므로 여기서는 중복 안내 없이
+            // reportSession을 유지(모달 유지)하고 버튼만 다시 활성화한다.
+            try { await onPublish?.(reportSession); setReportSession(null); }
+            catch(e) {}
+            finally { setReportPublishing(false); }
+          }}
           onUnpublish={async () => { await onUnpublish?.(reportSession); setReportSession(null); }}
           onSendPair={() => { setConfirmPair(reportSession); setReportSession(null); }}
         />
@@ -20673,7 +20728,7 @@ function PartVolBadges({ exercises, style={} }) {
   );
 }
 
-function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit, onPublish, onUnpublish, onSendPair }) {
+function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit, onPublish, onUnpublish, onSendPair, publishing=false }) {
   const [saving, setSaving] = useState(false);
 
   // 세션 데이터에서 필드 추출
@@ -20765,9 +20820,9 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
               나눠서 기록
             </button>
           ) : (
-            <button onClick={onPublish}
-              style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#a29bfe,#7c6fff)",color:"#fff",fontSize:10,fontWeight:800}}>
-              회원에게 전송
+            <button onClick={onPublish} disabled={publishing}
+              style={{padding:"6px 12px",borderRadius:7,border:"none",cursor:publishing?"default":"pointer",opacity:publishing?.7:1,background:"linear-gradient(135deg,#a29bfe,#7c6fff)",color:"#fff",fontSize:10,fontWeight:800}}>
+              {publishing?"전송 중...":"회원에게 전송"}
             </button>
           )}
           <Btn ghost sm onClick={onEdit}>✏️ 수정</Btn>

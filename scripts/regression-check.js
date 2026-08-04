@@ -4344,6 +4344,49 @@ const checks = [
     const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
     return r.date === '2026-08-03';
   }),
+
+  // ── 회원 수업일지 전송 무한 로딩 방지(2026-08-04) ──
+  ['수업일지 전송 무한 로딩 방지: handlePublishSession이 오프라인 즉시 차단 + withTimeout(15초)으로 publishSession을 감싸고, 실패 시 항상 throw해 호출부(모달)가 재시도 UI를 그릴 수 있다',
+    (() => {
+      const fn = app.slice(app.indexOf('async function handlePublishSession'), app.indexOf('async function handleUnpublishSession'));
+      return fn.includes('navigator.onLine === false') &&
+        fn.includes('withTimeout(publishPromise, 15000') &&
+        fn.includes('throw e;') &&
+        fn.includes('finally { setLoading(false); }');
+    })()
+  ],
+  ['수업일지 전송: 핵심 저장(refreshSessionsForMember 이전의 publishSession) 실패는 즉시 실패로 처리하고, 뒤이은 목록 재조회 실패는 별도 catch로 흡수해 "전송 완료" 처리를 뒤집지 않는다',
+    (() => {
+      const fn = app.slice(app.indexOf('async function handlePublishSession'), app.indexOf('async function handleUnpublishSession'));
+      const publishIdx = fn.indexOf('withTimeout(publishPromise');
+      const refreshIdx = fn.indexOf('withTimeout(refreshSessionsForMember');
+      const refreshCatchIdx = fn.indexOf('catch(refreshErr)');
+      return publishIdx >= 0 && refreshIdx > publishIdx && refreshCatchIdx > refreshIdx;
+    })()
+  ],
+  ['수업일지 전송 상태 격리: HubScreen이 회원 전환 시(member.id 변경) 전송 중·전송 실패·미리보기 상태를 초기화하고, 언마운트 후에는 setState하지 않는다',
+    (() => {
+      const hub = app.slice(app.indexOf('function HubScreen('), app.indexOf('function HistoryScreen('));
+      return hub.includes('const hubMountedRef = useRef(true);') &&
+        hub.includes('useEffect(() => { setSendingToday(false); setSendTodayError(null); setShowPreview(false); }, [member.id]);') &&
+        hub.includes('if (hubMountedRef.current)');
+    })()
+  ],
+  ['수업일지 전송 UI 상태 구분: 실패 시 버튼 문구가 "다시 전송"으로 바뀌고, 전송 중에는 미리보기 모달의 닫기·뒤로 버튼이 비활성화된다',
+    (() => {
+      const hub = app.slice(app.indexOf('function HubScreen('), app.indexOf('function HistoryScreen('));
+      return hub.includes('sendTodayError?"다시 전송"') &&
+        (hub.match(/disabled=\{sendingToday\}/g) || []).length >= 3;
+    })()
+  ],
+  ['publishSession(db.js): 핵심 저장(updateDoc) 실패는 즉시 throw로 전파하고, 회원 알림 생성은 await 없이 흘려보내 부가 작업 실패가 전송 결과에 영향을 주지 않는다',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function publishSession'), db.indexOf('export async function sendPairSession'));
+      return fn.includes('dbLog("publishSession", `session-save 실패: ${e.message}`);') &&
+        fn.includes('throw e;') &&
+        !fn.includes('await createMemberNotification');
+    })()
+  ],
 ];
 
 let failed = 0;

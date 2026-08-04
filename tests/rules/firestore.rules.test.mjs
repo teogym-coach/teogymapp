@@ -1474,6 +1474,128 @@ describe("TEO GYM Firestore Rules v8", function () {
   });
 
   // ════════════════════════════════════════════════════
+  // 13b. notices/{noticeId}/reads — 공지 읽음 통계(관리자 조회용, §공지센터 2026-08)
+  //   members/{memberId}/noticeReads(회원앱 미확인 배지)와는 방향이 반대인 신규 서브컬렉션.
+  // ════════════════════════════════════════════════════
+  describe("13b. notices/{noticeId}/reads (공지 읽음 통계)", () => {
+    async function seedNoticeRead(noticeId, memberId, data) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore()
+          .collection("notices").doc(noticeId)
+          .collection("reads").doc(memberId)
+          .set(data);
+      });
+    }
+
+    beforeEach(async () => {
+      await seedMembers({ member_a: memberActive, member_b: memberB });
+      await seedGlobal("settings", "trainers", { uids: [TRAINER_UID] });
+      await seedGlobal("notices", "notice_all", {
+        trainerUid: TRAINER_UID, createdBy: TRAINER_UID,
+        isPublished: true, targetType: "all", title: "전체 공지",
+      });
+    });
+
+    it("[회원 A] 자신의 읽음 기록 최초 생성 성공(memberId·authUid 일치, readCount=1)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("notices").doc("notice_all").collection("reads").doc("member_a").set({
+          memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+          firstReadAt: new Date(), lastReadAt: new Date(), readCount: 1,
+        })
+      );
+    });
+
+    it("[회원 A] 다른 회원(member_b) 몫으로 읽음 기록 생성 시도 차단(위조 방지)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("notices").doc("notice_all").collection("reads").doc("member_b").set({
+          memberId: "member_b", authUid: MEMBER_A_UID, memberNameSnapshot: "가짜",
+          firstReadAt: new Date(), lastReadAt: new Date(), readCount: 1,
+        })
+      );
+    });
+
+    it("[회원 B] 회원 A의 읽음 기록 read 시도 차단(다른 회원 읽음 현황 조회 불가)", async () => {
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt: new Date(), lastReadAt: new Date(), readCount: 1,
+      });
+      const db = asUser(testEnv, MEMBER_B_UID);
+      await assertFails(db.collection("notices").doc("notice_all").collection("reads").doc("member_a").get());
+    });
+
+    it("[관리자] 공지 소유 트레이너는 회원 A의 읽음 기록 read 허용(통계 조회)", async () => {
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt: new Date(), lastReadAt: new Date(), readCount: 1,
+      });
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("notices").doc("notice_all").collection("reads").doc("member_a").get());
+    });
+
+    it("[회원 A] 재확인 시 firstReadAt은 불변, readCount는 정확히 1만 증가하는 update만 허용", async () => {
+      const firstReadAt = new Date("2026-08-01T00:00:00Z");
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt, lastReadAt: firstReadAt, readCount: 1,
+      });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertSucceeds(
+        db.collection("notices").doc("notice_all").collection("reads").doc("member_a").update({
+          lastReadAt: new Date(), readCount: 2,
+        })
+      );
+    });
+
+    it("[회원 A] firstReadAt을 바꿔서 재확인하려는 시도는 차단(최초 확인 시각 위조 방지)", async () => {
+      const firstReadAt = new Date("2026-08-01T00:00:00Z");
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt, lastReadAt: firstReadAt, readCount: 1,
+      });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("notices").doc("notice_all").collection("reads").doc("member_a").update({
+          firstReadAt: new Date(), lastReadAt: new Date(), readCount: 2,
+        })
+      );
+    });
+
+    it("[회원 A] readCount를 1보다 크게 건너뛰며 갱신 시도 차단(중복 증가 방지)", async () => {
+      const firstReadAt = new Date("2026-08-01T00:00:00Z");
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt, lastReadAt: firstReadAt, readCount: 1,
+      });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("notices").doc("notice_all").collection("reads").doc("member_a").update({
+          lastReadAt: new Date(), readCount: 5,
+        })
+      );
+    });
+
+    it("[관리자] 재공지 시 읽음 기록 삭제(초기화) 허용", async () => {
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt: new Date(), lastReadAt: new Date(), readCount: 1,
+      });
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("notices").doc("notice_all").collection("reads").doc("member_a").delete());
+    });
+
+    it("[회원 A] 자신의 읽음 기록 delete 시도 차단(관리자만 초기화 가능)", async () => {
+      await seedNoticeRead("notice_all", "member_a", {
+        memberId: "member_a", authUid: MEMBER_A_UID, memberNameSnapshot: "회원A",
+        firstReadAt: new Date(), lastReadAt: new Date(), readCount: 1,
+      });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("notices").doc("notice_all").collection("reads").doc("member_a").delete());
+    });
+  });
+
+  // ════════════════════════════════════════════════════
   // 14. globalDailyConditioning
   // ════════════════════════════════════════════════════
   describe("14. 글로벌 dailyConditioning", () => {

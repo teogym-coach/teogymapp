@@ -4475,6 +4475,67 @@ const checks = [
         !fn.includes('await createMemberNotification');
     })()
   ],
+
+  // ── 공지센터 개편(2026-08) ──
+  ['공지센터: markNoticeRead가 memberName을 받아 members/noticeReads·notices/reads 양방향에 기록(이중 기록, 하위호환)',
+    db.includes('export async function markNoticeRead(memberId,noticeId,memberName){') &&
+    db.includes('doc(db,"members",memberId,"noticeReads",noticeId)') &&
+    db.includes('doc(db,"notices",noticeId,"reads",memberId)')
+  ],
+  ['공지센터: getMemberNotices가 대상 스냅샷(audienceMemberIds)과 공개기간(publishedStartAt/EndAt)으로 회원앱 노출을 걸러낸다 — 필드 없는 레거시 공지는 그대로 노출(마이그레이션 불필요)',
+    db.includes('n.audienceMemberIds.includes(memberId)') &&
+    db.includes('isWithinPublishWindow(n,now)')
+  ],
+  ['공지센터: saveNotice가 isNewManual/publishedStartAt/publishedEndAt을 저장하고, 최초 게시 시점에만 대상 스냅샷을 고정한다',
+    db.includes('isNewManual:!!data.isNewManual') &&
+    db.includes('publishedStartAt:data.publishedStartAt||null') &&
+    db.includes('publishedEndAt:data.publishedEndAt||null') &&
+    db.includes('update.audienceMemberIds=options.audienceMemberIds') &&
+    db.includes('createPayload.audienceMemberIds=options.audienceMemberIds')
+  ],
+  ['공지센터: republishNotice가 notices/reads 서브컬렉션과 회원별 noticeReads를 모두 초기화하고 버전을 올린다(일반 수정과 분리된 별도 경로)',
+    db.includes('export async function republishNotice(id, nextAudienceMemberIds){') &&
+    db.includes('collection(db,"notices",id,"reads")') &&
+    db.includes('doc(db,"members",memberId,"noticeReads",id)') &&
+    db.includes('version:(Number(before.version)||1)+1')
+  ],
+  ['공지센터: getNoticeReads(관리자 읽음 명단 조회) 함수 존재',
+    db.includes('export async function getNoticeReads(noticeId){')
+  ],
+  ['공지센터: 회원앱 openNotice는 alert() 대신 읽음 기록만 남기고(상세를 실제로 열었을 때만 호출), 목록 렌더 경로에서는 호출되지 않는다',
+    (() => {
+      const s = app.indexOf('const openNotice=async(notice)=>');
+      const e = app.indexOf(';', app.indexOf('markNoticeRead(profile.id,notice.id,profile.name)', s));
+      const fn = app.slice(s, e + 1);
+      return fn.includes('markNoticeRead(profile.id,notice.id,profile.name)') && !fn.includes('alert(');
+    })()
+  ],
+  ['공지센터: MemberNoticeCenterScreen이 중요공지(고정 정렬+NEW배지)와 FAQ(검색) 두 영역으로 구성된다',
+    app.includes('function MemberNoticeCenterScreen({notices=[],onOpen,onBack}){') &&
+    app.includes('NOTICE_FAQ_ITEMS.filter(f=>matchSearch(f.q,faqQuery))') &&
+    app.includes('sortNoticesForCenter(notices)') &&
+    app.includes('isNoticeNew(n)')
+  ],
+  ['공지센터: 관리자 "읽음 기록 초기화 후 재공지"는 기본 OFF이고 지정된 확인 문구를 그대로 사용한다',
+    app.includes('읽음 기록 초기화 후 재공지') &&
+    app.includes('기존 읽음 기록이 초기화되며 모든 대상 회원에게 다시 미확인 공지로 표시됩니다. 재공지하시겠습니까?')
+  ],
+  ['공지센터: NoticeReadStatsScreen이 대상/읽음/미확인/읽음률을 계산하고 teo 대표·테스트 회원을 통계에서 제외한다',
+    app.includes('function NoticeReadStatsScreen(') &&
+    app.includes('!isExcludedAdminMember(m)') &&
+    app.includes('const readRate = targetCount ? Math.round(readCount/targetCount*100) : 0')
+  ],
+  ['공지센터: 미확인 회원 명단 클릭 시 기존 회원 상세 화면(goHub)으로 이동한다',
+    app.includes('onOpenMember={goHub}') &&
+    app.includes('onClick={()=>onOpenMember?.(m)}')
+  ],
+  ['공지센터 Rules: notices/{noticeId}/reads/{memberId}는 회원 자신의 기록만 생성·수정 가능(다른 회원 몫 위조 차단), firstReadAt 불변, readCount는 1씩만 증가',
+    firestoreRules.includes('match /reads/{memberId} {') &&
+    firestoreRules.includes('request.resource.data.memberId == memberId') &&
+    firestoreRules.includes('request.resource.data.authUid == uid()') &&
+    firestoreRules.includes('request.resource.data.firstReadAt == resource.data.firstReadAt') &&
+    firestoreRules.includes('request.resource.data.readCount == resource.data.readCount + 1')
+  ],
 ];
 
 let failed = 0;

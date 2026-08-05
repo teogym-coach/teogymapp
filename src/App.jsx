@@ -1493,18 +1493,21 @@ function pairSessionHasContent(ps) {
     feedbackHasValue(ex?.feedbackB)
   );
 }
-// "오늘 이미 나눠서 기록을 완료했고 아직 새 회차 내용을 입력하지 않은 상태"를 splitDone 필드 없이 판정한다.
+// "checkDate 기준으로 이미 나눠서 기록을 완료했고 아직 새 회차 내용을 입력하지 않은 상태"를 splitDone 필드 없이 판정한다.
 // pairSessions는 팀당 문서 하나를 재사용하므로 splitDone을 계속 true로 남기면 다음 회차 진입 시 폼이 영구
-// 잠긴다 — 대신 나눠서 기록 시 항상 갱신되는 lastSplitAt(서버 시각)과 실제 작성 내용 유무로 매 렌더 다시 판단해
-// 날짜가 바뀌거나 새 내용이 들어오는 즉시 자동으로 "완료" 상태가 풀리게 한다.
-function pairSessionCompletedToday(ps, todayKST = getKoreaDateString()) {
+// 잠긴다 — 대신 나눠서 기록 시 저장되는 lastCompletedDate(방금 완료한 실제 수업 날짜)와 실제 작성 내용 유무로
+// 매 렌더 다시 판단한다. checkDate 기본값은 오늘이지만, 폼 화면은 현재 선택된 날짜를 넘겨써서 팀 회원 조합이
+// 같아도 날짜가 다르면(예: 다음 회차를 미리 준비) 잠금이 즉시 풀리게 한다.
+function pairSessionCompletedToday(ps, checkDate = getKoreaDateString()) {
   if (!ps) return false;
   if (ps.splitDone) return true; // 과거 로직으로 splitDone=true가 저장된 문서가 있을 경우의 호환 처리
   if (!ps.lastSplitAt) return false;
   if (pairSessionHasContent(ps)) return false;
+  if (ps.lastCompletedDate) return ps.lastCompletedDate === checkDate;
+  // lastCompletedDate가 없는 구버전 문서 호환: lastSplitAt(서버 시각)의 날짜로 대신 판단
   const d = ps.lastSplitAt?.toDate ? ps.lastSplitAt.toDate() : new Date(ps.lastSplitAt);
   if (isNaN(d?.getTime?.())) return false;
-  return getKoreaDateString(d) === todayKST;
+  return getKoreaDateString(d) === checkDate;
 }
 function formatParts(data = {}) {
   const parts = Array.isArray(data.targetParts) && data.targetParts.length ? data.targetParts : (data.targetPart ? String(data.targetPart).split(/\s*[+,·/]\s*/).filter(Boolean) : []);
@@ -9781,7 +9784,7 @@ export default function App() {
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
-        {screen==="pair21Form" && <PairSessionFormScreen editData={editPairSession} initialDate={pairFormInitialDate} members={members} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
+        {screen==="pair21Form" && <PairSessionFormScreen key={editPairSession?.id||"new"} editData={editPairSession} initialDate={pairFormInitialDate} members={members} pairSessions={pairSessions} onSelectExistingTeam={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); }} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
         {screen==="history"    && <HistoryScreen sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} initialReadFilter={historyInitialReadFilter} onInitialReadFilterConsumed={()=>setHistoryInitialReadFilter(null)} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
@@ -19706,7 +19709,7 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   );
 }
 
-function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave, onSaveNextSession, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
+function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSessions=[], onSelectExistingTeam, onSave, onSaveNextSession, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
   const isEdit = !!(editData?.id);
 
   // ID가 없으면 이름으로 자동 복원 (기존 데이터 memberAId 누락 대응)
@@ -19731,7 +19734,13 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
     return initialDate || getKoreaDateString();
   });
   const [intensity, setIntensity] = useState(editData?.intensity||"중강도");
-  const [selectedTypes, setSelectedTypes] = useState(() => normalizeTypes(editData?.selectedTypes || editData?.type));
+  // 새 회차 기록은 1:1 getInitialNewSessionValues와 동일한 우선순위로 A 회원의 "다음 수업 준비" 부위를
+  // 반영한다(SESSION_BODY_PART_OPTIONS에 있는 값만 채택). 실제 작성 중이던 기록은 저장된 값을 그대로 유지.
+  const [selectedTypes, setSelectedTypes] = useState(() => {
+    if (isEdit && pairSessionHasContent(editData)) return normalizeTypes(editData?.selectedTypes || editData?.type);
+    const nextParts = parseNextParts(memberA?.nextWorkoutPart || memberA?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
+    return nextParts.length ? nextParts : normalizeTypes(editData?.selectedTypes || editData?.type);
+  });
   const [trainerCommentA, setTrainerCommentA] = useState(editData?.trainerCommentA||"");
   const [trainerCommentB, setTrainerCommentB] = useState(editData?.trainerCommentB||"");
   const [saving, setSaving] = useState(false);
@@ -19979,7 +19988,20 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
           style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.08)",
             background:"#111827",color:"#ddddf0",fontSize:13,boxSizing:"border-box",marginBottom:8}} />
         {filtered.map(m=>(
-          <div key={m.id} onClick={()=>{setMemberBId(m.id);setMemberSearch("");}}
+          <div key={m.id} onClick={()=>{
+            // 새 팀 생성(+2:1 추가)에서만 검사한다 — 회원 선택 순서(A+B ↔ B+A)와 무관하게 이미 등록된
+            // 팀이면 별도 문서를 새로 만들지 않고 기존 팀 문서로 이동해 회원 조합당 문서가 중복되지 않게 한다.
+            const existing = pairSessions.find(ps => (ps.teamStatus||"active")!=="ended" && (
+              (ps.memberAId===memberAId && ps.memberBId===m.id) ||
+              (ps.memberAId===m.id && ps.memberBId===memberAId)
+            ));
+            if (existing) {
+              showToast(`이미 등록된 팀입니다 — 기존 기록으로 이동합니다`);
+              onSelectExistingTeam?.(existing);
+              return;
+            }
+            setMemberBId(m.id);setMemberSearch("");
+          }}
             style={{padding:"11px 13px",borderRadius:8,border:"1px solid rgba(255,255,255,.06)",
               background:"#111827",marginBottom:6,cursor:"pointer",
               display:"flex",alignItems:"center",gap:10}}>
@@ -19994,9 +20016,10 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
     );
   }
 
-  // splitDone 원시값 대신 "오늘 방금 나눠서 기록을 완료했고 아직 새 내용이 없는지"로 판정 —
-  // 팀 문서를 재사용하는 구조라 splitDone을 그대로 두면 다음 회차 진입 시 폼이 영구히 잠긴다.
-  const isSplitDone = pairSessionCompletedToday(editData);
+  // splitDone 원시값 대신 "현재 선택된 date가 방금 완료된 회차와 같은 날짜인지"로 판정 —
+  // 팀 문서를 재사용하는 구조라 오늘 날짜로만 판단하면 같은 날 안에 다음 회차(예: 내일 수업)를
+  // 미리 준비하려 해도 폼이 잠긴 채로 남는다. date를 다른 날짜로 바꾸면 즉시 잠금이 풀린다.
+  const isSplitDone = pairSessionCompletedToday(editData, date);
 
   return (
     <div>
@@ -20034,8 +20057,9 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
         <div style={{display:"flex",gap:8}}>
           <div style={{flex:1}}>
             <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
+            {/* 완료된 회차를 보고 있어도 날짜만은 항상 바꿀 수 있게 둔다 — 다른 날짜를 고르는 순간
+                isSplitDone이 즉시 풀려 다음 회차를 같은 팀 문서에 바로 이어 작성할 수 있다. */}
             <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-              disabled={isSplitDone}
               style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
                 background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
           </div>
@@ -20054,8 +20078,8 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], onSave,
       {isSplitDone && (
         <div style={{padding:"10px 13px",borderRadius:8,background:"rgba(94,234,212,.06)",
           border:"1px solid rgba(94,234,212,.2)",marginBottom:10}}>
-          <Mo c="#5EEAD4" s={10} style={{fontWeight:800}}>✅ 나눠서 기록 완료 — 개인 기록이 생성되었습니다</Mo>
-          <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:3}}>2:1 원본은 계속 조회·수정 가능합니다</Mo>
+          <Mo c="#5EEAD4" s={10} style={{fontWeight:800}}>✅ {date} 수업 나눠서 기록 완료 — 개인 기록이 생성되었습니다</Mo>
+          <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:3}}>다른 날짜의 새 수업을 기록하려면 위 날짜를 변경하세요</Mo>
         </div>
       )}
 

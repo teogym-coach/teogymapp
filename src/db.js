@@ -2398,6 +2398,9 @@ export async function splitPairSession(pairSessionId, memberASessionData, member
     splitDone: false,
     status: "draft",
     lastSplitAt: serverTimestamp(),
+    // 방금 완료·분리된 실제 수업 날짜(위 date는 항상 "오늘"로 초기화되므로 별도 보존) —
+    // 이 값과 폼에서 선택한 날짜가 다르면 같은 팀이라도 새 회차 기록으로 판단한다.
+    lastCompletedDate: pairData.date || getKoreaDateString(),
     lastASessionId: aRef.id,
     lastBSessionId: bRef.id,
     updatedAt: serverTimestamp(),

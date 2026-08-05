@@ -12075,13 +12075,14 @@ function normalizeSessionDateKey(d){
   return String(d).slice(0,10);
 }
 // 오늘 수업 세부 상태 통합 판별 — 회원 카드 배지·강조 테두리·전체 목록 정렬·"오늘 수업" 탭 필터·홈 화면·수업 예정 캘린더가
-// 전부 이 함수 하나만 공유한다. updatedAt 등 문서 수정 시각은 사용하지 않는다.
+// 전부 이 함수 하나만 공유한다. updatedAt·createdAt 등 문서 생성/수정 시각은 절대 사용하지 않는다 —
+// 과거 날짜 수업일지를 오늘 기록/수정한다고 해서 오늘 수업으로 잘못 분류되는 것을 막기 위함(우선순위는 항상 실제 수업 날짜만).
 // 반환값: null(오늘 수업 아님) · "scheduled"(오늘 예정만, 실제 종목 없음) · "recording"(오늘 실제 종목 1개 이상 저장, 아직 비공개)
 // · "done"(오늘 수업일지가 회원에게 공개됨 · isPublished)
 // 우선순위: done → recording → scheduled → 오늘 수업 아님
 function getTodaySessionStatus(m, sessionsMap, today){
   const ss = sessionsMap?.[m?.id] || [];
-  const todayDocs = ss.filter(s => normalizeSessionDateKey(s.date || s.sessionDate || s.createdAt) === today);
+  const todayDocs = ss.filter(s => normalizeSessionDateKey(s.date || s.sessionDate) === today);
   if (todayDocs.length) {
     if (todayDocs.some(s => s.isPublished)) return "done";
     // 단순 세션 문서 존재만으로 "기록 중"으로 보지 않고, 실제 저장된 운동 종목이 1개 이상인지 확인한다(mkEx 기본 빈 카드 제외)
@@ -12094,6 +12095,18 @@ function getTodaySessionStatus(m, sessionsMap, today){
   if (getMemberNextSessionInfo(m).date === today) return "scheduled";
   return null;
 }
+// 지난 예정 수업 미기록 판별 — "다음 수업 준비"(nextWorkoutDate/nextPtDate)가 오늘보다 이전인데 그 날짜로
+// 저장된 수업일지가 하나도 없는 경우만 대상이다. getTodaySessionStatus와 동일하게 createdAt 등 기록 시각은 쓰지 않고
+// 실제 날짜 필드(세션 date > 다음 수업 준비 날짜)만 본다. 그 날짜의 세션 문서가 하나라도 있으면(임시저장이어도)
+// 이미 "처리"된 것으로 보고 즉시 대상에서 빠진다(회원 히스토리에서만 확인).
+function getPastUnrecordedInfo(m, sessionsMap, today){
+  const info = getMemberNextSessionInfo(m);
+  if (!info.date || info.date >= today) return null;
+  const ss = sessionsMap?.[m?.id] || [];
+  const hasDocForThatDate = ss.some(s => normalizeSessionDateKey(s.date || s.sessionDate) === info.date);
+  if (hasDocForThatDate) return null;
+  return { date: info.date, time: info.time, part: info.part };
+}
 // 오늘 수업 회원 통합 판별 — getTodaySessionStatus가 null이 아니면 오늘 수업 회원이다.
 function isTodaySessionMember(m, sessionsMap, today){
   return !!getTodaySessionStatus(m, sessionsMap, today);
@@ -12104,6 +12117,8 @@ const TODAY_STATUS_STYLE = {
   recording: { label:"기록 중",   rgb:"245,158,11",  solid:"#F59E0B", soft:"#B45309",   tint:"rgba(245,158,11,.12)" },
   done:      { label:"오늘 완료", rgb:"34,197,94",   solid:"#22C55E", soft:"#15803D",   tint:"rgba(34,197,94,.12)" },
 };
+// 지난 수업 미기록 카드 톤 — "기록 중"(주황)과 구분되는 연한 빨간 계열. 항상 텍스트 배지와 함께 표시한다(색상만으로 구분하지 않음).
+const PAST_UNRECORDED_STYLE = { label:"지난 수업 미기록", rgb:"239,68,68", solid:"#EF4444", soft:"#B91C1C", tint:"rgba(239,68,68,.10)" };
 // 오늘 수업 회원의 정렬용 예약 시간 키 — 시간이 지정돼 있으면 "HH:MM"(오름차순 비교 가능), 없으면 null(항상 마지막)
 function getTodaySortTimeKey(m, today){
   const info = getMemberNextSessionInfo(m);
@@ -12298,22 +12313,17 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
     const last   = sorted[0];
 
     // ── 오늘 수업 판정: sessionsMap 직접 탐색, YYYY-MM-DD 정규화 ──────
-    const normalizeDate = (d) => {
-      if (!d) return "";
-      if (typeof d === "string") return d.slice(0, 10);
-      if (d instanceof Date) return d.toISOString().slice(0, 10);
-      return String(d).slice(0, 10);
-    };
+    // 공용 normalizeSessionDateKey 재사용(중복 구현 금지). createdAt은 기록 시각일 뿐 실제 수업 날짜가 아니므로 폴백에서 제외한다.
     const todaySession = ss.find(s =>
-      normalizeDate(s.date || s.sessionDate || s.createdAt) === today
+      normalizeSessionDateKey(s.date || s.sessionDate) === today
     );
 
     // ── lastDate: sessionsMap이 로드됐으면 반드시 세션 직접 계산 ──────
     // m.lastSessionDate(캐시)는 sessionsMap이 비어있을 때만 폴백
     const lastDate = todaySession ? today
       : last?.date
-        ? normalizeDate(last.date)
-        : (ss.length === 0 ? (m.lastSessionDate ? normalizeDate(m.lastSessionDate) : null) : null);
+        ? normalizeSessionDateKey(last.date)
+        : (ss.length === 0 ? (m.lastSessionDate ? normalizeSessionDateKey(m.lastSessionDate) : null) : null);
 
     const lastMuscle = last
       ? (last.exercises||[]).map(e=>e.muscleTop).filter(Boolean)
@@ -12380,7 +12390,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
     if (filter === "diet")    return (m.goal||"").includes("다이어트") || (m.goal||"").includes("감량");
     if (filter === "bulk")    return (m.goal||"").includes("벌크") || (m.goal||"").includes("증량") || (m.goal||"").includes("근육");
     // V2 신규 필터 — 전부 기존 데이터 계산만 재사용
-    if (filter === "unrecorded") return (sessionsMap[m.id]||[]).some(s=>s.isPublished!==true);
+    if (filter === "unrecorded") return !!getPastUnrecordedInfo(m, sessionsMap, today);
     if (filter === "attention")  return attentionById.has(m.id);
     if (filter === "new")        return (m.startDate||"") >= dateStrDaysAgo(29);
     return true;
@@ -12444,9 +12454,17 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
     return c;
   }, { scheduled:0, recording:0, done:0 }) : null;
 
-  const filtered = (filter === "today" && todaySubFilter !== "all")
-    ? filteredBase.filter(m => getTodaySessionStatus(m, sessionsMap, today) === todaySubFilter)
-    : filteredBase;
+  // "미기록" 탭 — 가장 최근에 놓친 예정일이 위로 오도록 예정 날짜 내림차순으로 별도 정렬한다(오래된 날짜순이 아님).
+  const filtered = filter === "unrecorded"
+    ? [...filteredBase].sort((a, b) => {
+        const da = getPastUnrecordedInfo(a, sessionsMap, today)?.date || "";
+        const db = getPastUnrecordedInfo(b, sessionsMap, today)?.date || "";
+        if (da !== db) return db.localeCompare(da);
+        return (a.name||"").localeCompare(b.name||"");
+      })
+    : (filter === "today" && todaySubFilter !== "all")
+      ? filteredBase.filter(m => getTodaySessionStatus(m, sessionsMap, today) === todaySubFilter)
+      : filteredBase;
 
   const ownerMember = members.find(m => isOwner(m));
 
@@ -12700,6 +12718,13 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
             // 오늘 수업 예약 시간 — 지정돼 있으면 "HH:MM"(24시간), 없으면 "시간 미정"
             const todayTimeKey = todayStatus ? getTodaySortTimeKey(m, today) : null;
             const todayTimeText = todayStatus ? (todayTimeKey || "시간 미정") : "";
+            // 지난 수업 미기록 — 오늘 수업 회원이 아닐 때만 대상(오늘 수업이 우선). 필터 탭과 무관하게 어느 화면에서도 같은 기준으로 표시.
+            const pastUnrecorded = !isToday ? getPastUnrecordedInfo(m, sessionsMap, today) : null;
+            const cardAccent = statusStyle || (pastUnrecorded ? PAST_UNRECORDED_STYLE : null);
+            const pastUnrecordedText = pastUnrecorded ? (() => {
+              const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(pastUnrecorded.date);
+              return `${dm ? `${Number(dm[2])}월 ${Number(dm[3])}일 예정` : "예정일 확인 필요"} · ${PAST_UNRECORDED_STYLE.label}`;
+            })() : "";
             const status    = mStatus(m);
             const isEnded   = status === "ended";
             const isPaused  = status === "paused";
@@ -12752,11 +12777,11 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
             return (
               <div key={m.id} style={{position:"relative"}}
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
-              <MemberCardShell dim={isEnded} mode={cardMode} accent={statusStyle} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
+              <MemberCardShell dim={isEnded} mode={cardMode} accent={cardAccent} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 좌 — 프로필 + 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
                   <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isRowLayout?leftPct:"100%",maxWidth:isRowLayout?leftPct:undefined,flexShrink:0}}>
                     <div style={{position:"relative",flexShrink:0}}>
-                      <MemberAvatar name={m.name} photo={photo} tone={statusStyle ? statusStyle.solid : visitTone(meta.daysSince,false)}/>
+                      <MemberAvatar name={m.name} photo={photo} tone={statusStyle ? statusStyle.solid : pastUnrecorded ? PAST_UNRECORDED_STYLE.solid : visitTone(meta.daysSince,false)}/>
                       {!isEnded && hasTodayFeedInput(m) && (
                         <span style={{position:"absolute",top:-5,right:-8,background:DB.danger,color:"#fff",
                           fontSize:7.5,fontWeight:800,padding:"2px 5px",borderRadius:7,
@@ -12771,6 +12796,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                           {m.name}
                         </span>
                         {!isEnded && statusStyle && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:statusStyle.tint,color:statusStyle.soft,fontWeight:800,fontFamily:DB.font}}>{statusStyle.label}</span>}
+                        {!isEnded && !statusStyle && pastUnrecorded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:PAST_UNRECORDED_STYLE.tint,color:PAST_UNRECORDED_STYLE.soft,fontWeight:800,fontFamily:DB.font}}>{PAST_UNRECORDED_STYLE.label}</span>}
                         {m.isTestMember && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(139,92,246,.1)",color:"#7C3AED",fontWeight:800,fontFamily:DB.font}}>TEST</span>}
                         {isPaused && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,fontFamily:DB.font}}>휴식중</span>}
                         {isEnded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(100,116,139,.1)",color:DB.sub,fontWeight:800,fontFamily:DB.font}}>종료</span>}
@@ -12793,8 +12819,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                       </div>
                       {/* 다음 수업 — 오늘 완료 회원은 오늘 정보만(다음 수업 준비는 아래 별도 줄) */}
                       <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,minWidth:0}}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:(statusStyle||next.hot)?800:600,color:statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:pastUnrecorded?PAST_UNRECORDED_STYLE.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:(statusStyle||pastUnrecorded||next.hot)?800:600,color:statusStyle?statusStyle.soft:pastUnrecorded?PAST_UNRECORDED_STYLE.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                           {statusStyle ? (
                             todayStatus === "done" ? todayStatusText : (
                               <>
@@ -12803,7 +12829,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                                 {todayStatusText}
                               </>
                             )
-                          ) : next.text}
+                          ) : pastUnrecorded ? pastUnrecordedText : next.text}
                         </span>
                         {meta.remaining !== null && (
                           <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>

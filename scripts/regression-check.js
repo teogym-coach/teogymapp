@@ -155,6 +155,27 @@ function siScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 회원 목록 "오늘 수업"/"미기록" 분류(2026-08-05): 실제 실행 시나리오 검증 ──
+// 수업 날짜는 createdAt/updatedAt 등 기록 시각이 아니라 세션 date·다음 수업 준비 날짜만으로 판정돼야 하며,
+// 과거 예정인데 미기록인 건은 "미기록"으로, 과거인데 이미 저장/완료된 건은 어디에도 노출되지 않아야 한다.
+let todaySessionLib = null;
+try {
+  const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
+  // TODAY_STATUS_STYLE/PAST_UNRECORDED_STYLE(색상 상수, DB 참조)은 판정 로직에 필요 없어 슬라이스에서 제외한다.
+  const sliceCore = app.slice(app.indexOf('function normalizeSessionDateKey'), app.indexOf('const TODAY_STATUS_STYLE'));
+  const sliceSort = app.slice(app.indexOf('function getTodaySortTimeKey'), app.indexOf('function nextSessionInfoLabel'));
+  const sliceNextInfo = app.slice(app.indexOf('function getMemberNextSessionInfo'), app.indexOf('function getNextWorkoutSummary'));
+  todaySessionLib = new Function(`${sliceKoreaDate}\n${sliceFuncEx}\n${sliceCore}\n${sliceSort}\n${sliceNextInfo}\nreturn { getKoreaDateString, normalizeSessionDateKey, getMemberNextSessionInfo, getTodaySessionStatus, getPastUnrecordedInfo, isTodaySessionMember, getTodaySortTimeKey };`)();
+} catch (e) {
+  console.error('[regression] 오늘 수업 분류 헬퍼 추출 실패:', e.message);
+}
+function tsScenario(name, fn) {
+  if (!todaySessionLib) return [name, false];
+  try { return [name, !!fn(todaySessionLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 const daysAgoStr = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const daysFromNowStr = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 function wgScenario(name, fn) {
@@ -4536,6 +4557,92 @@ const checks = [
     firestoreRules.includes('request.resource.data.firstReadAt == resource.data.firstReadAt') &&
     firestoreRules.includes('request.resource.data.readCount == resource.data.readCount + 1')
   ],
+
+  // ── 회원 목록 "오늘 수업"/"미기록" 분류(2026-08-05) ──
+  ['오늘 수업 판정: getTodaySessionStatus가 세션 날짜 판정에 createdAt을 폴백으로 쓰지 않는다(과거 수업을 오늘 기록/수정해도 오늘 수업으로 오분류되지 않도록)',
+    (() => {
+      const fn = app.slice(app.indexOf('function getTodaySessionStatus'), app.indexOf('function getPastUnrecordedInfo'));
+      return fn.includes('normalizeSessionDateKey(s.date || s.sessionDate)') && !fn.includes('s.createdAt');
+    })()
+  ],
+  ['지난 수업 미기록 판정: getPastUnrecordedInfo가 다음 수업 준비일이 오늘보다 이전이고 그 날짜에 저장된 수업일지가 없을 때만 대상으로 판정한다(createdAt 미사용)',
+    (() => {
+      const fn = app.slice(app.indexOf('function getPastUnrecordedInfo'), app.indexOf('function isTodaySessionMember'));
+      return fn.includes('info.date >= today') && fn.includes('hasDocForThatDate') && !fn.includes('s.createdAt');
+    })()
+  ],
+  ['회원 목록 카드: 지난 수업 미기록 회원은 연한 빨간 톤 강조와 "지난 수업 미기록" 텍스트 배지를 함께 표시한다(색상만으로 구분하지 않음)',
+    app.includes('const PAST_UNRECORDED_STYLE = { label:"지난 수업 미기록"') &&
+    app.includes('pastUnrecorded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:PAST_UNRECORDED_STYLE.tint')
+  ],
+  ['미기록 탭: 예정 날짜 내림차순(가장 최근에 놓친 수업이 위)으로 정렬한다',
+    app.includes('"미기록" 탭 — 가장 최근에 놓친 예정일이 위로 오도록') &&
+    app.includes('return db.localeCompare(da);')
+  ],
+  tsScenario('시나리오A: 어제 예정됐지만 미기록인 회원 — 오늘 수업 미노출·미기록 노출(지난 수업 미기록 배지 대상)', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'a1', nextWorkoutDate: '2026-08-04' };
+    const sessionsMap = { a1: [] };
+    const isToday = lib.isTodaySessionMember(member, sessionsMap, today);
+    const past = lib.getPastUnrecordedInfo(member, sessionsMap, today);
+    return isToday === false && !!past && past.date === '2026-08-04';
+  }),
+  tsScenario('시나리오B: 어제 날짜의 수업일지를 오늘 작성 중인 회원 — 오늘 수업 미노출', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'b1', nextWorkoutDate: '2026-08-04' };
+    const sessionsMap = { b1: [{ date: '2026-08-04', createdAt: '2026-08-05T09:00:00.000Z', exercises: [{ name: '스쿼트' }], isPublished: false }] };
+    return lib.isTodaySessionMember(member, sessionsMap, today) === false;
+  }),
+  tsScenario('시나리오C: 어제 수업일지를 완료한 회원 — 오늘 수업·미기록 모두 미노출(히스토리에서만 확인)', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'c1', nextWorkoutDate: '2026-08-04' };
+    const sessionsMap = { c1: [{ date: '2026-08-04', exercises: [{ name: '벤치프레스' }], isPublished: true }] };
+    const isToday = lib.isTodaySessionMember(member, sessionsMap, today);
+    const past = lib.getPastUnrecordedInfo(member, sessionsMap, today);
+    return isToday === false && past === null;
+  }),
+  tsScenario('시나리오D: 오늘 예정이며 시간이 있는 회원 — 오늘 수업 노출·시간 정렬 키 확보', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'd1', nextWorkoutDate: '2026-08-05', nextWorkoutTime: '18:00' };
+    const sessionsMap = { d1: [] };
+    return lib.getTodaySessionStatus(member, sessionsMap, today) === 'scheduled' &&
+      lib.getTodaySortTimeKey(member, today) === '18:00';
+  }),
+  tsScenario('시나리오E: 오늘 예정이지만 시간 미정인 회원 — 오늘 수업 노출·정렬 키는 null(시간 지정 회원보다 아래)', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'e1', nextWorkoutDate: '2026-08-05' };
+    const sessionsMap = { e1: [] };
+    const timed = { id: 'd1', nextWorkoutDate: '2026-08-05', nextWorkoutTime: '18:00' };
+    const status = lib.getTodaySessionStatus(member, sessionsMap, today);
+    const timeKey = lib.getTodaySortTimeKey(member, today);
+    const timedKey = lib.getTodaySortTimeKey(timed, today);
+    return status === 'scheduled' && timeKey === null && !!timedKey;
+  }),
+  tsScenario('시나리오F: 내일 예정된 회원 — 오늘 수업 미노출', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'f1', nextWorkoutDate: '2026-08-06' };
+    const sessionsMap = { f1: [] };
+    return lib.isTodaySessionMember(member, sessionsMap, today) === false;
+  }),
+  tsScenario('시나리오G: 기록 시작 시각(createdAt)은 오늘이지만 sessionDate가 어제인 기록 — 오늘 수업 미노출(createdAt 폴백 금지)', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'g1', nextWorkoutDate: '2026-08-04' };
+    const sessionsMap = { g1: [{ date: '2026-08-04', createdAt: '2026-08-05T10:00:00.000Z', exercises: [{ name: '데드리프트' }], isPublished: false }] };
+    return lib.getTodaySessionStatus(member, sessionsMap, today) === null;
+  }),
+  tsScenario('시나리오H: 어제 미기록 일정(다음 수업 준비 미갱신)과 오늘 실제 기록이 공존 — 오늘 수업엔 오늘 일정만, 미기록엔 어제 일정만 각각 노출(중복 없음)', lib => {
+    const today = '2026-08-05';
+    const member = { id: 'h1', nextWorkoutDate: '2026-08-04' };
+    const sessionsMap = { h1: [{ date: '2026-08-05', exercises: [{ name: '스쿼트' }], isPublished: false }] };
+    const status = lib.getTodaySessionStatus(member, sessionsMap, today);
+    const past = lib.getPastUnrecordedInfo(member, sessionsMap, today);
+    return status === 'recording' && !!past && past.date === '2026-08-04';
+  }),
+  tsScenario('시나리오I: 한국 시간 자정 전후 — UTC 변환 때문에 날짜가 하루씩 밀리지 않는다', lib => {
+    const justAfterMidnightKST = lib.getKoreaDateString(new Date(Date.UTC(2026, 7, 4, 15, 30))); // KST 2026-08-05 00:30
+    const justBeforeMidnightKST = lib.getKoreaDateString(new Date(Date.UTC(2026, 7, 4, 14, 30))); // KST 2026-08-04 23:30
+    return justAfterMidnightKST === '2026-08-05' && justBeforeMidnightKST === '2026-08-04';
+  }),
 ];
 
 let failed = 0;

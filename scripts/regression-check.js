@@ -82,7 +82,7 @@ function usScenario(name, fn) {
 let acquisitionLib = null;
 try {
   const sliceAcq = app.slice(app.indexOf('const ACQUISITION_FIRST_TOUCH_OPTIONS'), app.indexOf('// 온보딩 v2의 세부 목표(12종)'));
-  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER };`)();
+  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER, ACQ_CANONICAL_CHANNELS, ACQUISITION_CHANNEL_OPTIONS };`)();
 } catch (e) {
   console.error('[regression] 유입 분석 정규화 로직 추출 실패:', e.message);
 }
@@ -4940,6 +4940,89 @@ const checks = [
   acqScenario('개인정보: 방문 이유 카드용 이름 마스킹은 성만 남긴다', L =>
     L.maskAcquisitionName('홍길동') === '홍**' && L.maskAcquisitionName('김민') === '김*' && L.maskAcquisitionName('') === '회원'
   ),
+
+  // ════════════════════════════════════════════
+  // 분석 리포트: 회원별 분석 카드 제거 + 방문 경로 선택지 공통화
+  // ════════════════════════════════════════════
+  ['분석 리포트: 회원별 분석 제목과 카드 목록(ANALYTICS_MEMBER_REPORTS)이 더 이상 없다',
+    !app.includes('회원별 분석') &&
+    !app.includes('ANALYTICS_MEMBER_REPORTS') &&
+    !app.includes('function goMembers(')
+  ],
+  ['분석 리포트: 유입 분석 · 회원 입력 현황 두 카드는 그대로 노출된다',
+    app.includes('{ key: "referral", icon: "📊", title: "유입 분석", sub: "방문 경로와 마케팅 성과" }') &&
+    app.includes('{ key: "memberInputStatus", icon: "🗂️", title: "회원 입력 현황", sub: "회원앱 입력 참여도 한눈에 보기" }')
+  ],
+  ['분석 리포트: 카드 2개뿐이라도 화면 폭을 억지로 채우지 않도록 별도의 좁은 최대 너비를 쓴다',
+    app.includes('const contentMaxWidth = isWide ? 720 : 820;')
+  ],
+  ['회원 상세 분석도구: 운동 분석·훈련 피드백·상담 리포트·대사 추정·평가 기록·운동 라이브러리·컨디셔닝·AI 루틴 추천 메뉴가 그대로 유지된다',
+    app.includes('{menuBtn("🏋️","운동 분석","근력 · 훈련량 · 컨디션 · 부위 변화","exerciseAnalysis")}') &&
+    app.includes('{menuBtn("📋","훈련 피드백","다음 수업을 위한 훈련 요약","feedback")}') &&
+    app.includes('{menuBtn("🗣️","상담 리포트","회원의 변화를 한눈에 확인하고 다음 목표를 준비합니다","counselReport")}') &&
+    app.includes('{menuBtn("🔥","대사 추정","유산소 · 체중 분석","metabolism")}') &&
+    app.includes('{menuBtn("📋","평가 기록","체형 · 기능 · 인체도","assessment")}') &&
+    app.includes('{menuBtn("📚","운동 라이브러리","부위별 운동 기록","library")}') &&
+    app.includes('{menuBtn("🧘","컨디셔닝","매일 기능 운동","daily_conditioning")}') &&
+    app.includes('{menuBtn("🤖","AI 루틴 추천",t("수업기록 기반","운동기록 기반"),"ai_routine")}')
+  ],
+  acqScenario('방문 경로 공통화: 엘리베이터 광고·간판이 지나가다 발견과 별도 채널로 정규화된다', L =>
+    L.normalizeAcquisitionChannel('엘베 광고') === '엘리베이터 광고' &&
+    L.normalizeAcquisitionChannel('아파트 엘리베이터 광고') === '엘리베이터 광고' &&
+    L.normalizeAcquisitionChannel('elevator_ad') === '엘리베이터 광고' &&
+    L.normalizeAcquisitionChannel('외부 간판') === '간판' &&
+    L.normalizeAcquisitionChannel('signage') === '간판' &&
+    L.normalizeAcquisitionChannel('지나가다가') === '지나가다 발견' &&
+    L.normalizeAcquisitionChannel('엘리베이터 광고') !== L.normalizeAcquisitionChannel('지나가다 발견') &&
+    L.normalizeAcquisitionChannel('간판') !== L.normalizeAcquisitionChannel('지나가다 발견')
+  ),
+  acqScenario('방문 경로 공통화: 엘리베이터 광고·간판이 집계에서도 서로 다른 채널로 각각 카운트된다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: ['엘리베이터 광고'] } },
+      { id: 'b', name: 'B', startDate: '2026-08-01', survey: { visitRoutes: ['간판'] } },
+      { id: 'c', name: 'C', startDate: '2026-08-01', survey: { visitRoutes: ['지나가다 발견'] } },
+    ]});
+    const s = L.summarizeAcquisitionRows(rows);
+    return (s.channels.find(c => c.name === '엘리베이터 광고') || {}).count === 1
+      && (s.channels.find(c => c.name === '간판') || {}).count === 1
+      && (s.channels.find(c => c.name === '지나가다 발견') || {}).count === 1;
+  }),
+  acqScenario('방문 경로 공통화: 지인 소개·기존 회원 소개·referral 레거시 코드가 명확한 경우에만 각각 정규화되고, 모호한 "소개"는 임의로 분류되지 않는다', L =>
+    L.normalizeAcquisitionChannel('지인 추천') === '지인 소개' &&
+    L.normalizeAcquisitionChannel('referral') === '지인 소개' &&
+    L.normalizeAcquisitionChannel('회원 소개') === '기존 회원 소개' &&
+    L.normalizeAcquisitionChannel('지인 소개') !== L.normalizeAcquisitionChannel('기존 회원 소개') &&
+    L.normalizeAcquisitionChannel('소개') === '소개' // 모호한 값은 alias 매핑 없이 원문 그대로 유지(임의 분류 금지)
+  ),
+  acqScenario('AI 세부 출처: "모름"은 특정 AI가 아니라 세부 출처 미기재로 집계된다(기타 AI 검색과 구분)', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: [L.ACQ_AI_CHANNEL], visitAiTool: '모름' } },
+    ]});
+    const s = L.summarizeAcquisitionRows(rows);
+    return (s.aiSources.find(a => a.name === L.ACQ_AI_UNSPECIFIED) || {}).count === 1
+      && !s.aiSources.some(a => a.name === L.ACQ_AI_OTHER);
+  }),
+  ['방문 경로 공통 상수: ACQUISITION_CHANNEL_OPTIONS 하나를 상담 등록·회원 프로필 두 화면이 함께 사용한다(하드코딩 배열 중복 제거)',
+    (app.match(/value={visitRoutes} onChange={setVisitRoutes}/g) || []).length >= 1 &&
+    (app.match(/<AcquisitionChannelSelector value={visitRoutes} onChange={setVisitRoutes}/g) || []).length === 3 &&
+    !app.includes('["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"]') &&
+    !app.includes('["네이버 블로그","네이버 플레이스","인스타그램","유튜브","AI 검색","지인 소개","기존 회원 소개","지나가다 발견","카카오 지도","기타"]')
+  ],
+  ['방문 경로 공통 상수: 저장 형식은 기존과 동일하게 라벨 문자열을 그대로 쓴다(코드값을 Firestore에 저장하지 않음)',
+    app.includes('const toggle = (label) => {') &&
+    app.includes('if (multi) onChange(list.includes(label) ? list.filter(x => x !== label) : [...list, label]);')
+  ],
+  ['AI 세부 출처 공통 상수: ChatGPT·Gemini·Claude·Perplexity·Copilot·네이버 AI 브리핑·기타 AI 검색·모름 8종을 상담 등록·회원 프로필이 함께 사용',
+    app.includes('const ACQ_AI_TOOL_OPTIONS = ["ChatGPT", "Gemini", "Claude", "Perplexity", "Copilot", "네이버 AI 브리핑", ACQ_AI_OTHER, "모름"];') &&
+    (app.match(/<AcquisitionAiToolSelector value={visitAiTool} onChange={setVisitAiTool}/g) || []).length === 3
+  ],
+  ['AI 세부 출처: 목록에 없는 기존 저장값(레거시 자유 입력)은 저장을 지우지 않고 캡션으로 보여준다',
+    app.includes('현재 저장값 · {value} (목록에 없는 값이라 그대로 유지했습니다. 필요하면 위에서 다시 선택해주세요.)')
+  ],
+  ['지인 소개/기타 선택 시 부가 입력(소개자 이름, 기타 경로 메모)은 기존 필드(visitReferer/visitEtc)를 그대로 사용',
+    app.includes('(visitRoutes.includes("지인 소개")||visitRoutes.includes("기존 회원 소개")) && (') &&
+    app.includes('value={visitReferer} onChange={e=>setVisitReferer(e.target.value)}')
+  ],
 
   ['회원 프로필 수정: 저장 시 members 배열 상태도 함께 갱신 — 방문계기 수정이 유입 분석에 즉시 반영된다',
     app.includes('setMembers(prev => prev.map(m => m.id === member.id ? {...m, ...publicD} : m));')

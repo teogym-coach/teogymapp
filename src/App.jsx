@@ -1320,7 +1320,7 @@ const ACQ_AI_OTHER = "기타 AI 검색";
 // 상담 등록/온보딩에만 있는 값(네이버 검색·운동닥터·당근·숨고)을 뒤에 덧붙인다.
 const ACQ_CANONICAL_CHANNELS = [
   "네이버 블로그", "네이버 플레이스", "네이버 검색", "인스타그램", "유튜브",
-  ACQ_AI_CHANNEL, "지인 소개", "기존 회원 소개", "지나가다 발견", "카카오 지도",
+  ACQ_AI_CHANNEL, "지인 소개", "기존 회원 소개", "지나가다 발견", "엘리베이터 광고", "간판", "카카오 지도",
   "운동닥터", "당근", "숨고", "기타",
 ];
 
@@ -1328,17 +1328,54 @@ const ACQ_CANONICAL_CHANNELS = [
 const ACQ_CHANNEL_ALIAS = {
   "네이버블로그": "네이버 블로그", "naverblog": "네이버 블로그",
   "네이버플레이스": "네이버 플레이스", "naverplace": "네이버 플레이스", "플레이스": "네이버 플레이스",
-  "네이버검색": "네이버 검색", "네이버": "네이버 검색",
+  "네이버검색": "네이버 검색", "네이버": "네이버 검색", "naversearch": "네이버 검색",
   "인스타그램": "인스타그램", "인스타": "인스타그램", "instagram": "인스타그램",
   "유튜브": "유튜브", "youtube": "유튜브",
-  "ai검색": ACQ_AI_CHANNEL, "ai": ACQ_AI_CHANNEL, "ai추천": ACQ_AI_CHANNEL,
-  "지인소개": "지인 소개", "지인추천": "지인 소개", "지인": "지인 소개",
-  "기존회원소개": "기존 회원 소개", "회원소개": "기존 회원 소개",
-  "지나가다발견": "지나가다 발견", "지나가다가": "지나가다 발견", "지나가다": "지나가다 발견",
-  "카카오지도": "카카오 지도", "카카오맵": "카카오 지도", "kakaomap": "카카오 지도",
-  "운동닥터": "운동닥터", "당근": "당근", "당근마켓": "당근", "숨고": "숨고",
+  "ai검색": ACQ_AI_CHANNEL, "ai": ACQ_AI_CHANNEL, "ai추천": ACQ_AI_CHANNEL, "ai_search": ACQ_AI_CHANNEL,
+  "지인소개": "지인 소개", "지인추천": "지인 소개", "지인": "지인 소개", "referral": "지인 소개",
+  "기존회원소개": "기존 회원 소개", "회원소개": "기존 회원 소개", "existing_member_referral": "기존 회원 소개",
+  "지나가다발견": "지나가다 발견", "지나가다가": "지나가다 발견", "지나가다": "지나가다 발견", "walk_by": "지나가다 발견",
+  // 엘리베이터 광고 — 지나가다 발견과 구분되는 별도 채널(명확히 "엘리베이터"를 언급한 경우만 매칭)
+  "엘리베이터": "엘리베이터 광고", "엘베광고": "엘리베이터 광고", "엘리베이터광고": "엘리베이터 광고",
+  "아파트엘리베이터광고": "엘리베이터 광고", "elevator_ad": "엘리베이터 광고", "elevatorad": "엘리베이터 광고", "elevator": "엘리베이터 광고",
+  // 간판 — 지나가다 발견과 구분되는 별도 채널(명확히 "간판"을 언급한 경우만 매칭)
+  "외부간판": "간판", "건물간판": "간판", "매장간판": "간판", "signage": "간판", "signboard": "간판",
+  "카카오지도": "카카오 지도", "카카오맵": "카카오 지도", "kakaomap": "카카오 지도", "kakao_map": "카카오 지도",
+  "운동닥터": "운동닥터", "당근": "당근", "당근마켓": "당근", "daangn": "당근", "숨고": "숨고", "soomgo": "숨고",
   "기타": "기타", "other": "기타",
 };
+
+// ────────────────────────────────────────────────────────────────
+// 방문 경로 입력 공통화 — 상담 고객 등록 화면과 회원 프로필 수정(방문계기 탭) 화면이
+// 지금까지 서로 다른 선택지를 하드코딩해서 썼다("지인 추천" vs "지인 소개", "지나가다가" vs "지나가다 발견" 등).
+// 앞으로는 두 화면이 이 옵션 목록 하나만 렌더링한다.
+//
+// 저장 형식은 바꾸지 않는다 — 지금까지처럼 칩을 누르면 label(한글) 문자열이 그대로 visitRoutes 배열/필드에
+// 저장된다. value(코드)는 항목을 구분하기 위한 식별자일 뿐 Firestore에 쓰지 않는다(마이그레이션 불필요).
+// ────────────────────────────────────────────────────────────────
+const ACQUISITION_CHANNEL_OPTIONS = [
+  { value: "naver_search", label: "네이버 검색" },
+  { value: "naver_blog", label: "네이버 블로그" },
+  { value: "naver_place", label: "네이버 플레이스" },
+  { value: "instagram", label: "인스타그램" },
+  { value: "youtube", label: "유튜브" },
+  { value: "ai_search", label: ACQ_AI_CHANNEL },
+  { value: "referral", label: "지인 소개" },
+  { value: "existing_member_referral", label: "기존 회원 소개" },
+  { value: "walk_by", label: "지나가다 발견" },
+  { value: "elevator_ad", label: "엘리베이터 광고" },
+  { value: "signage", label: "간판" },
+  { value: "kakao_map", label: "카카오 지도" },
+  { value: "daangn", label: "당근" },
+  { value: "soomgo", label: "숨고" },
+  { value: "other", label: "기타" },
+];
+// AI 검색 세부 출처 단일 선택 — 상담 등록·회원 프로필이 함께 쓰는 표준 목록.
+// 저장 필드는 기존 visitAiTool(문자열) 그대로 사용한다.
+const ACQ_AI_TOOL_OPTIONS = ["ChatGPT", "Gemini", "Claude", "Perplexity", "Copilot", "네이버 AI 브리핑", ACQ_AI_OTHER, "모름"];
+// AcquisitionChannelSelector / AcquisitionAiToolSelector(방문 경로·AI 출처 공용 칩 UI)는
+// JSX를 포함해 회귀 스크립트가 이 구간을 순수 함수로 슬라이스·실행할 수 없으므로,
+// ConsultationFormScreen 바로 앞(이 구간 밖)에서 정의한다 — 옵션 상수만 여기 남긴다.
 
 // 온보딩 v2 acquisition.firstTouch(코드값) → 표준 채널
 const ACQ_ONBOARDING_CHANNEL = {
@@ -1382,6 +1419,8 @@ function normalizeAcquisitionChannel(raw) {
 function normalizeAiSourceList(raw) {
   const t = acqText(raw).toLowerCase();
   if (!t) return [];
+  // "모름"(어떤 AI인지 회원도 모름)은 특정 서비스가 아니라 "미기재"와 같은 뜻이므로 기타로 묶지 않는다.
+  if (/^모름$|^잘\s*모름$|^모른다|^모르겠|^unknown$/.test(t)) return [];
   const found = [];
   ACQ_AI_SOURCE_RULES.forEach(rule => {
     if (rule.tests.some(re => re.test(t)) && !found.includes(rule.label)) found.push(rule.label);
@@ -10269,7 +10308,7 @@ export default function App() {
           }} showToast={showToast} />}
         {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} nutritionData={nutritionData} bodyData={bodyData} onBack={()=>setScreen("hub")} />}
         {/* 분석 리포트 허브 — 관리자 홈 사이드바/퀵메뉴 "분석 리포트"의 진입 화면 */}
-        {screen==="report" && <AnalyticsReportScreen members={members} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} onBack={()=>setScreen("home")}
+        {screen==="report" && <AnalyticsReportScreen setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} onBack={()=>setScreen("home")}
           onOpenReport={key=>{ setAnalyticsReturn("report"); setScreen(key); }} />}
         {/* 유입 분석 — 분석 리포트와 회원 상세(분석도구) 두 진입점이 같은 컴포넌트를 재사용한다 */}
         {screen==="referral"  && <ReferralStatsScreen members={members} consultations={consultations}
@@ -14197,6 +14236,74 @@ function ConsultationsScreen({ consultations = [], loading, onBack, onRefresh, o
   );
 }
 
+// 방문 경로 칩 선택 UI — 상담 등록 화면(밝은 테마)과 회원 프로필 수정 화면(어두운 테마)이 함께 쓴다.
+// tone으로 두 화면의 기존 색 구성을 그대로 유지하고, 옵션·저장 방식만 하나로 통일한다.
+function AcquisitionChannelSelector({ value, onChange, multi = true, options = ACQUISITION_CHANNEL_OPTIONS, tone = "light" }) {
+  const dark = tone === "dark";
+  const list = multi ? (Array.isArray(value) ? value : []) : value;
+  const isActive = (label) => multi ? list.includes(label) : value === label;
+  const toggle = (label) => {
+    if (multi) onChange(list.includes(label) ? list.filter(x => x !== label) : [...list, label]);
+    else onChange(value === label ? "" : label);
+  };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: dark ? 6 : 7 }}>
+      {options.map(o => {
+        const active = isActive(o.label);
+        return (
+          <button key={o.value} type="button" onClick={() => toggle(o.label)}
+            style={{
+              padding: "8px 14px", borderRadius: 20, border: "1px solid", cursor: "pointer",
+              fontFamily: dark ? undefined : DB.font,
+              fontSize: dark ? 13 : 12.5, fontWeight: active ? 800 : (dark ? 400 : 600), transition: "all .12s",
+              borderColor: active ? (dark ? "#5EEAD4" : "transparent") : (dark ? "rgba(255,255,255,0.08)" : DB.border),
+              background: active ? (dark ? "rgba(0,229,160,.15)" : `linear-gradient(135deg,${DB.mint},${DB.mintSoft})`) : (dark ? "#111827" : "#fff"),
+              color: active ? (dark ? "#5EEAD4" : "#fff") : (dark ? "#94a3b8" : DB.sub),
+              whiteSpace: "nowrap",
+            }}>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// AI 세부 출처 칩 선택 UI(단일 선택). 목록에 없는 기존 저장값(자유 입력 레거시)은 지우지 않고
+// 그대로 두되, 어떤 칩도 활성화되지 않으므로 원문을 캡션으로 보여준다(값은 클릭 전까지 유실되지 않음).
+function AcquisitionAiToolSelector({ value, onChange, tone = "light" }) {
+  const dark = tone === "dark";
+  const known = !value || ACQ_AI_TOOL_OPTIONS.includes(value);
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: dark ? 6 : 7 }}>
+        {ACQ_AI_TOOL_OPTIONS.map(label => {
+          const active = value === label;
+          return (
+            <button key={label} type="button" onClick={() => onChange(active ? "" : label)}
+              style={{
+                padding: "7px 12px", borderRadius: 20, border: "1px solid", cursor: "pointer",
+                fontFamily: dark ? undefined : DB.font,
+                fontSize: dark ? 12 : 12, fontWeight: active ? 800 : (dark ? 400 : 600),
+                borderColor: active ? "transparent" : (dark ? "rgba(255,255,255,0.08)" : DB.border),
+                background: active ? (dark ? "rgba(162,155,254,.18)" : `linear-gradient(135deg,${DB.mint},${DB.mintSoft})`) : (dark ? "#111827" : "#fff"),
+                color: active ? (dark ? "#a29bfe" : "#fff") : (dark ? "#94a3b8" : DB.sub),
+                whiteSpace: "nowrap",
+              }}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      {value && !known && (
+        <div style={{ marginTop: 6, fontSize: dark ? 9 : 11, fontFamily: dark ? "'DM Mono',monospace" : DB.font, color: dark ? "#94a3b8" : DB.faint, lineHeight: 1.5 }}>
+          현재 저장값 · {value} (목록에 없는 값이라 그대로 유지했습니다. 필요하면 위에서 다시 선택해주세요.)
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 신규 상담 등록/수정 — 대표가 상담 중에 입력하는 최소 항목만 둔다.
 // 운동 목적·경험·생활습관·통증·병력·일정·성향은 회원앱 사전 문진에서 회원이 직접 작성한다.
 function ConsultationFormScreen({ initial, onSave, onBack, saving }) {
@@ -14258,17 +14365,17 @@ function ConsultationFormScreen({ initial, onSave, onBack, saving }) {
 
         <div style={cardBox}>
           <span style={label}>방문 경로 (복수 선택)</span>
-          <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:12}}>
-            {["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"].map(r => {
-              const active = visitRoutes.includes(r);
-              return <button key={r} style={chip(active)}
-                onClick={()=>setVisitRoutes(prev => prev.includes(r) ? prev.filter(x=>x!==r) : [...prev, r])}>{r}</button>;
-            })}
+          <div style={{marginBottom:12}}>
+            <AcquisitionChannelSelector value={visitRoutes} onChange={setVisitRoutes} tone="light" />
           </div>
-          {visitRoutes.includes("AI 검색") && (
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-              <div><span style={label}>사용한 AI</span><input style={input} value={visitAiTool} onChange={e=>setVisitAiTool(e.target.value)} placeholder="ChatGPT, Perplexity 등" /></div>
-              <div><span style={label}>검색 키워드</span><input style={input} value={visitKeyword} onChange={e=>setVisitKeyword(e.target.value)} placeholder="예: 청라 PT 추천" /></div>
+          {visitRoutes.includes(ACQ_AI_CHANNEL) && (
+            <div style={{marginBottom:12}}>
+              <span style={label}>AI 세부 출처</span>
+              <div style={{marginBottom:10}}>
+                <AcquisitionAiToolSelector value={visitAiTool} onChange={setVisitAiTool} tone="light" />
+              </div>
+              <span style={label}>검색 키워드</span>
+              <input style={input} value={visitKeyword} onChange={e=>setVisitKeyword(e.target.value)} placeholder="예: 청라 PT 추천" />
             </div>
           )}
           {visitRoutes.includes("기타") && (
@@ -14724,16 +14831,14 @@ function MemberForm({ initial, onSave, onBack, prefill = null }) {
           {editTab==="방문계기" && (
             <div>
               <StepLabel label="방문 경로 (복수 선택)" />
-              <ChipSelect multi
-                options={["네이버 블로그","네이버 플레이스","인스타그램","유튜브","AI 검색","지인 소개","기존 회원 소개","지나가다 발견","카카오 지도","기타"]}
-                value={visitRoutes} onChange={setVisitRoutes} />
+              <AcquisitionChannelSelector value={visitRoutes} onChange={setVisitRoutes} tone="dark" />
               {/* AI 검색 상세 */}
-              {visitRoutes.includes("AI 검색") && (
+              {visitRoutes.includes(ACQ_AI_CHANNEL) && (
                 <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,
                   background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.2)"}}>
                   <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>🤖 AI 검색 상세</Mo>
                   <StepLabel label="사용한 AI" />
-                  <ChipSelect options={["ChatGPT","Perplexity","Gemini","Claude","네이버 Cue","기타"]} value={visitAiTool} onChange={setVisitAiTool} />
+                  <AcquisitionAiToolSelector value={visitAiTool} onChange={setVisitAiTool} tone="dark" />
                   <StepLabel label="검색 키워드" />
                   <input value={visitKeyword} onChange={e=>setVisitKeyword(e.target.value)}
                     placeholder="예: 청라 PT 추천, 청라 체형교정, 청라 다이어트 PT"
@@ -14895,12 +15000,14 @@ function MemberForm({ initial, onSave, onBack, prefill = null }) {
 
       <Card title="상담 정보" style={{marginTop:10}}>
         <StepLabel label="방문 경로 (복수 선택)" />
-        <ChipSelect multi
-          options={["네이버 검색","네이버 블로그","인스타그램","유튜브","AI 검색","지인 추천","지나가다가","당근","숨고","기타"]}
-          value={visitRoutes} onChange={setVisitRoutes} />
-        {visitRoutes.includes("AI 검색") && (
+        <AcquisitionChannelSelector value={visitRoutes} onChange={setVisitRoutes} tone="dark" />
+        {visitRoutes.includes(ACQ_AI_CHANNEL) && (
           <div style={{marginTop:10}}>
-            <Field label="검색 키워드" value={visitKeyword} onChange={setVisitKeyword} placeholder="예: 청라 PT 추천" />
+            <StepLabel label="AI 세부 출처" />
+            <AcquisitionAiToolSelector value={visitAiTool} onChange={setVisitAiTool} tone="dark" />
+            <div style={{marginTop:10}}>
+              <Field label="검색 키워드" value={visitKeyword} onChange={setVisitKeyword} placeholder="예: 청라 PT 추천" />
+            </div>
           </div>
         )}
         {visitRoutes.includes("기타") && (
@@ -23960,26 +24067,17 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
 // ════════════════════════════════════════════
 // 분석 리포트 허브 — 관리자 홈 사이드바/퀵메뉴의 "분석 리포트" 진입 화면
 //
-// 짐 전체 단위로 볼 수 있는 분석(유입 분석·회원 입력 현황)은 여기서 바로 열고,
-// 회원 한 명을 골라야 의미가 있는 분석(운동 분석·훈련 피드백 등)은 회원 목록으로 안내한다.
+// 짐 전체 단위로 볼 수 있는 분석(유입 분석·회원 입력 현황)만 이 허브에서 바로 연다.
+// 회원 한 명을 골라야 의미가 있는 분석(운동 분석·훈련 피드백 등)은 카드를 눌러도 회원을 다시 골라야 해서
+// 허브의 목적과 맞지 않아 제거했다 — 해당 기능 자체는 회원 상세(HubScreen) > 분석도구 메뉴에 그대로 있다.
 // 유입 분석은 화면을 복제하지 않고 회원 상세 > 분석도구와 같은 ReferralStatsScreen을 그대로 연다.
 // ════════════════════════════════════════════
 const ANALYTICS_GYM_REPORTS = [
   { key: "referral", icon: "📊", title: "유입 분석", sub: "방문 경로와 마케팅 성과" },
   { key: "memberInputStatus", icon: "🗂️", title: "회원 입력 현황", sub: "회원앱 입력 참여도 한눈에 보기" },
 ];
-const ANALYTICS_MEMBER_REPORTS = [
-  { icon: "💪", title: "운동 분석", sub: "부위별 훈련량과 성장 추이" },
-  { icon: "🗒️", title: "훈련 피드백", sub: "수업별 피드백 모아보기" },
-  { icon: "🗣️", title: "상담 리포트", sub: "회원의 변화와 다음 목표" },
-  { icon: "🔥", title: "대사 추정", sub: "유산소 · 체중 분석" },
-  { icon: "📋", title: "평가 기록", sub: "체형 · 기능 · 인체도" },
-  { icon: "📚", title: "운동 라이브러리", sub: "부위별 운동 기록" },
-  { icon: "🧘", title: "컨디셔닝", sub: "매일 기능 운동" },
-  { icon: "🤖", title: "AI 루틴 추천", sub: "수업기록 기반 루틴 제안" },
-];
 
-function AnalyticsReportScreen({ members = [], setScreen, loadMembers, loadPairSessions, showToast, onBack, onOpenReport }) {
+function AnalyticsReportScreen({ setScreen, loadMembers, loadPairSessions, showToast, onBack, onOpenReport }) {
   const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
   useEffect(() => {
     const h = () => setWinW(window.innerWidth);
@@ -23987,24 +24085,19 @@ function AnalyticsReportScreen({ members = [], setScreen, loadMembers, loadPairS
     return () => window.removeEventListener("resize", h);
   }, []);
   const isWide = winW >= 1024;
-  const memberCount = members.filter(isRegularAdminMember).length;
-
-  const goMembers = (title) => {
-    loadMembers?.();
-    setScreen?.("members");
-    showToast?.(`회원을 선택하면 상세 화면의 분석도구에서 ${title}을(를) 볼 수 있습니다.`);
-  };
 
   const cardBase = {
     background: DB.card, border: `1px solid ${DB.border}`, borderRadius: 16, boxShadow: DB.shadow,
     padding: "15px 16px", textAlign: "left", cursor: "pointer", minWidth: 0, width: "100%",
     display: "flex", alignItems: "center", gap: 12, fontFamily: DB.font,
   };
+  // 카드가 2개뿐이라 사이드바 옆 넓은 폭(1400)을 그대로 쓰면 과하게 늘어져 보이므로, 이 허브만 더 좁은 콘텐츠 폭을 쓴다.
+  const contentMaxWidth = isWide ? 720 : 820;
 
   const content = (
     <div style={{ flex: 1, overflowY: isWide ? "auto" : "visible", overscrollBehaviorY: isWide ? "contain" : undefined, minHeight: 0, height: isWide ? "var(--admin-layout-height, 100dvh)" : undefined, background: DB.bg, fontFamily: DB.font }}>
       <div style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(246,247,249,.90)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", borderBottom: DB.hairline }}>
-        <div style={{ maxWidth: isWide ? 1400 : 820, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top,0px))" }}>
+        <div style={{ maxWidth: contentMaxWidth, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top,0px))" }}>
           <button onClick={onBack} aria-label="홈으로" style={{ width: 34, height: 34, borderRadius: 11, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 15, cursor: "pointer", boxShadow: DB.shadow, flexShrink: 0 }}>←</button>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap", rowGap: 2 }}>
             <span style={{ fontWeight: 800, fontSize: isWide ? 20 : 17, color: DB.text, letterSpacing: "-.4px" }}>분석 리포트</span>
@@ -24013,9 +24106,9 @@ function AnalyticsReportScreen({ members = [], setScreen, loadMembers, loadPairS
         </div>
       </div>
 
-      <div style={{ maxWidth: isWide ? 1400 : 820, margin: "0 auto", padding: isWide ? "18px 28px calc(48px + env(safe-area-inset-bottom,0px))" : "14px 16px calc(48px + env(safe-area-inset-bottom,0px))" }}>
+      <div style={{ maxWidth: contentMaxWidth, margin: "0 auto", padding: isWide ? "18px 28px calc(48px + env(safe-area-inset-bottom,0px))" : "14px 16px calc(48px + env(safe-area-inset-bottom,0px))" }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: DB.faint, marginBottom: 9, letterSpacing: ".02em" }}>짐 전체 분석</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 10, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 10 }}>
           {ANALYTICS_GYM_REPORTS.map(r => (
             <button key={r.key} onClick={() => onOpenReport?.(r.key)}
               style={{ ...cardBase, background: `linear-gradient(135deg,rgba(57,199,184,.09),${DB.card})`, border: "1px solid rgba(57,199,184,.28)" }}>
@@ -24025,22 +24118,6 @@ function AnalyticsReportScreen({ members = [], setScreen, loadMembers, loadPairS
                 <span style={{ display: "block", fontWeight: 600, fontSize: 11.5, color: DB.sub, marginTop: 2, lineHeight: 1.45, wordBreak: "keep-all" }}>{r.sub}</span>
               </span>
               <span style={{ marginLeft: "auto", color: DB.mintSoft, fontSize: 15, fontWeight: 800, flexShrink: 0 }}>→</span>
-            </button>
-          ))}
-        </div>
-
-        <div style={{ fontSize: 12, fontWeight: 800, color: DB.faint, marginBottom: 4, letterSpacing: ".02em" }}>회원별 분석</div>
-        <div style={{ fontSize: 11.5, fontWeight: 600, color: DB.faint, marginBottom: 9, lineHeight: 1.6 }}>
-          회원 한 명을 선택해야 볼 수 있는 분석입니다. 카드를 누르면 회원 목록({memberCount}명)으로 이동합니다.
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 10 }}>
-          {ANALYTICS_MEMBER_REPORTS.map(r => (
-            <button key={r.title} onClick={() => goMembers(r.title)} style={cardBase}>
-              <span style={{ width: 38, height: 38, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{r.icon}</span>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: "block", fontWeight: 800, fontSize: 13.5, color: DB.text }}>{r.title}</span>
-                <span style={{ display: "block", fontWeight: 600, fontSize: 11, color: DB.faint, marginTop: 2, lineHeight: 1.4, wordBreak: "keep-all" }}>{r.sub}</span>
-              </span>
             </button>
           ))}
         </div>

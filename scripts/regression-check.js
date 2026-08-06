@@ -4941,6 +4941,9 @@ const checks = [
     L.maskAcquisitionName('홍길동') === '홍**' && L.maskAcquisitionName('김민') === '김*' && L.maskAcquisitionName('') === '회원'
   ),
 
+  ['회원 프로필 수정: 저장 시 members 배열 상태도 함께 갱신 — 방문계기 수정이 유입 분석에 즉시 반영된다',
+    app.includes('setMembers(prev => prev.map(m => m.id === member.id ? {...m, ...publicD} : m));')
+  ],
   ['방문계기 탭: 저장된 방문 계기 상세 메모가 초기값 1순위(연산자 우선순위 버그로 회원 메모에 덮어써지지 않음)',
     app.includes('sv.visitDetail || initial?.visitDetail || (initial?.memo?.includes("방문") ? initial.memo : "")') &&
     !app.includes('initial?.memo?.includes("방문") ? initial?.memo : sv.visitDetail || ""')

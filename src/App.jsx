@@ -9731,6 +9731,9 @@ export default function App() {
       const { memo, ticketInfo, ...publicD } = d;
       const u = {...member, ...publicD};
       setMember(u);
+      // 회원 목록 상태에도 같은 값을 반영한다 — 유입 분석·회원 목록 등 members 배열을 읽는 화면이
+      // 프로필(방문계기 포함) 수정 직후에도 최신 값을 보게 하기 위함(private 필드는 제외).
+      setMembers(prev => prev.map(m => m.id === member.id ? {...m, ...publicD} : m));
       setMemberPrivateData(prev => ({
         ...(prev || {}),
         ...('memo' in d && { memo: memo ?? "" }),

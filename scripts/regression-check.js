@@ -76,6 +76,26 @@ function usScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 회원 상세 "오늘 수업" 카드 부위별 근육통·통증 "최근 상태" 참고 표시: 실제 실행 시나리오 검증 ──
+// getHubBodyPartAwareness는 선택을 막지 않고(HubScreen의 partChip onClick은 항상 동작), 참고 경고 판정에만 쓰인다.
+let hubAwarenessLib = null;
+try {
+  const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceDaysDiff = app.slice(app.indexOf('function koreaDateDaysDiff(fromDateStr,toDateStr){'), app.indexOf('function getPersonalWorkoutCompletionDateKey'));
+  const sliceNormalize = app.slice(app.indexOf('function normalizePersonalWorkoutSoreness'), app.indexOf('function sorenessTimingLabel'));
+  const sliceLevelDesc = app.slice(app.indexOf('function sorenessTimingLabel'), app.indexOf('function getPersonalWorkoutAttentionReasons'));
+  const sliceFeedbackParts = app.slice(app.indexOf('function memberFeedbackParts(existing={})'), app.indexOf('function formatSorenessBodyParts'));
+  const sliceAwareness = app.slice(app.indexOf('const HUB_SORENESS_RECENCY_DAYS'), app.indexOf('function HubScreen('));
+  hubAwarenessLib = new Function(`${sliceKoreaDate}\n${sliceDaysDiff}\n${sliceNormalize}\n${sliceLevelDesc}\n${sliceFeedbackParts}\n${sliceAwareness}\nreturn { getHubBodyPartAwareness, HUB_SORENESS_RECENCY_DAYS, HUB_PAIN_RECENCY_DAYS };`)();
+} catch (e) {
+  console.error('[regression] 오늘 수업 카드 부위 경고 로직 추출 실패:', e.message);
+}
+function hbaScenario(name, fn) {
+  if (!hubAwarenessLib) return [name, false];
+  try { return [name, !!fn(hubAwarenessLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 개인운동 공통 계산 헬퍼: 실제 실행 시나리오 검증 ──
 // 회원앱 기록 화면·목록·상세와 관리자 "최근 개인운동" 카드가 모두 같은 함수를 쓰므로, 원본 소스를 그대로
 // 슬라이스해 실행한다(로직을 여기에 다시 옮겨 적지 않는다). 볼륨은 기존 exVol을, 식별자는 기존
@@ -4679,6 +4699,46 @@ const checks = [
     const justAfterMidnightKST = lib.getKoreaDateString(new Date(Date.UTC(2026, 7, 4, 15, 30))); // KST 2026-08-05 00:30
     const justBeforeMidnightKST = lib.getKoreaDateString(new Date(Date.UTC(2026, 7, 4, 14, 30))); // KST 2026-08-04 23:30
     return justAfterMidnightKST === '2026-08-05' && justBeforeMidnightKST === '2026-08-04';
+  }),
+
+  // ── "오늘 수업" 카드 부위 선택 — 근육통·통증은 참고 경고일 뿐 선택을 막지 않는다 ──
+  hbaScenario('시나리오A: 2일 전 가슴 근육통(PT 수업) — 최근 3일 이내라 참고 표시 대상(sore)', lib => {
+    const sessions = [{ date: '2026-08-08', memberFeedback: { sorenessLevel: '보통', sorenessBodyParts: ['가슴'] } }];
+    const info = lib.getHubBodyPartAwareness({ sessions, todayKey: '2026-08-10' });
+    return info['가슴']?.kind === 'sore';
+  }),
+  hbaScenario('시나리오B: 3일 전 어깨 통증 VAS 5 — 최근 7일 이내라 참고 표시 대상(pain), VAS 값도 함께 노출', lib => {
+    const ci = [{ date: '2026-08-07', painPart: '어깨', painVas: 5 }];
+    const info = lib.getHubBodyPartAwareness({ ci, todayKey: '2026-08-10' });
+    return info['어깨']?.kind === 'pain' && info['어깨']?.vas === 5;
+  }),
+  hbaScenario('시나리오C: 4일 전 근육통 — 최근 3일 초과라 "오늘 수업" 참고 표시에서 제외(히스토리 자체는 건드리지 않음)', lib => {
+    const sessions = [{ date: '2026-08-06', memberFeedback: { sorenessLevel: '약간', sorenessBodyParts: ['등'] } }];
+    const info = lib.getHubBodyPartAwareness({ sessions, todayKey: '2026-08-10' });
+    return info['등'] === undefined;
+  }),
+  hbaScenario('시나리오D: 8일 전 일반 통증 — 최근 7일 초과라 "오늘 수업" 참고 표시에서 제외', lib => {
+    const ci = [{ date: '2026-08-02', painPart: '가슴', painVas: 3 }];
+    const info = lib.getHubBodyPartAwareness({ ci, todayKey: '2026-08-10' });
+    return info['가슴'] === undefined;
+  }),
+  hbaScenario('시나리오E: PT 근육통과 개인운동 근육통이 같은 부위(등)에 있으면 가장 최근 기록 하나만 표시(중복 없음)', lib => {
+    const sessions = [{ date: '2026-08-05', memberFeedback: { sorenessLevel: '보통', sorenessBodyParts: ['등'] } }];
+    const personalWorkouts = [{ id: 'w1', status: 'completed' }];
+    const personalSorenessMap = { w1: { workoutDate: '2026-08-08', bodyParts: [{ part: '등', level: 3 }] } };
+    const info = lib.getHubBodyPartAwareness({ sessions, personalWorkouts, personalSorenessMap, todayKey: '2026-08-10' });
+    return info['등']?.kind === 'sore' && info['등']?.source === 'personal' && info['등']?.date === '2026-08-08';
+  }),
+  hbaScenario('시나리오F: 같은 부위(가슴)에 근육통과 통증이 동시에 최근 기록으로 있으면 통증 경고를 우선 표시', lib => {
+    const sessions = [{ date: '2026-08-09', memberFeedback: { sorenessLevel: '보통', sorenessBodyParts: ['가슴'] } }];
+    const ci = [{ date: '2026-08-07', painPart: '가슴', painVas: 4 }];
+    const info = lib.getHubBodyPartAwareness({ sessions, ci, todayKey: '2026-08-10' });
+    return info['가슴']?.kind === 'pain';
+  }),
+  hbaScenario('시나리오G: VAS 값 없는 레거시 통증 데이터도 오류 없이 처리되고(vas:null) 참고 표시 대상이 된다', lib => {
+    const ci = [{ date: '2026-08-08', painPart: '무릎' }];
+    const info = lib.getHubBodyPartAwareness({ ci, todayKey: '2026-08-10' });
+    return info['무릎']?.kind === 'pain' && info['무릎']?.vas === null;
   }),
 ];
 

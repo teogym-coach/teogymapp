@@ -15161,6 +15161,61 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
   );
 }
 
+// "오늘 수업" 카드의 부위별 근육통·통증 "최근 상태" 참고 표시 — 절대 선택을 막지 않는다(파트 클릭 자체는 항상 가능).
+// PT 수업 후 근육통(sessions.memberFeedback/sorenessReport)과 개인운동 후 근육통(personalSorenessMap)을 함께 조회해
+// 부위별로 가장 최근 기록 하나만 남기고, 건강 체크인 통증(memberCheckins)과 합쳐 같은 부위면 통증을 우선한다.
+// 근육통은 최근 HUB_SORENESS_RECENCY_DAYS일, 통증은 최근 HUB_PAIN_RECENCY_DAYS일 이내 기록만 "현재 경고"로 남기고
+// 그 밖의 기록은 여기서 제외될 뿐 히스토리·분석 데이터에는 전혀 영향을 주지 않는다.
+const HUB_SORENESS_RECENCY_DAYS = 3;
+const HUB_PAIN_RECENCY_DAYS = 7;
+function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], personalSorenessMap = {}, ci = [], todayKey = getKoreaDateString() } = {}) {
+  const soreByPart = {};
+  const noteSore = (part, date, levelLabel, source) => {
+    if (!part || !date) return;
+    const cur = soreByPart[part];
+    if (!cur || date > cur.date) soreByPart[part] = { date, levelLabel: levelLabel || "", source };
+  };
+  (sessions || []).forEach(s => {
+    const f = s.memberFeedback;
+    memberFeedbackParts(f || {}).forEach(p => noteSore(p, s.date, f?.sorenessLevel, "pt"));
+    const r = s.sorenessReport;
+    if (r && r.part) noteSore(r.part, s.date, r.level, "pt");
+  });
+  (personalWorkouts || []).forEach(w => {
+    const soreness = normalizePersonalWorkoutSoreness(personalSorenessMap[w.id]);
+    if (!soreness) return;
+    (soreness.bodyParts || []).forEach(bp => noteSore(bp.part, soreness.workoutDate, sorenessLevelDescription(bp.level), "personal"));
+  });
+
+  const painByPart = {};
+  (ci || []).forEach(c => {
+    const rec = c.painRecord || { part: c.painPart, side: c.painSide, vas: c.painVas };
+    const part = rec?.part;
+    if (!part || part === "없음") return;
+    const date = String(c.date || c.id || "").slice(0, 10);
+    if (!date) return;
+    const cur = painByPart[part];
+    const vasNum = Number(rec.vas);
+    if (!cur || date > cur.date) painByPart[part] = { date, vas: Number.isFinite(vasNum) ? vasNum : null, side: rec.side || "" };
+  });
+
+  const byPart = {};
+  new Set([...Object.keys(soreByPart), ...Object.keys(painByPart)]).forEach(part => {
+    const painRec = painByPart[part];
+    const painDays = painRec ? koreaDateDaysDiff(painRec.date, todayKey) : null;
+    if (painRec && painDays != null && painDays >= 0 && painDays <= HUB_PAIN_RECENCY_DAYS) {
+      byPart[part] = { kind: "pain", daysAgo: painDays, ...painRec };
+      return;
+    }
+    const soreRec = soreByPart[part];
+    const soreDays = soreRec ? koreaDateDaysDiff(soreRec.date, todayKey) : null;
+    if (soreRec && soreDays != null && soreDays >= 0 && soreDays <= HUB_SORENESS_RECENCY_DAYS) {
+      byPart[part] = { kind: "sore", daysAgo: soreDays, ...soreRec };
+    }
+  });
+  return byPart;
+}
+
 function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
@@ -15436,13 +15491,20 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
 
   // ── 오늘 진행 부위 (화면 표시·불러오기용 — 별도 저장하지 않음) ─
   const plannedParts = currentNextParts; // 지난 수업에서 저장해 둔 "다음 운동 부위"
-  const avoidParts = [...new Set([
-    ...(soreInfo?.parts||[]),
-    ...(ciPainRec && ciPainRec.part && ciPainRec.part!=="없음" ? [ciPainRec.part] : []),
-  ])];
+  // 부위별 근육통·통증 "최근 상태" 참고 표시 — getHubBodyPartAwareness는 선택을 막지 않는다(경고 표시에만 사용).
+  const bodyPartAwareness = getHubBodyPartAwareness({ sessions, personalWorkouts, personalSorenessMap, ci, todayKey: todayStr });
   const [todayParts, setTodayParts] = useState(() => plannedParts);
   useEffect(() => { setTodayParts(plannedParts); }, [member.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleTodayPart = (p) => setTodayParts(prev => prev.includes(p) ? prev.filter(x=>x!==p) : [...prev, p]);
+  // 통증 부위는 선택 자체는 항상 가능하되, "새로 선택"할 때만 한 번 더 확인한다(이미 선택된 부위를 해제할 땐 확인 없음).
+  const [pendingPainPart, setPendingPainPart] = useState(null);
+  const handleTogglePart = (p) => {
+    const info = bodyPartAwareness[p];
+    if (!todayParts.includes(p) && info?.kind === "pain") { setPendingPainPart(p); return; }
+    toggleTodayPart(p);
+  };
+  const confirmPendingPain = () => { if (pendingPainPart) toggleTodayPart(pendingPainPart); setPendingPainPart(null); };
+  const selectedSoreParts = todayParts.filter(p => bodyPartAwareness[p]?.kind === "sore");
   const recentSameParts = (() => {
     if (!todayParts.length) return null;
     for (let i=sessions.length-1;i>=0;i--) {
@@ -15484,15 +15546,21 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
       background:tone==="today"?DB.mintTintStrong:"rgba(15,23,42,.05)", color:tone==="today"?DB.mintSoft:DB.faint}}>{label}</span>
   ) : null;
   const whenToneOf = (label) => label && label.startsWith("오늘") ? "today" : "past";
-  const partChip = (label, active, onClick, avoid, subLabel) => (
+  // kind: null(일반) | "sore"(최근 근육통, 주황) | "pain"(최근 통증, 붉은색) — 선택 여부(active)가 항상 시각적으로 우선한다.
+  // 선택된 상태에서도 kind가 있으면 링(box-shadow)으로만 주의를 남겨 "선택 안 된 것처럼" 보이지 않게 한다.
+  const PART_CHIP_TONE = { sore:{border:"rgba(245,158,11,.55)",tint:"rgba(245,158,11,.07)",text:"#92600A",ring:"rgba(245,158,11,.55)"}, pain:{border:"rgba(239,68,68,.55)",tint:"rgba(239,68,68,.08)",text:"#B02A2A",ring:"rgba(239,68,68,.55)"} };
+  const partChip = (label, active, onClick, kind, subLabel) => {
+    const tone = PART_CHIP_TONE[kind] || null;
+    return (
     <button key={label} type="button" onClick={onClick} style={{
-      borderRadius:999, padding:"8px 16px", fontSize:13, fontWeight:700, fontFamily:DB.font, cursor:"pointer",
-      border:avoid?"1px dashed rgba(245,158,11,.55)":`1px solid ${active?"transparent":DB.border}`,
-      background:avoid?"rgba(245,158,11,.05)":active?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:DB.card,
-      color:avoid?"#92600A":active?"#fff":DB.sub,
-      boxShadow:active&&!avoid?"0 6px 18px rgba(57,199,184,.32)":DB.shadow,
+      borderRadius:999, padding:"8px 16px", minHeight:40, fontSize:13, fontWeight:700, fontFamily:DB.font, cursor:"pointer",
+      border:active?"1px solid transparent":tone?`1.5px dashed ${tone.border}`:`1px solid ${DB.border}`,
+      background:active?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:tone?tone.tint:DB.card,
+      color:active?"#fff":tone?tone.text:DB.sub,
+      boxShadow:active?(tone?`0 6px 18px rgba(57,199,184,.32), 0 0 0 2px ${tone.ring}`:"0 6px 18px rgba(57,199,184,.32)"):DB.shadow,
     }}>{label}{subLabel&&<small style={{fontSize:10,fontWeight:700,opacity:.85,marginLeft:3}}>{subLabel}</small>}</button>
-  );
+    );
+  };
   const menuBtn = (icon, label, desc, sc) => (
     <button key={sc} onClick={()=>setScreen(sc)} style={{
       border:`1px solid ${DB.border}`, background:DB.bg, borderRadius:14,
@@ -15988,9 +16056,15 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             </div>
 
             {plannedParts.length>0 && <div style={{fontSize:11,fontWeight:600,color:DB.sub,marginBottom:9}}>지난 수업에서 계획한 부위 · <b style={{color:DB.mintSoft,fontWeight:800}}>{plannedParts.join(" · ")}</b></div>}
-            <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
-              {NEXT_PT_PART_OPTIONS.filter(p=>p!=="미정").map(p=>partChip(p, todayParts.includes(p), ()=>toggleTodayPart(p), avoidParts.includes(p), avoidParts.includes(p)?(soreInfo?.parts?.includes(p)?"근육통":"통증"):null))}
+            <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:selectedSoreParts.length?8:14}}>
+              {NEXT_PT_PART_OPTIONS.filter(p=>p!=="미정").map(p=>partChip(p, todayParts.includes(p), ()=>handleTogglePart(p), bodyPartAwareness[p]?.kind||null, bodyPartAwareness[p]?.kind==="sore"?"근육통":bodyPartAwareness[p]?.kind==="pain"?"통증":null))}
             </div>
+            {selectedSoreParts.length>0 && (
+              <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"9px 12px",borderRadius:DB.radiusSm,background:"rgba(245,158,11,.08)",color:"#92600A",fontSize:11.5,fontWeight:600,lineHeight:1.5,marginBottom:14}}>
+                <span style={{flexShrink:0}}>⚠️</span>
+                <span>최근 회원이 {selectedSoreParts.join(" · ")} 부위의 근육통을 기록했습니다. 현재 상태를 확인한 후 운동 강도와 구성을 조절해주세요.</span>
+              </div>
+            )}
 
             {todayCardState==="idle" && (
               <>
@@ -16557,6 +16631,23 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 통증 부위 선택 확인 — "부위 선택 취소"는 이 부위만 선택하지 않고 다른 선택된 부위는 그대로 둔다 ── */}
+      {pendingPainPart && (
+        <div role="dialog" aria-modal="true" aria-label="통증 부위 선택 확인" onClick={e=>{ if (e.target===e.currentTarget) setPendingPainPart(null); }}
+          style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:220,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{width:"100%",maxWidth:360,background:"#FFFFFF",borderRadius:20,border:"1px solid #D6DCE3",boxShadow:"0 20px 60px rgba(15,23,42,.25)",padding:"20px 20px 16px"}}>
+            <div style={{fontSize:14.5,fontWeight:800,color:DB.text,marginBottom:6}}>{pendingPainPart} 통증 확인이 필요해요</div>
+            <div style={{fontSize:12.5,color:DB.sub,lineHeight:1.6,marginBottom:16}}>
+              최근 {pendingPainPart} 통증{Number.isFinite(bodyPartAwareness[pendingPainPart]?.vas)?` VAS ${bodyPartAwareness[pendingPainPart].vas}`:""} 기록이 있습니다.<br/>현재 통증 상태를 확인하셨나요?
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button type="button" onClick={()=>setPendingPainPart(null)} style={{flex:1,border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,borderRadius:12,padding:"11px 10px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>부위 선택 취소</button>
+              <button type="button" onClick={confirmPendingPain} style={{flex:1,border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",borderRadius:12,padding:"11px 10px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:DB.font,boxShadow:"0 6px 18px rgba(57,199,184,.32)"}}>확인 후 진행</button>
+            </div>
           </div>
         </div>
       )}

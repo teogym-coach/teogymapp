@@ -82,13 +82,29 @@ function usScenario(name, fn) {
 let acquisitionLib = null;
 try {
   const sliceAcq = app.slice(app.indexOf('const ACQUISITION_FIRST_TOUCH_OPTIONS'), app.indexOf('// 온보딩 v2의 세부 목표(12종)'));
-  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER, ACQ_CANONICAL_CHANNELS, ACQUISITION_CHANNEL_OPTIONS };`)();
+  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER, ACQ_CANONICAL_CHANNELS, ACQUISITION_CHANNEL_OPTIONS, acqSourceTimestampMs, acqPickNewerCandidate, acqSourceOriginLabel };`)();
 } catch (e) {
   console.error('[regression] 유입 분석 정규화 로직 추출 실패:', e.message);
 }
 function acqScenario(name, fn) {
   if (!acquisitionLib) return [name, false];
   try { return [name, !!fn(acquisitionLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
+// ── 방문계기 수정 timestamp(survey.visitUpdatedAt) 계산 로직: 실제 실행 시나리오 검증 ──
+// db.js는 Firestore SDK(serverTimestamp 등)를 import하므로 그대로 실행할 수 없어, serverTimestamp만
+// 스텁으로 주입하고 원본 헬퍼 코드 자체를 슬라이스해 실행한다.
+let visitUpdatedAtLib = null;
+try {
+  const sliceVisit = db.slice(db.indexOf('const SURVEY_VISIT_FIELDS'), db.indexOf('export async function addMember'));
+  visitUpdatedAtLib = new Function('serverTimestamp', `${sliceVisit}\nreturn { computeVisitUpdatedAt, surveyVisitFieldsEqual, surveyHasAnyVisitData };`)(() => '__SERVER_TS__');
+} catch (e) {
+  console.error('[regression] 방문계기 timestamp 로직 추출 실패:', e.message);
+}
+function visitAtScenario(name, fn) {
+  if (!visitUpdatedAtLib) return [name, false];
+  try { return [name, !!fn(visitUpdatedAtLib)]; }
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
@@ -4942,6 +4958,109 @@ const checks = [
   ),
 
   // ════════════════════════════════════════════
+  // 유입 분석: 방문계기 "최근 기록 1개만" 선택(합산 금지) — 이희경 회원 버그 수정
+  // ════════════════════════════════════════════
+  acqScenario('최신 선택 1: 과거 onboarding(지나가다 발견) + 최근 profile(간판) → 최종 sources는 [간판]만(합쳐지지 않음)', L => {
+    const r = L.normalizeMemberAcquisitionData(
+      { survey: { visitRoutes: ['간판'], visitUpdatedAt: { toDate: () => new Date('2026-08-06T10:00:00Z') } } },
+      { v2: { updatedAt: '2026-08-01T00:00:00.000Z', acquisition: { firstTouch: 'walk_by' } } }
+    );
+    return r.sources.length === 1 && r.sources[0] === '간판' && r.selectedSource === 'profile';
+  }),
+  acqScenario('최신 선택 2: 과거 profile(간판, timestamp 없음) + 최근 onboarding(네이버 검색) → 최종 sources는 [네이버 검색]', L => {
+    const r = L.normalizeMemberAcquisitionData(
+      { survey: { visitRoutes: ['간판'] } }, // visitUpdatedAt 없음 — 이 기능 이전에 저장된 레거시
+      { v2: { updatedAt: '2026-08-06T10:00:00.000Z', acquisition: { firstTouch: 'naver_search' } } }
+    );
+    return r.sources.length === 1 && r.sources[0] === '네이버 검색' && r.selectedSource === 'onboarding';
+  }),
+  acqScenario('최신 선택 3: profile·onboarding timestamp가 정확히 동일하면 profile 우선', L => {
+    const same = { toDate: () => new Date('2026-08-01T00:00:00Z') };
+    const r = L.normalizeMemberAcquisitionData(
+      { survey: { visitRoutes: ['간판'], visitUpdatedAt: same } },
+      { v2: { updatedAt: '2026-08-01T00:00:00.000Z', acquisition: { firstTouch: 'walk_by' } } }
+    );
+    return r.selectedSource === 'profile' && r.sources[0] === '간판';
+  }),
+  acqScenario('최신 선택 4: 양쪽 모두 timestamp가 없으면 profile 우선', L => {
+    const r = L.normalizeMemberAcquisitionData(
+      { survey: { visitRoutes: ['간판'] } },
+      { v2: { acquisition: { firstTouch: 'walk_by' } } } // v2.updatedAt 없음
+    );
+    return r.selectedSource === 'profile' && r.sources[0] === '간판';
+  }),
+  acqScenario('최신 선택 5: 최신 profile에서 복수 경로를 선택했으면 그 복수 경로만 그대로 집계된다', L => {
+    const r = L.normalizeMemberAcquisitionData(
+      { survey: { visitRoutes: ['간판', '지인 소개'], visitUpdatedAt: { toDate: () => new Date('2026-08-06') } } },
+      { v2: { updatedAt: '2026-08-01T00:00:00.000Z', acquisition: { firstTouch: 'walk_by' } } }
+    );
+    return r.sources.length === 2 && r.sources.includes('간판') && r.sources.includes('지인 소개');
+  }),
+  acqScenario('최신 선택 6: 서로 다른 출처의 방문 경로는 절대 합쳐지지 않는다(선택된 출처의 채널만 반환)', L => {
+    const r = L.normalizeMemberAcquisitionData(
+      { survey: { visitRoutes: ['간판'], visitUpdatedAt: { toDate: () => new Date('2026-08-06') } } },
+      { v2: { updatedAt: '2026-08-01T00:00:00.000Z', acquisition: { firstTouch: 'referral' } } }
+    );
+    return !r.sources.includes('지인 소개') && r.sources.length === 1;
+  }),
+  acqScenario('최신 선택 7: 온보딩 firstTouch(채널 통계)와 decisionTouch(상담 결정 상세)는 채널로 중복 집계되지 않는다', L => {
+    const r = L.normalizeMemberAcquisitionData({}, { v2: {
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      acquisition: { firstTouch: 'naver_blog', decisionTouch: 'price' },
+    } });
+    return r.sources.length === 1 && r.sources[0] === '네이버 블로그' && r.decisionTouch && r.decisionTouch !== '네이버 블로그';
+  }),
+  acqScenario('출처 우선순위 상수: profile > onboarding > consultation 순서가 유지된다', L =>
+    L.acqPickNewerCandidate({ key: 'onboarding', hasTs: false }, { key: 'profile', hasTs: false }).key === 'profile' &&
+    L.acqPickNewerCandidate({ key: 'consultation', hasTs: false }, { key: 'onboarding', hasTs: false }).key === 'onboarding'
+  ),
+  ['이희경 회원: HubScreen 사전 문진 카드와 유입 분석 목록이 같은 normalizeMemberAcquisitionData 결과(selectedSource)로 출처·날짜 캡션을 표시한다',
+    app.includes('acqSourceOriginLabel(acqSummary.selectedSource)') &&
+    app.includes('acqSourceOriginLabel(r.acq.selectedSource)') &&
+    app.includes("const ACQ_SOURCE_ORIGIN_LABEL = { profile: \"회원정보에서 수정\", onboarding: \"온보딩 응답\", consultation: \"상담 등록 시 입력\" };")
+  ],
+
+  // ════════════════════════════════════════════
+  // 방문계기 수정 timestamp(survey.visitUpdatedAt) — 무관한 회원정보 수정으로는 갱신되지 않아야 함
+  // ════════════════════════════════════════════
+  visitAtScenario('방문계기 timestamp 1: 방문계기 이외 필드만 바뀌면(이름·체중 등) visitUpdatedAt이 갱신되지 않는다', L => {
+    const prev = { visitRoutes: ['간판'], gender: '남', weight: '70' };
+    const next = { visitRoutes: ['간판'], gender: '남', weight: '75' }; // 방문계기 필드는 동일, 체중만 변경
+    const r = L.computeVisitUpdatedAt(prev, next);
+    return r === undefined;
+  }),
+  visitAtScenario('방문계기 timestamp 2: visitRoutes가 실제로 바뀌면 serverTimestamp가 새로 찍힌다', L => {
+    const prev = { visitRoutes: ['지나가다 발견'] };
+    const next = { visitRoutes: ['간판'] };
+    const r = L.computeVisitUpdatedAt(prev, next);
+    return r === '__SERVER_TS__';
+  }),
+  visitAtScenario('방문계기 timestamp 3: 과거에 있던 visitUpdatedAt은 실제 변경이 없으면 그대로 이어간다(유실 없음)', L => {
+    const prev = { visitRoutes: ['간판'], visitUpdatedAt: 'OLD_TS' };
+    const next = { visitRoutes: ['간판'] };
+    return L.computeVisitUpdatedAt(prev, next) === 'OLD_TS';
+  }),
+  visitAtScenario('방문계기 timestamp 4: 배열 순서만 다른 동일 경로 선택은 "변경 없음"으로 판정된다(중복 저장 방지)', L =>
+    L.surveyVisitFieldsEqual({ visitRoutes: ['간판', '지인 소개'] }, { visitRoutes: ['지인 소개', '간판'] }) === true
+  ),
+  ['방문계기 timestamp: updateMember이 실제 변경 여부를 확인해 survey.visitUpdatedAt을 조건부로 갱신한다',
+    db.includes('const vAt = computeVisitUpdatedAt(before.survey, nextSurvey);') &&
+    db.includes('if (vAt !== undefined) nextSurvey.visitUpdatedAt = vAt; else delete nextSurvey.visitUpdatedAt;')
+  ],
+  ['방문계기 timestamp: addMember도 신규 등록 시점에 방문 경로가 있으면 최초 timestamp를 남긴다',
+    db.includes('if (payload.survey && surveyHasAnyVisitData(payload.survey)) {') &&
+    db.includes('payload.survey = { ...payload.survey, visitUpdatedAt: serverTimestamp() };')
+  ],
+  ['방문계기 timestamp: Firestore Rules는 트레이너의 survey 쓰기를 필드 제한 없이 이미 허용 중이라(회원 본인 쓰기만 memberProfileUpdateKeysAllowed로 제한) 별도 화이트리스트 추가가 필요 없다',
+    (() => {
+      const start = firestoreRules.indexOf('match /members/{memberId}');
+      const slice = firestoreRules.slice(start, start + 1200).replace(/\s+/g, ' ');
+      const trainerBranch = slice.slice(slice.indexOf('allow update:'), slice.indexOf('|| (resource.data.memberUid'));
+      return trainerBranch.includes('resource.data.trainerUid == uid()') && !trainerBranch.includes('memberProfileUpdateKeysAllowed');
+    })()
+  ],
+
+  // ════════════════════════════════════════════
   // 분석 리포트: 회원별 분석 카드 제거 + 방문 경로 선택지 공통화
   // ════════════════════════════════════════════
   ['분석 리포트: 회원별 분석 제목과 카드 목록(ANALYTICS_MEMBER_REPORTS)이 더 이상 없다',
@@ -5036,10 +5155,11 @@ const checks = [
     (app.match(/value=\{visitDetail\} onChange=\{e=>setVisitDetail\(e\.target\.value\)\}/g) || []).length === 1 &&
     app.includes('visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo, visitAiMemo,')
   ],
-  ['유입 분석: 회원 프로필 방문계기 · 상담 문서 · 온보딩 v2 세 구조를 하나의 공용 selector로 읽는다',
+  ['유입 분석: 회원 프로필 방문계기 · 상담 문서 · 온보딩 v2 세 구조를 하나의 공용 selector로 읽되, 합치지 않고 최근 기록 1개만 선택한다',
     app.includes('function normalizeMemberAcquisitionData(entity, onboarding)') &&
     app.includes('const ac = (onboarding && onboarding.v2 && onboarding.v2.acquisition) || (e.v2 && e.v2.acquisition) || {};') &&
-    app.includes('const pick = (key) => acqText(sv[key]) || acqText(e[key]);')
+    app.includes('.reduce(acqPickNewerCandidate, null);') &&
+    !app.includes('acqArr(sv.visitRoutes).forEach(pushSource);') // 예전 "전부 합산" 방식이 남아있지 않은지 확인
   ],
   ['유입 분석: 회원 상세(사전 문진 카드)도 같은 정규화 함수를 사용한다(표기 불일치 방지)',
     (app.match(/normalizeMemberAcquisitionData\(member, ob\)/g) || []).length === 2 &&

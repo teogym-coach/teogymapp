@@ -396,6 +396,27 @@ async function saveMemberPrivateFields(memberId, privatePayload) {
   await setDoc(privateRef, { ...privatePayload, updatedAt: serverTimestamp() }, { merge: true });
 }
 
+// 유입 분석이 "가장 최근 방문계기 기록"을 판단하려면 방문계기(survey.visit*)를 실제로 언제 고쳤는지가
+// 필요하다. 그런데 survey는 MemberForm이 8개 탭 전체를 한 번에 통째로 다시 저장하는 구조라(다른 탭만
+// 고쳐도 survey 전체가 재기록됨), 문서에 그냥 updatedAt만 있으면 이름·체중·스케줄 수정으로도 "방문계기가
+// 방금 바뀐 것"처럼 보인다. 그래서 이 필드들만 콕 집어 실제 값이 바뀌었을 때만 survey.visitUpdatedAt을
+// 갱신한다 — updateMember/addMember 두 곳에서 공유한다.
+const SURVEY_VISIT_FIELDS = ["visitRoutes", "visitDetail", "visitEtc", "visitRealMemo", "visitAiTool", "visitKeyword", "visitAiMemo", "visitReferer"];
+function surveyVisitFieldsEqual(a = {}, b = {}) {
+  const norm = (v) => Array.isArray(v) ? JSON.stringify([...v].map(String).sort()) : String(v ?? "");
+  return SURVEY_VISIT_FIELDS.every(f => norm(a[f]) === norm(b[f]));
+}
+function surveyHasAnyVisitData(sv = {}) {
+  return SURVEY_VISIT_FIELDS.some(f => Array.isArray(sv[f]) ? sv[f].length > 0 : !!sv[f]);
+}
+// prevSurvey: 저장 전 Firestore에 있던 survey(신규 생성 시엔 없음/{}). nextSurvey: 이번에 저장할 survey.
+// 반환값이 undefined면 visitUpdatedAt 키 자체를 넣지 않는다(과거에도 없었고 이번에도 안 바뀐 경우).
+function computeVisitUpdatedAt(prevSurvey, nextSurvey) {
+  if (!nextSurvey) return undefined;
+  if (surveyVisitFieldsEqual(prevSurvey || {}, nextSurvey)) return prevSurvey?.visitUpdatedAt ?? undefined;
+  return surveyHasAnyVisitData(nextSurvey) ? serverTimestamp() : undefined;
+}
+
 export async function addMember(data) {
   const uid = requireUid();
   dbLog("addMember", data.name);
@@ -407,6 +428,10 @@ export async function addMember(data) {
     createdAt:  serverTimestamp(),
     updatedAt:  serverTimestamp(),
   };
+  // 신규 등록 시점에 이미 방문 경로가 채워져 있으면(직접 입력 또는 상담 전환 prefill) 그 시점을 최초 기록으로 남긴다.
+  if (payload.survey && surveyHasAnyVisitData(payload.survey)) {
+    payload.survey = { ...payload.survey, visitUpdatedAt: serverTimestamp() };
+  }
   const ref = await addDoc(collection(db, "members"), payload);
   if (memo || ticketInfo) {
     await saveMemberPrivateFields(ref.id, clean({ memo, ticketInfo }));
@@ -428,6 +453,14 @@ export async function updateMember(id, data) {
   const { memo, ticketInfo, ...publicData } = data;
   const normalized = clean(normalizeMemberData(publicData));
   const hasPrivate = 'memo' in data || 'ticketInfo' in data;
+
+  // 방문계기 필드가 실제로 바뀐 경우에만 survey.visitUpdatedAt을 새로 찍는다(그 외엔 기존 값을 그대로 이어간다).
+  if (normalized.survey) {
+    const nextSurvey = { ...normalized.survey };
+    const vAt = computeVisitUpdatedAt(before.survey, nextSurvey);
+    if (vAt !== undefined) nextSurvey.visitUpdatedAt = vAt; else delete nextSurvey.visitUpdatedAt;
+    normalized.survey = nextSurvey;
+  }
 
   // Spark 회원앱 로그인은 email이 아니라 members.memberUid == auth.uid를 기준으로 한다.
   // 따라서 표시용 이메일이 바뀌어도 이미 연결된 memberUid를 자동 해제하지 않는다.

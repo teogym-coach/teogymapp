@@ -1428,49 +1428,128 @@ function normalizeAiSourceList(raw) {
   return found.length ? found : [ACQ_AI_OTHER];
 }
 
+// 방문계기 출처 하나의 신뢰 가능한 수정 시각을 밀리초로 환산한다.
+// ISO 문자열(온보딩 v2.updatedAt) / Firestore Timestamp(serverTimestamp로 쓴 visitUpdatedAt·updatedAt) 모두 지원.
+function acqSourceTimestampMs(v) {
+  if (!v) return 0;
+  if (typeof v === "string") { const t = Date.parse(v); return Number.isFinite(t) ? t : 0; }
+  if (typeof v.toDate === "function") { try { const d = v.toDate(); return Number.isFinite(d?.getTime?.()) ? d.getTime() : 0; } catch { return 0; } }
+  if (typeof v.toMillis === "function") { try { return v.toMillis(); } catch { return 0; } }
+  if (v instanceof Date) return Number.isFinite(v.getTime()) ? v.getTime() : 0;
+  return 0;
+}
+// 출처 간 동률·비교불가 시 우선순위(숫자가 작을수록 우선) — profile > onboarding > consultation
+const ACQ_SOURCE_PRIORITY = { profile: 0, onboarding: 1, consultation: 2 };
+// 두 후보 중 "최종값"으로 선택할 쪽을 고른다.
+// - 둘 다 신뢰 가능한 timestamp가 있으면 더 최근 쪽(같으면 우선순위)
+// - 한쪽만 timestamp가 있으면 그쪽이 이긴다(있는 timestamp가 없는 쪽보다 항상 더 신뢰할 수 있다)
+// - 둘 다 timestamp가 없으면 우선순위만으로 결정
+function acqPickNewerCandidate(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a.hasTs && b.hasTs) {
+    if (a.ts !== b.ts) return a.ts > b.ts ? a : b;
+    return ACQ_SOURCE_PRIORITY[a.key] <= ACQ_SOURCE_PRIORITY[b.key] ? a : b;
+  }
+  if (a.hasTs !== b.hasTs) return a.hasTs ? a : b;
+  return ACQ_SOURCE_PRIORITY[a.key] <= ACQ_SOURCE_PRIORITY[b.key] ? a : b;
+}
+
 // 회원(members) · 상담(consultations) · 온보딩(memberOnboarding/main) 세 구조를 하나로 읽는 공용 selector.
-// entity: members 문서(survey 중첩) 또는 consultations 문서(평탄 필드) — 둘 다 그대로 넣으면 된다.
+//
+// 이전에는 세 출처의 방문 경로를 전부 합쳐 sources 배열에 누적했다 — 그 결과 회원정보에서 최근에
+// "간판"으로 고쳐도 과거 온보딩의 "지나가다 발견"이 함께 집계되는 문제가 있었다(서로 다른 시점·출처의
+// 응답을 합산하면 안 된다). 지금은 회원 한 명당 딱 하나의 출처만 최종값으로 선택한다 — 각 출처의
+// 가장 최근 신뢰 가능한 timestamp를 비교해서 더 최근 쪽을 쓰고, 비교 불가하면 profile > onboarding
+// > consultation 순으로 우선한다. 복수 선택은 "선택된 그 출처 안에서"만 그대로 인정한다(합치지 않음).
+//
+// entity: members 문서(survey 중첩) 또는 consultations 문서(평탄 필드, survey 키 자체가 없음) — 둘 다 그대로 넣으면 된다.
 // onboarding: getMemberOnboarding() 결과(없으면 생략 가능).
 function normalizeMemberAcquisitionData(entity, onboarding) {
   const e = entity || {};
   const sv = e.survey || {};
   const ac = (onboarding && onboarding.v2 && onboarding.v2.acquisition) || (e.v2 && e.v2.acquisition) || {};
-  // survey(회원 프로필) 우선, 없으면 평탄 필드(상담 문서)
-  const pick = (key) => acqText(sv[key]) || acqText(e[key]);
+  const onboardingUpdatedAt = (onboarding && onboarding.v2 && onboarding.v2.updatedAt) || (e.v2 && e.v2.updatedAt) || null;
+  const isConsultationEntity = !("survey" in e); // members 문서는 항상 survey 키가 있고(비어있어도 {}), 상담 문서엔 없다
 
-  const sources = [];
-  const pushSource = (raw) => {
-    const c = normalizeAcquisitionChannel(raw);
-    if (c && !sources.includes(c)) sources.push(c);
-  };
-  acqArr(sv.visitRoutes).forEach(pushSource);
-  acqArr(e.visitRoutes).forEach(pushSource);
-  if (ac.firstTouch) pushSource(ACQ_ONBOARDING_CHANNEL[ac.firstTouch] || acquisitionLabel(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch) || ac.firstTouch);
+  // ── 후보 1: profile(members.survey.visit*) — 회원정보 수정 > 방문계기 탭 ──
+  const legacyReason = acqText(e.visitRealMemo) || acqText(e.visitReason) || acqText(e.referralSource) || acqText(e.source) || acqText(e.note);
+  const profileHasAny = !isConsultationEntity && !!(
+    acqArr(sv.visitRoutes).length || acqText(sv.visitDetail) || acqText(sv.visitEtc) ||
+    acqText(sv.visitRealMemo) || acqText(sv.visitReason) || acqText(sv.visitAiTool) || acqText(sv.visitKeyword) || legacyReason
+  );
+  const profileCandidate = profileHasAny ? {
+    key: "profile", ts: acqSourceTimestampMs(sv.visitUpdatedAt), hasTs: !!sv.visitUpdatedAt,
+    sources: acqArr(sv.visitRoutes).map(normalizeAcquisitionChannel).filter(Boolean),
+    sourceDetail: acqText(sv.visitDetail), otherSource: acqText(sv.visitEtc),
+    memberReason: acqText(sv.visitRealMemo) || acqText(sv.visitReason) || legacyReason,
+    aiSources: normalizeAiSourceList(acqText(sv.visitAiTool)),
+    keyword: acqText(sv.visitKeyword), aiMemo: acqText(sv.visitAiMemo), referer: acqText(sv.visitReferer),
+    decisionTouch: "",
+  } : null;
 
-  const aiSources = [];
-  const pushAi = (label) => { if (label && !aiSources.includes(label)) aiSources.push(label); };
-  normalizeAiSourceList(pick("visitAiTool")).forEach(pushAi);
-  if (ACQ_ONBOARDING_AI_SOURCE[ac.firstTouch]) pushAi(ACQ_ONBOARDING_AI_SOURCE[ac.firstTouch]);
+  // ── 후보 2: onboarding(memberOnboarding/main.v2.acquisition) — 회원앱 온보딩 ──
+  // v2는 목표·경험·생활습관·통증·병력·일정·성향·유입을 한 번에 통째로 제출하는 단일 폼이라,
+  // acquisition 전용 timestamp는 따로 없지만 v2.updatedAt(제출 시각)을 그대로 신뢰할 수 있다.
+  const onboardingHasAny = !!(ac.firstTouch || ac.decisionTouch);
+  const onboardingCandidate = onboardingHasAny ? {
+    key: "onboarding", ts: acqSourceTimestampMs(onboardingUpdatedAt), hasTs: !!onboardingUpdatedAt,
+    sources: ac.firstTouch
+      ? [normalizeAcquisitionChannel(ACQ_ONBOARDING_CHANNEL[ac.firstTouch] || acquisitionLabel(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch) || ac.firstTouch)].filter(Boolean)
+      : [],
+    sourceDetail: "", otherSource: ac.firstTouch === "other" ? (acqText(ac.firstTouchOther) || "기타") : "",
+    memberReason: "",
+    aiSources: ACQ_ONBOARDING_AI_SOURCE[ac.firstTouch] ? [ACQ_ONBOARDING_AI_SOURCE[ac.firstTouch]] : [],
+    keyword: "", aiMemo: "", referer: "",
+    decisionTouch: ac.decisionTouch
+      ? (ac.decisionTouch === "other" ? (acqText(ac.decisionTouchOther) || "기타") : (acquisitionLabel(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch) || ac.decisionTouch))
+      : "",
+  } : null;
 
-  const otherSource = pick("visitEtc") || (ac.firstTouch === "other" ? acqText(ac.firstTouchOther) : "");
-  // 회원이 직접 말한 방문 이유 — 프로필 방문계기 탭의 값이 1순위, 레거시(visitReason)·상담 메모가 그 다음.
-  const memberReason = acqText(sv.visitRealMemo) || acqText(sv.visitReason) || acqText(e.visitRealMemo)
-    || acqText(e.visitReason) || acqText(e.consultMemo);
-  const decisionTouch = ac.decisionTouch
-    ? (ac.decisionTouch === "other" ? (acqText(ac.decisionTouchOther) || "기타") : (acquisitionLabel(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch) || ac.decisionTouch))
-    : "";
+  // ── 후보 3: consultation(상담 문서 평탄 필드) — 상담 문서 자체를 넣었을 때만 해당(정식 회원 전환 후에는
+  // 그 방문 경로가 이미 profile로 옮겨져 있으므로, member 엔티티에는 이 후보를 만들지 않는다) ──
+  const consultationHasAny = isConsultationEntity && !!(
+    acqArr(e.visitRoutes).length || acqText(e.visitEtc) || acqText(e.visitAiTool) || acqText(e.visitKeyword) || acqText(e.consultMemo)
+  );
+  const consultationCandidate = consultationHasAny ? {
+    key: "consultation", ts: acqSourceTimestampMs(e.updatedAt) || acqSourceTimestampMs(e.createdAt), hasTs: !!(e.updatedAt || e.createdAt),
+    sources: acqArr(e.visitRoutes).map(normalizeAcquisitionChannel).filter(Boolean),
+    sourceDetail: "", otherSource: acqText(e.visitEtc),
+    memberReason: acqText(e.visitRealMemo) || acqText(e.visitReason) || acqText(e.consultMemo),
+    aiSources: normalizeAiSourceList(acqText(e.visitAiTool)),
+    keyword: acqText(e.visitKeyword), aiMemo: "", referer: "",
+    decisionTouch: "",
+  } : null;
 
-  const sourceDetail = pick("visitDetail");
-  const keyword = pick("visitKeyword");
-  const aiMemo = pick("visitAiMemo");
-  const referer = pick("visitReferer");
+  // ── 최근 기록 "하나만" 선택(합치지 않음) ──
+  const selected = [profileCandidate, onboardingCandidate, consultationCandidate]
+    .filter(Boolean)
+    .reduce(acqPickNewerCandidate, null);
+
+  if (!selected) {
+    return {
+      selectedSource: "", selectedAt: null,
+      sources: [], sourceDetail: "", otherSource: "", memberReason: "", aiSources: [],
+      keyword: "", aiMemo: "", referer: "", decisionTouch: "",
+      hasAny: false,
+    };
+  }
   return {
     // ── 공용 계약(유입 분석·회원 상세가 함께 사용) ──
-    sources, sourceDetail, otherSource, memberReason, aiSources,
+    sources: selected.sources, sourceDetail: selected.sourceDetail, otherSource: selected.otherSource,
+    memberReason: selected.memberReason, aiSources: selected.aiSources,
     // ── 화면 표시용 부가 정보 ──
-    keyword, aiMemo, referer, decisionTouch,
-    hasAny: !!(sources.length || sourceDetail || otherSource || memberReason || aiSources.length || keyword),
+    keyword: selected.keyword, aiMemo: selected.aiMemo, referer: selected.referer, decisionTouch: selected.decisionTouch,
+    // ── 어떤 출처가 최종으로 선택됐는지(카드 하단 보조 표시용) ──
+    selectedSource: selected.key, selectedAt: selected.hasTs ? selected.ts : null,
+    hasAny: true,
   };
+}
+
+// 회원 카드·사전 문진 카드에 "어디서 · 언제" 최종 선택됐는지 보여주기 위한 출처 라벨.
+const ACQ_SOURCE_ORIGIN_LABEL = { profile: "회원정보에서 수정", onboarding: "온보딩 응답", consultation: "상담 등록 시 입력" };
+function acqSourceOriginLabel(key) {
+  return ACQ_SOURCE_ORIGIN_LABEL[key] || "";
 }
 
 // 유입일 — "방문계기를 언제 수정했는지"가 아니라 "언제 유입됐는지"를 쓴다.
@@ -15700,7 +15779,12 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
             <div>
               {line("최초 발견", acquisitionText(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch, ac.firstTouchOther))}
               {line("상담 결정", acquisitionText(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch, ac.decisionTouchOther))}
-              {line("유입 채널", acqSummary.sources.join(", "))}
+              {line("유입 채널", acqSummary.sources.join(", ") || ACQ_UNKNOWN)}
+              {acqSummary.selectedSource && (
+                <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,fontWeight:600,marginTop:-4,marginBottom:4,paddingLeft:88}}>
+                  {acqSourceOriginLabel(acqSummary.selectedSource)}{acqSummary.selectedAt ? ` · ${formatCompactDate(new Date(acqSummary.selectedAt))}` : ""}
+                </div>
+              )}
               {line("최우선 목표", g.primary)}
               {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
               {line("구체적 목표", g.detail)}
@@ -24662,6 +24746,11 @@ function ReferralStatsScreen({
                     {r.acq.sources.join(", ") || ACQ_UNKNOWN}
                     {r.acq.aiSources.length ? ` · ${r.acq.aiSources.join(", ")}` : ""}
                   </div>
+                  {r.acq.selectedSource && (
+                    <div style={{ fontFamily: DB.font, fontSize: 10.5, color: DB.faint, fontWeight: 600, marginTop: 2 }}>
+                      {acqSourceOriginLabel(r.acq.selectedSource)}{r.acq.selectedAt ? ` · ${formatCompactDate(new Date(r.acq.selectedAt))}` : ""}
+                    </div>
+                  )}
                   {(r.acq.sourceDetail || r.acq.otherSource || r.acq.keyword) && (
                     <div style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.sub, fontWeight: 600, marginTop: 3, lineHeight: 1.5, wordBreak: "keep-all" }}>
                       {[r.acq.sourceDetail, r.acq.keyword, r.acq.otherSource].filter(Boolean).join(" · ")}

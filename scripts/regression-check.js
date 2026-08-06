@@ -4740,6 +4740,30 @@ const checks = [
     const info = lib.getHubBodyPartAwareness({ ci, todayKey: '2026-08-10' });
     return info['무릎']?.kind === 'pain' && info['무릎']?.vas === null;
   }),
+
+  // ── 관리자 홈 좁은 화면(<768px) 회원 검색: 데스크톱 검색창이 isWide&&로 언마운트되는 대신
+  //    모바일 전용 진입 버튼 + 바텀시트가 같은 검색 상태/핸들러를 재사용해야 한다 ──
+  ['좁은 화면 회원 검색 진입점: isWide(768px)가 false면 데스크톱 검색창 대신 전체 너비 "회원 검색" 버튼을 노출',
+    /\{isWide && \(\r?\n\s*<div ref=\{searchWrapRef\}/.test(app) &&
+    /\{!isWide && \(\r?\n\s*<button type="button" onClick=\{\(\)=>setMobileSearchOpen\(true\)\}/.test(app)
+  ],
+  ['좁은 화면 회원 검색 시트: 새 검색 로직 없이 HomeScreen의 searchQuery/searchResultsShown/openMemberFromSearch를 그대로 props로 전달',
+    app.includes('function AdminMemberSearchSheet(') &&
+    app.includes('query={searchQuery}') &&
+    app.includes('onQueryChange={handleSearchChange}') &&
+    app.includes('resultsShown={searchResultsShown}') &&
+    app.includes('onPick={(m)=>{ setMobileSearchOpen(false); openMemberFromSearch(m); }}')
+  ],
+  ['좁은 화면 회원 검색 시트: 기존 iOS 키보드 대응 훅(useKeyboardAwareViewport/useLockBodyScroll)과 pw-picker-sheet 오프셋 변수를 재사용',
+    (() => {
+      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
+      return sliceSheet.includes('useKeyboardAwareViewport(open)') &&
+        sliceSheet.includes('useLockBodyScroll(open)') &&
+        sliceSheet.includes('--pw-keyboard-offset') &&
+        sliceSheet.includes('sheetClassName="pw-picker-sheet"') &&
+        sliceSheet.includes('검색 결과가 없습니다');
+    })()
+  ],
 ];
 
 let failed = 0;

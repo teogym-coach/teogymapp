@@ -10757,6 +10757,93 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
+// 좁은 화면 전용 회원 검색 바텀시트 — HomeScreen 상단 검색창(searchQuery/searchResultsShown 등)을 그대로 props로 받아
+// 새 검색 로직 없이 재사용한다. 키보드 대응은 MemberPersonalExercisePicker(운동 종목 검색 시트)와 동일하게
+// useKeyboardAwareViewport + pw-picker-sheet의 --pw-keyboard-offset/--pw-sheet-max-h 방식을 재사용.
+function AdminMemberSearchSheet({ open, onClose, query, onQueryChange, resultsShown, hasMore, loading, todayMemberIds, statusLabel, onPick, onShowAll }) {
+  const inputRef = useRef(null);
+  const { keyboardInset, availableHeight } = useKeyboardAwareViewport(open);
+  useLockBodyScroll(open);
+  const sheetStyle = useMemo(() => {
+    const style = {};
+    if (keyboardInset > 0) style["--pw-keyboard-offset"] = `${keyboardInset}px`;
+    if (availableHeight != null) {
+      style["--pw-sheet-max-h"] = `${availableHeight}px`;
+      style["--pw-sheet-h"] = `${availableHeight}px`;
+    }
+    return style;
+  }, [keyboardInset, availableHeight]);
+
+  return (
+    <MemberBottomSheet open={open} onClose={onClose} title="회원 검색" sheetClassName="pw-picker-sheet" sheetStyle={sheetStyle} bodyClassName="pw-picker-body">
+      <div className="pw-picker-fixed">
+        <div style={{
+          display:"flex",alignItems:"center",gap:8,
+          background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:12,
+          padding:"11px 13px",
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="search"
+            autoComplete="off"
+            value={query}
+            onChange={onQueryChange}
+            placeholder="이름으로 회원 검색"
+            aria-label="회원 검색"
+            style={{flex:1,minWidth:0,border:"none",outline:"none",background:"transparent",fontFamily:DB.font,fontSize:16,color:DB.text,fontWeight:500,padding:0}}
+          />
+          {query && (
+            <button type="button" aria-label="검색어 지우기" onClick={()=>onQueryChange({target:{value:""}})}
+              style={{border:"none",background:"none",cursor:"pointer",color:DB.faint,padding:0,display:"flex",flexShrink:0}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="pw-picker-scroll">
+        {loading ? (
+          <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>회원 불러오는 중…</p>
+        ) : query.trim().length===0 ? (
+          <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>회원 이름을 입력해 검색하세요</p>
+        ) : resultsShown.length===0 ? (
+          <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>검색 결과가 없습니다</p>
+        ) : (
+          <>
+            {resultsShown.map((m,i)=>{
+              const isToday = todayMemberIds.has(m.id);
+              const label = statusLabel[m.status||"active"];
+              return (
+                <div key={m.id} onClick={()=>onPick(m)}
+                  style={{
+                    display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+                    padding:"13px 6px",cursor:"pointer",
+                    borderTop:i===0?"none":`1px solid ${DB.border}`,
+                  }}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14.5,color:DB.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.name}</div>
+                    {label && <div style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,marginTop:2}}>{label}</div>}
+                  </div>
+                  {isToday && (
+                    <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10.5,color:DB.mintSoft,background:DB.mintTint,padding:"3px 8px",borderRadius:999}}>오늘 수업</span>
+                  )}
+                </div>
+              );
+            })}
+            {hasMore && (
+              <div onClick={onShowAll}
+                style={{padding:"13px 6px",textAlign:"center",cursor:"pointer",borderTop:`1px solid ${DB.border}`,fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:DB.mintSoft}}>
+                전체 결과 보기
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </MemberBottomSheet>
+  );
+}
+
 function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, sessionReadsMapByMember, appUsageSummaryByMember, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession, onOpenMemberUnreadHistory }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
@@ -10765,6 +10852,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchActiveIdx, setSearchActiveIdx] = useState(-1);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false); // 좁은 화면(isWide=false) 전용 — 데스크톱 검색창이 언마운트되는 대신 이 바텀시트로 같은 검색을 제공
   const searchWrapRef = useRef(null);
   const searchInputRef = useRef(null);
   useEffect(()=>{
@@ -11256,6 +11344,20 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
 
       <div style={{padding:PAD,maxWidth:1240,margin:"0 auto"}}>
 
+        {/* 모바일/좁은 화면 전용 회원 검색 버튼 — isWide가 false로 바뀌면 위 상단바의 검색창 자체가 언마운트되므로(768px 미만),
+             같은 자리를 대신할 진입점. 새 검색 로직 없이 AdminMemberSearchSheet가 위에서 계산한 searchQuery/searchResultsShown을 그대로 연다. */}
+        {!isWide && (
+          <button type="button" onClick={()=>setMobileSearchOpen(true)} style={{
+            width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,
+            height:48,marginBottom:GAPM,padding:"0 16px",borderRadius:13,cursor:"pointer",
+            background:DB.card,border:`1px solid ${DB.border}`,boxShadow:DB.shadow,
+            color:DB.text,fontFamily:DB.font,fontWeight:700,fontSize:14,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={DB.mintSoft} strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+            회원 검색
+          </button>
+        )}
+
         {/* ═══ 오늘 해야 할 일 — 홈의 주인공. 3초 안에 오늘 할 행동이 보인다.
              Hero/오늘의 한 줄 카드는 업무 효율 우선 개편으로 삭제(하루 1회성 정보 + AI 코치와 중복) — 첫 화면 최상단으로 승격.
              "회원 입력 확인"은 벨 아이콘·알림 Drawer·"체크가 필요한 회원" 카드와 역할이 중복돼 제거하고 자리를
@@ -11596,6 +11698,21 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
         onOpenItem={openFeedItem}
         onMarkEventsRead={onMarkEventsRead}
         onPickMember={m=>onSelectMember?.(m)}
+      />
+
+      {/* 모바일 회원 검색 바텀시트 — 상단 검색창과 동일한 searchQuery/searchResultsShown/openMemberFromSearch를 그대로 사용 */}
+      <AdminMemberSearchSheet
+        open={mobileSearchOpen}
+        onClose={()=>{ setMobileSearchOpen(false); clearSearch(); }}
+        query={searchQuery}
+        onQueryChange={handleSearchChange}
+        resultsShown={searchResultsShown}
+        hasMore={searchHasMore}
+        loading={membersLoading && homeMembers.length===0}
+        todayMemberIds={todayMemberIds}
+        statusLabel={SEARCH_STATUS_LABEL}
+        onPick={(m)=>{ setMobileSearchOpen(false); openMemberFromSearch(m); }}
+        onShowAll={()=>{ setMobileSearchOpen(false); clearSearch(); loadMembers(); setScreen("members"); }}
       />
 
       {/* 준비 중 모달 */}

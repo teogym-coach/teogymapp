@@ -14320,10 +14320,19 @@ function ConsultationsScreen({ consultations = [], loading, onBack, onRefresh, o
 function AcquisitionChannelSelector({ value, onChange, multi = true, options = ACQUISITION_CHANNEL_OPTIONS, tone = "light" }) {
   const dark = tone === "dark";
   const list = multi ? (Array.isArray(value) ? value : []) : value;
-  const isActive = (label) => multi ? list.includes(label) : value === label;
+  // 저장된 값이 지금 옵션 목록의 라벨과 정확히 같은 문자열이 아닐 수 있다(예: 예전 "지나가다가"는
+  // 지금 옵션 "지나가다 발견"과 다른 문자열). normalizeAcquisitionChannel로 정규화한 뒤 비교해야
+  // 과거 표기가 "선택 안 됨"으로 보여서 안 보이는 채로 계속 남아있는 문제(칩엔 안 보이지만 실제로는
+  // visitRoutes 배열에 남아있어 다른 항목과 함께 저장되는 문제)를 막을 수 있다.
+  const isActive = (label) => multi
+    ? list.some(x => normalizeAcquisitionChannel(x) === label)
+    : normalizeAcquisitionChannel(value) === label;
   const toggle = (label) => {
-    if (multi) onChange(list.includes(label) ? list.filter(x => x !== label) : [...list, label]);
-    else onChange(value === label ? "" : label);
+    if (multi) {
+      onChange(isActive(label) ? list.filter(x => normalizeAcquisitionChannel(x) !== label) : [...list, label]);
+    } else {
+      onChange(isActive(label) ? "" : label);
+    }
   };
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: dark ? 6 : 7 }}>

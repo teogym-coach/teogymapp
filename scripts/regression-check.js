@@ -5019,6 +5019,11 @@ const checks = [
     app.includes('acqSourceOriginLabel(r.acq.selectedSource)') &&
     app.includes("const ACQ_SOURCE_ORIGIN_LABEL = { profile: \"회원정보에서 수정\", onboarding: \"온보딩 응답\", consultation: \"상담 등록 시 입력\" };")
   ],
+  ['방문 경로 칩 UI: 예전 표기(예: "지나가다가")로 저장된 값도 정규화 후 비교해 현재 옵션 칩에 선택됨으로 보인다(안 보이는 채로 남아 중복 저장되는 문제 방지)',
+    app.includes('? list.some(x => normalizeAcquisitionChannel(x) === label)') &&
+    app.includes(': normalizeAcquisitionChannel(value) === label;') &&
+    app.includes('onChange(isActive(label) ? list.filter(x => normalizeAcquisitionChannel(x) !== label) : [...list, label]);')
+  ],
 
   // ════════════════════════════════════════════
   // 방문계기 수정 timestamp(survey.visitUpdatedAt) — 무관한 회원정보 수정으로는 갱신되지 않아야 함
@@ -5129,7 +5134,7 @@ const checks = [
   ],
   ['방문 경로 공통 상수: 저장 형식은 기존과 동일하게 라벨 문자열을 그대로 쓴다(코드값을 Firestore에 저장하지 않음)',
     app.includes('const toggle = (label) => {') &&
-    app.includes('if (multi) onChange(list.includes(label) ? list.filter(x => x !== label) : [...list, label]);')
+    app.includes('onChange(isActive(label) ? list.filter(x => normalizeAcquisitionChannel(x) !== label) : [...list, label]);')
   ],
   ['AI 세부 출처 공통 상수: ChatGPT·Gemini·Claude·Perplexity·Copilot·네이버 AI 브리핑·기타 AI 검색·모름 8종을 상담 등록·회원 프로필이 함께 사용',
     app.includes('const ACQ_AI_TOOL_OPTIONS = ["ChatGPT", "Gemini", "Claude", "Perplexity", "Copilot", "네이버 AI 브리핑", ACQ_AI_OTHER, "모름"];') &&

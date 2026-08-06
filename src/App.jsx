@@ -12120,8 +12120,8 @@ const TODAY_STATUS_STYLE = {
   recording: { label:"기록 중",   rgb:"245,158,11",  solid:"#F59E0B", soft:"#B45309",   tint:"rgba(245,158,11,.12)" },
   done:      { label:"오늘 완료", rgb:"34,197,94",   solid:"#22C55E", soft:"#15803D",   tint:"rgba(34,197,94,.12)" },
 };
-// 지난 수업 미기록 카드 톤 — "기록 중"(주황)과 구분되는 연한 빨간 계열. 항상 텍스트 배지와 함께 표시한다(색상만으로 구분하지 않음).
-const PAST_UNRECORDED_STYLE = { label:"지난 수업 미기록", rgb:"239,68,68", solid:"#EF4444", soft:"#B91C1C", tint:"rgba(239,68,68,.10)" };
+// 지난 수업 미기록 경고 톤은 더 이상 사용하지 않는다 — 수업 예정일은 확정된 출석 기록이 아니므로
+// 예정일이 지나고 기록이 없다는 이유만으로 카드를 경고색으로 강조하지 않는다(일반 회원 카드와 동일하게 표시).
 // 오늘 수업 회원의 정렬용 예약 시간 키 — 시간이 지정돼 있으면 "HH:MM"(오름차순 비교 가능), 없으면 null(항상 마지막)
 function getTodaySortTimeKey(m, today){
   const info = getMemberNextSessionInfo(m);
@@ -12721,12 +12721,12 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
             // 오늘 수업 예약 시간 — 지정돼 있으면 "HH:MM"(24시간), 없으면 "시간 미정"
             const todayTimeKey = todayStatus ? getTodaySortTimeKey(m, today) : null;
             const todayTimeText = todayStatus ? (todayTimeKey || "시간 미정") : "";
-            // 지난 수업 미기록 — 오늘 수업 회원이 아닐 때만 대상(오늘 수업이 우선). 필터 탭과 무관하게 어느 화면에서도 같은 기준으로 표시.
+            // 지난 수업 미기록 — 오늘 수업 회원이 아닐 때만 대상(오늘 수업이 우선). 예정일은 확정된 출석이 아니므로
+            // 경고 스타일(테두리·배지·빨간 텍스트)은 전혀 적용하지 않고, 회색 보조문구(예: "8월 4일 예정")로만 날짜 정보를 보여준다.
             const pastUnrecorded = !isToday ? getPastUnrecordedInfo(m, sessionsMap, today) : null;
-            const cardAccent = statusStyle || (pastUnrecorded ? PAST_UNRECORDED_STYLE : null);
             const pastUnrecordedText = pastUnrecorded ? (() => {
               const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(pastUnrecorded.date);
-              return `${dm ? `${Number(dm[2])}월 ${Number(dm[3])}일 예정` : "예정일 확인 필요"} · ${PAST_UNRECORDED_STYLE.label}`;
+              return dm ? `${Number(dm[2])}월 ${Number(dm[3])}일 예정` : "예정일 확인 필요";
             })() : "";
             const status    = mStatus(m);
             const isEnded   = status === "ended";
@@ -12780,11 +12780,11 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
             return (
               <div key={m.id} style={{position:"relative"}}
                 onClick={()=>statusMenu===m.id&&setStatusMenu(null)}>
-              <MemberCardShell dim={isEnded} mode={cardMode} accent={cardAccent} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
+              <MemberCardShell dim={isEnded} mode={cardMode} accent={statusStyle} onClick={()=>{markMemberFeedRead(m);onSelect(m);}}>
                   {/* 좌 — 프로필 + 이름 → 다음 수업 → 목표 칩 → 최근 운동 (이메일은 카드에서 숨김, 상세에서 확인) */}
                   <div style={{display:"flex",alignItems:"flex-start",gap:10,width:isRowLayout?leftPct:"100%",maxWidth:isRowLayout?leftPct:undefined,flexShrink:0}}>
                     <div style={{position:"relative",flexShrink:0}}>
-                      <MemberAvatar name={m.name} photo={photo} tone={statusStyle ? statusStyle.solid : pastUnrecorded ? PAST_UNRECORDED_STYLE.solid : visitTone(meta.daysSince,false)}/>
+                      <MemberAvatar name={m.name} photo={photo} tone={statusStyle ? statusStyle.solid : visitTone(meta.daysSince,false)}/>
                       {!isEnded && hasTodayFeedInput(m) && (
                         <span style={{position:"absolute",top:-5,right:-8,background:DB.danger,color:"#fff",
                           fontSize:7.5,fontWeight:800,padding:"2px 5px",borderRadius:7,
@@ -12799,7 +12799,6 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                           {m.name}
                         </span>
                         {!isEnded && statusStyle && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:statusStyle.tint,color:statusStyle.soft,fontWeight:800,fontFamily:DB.font}}>{statusStyle.label}</span>}
-                        {!isEnded && !statusStyle && pastUnrecorded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:PAST_UNRECORDED_STYLE.tint,color:PAST_UNRECORDED_STYLE.soft,fontWeight:800,fontFamily:DB.font}}>{PAST_UNRECORDED_STYLE.label}</span>}
                         {m.isTestMember && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(139,92,246,.1)",color:"#7C3AED",fontWeight:800,fontFamily:DB.font}}>TEST</span>}
                         {isPaused && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,fontFamily:DB.font}}>휴식중</span>}
                         {isEnded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(100,116,139,.1)",color:DB.sub,fontWeight:800,fontFamily:DB.font}}>종료</span>}
@@ -12822,8 +12821,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                       </div>
                       {/* 다음 수업 — 오늘 완료 회원은 오늘 정보만(다음 수업 준비는 아래 별도 줄) */}
                       <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,minWidth:0}}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:pastUnrecorded?PAST_UNRECORDED_STYLE.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:(statusStyle||pastUnrecorded||next.hot)?800:600,color:statusStyle?statusStyle.soft:pastUnrecorded?PAST_UNRECORDED_STYLE.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.faint} strokeWidth="2" strokeLinecap="round" style={{flexShrink:0}}><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span style={{fontFamily:DB.font,fontSize:11.5,fontWeight:(statusStyle||next.hot)?800:600,color:statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.sub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                           {statusStyle ? (
                             todayStatus === "done" ? todayStatusText : (
                               <>

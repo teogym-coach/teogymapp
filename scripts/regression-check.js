@@ -4571,15 +4571,43 @@ const checks = [
       return fn.includes('info.date >= today') && fn.includes('hasDocForThatDate') && !fn.includes('s.createdAt');
     })()
   ],
-  ['회원 목록 카드: 지난 수업 미기록 회원은 연한 빨간 톤 강조와 "지난 수업 미기록" 텍스트 배지를 함께 표시한다(색상만으로 구분하지 않음)',
-    app.includes('const PAST_UNRECORDED_STYLE = { label:"지난 수업 미기록"') &&
-    app.includes('pastUnrecorded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:PAST_UNRECORDED_STYLE.tint')
+  // ── 지난 수업 미기록 경고 UI 제거(2026-08-06) — 수업 예정일은 확정된 출석 기록이 아니므로,
+  // 예정일이 지났고 그 날짜 기록이 없다는 이유만으로 카드를 경고색으로 강조하지 않는다 ──
+  ['회원 목록 카드: 지난 수업 미기록 경고 톤(PAST_UNRECORDED_STYLE)과 그 배지가 소스에서 완전히 제거됐다',
+    !app.includes('PAST_UNRECORDED_STYLE') &&
+    !/pastUnrecorded\s*&&\s*<span/.test(app)
   ],
-  ['미기록 탭: 예정 날짜 내림차순(가장 최근에 놓친 수업이 위)으로 정렬한다',
+  ['회원 목록 카드: 카드 강조 테두리(accent)는 오늘 수업 상태(statusStyle)로만 결정되고 지난 수업 미기록으로는 강조되지 않는다',
+    app.includes('accent={statusStyle}') && !/accent=\{cardAccent\}/.test(app)
+  ],
+  ['회원 아바타 상태 점: 지난 수업 미기록 여부와 무관하게 기존 방문 톤(visitTone)만 사용한다',
+    app.includes('tone={statusStyle ? statusStyle.solid : visitTone(meta.daysSince,false)}')
+  ],
+  ['다음 수업 문구 아이콘·글자색: statusStyle/오늘 예정(next.hot) 여부로만 정해지고 지난 수업 미기록으로는 강조되지 않는다',
+    app.includes('stroke={statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.faint}') &&
+    app.includes('fontWeight:(statusStyle||next.hot)?800:600,color:statusStyle?statusStyle.soft:next.hot?DB.mintSoft:DB.sub')
+  ],
+  ['지난 수업 미기록 보조문구: "N월 N일 예정" 형태의 회색 보조문구만 표시하고 경고 라벨은 붙이지 않는다',
+    app.includes('return dm ? `${Number(dm[2])}월 ${Number(dm[3])}일 예정` : "예정일 확인 필요";')
+  ],
+  ['회원 목록 정렬: sortMembers의 그룹 판정은 오늘 수업 상태(getTodaySessionStatus)만 사용하고, 지난 수업 미기록 여부로 상단에 우선 배치하지 않는다',
+    (() => {
+      const fn = app.slice(app.indexOf('function sortMembers'), app.indexOf('// 검색 중이면 모든 상태 포함'));
+      return fn.includes('getTodaySessionStatus') && !fn.includes('getPastUnrecordedInfo') && !fn.includes('PastUnrecorded');
+    })()
+  ],
+  ['미기록 탭(opt-in 필터): 예정 날짜 내림차순(가장 최근에 놓친 수업이 위)으로 정렬한다 — 전체/기본 목록의 자동 우선 정렬이 아니라 관리자가 직접 선택하는 별도 탭에서만 적용',
     app.includes('"미기록" 탭 — 가장 최근에 놓친 예정일이 위로 오도록') &&
     app.includes('return db.localeCompare(da);')
   ],
-  tsScenario('시나리오A: 어제 예정됐지만 미기록인 회원 — 오늘 수업 미노출·미기록 노출(지난 수업 미기록 배지 대상)', lib => {
+  ['수업일지 미전송 판정(buildUnsentSessionMembers)은 지난 수업 미기록 판정과 완전히 분리돼 있다 — nextWorkoutDate/getPastUnrecordedInfo를 전혀 참조하지 않고, 실제 저장된 세션의 isPublished만으로 판정한다',
+    (() => {
+      const fn = app.slice(app.indexOf('function buildUnsentSessionMembers'), app.indexOf('// 홈 "수업일지 미확인" — "수업일지 미전송"(관리자가 아직 공개 안 함)과는 완전히 다른 상태다.'));
+      return fn.includes('s.isPublished === true') && fn.includes('hasRealExercise') &&
+        !fn.includes('nextWorkoutDate') && !fn.includes('getPastUnrecordedInfo');
+    })()
+  ],
+  tsScenario('시나리오A: 어제 예정됐지만 미기록인 회원 — 오늘 수업 미노출·getPastUnrecordedInfo는 여전히 데이터를 반환(미기록 탭 필터용, 카드 경고 표시는 더 이상 하지 않음)', lib => {
     const today = '2026-08-05';
     const member = { id: 'a1', nextWorkoutDate: '2026-08-04' };
     const sessionsMap = { a1: [] };
@@ -4637,6 +4665,15 @@ const checks = [
     const status = lib.getTodaySessionStatus(member, sessionsMap, today);
     const past = lib.getPastUnrecordedInfo(member, sessionsMap, today);
     return status === 'recording' && !!past && past.date === '2026-08-04';
+  }),
+  tsScenario('시나리오F(신규): 지난 예정일 이후 새 미래 예정일을 저장한 회원 — 더 이상 지난 수업 미기록 대상이 아니고, 가장 최근에 저장된 미래 예정일만 노출된다', lib => {
+    const today = '2026-08-05';
+    // 8/4로 예정됐다가 미기록 상태였던 회원이 8/10으로 예정일을 다시 잡은 상황(nextWorkoutDate는 최신 값 1건만 저장)
+    const member = { id: 'f2', nextWorkoutDate: '2026-08-10' };
+    const sessionsMap = { f2: [] };
+    const past = lib.getPastUnrecordedInfo(member, sessionsMap, today);
+    const info = lib.getMemberNextSessionInfo(member);
+    return past === null && info.date === '2026-08-10';
   }),
   tsScenario('시나리오I: 한국 시간 자정 전후 — UTC 변환 때문에 날짜가 하루씩 밀리지 않는다', lib => {
     const justAfterMidnightKST = lib.getKoreaDateString(new Date(Date.UTC(2026, 7, 4, 15, 30))); // KST 2026-08-05 00:30

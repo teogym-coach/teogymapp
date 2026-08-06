@@ -4741,65 +4741,56 @@ const checks = [
     return info['무릎']?.kind === 'pain' && info['무릎']?.vas === null;
   }),
 
-  // ── 관리자 홈 좁은 화면(<768px) 회원 검색: 데스크톱 검색창이 isWide&&로 언마운트되는 대신
-  //    모바일 전용 진입 버튼 + 바텀시트가 같은 검색 상태/핸들러를 재사용해야 한다 ──
-  ['좁은 화면 회원 검색 진입점: isWide(768px)가 false면 데스크톱 검색창 대신 전체 너비 "회원 검색" 버튼을 노출',
-    /\{isWide && \(\r?\n\s*<div ref=\{searchWrapRef\}/.test(app) &&
-    /\{!isWide && \(\r?\n\s*<button type="button" onClick=\{\(\)=>setMobileSearchOpen\(true\)\}/.test(app)
+  // ── 관리자 홈 좁은 화면(<768px) 회원 검색 (3차 — 별도 모달/바텀시트 제거, 데스크톱과 동일한 인라인 <input> 직접 배치) ──
+  // 1차(dc9cbc7)는 모바일 전용 바텀시트를 열었고, 2차(77da7ce)는 그 바텀시트가 MEMBER_CSS 스코프 밖이라 안 열리던
+  // 버그를 고쳤지만, 여전히 "버튼 → 별도 시트"라는 한 단계가 남아 사용성이 나빴다. 3차는 그 우회로 자체를 없애고
+  // isWide 여부와 무관하게 searchQuery/handleSearchChange/searchResultsShown/searchHasMore/openMemberFromSearch/
+  // todayMemberIds(HomeScreen 로컬 상태) 하나만 쓰는 searchResultsPanel(공유 JSX)을 데스크톱 입력창과 모바일
+  // 인라인 입력창이 함께 참조하도록 재구성했다. AdminMemberSearchSheet/mobileSearchOpen은 완전히 삭제됨 —
+  // 아래는 그 삭제와 새 인라인 구조를 검증한다.
+  ['좁은 화면 회원 검색: 별도 바텀시트/모달(AdminMemberSearchSheet, mobileSearchOpen)이 완전히 제거됐다',
+    !app.includes('AdminMemberSearchSheet') &&
+    !app.includes('mobileSearchOpen') &&
+    !app.includes('setMobileSearchOpen')
   ],
-  ['좁은 화면 회원 검색 시트: 새 검색 로직 없이 HomeScreen의 searchQuery/searchResultsShown/openMemberFromSearch를 그대로 props로 전달',
-    app.includes('function AdminMemberSearchSheet(') &&
-    app.includes('query={searchQuery}') &&
-    app.includes('onQueryChange={handleSearchChange}') &&
-    app.includes('resultsShown={searchResultsShown}') &&
-    app.includes('onPick={(m)=>{ setMobileSearchOpen(false); openMemberFromSearch(m); }}')
+  ['좁은 화면 회원 검색: isWide(768px)가 false면 버튼이 아니라 실제 <input>이 곧바로 렌더링된다(모달을 여는 버튼 없음)',
+    /\{!isWide && \(\r?\n\s*<div ref=\{searchWrapRef\}/.test(app) &&
+    app.includes('className="home-search-bar" onClick={()=>searchInputRef.current?.focus()}') &&
+    app.includes('placeholder="이름으로 회원 검색"') &&
+    !/\{!isWide && \(\r?\n\s*<button/.test(app)
   ],
-  ['좁은 화면 회원 검색 시트: 기존 iOS 키보드 대응 훅(useKeyboardAwareViewport/useLockBodyScroll)을 재사용',
+  ['좁은 화면 회원 검색 input: onChange가 기존 handleSearchChange를 그대로 호출한다(새 모바일 전용 검색 상태 없음)',
     (() => {
-      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
-      return sliceSheet.includes('useKeyboardAwareViewport(open)') &&
-        sliceSheet.includes('useLockBodyScroll(open)') &&
-        sliceSheet.includes('검색 결과가 없습니다');
-    })()
-  ],
-  // ── 실제 클릭이 막혔던 버그(2차 수정) — AdminMemberSearchSheet가 MemberBottomSheet(.mv2-sheet-root 등)를
-  //    재사용하고 있었는데, 그 CSS 클래스들은 MEMBER_CSS(회원앱 전용 <style> 블록)에만 정의돼 있고 관리자 홈은
-  //    <style>{CSS}</style>만 로드해 MEMBER_CSS를 포함하지 않는다. 그래서 시트가 position:static인 채로 문서
-  //    맨 아래에 스타일 없이 깔려 버튼 클릭은 되지만 시트가 보이지 않았다. 아래 체크들은 그 회귀를 막는다 ──
-  ['좁은 화면 회원 검색 트리거: 실제 <button type="button">이 onClick으로 mobileSearchOpen을 true로 바꾼다(disabled 없음)',
-    (() => {
-      const idx = app.indexOf('<button type="button" onClick={()=>setMobileSearchOpen(true)} style={{');
+      const idx = app.indexOf('className="home-search-bar"');
       if (idx === -1) return false;
-      const tagEnd = app.indexOf('}}>', idx);
-      if (tagEnd === -1) return false;
-      const tag = app.slice(idx, tagEnd + 3);
-      return !tag.includes('disabled');
+      const block = app.slice(idx, idx + 1200);
+      return block.includes('value={searchQuery}') &&
+        block.includes('onChange={handleSearchChange}') &&
+        !block.includes('readOnly');
     })()
   ],
-  ['좁은 화면 회원 검색 시트: 관리자 화면에 없는 MEMBER_CSS 전용 클래스(mv2-*, pw-picker-*)에 의존하지 않고, 자체 완결형 인라인 style로 position:fixed 오버레이를 직접 구성한다',
+  ['좁은 화면 회원 검색: 데스크톱 드롭다운과 완전히 동일한 searchResultsPanel(검색어 없으면 비표시, 회원 클릭 시 openMemberFromSearch)을 공유한다',
+    app.includes('const searchResultsPanel = (') &&
+    app.includes('{searchOpen && searchQuery.trim().length>0 && searchResultsPanel}') &&
+    (app.match(/\{searchOpen && searchQuery\.trim\(\)\.length>0 && searchResultsPanel\}/g) || []).length === 2 &&
+    app.includes('onClick={()=>openMemberFromSearch(m)}') &&
+    app.includes('검색 결과가 없습니다')
+  ],
+  ['좁은 화면 회원 검색: 모달이 아니라 페이지 안 일반 input이므로 useLockBodyScroll/useKeyboardAwareViewport(바텀시트 전용 키보드 오프셋 로직)를 쓰지 않는다',
     (() => {
-      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
-      return !sliceSheet.includes('MemberBottomSheet') &&
-        !sliceSheet.includes('mv2-') &&
-        !sliceSheet.includes('pw-picker') &&
-        sliceSheet.includes('position:"fixed",inset:0,zIndex:1000') &&
-        sliceSheet.includes('if (!open) return null;');
+      const start = app.indexOf('function HomeScreen(');
+      const nextFnIdx = app.indexOf('\nfunction ', start + 20);
+      const slice = app.slice(start, nextFnIdx === -1 ? app.length : nextFnIdx);
+      return !slice.includes('useLockBodyScroll') && !slice.includes('useKeyboardAwareViewport') && !slice.includes('--pw-keyboard-offset');
     })()
   ],
-  ['좁은 화면 회원 검색 시트: 닫힌 상태에서는 null을 반환해 언마운트되므로(오버레이가 항상 DOM에 남아 아래 요소 클릭을 막는 방식이 아님) 버튼 위에 투명 레이어가 남지 않는다',
-    (() => {
-      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
-      const returnIdx = sliceSheet.indexOf('if (!open) return null;');
-      const jsxIdx = sliceSheet.indexOf('return (\r\n'); // useEffect cleanup의 'return () =>'와 구분하기 위해 개행까지 포함해 매칭
-      return returnIdx !== -1 && jsxIdx !== -1 && returnIdx < jsxIdx;
-    })()
+  ['768px 이상: 기존 데스크톱 검색창(width:200 고정, isWide&&)은 그대로 유지되고 모바일 입력창과 동시 노출되지 않는다',
+    /\{isWide && \(\r?\n\s*<div ref=\{searchWrapRef\} style=\{\{position:"relative",width:200,flexShrink:0\}\}/.test(app) &&
+    app.includes('placeholder="회원 검색"') // 데스크톱 placeholder는 좁은 화면과 문구를 다르게 유지(기존 그대로)
   ],
-  ['좁은 화면 회원 검색 시트: 배경(오버레이) 클릭 시 onClose가 호출되고, 회원 선택 시에도 onPick 래퍼가 setMobileSearchOpen(false)로 시트를 닫는다',
-    (() => {
-      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
-      return /onClick=\{onClose\} style=\{\{position:"absolute",inset:0/.test(sliceSheet);
-    })() &&
-    app.includes('onPick={(m)=>{ setMobileSearchOpen(false); openMemberFromSearch(m); }}')
+  ['모바일 검색창 placeholder 대비: .home-search-bar 전용 스코프 규칙이 있고, 전역(거의 흰색) 규칙과 분리돼 데스크톱에는 영향 없음',
+    app.includes('.home-search-bar input::placeholder{color:') &&
+    !app.includes('.home-search-bar input::placeholder{color:rgba(255,255,255')
   ],
 ];
 

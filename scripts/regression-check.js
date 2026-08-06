@@ -4754,15 +4754,52 @@ const checks = [
     app.includes('resultsShown={searchResultsShown}') &&
     app.includes('onPick={(m)=>{ setMobileSearchOpen(false); openMemberFromSearch(m); }}')
   ],
-  ['좁은 화면 회원 검색 시트: 기존 iOS 키보드 대응 훅(useKeyboardAwareViewport/useLockBodyScroll)과 pw-picker-sheet 오프셋 변수를 재사용',
+  ['좁은 화면 회원 검색 시트: 기존 iOS 키보드 대응 훅(useKeyboardAwareViewport/useLockBodyScroll)을 재사용',
     (() => {
       const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
       return sliceSheet.includes('useKeyboardAwareViewport(open)') &&
         sliceSheet.includes('useLockBodyScroll(open)') &&
-        sliceSheet.includes('--pw-keyboard-offset') &&
-        sliceSheet.includes('sheetClassName="pw-picker-sheet"') &&
         sliceSheet.includes('검색 결과가 없습니다');
     })()
+  ],
+  // ── 실제 클릭이 막혔던 버그(2차 수정) — AdminMemberSearchSheet가 MemberBottomSheet(.mv2-sheet-root 등)를
+  //    재사용하고 있었는데, 그 CSS 클래스들은 MEMBER_CSS(회원앱 전용 <style> 블록)에만 정의돼 있고 관리자 홈은
+  //    <style>{CSS}</style>만 로드해 MEMBER_CSS를 포함하지 않는다. 그래서 시트가 position:static인 채로 문서
+  //    맨 아래에 스타일 없이 깔려 버튼 클릭은 되지만 시트가 보이지 않았다. 아래 체크들은 그 회귀를 막는다 ──
+  ['좁은 화면 회원 검색 트리거: 실제 <button type="button">이 onClick으로 mobileSearchOpen을 true로 바꾼다(disabled 없음)',
+    (() => {
+      const idx = app.indexOf('<button type="button" onClick={()=>setMobileSearchOpen(true)} style={{');
+      if (idx === -1) return false;
+      const tagEnd = app.indexOf('}}>', idx);
+      if (tagEnd === -1) return false;
+      const tag = app.slice(idx, tagEnd + 3);
+      return !tag.includes('disabled');
+    })()
+  ],
+  ['좁은 화면 회원 검색 시트: 관리자 화면에 없는 MEMBER_CSS 전용 클래스(mv2-*, pw-picker-*)에 의존하지 않고, 자체 완결형 인라인 style로 position:fixed 오버레이를 직접 구성한다',
+    (() => {
+      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
+      return !sliceSheet.includes('MemberBottomSheet') &&
+        !sliceSheet.includes('mv2-') &&
+        !sliceSheet.includes('pw-picker') &&
+        sliceSheet.includes('position:"fixed",inset:0,zIndex:1000') &&
+        sliceSheet.includes('if (!open) return null;');
+    })()
+  ],
+  ['좁은 화면 회원 검색 시트: 닫힌 상태에서는 null을 반환해 언마운트되므로(오버레이가 항상 DOM에 남아 아래 요소 클릭을 막는 방식이 아님) 버튼 위에 투명 레이어가 남지 않는다',
+    (() => {
+      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
+      const returnIdx = sliceSheet.indexOf('if (!open) return null;');
+      const jsxIdx = sliceSheet.indexOf('return (\r\n'); // useEffect cleanup의 'return () =>'와 구분하기 위해 개행까지 포함해 매칭
+      return returnIdx !== -1 && jsxIdx !== -1 && returnIdx < jsxIdx;
+    })()
+  ],
+  ['좁은 화면 회원 검색 시트: 배경(오버레이) 클릭 시 onClose가 호출되고, 회원 선택 시에도 onPick 래퍼가 setMobileSearchOpen(false)로 시트를 닫는다',
+    (() => {
+      const sliceSheet = app.slice(app.indexOf('function AdminMemberSearchSheet('), app.indexOf('function HomeScreen('));
+      return /onClick=\{onClose\} style=\{\{position:"absolute",inset:0/.test(sliceSheet);
+    })() &&
+    app.includes('onPick={(m)=>{ setMobileSearchOpen(false); openMemberFromSearch(m); }}')
   ],
 ];
 

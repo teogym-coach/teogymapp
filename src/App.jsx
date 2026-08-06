@@ -10758,89 +10758,110 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
 }
 
 // 좁은 화면 전용 회원 검색 바텀시트 — HomeScreen 상단 검색창(searchQuery/searchResultsShown 등)을 그대로 props로 받아
-// 새 검색 로직 없이 재사용한다. 키보드 대응은 MemberPersonalExercisePicker(운동 종목 검색 시트)와 동일하게
-// useKeyboardAwareViewport + pw-picker-sheet의 --pw-keyboard-offset/--pw-sheet-max-h 방식을 재사용.
+// 새 검색 로직 없이 재사용한다.
+// 주의: MemberBottomSheet(.mv2-sheet-root 등)와 .pw-picker-* 클래스는 MEMBER_CSS(회원앱 전용 <style> 블록)에만
+// 정의돼 있고, 관리자 홈은 <style>{CSS}</style>만 로드해 MEMBER_CSS를 포함하지 않는다 — 그 CSS 클래스를 그대로
+// 재사용하면 실제로는 아무 규칙도 매칭되지 않아 position:static인 채로 문서 맨 아래에 스타일 없이 깔려버려
+// 클릭은 되지만 시트가 화면 밖(찌그러진 채)에 렌더링된다. 그래서 오버레이/시트 자체는 관리자 화면의 다른
+// 모달(NotificationDrawer 등)과 동일하게 인라인 style만으로 완전히 자체 완결형으로 구성하고, 키보드 대응
+// 로직(useKeyboardAwareViewport/useLockBodyScroll)만 재사용한다 — 이 훅들은 CSS 클래스가 아니라 순수 JS로
+// 동작해 관리자 화면에서도 그대로 쓸 수 있다.
 function AdminMemberSearchSheet({ open, onClose, query, onQueryChange, resultsShown, hasMore, loading, todayMemberIds, statusLabel, onPick, onShowAll }) {
   const inputRef = useRef(null);
   const { keyboardInset, availableHeight } = useKeyboardAwareViewport(open);
   useLockBodyScroll(open);
-  const sheetStyle = useMemo(() => {
-    const style = {};
-    if (keyboardInset > 0) style["--pw-keyboard-offset"] = `${keyboardInset}px`;
-    if (availableHeight != null) {
-      style["--pw-sheet-max-h"] = `${availableHeight}px`;
-      style["--pw-sheet-h"] = `${availableHeight}px`;
-    }
-    return style;
-  }, [keyboardInset, availableHeight]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = e => { if (e.key === "Escape") onClose?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
 
   return (
-    <MemberBottomSheet open={open} onClose={onClose} title="회원 검색" sheetClassName="pw-picker-sheet" sheetStyle={sheetStyle} bodyClassName="pw-picker-body">
-      <div className="pw-picker-fixed">
-        <div style={{
-          display:"flex",alignItems:"center",gap:8,
-          background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:12,
-          padding:"11px 13px",
-        }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-          <input
-            ref={inputRef}
-            type="text"
-            inputMode="search"
-            autoComplete="off"
-            value={query}
-            onChange={onQueryChange}
-            placeholder="이름으로 회원 검색"
-            aria-label="회원 검색"
-            style={{flex:1,minWidth:0,border:"none",outline:"none",background:"transparent",fontFamily:DB.font,fontSize:16,color:DB.text,fontWeight:500,padding:0}}
-          />
-          {query && (
-            <button type="button" aria-label="검색어 지우기" onClick={()=>onQueryChange({target:{value:""}})}
-              style={{border:"none",background:"none",cursor:"pointer",color:DB.faint,padding:0,display:"flex",flexShrink:0}}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+    <div style={{position:"fixed",inset:0,zIndex:1000}} role="dialog" aria-modal="true" aria-label="회원 검색">
+      <div onClick={onClose} style={{position:"absolute",inset:0,background:"rgba(17,24,32,.38)"}} />
+      <div style={{
+        position:"absolute",left:"50%",transform:"translateX(-50%)",
+        bottom:keyboardInset>0?keyboardInset:0,
+        width:"100%",maxWidth:430,
+        maxHeight:availableHeight!=null?availableHeight:"88dvh",
+        height:availableHeight!=null?availableHeight:undefined,
+        background:"#fff",borderRadius:"26px 26px 0 0",boxShadow:"0 -12px 40px rgba(15,23,42,.18)",
+        display:"flex",flexDirection:"column",overflow:"hidden",transition:"bottom .15s ease",
+      }}>
+        <div style={{width:40,height:5,borderRadius:999,background:"#E2E7ED",margin:"10px auto 0",flexShrink:0}} />
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px 10px",flexShrink:0}}>
+          <b style={{fontFamily:DB.font,fontSize:17,color:DB.text,letterSpacing:"-.2px"}}>회원 검색</b>
+          <button type="button" onClick={onClose} aria-label="닫기"
+            style={{border:0,background:"#F1F3F6",color:"#66717C",width:30,height:30,borderRadius:999,fontSize:13,cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{padding:"0 20px 12px",flexShrink:0}}>
+          <div style={{
+            display:"flex",alignItems:"center",gap:8,
+            background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:12,
+            padding:"11px 13px",
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+            <input
+              ref={inputRef}
+              type="text"
+              inputMode="search"
+              autoComplete="off"
+              value={query}
+              onChange={onQueryChange}
+              placeholder="이름으로 회원 검색"
+              aria-label="회원 검색"
+              style={{flex:1,minWidth:0,border:"none",outline:"none",background:"transparent",fontFamily:DB.font,fontSize:16,color:DB.text,fontWeight:500,padding:0}}
+            />
+            {query && (
+              <button type="button" aria-label="검색어 지우기" onClick={()=>onQueryChange({target:{value:""}})}
+                style={{border:"none",background:"none",cursor:"pointer",color:DB.faint,padding:0,display:"flex",flexShrink:0}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",padding:"0 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
+          {loading ? (
+            <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>회원 불러오는 중…</p>
+          ) : query.trim().length===0 ? (
+            <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>회원 이름을 입력해 검색하세요</p>
+          ) : resultsShown.length===0 ? (
+            <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>검색 결과가 없습니다</p>
+          ) : (
+            <>
+              {resultsShown.map((m,i)=>{
+                const isToday = todayMemberIds.has(m.id);
+                const label = statusLabel[m.status||"active"];
+                return (
+                  <div key={m.id} onClick={()=>onPick(m)}
+                    style={{
+                      display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+                      padding:"13px 6px",cursor:"pointer",
+                      borderTop:i===0?"none":`1px solid ${DB.border}`,
+                    }}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14.5,color:DB.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.name}</div>
+                      {label && <div style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,marginTop:2}}>{label}</div>}
+                    </div>
+                    {isToday && (
+                      <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10.5,color:DB.mintSoft,background:DB.mintTint,padding:"3px 8px",borderRadius:999}}>오늘 수업</span>
+                    )}
+                  </div>
+                );
+              })}
+              {hasMore && (
+                <div onClick={onShowAll}
+                  style={{padding:"13px 6px",textAlign:"center",cursor:"pointer",borderTop:`1px solid ${DB.border}`,fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:DB.mintSoft}}>
+                  전체 결과 보기
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
-      <div className="pw-picker-scroll">
-        {loading ? (
-          <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>회원 불러오는 중…</p>
-        ) : query.trim().length===0 ? (
-          <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>회원 이름을 입력해 검색하세요</p>
-        ) : resultsShown.length===0 ? (
-          <p style={{padding:"18px 4px",fontFamily:DB.font,fontSize:13,color:DB.faint,textAlign:"center"}}>검색 결과가 없습니다</p>
-        ) : (
-          <>
-            {resultsShown.map((m,i)=>{
-              const isToday = todayMemberIds.has(m.id);
-              const label = statusLabel[m.status||"active"];
-              return (
-                <div key={m.id} onClick={()=>onPick(m)}
-                  style={{
-                    display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
-                    padding:"13px 6px",cursor:"pointer",
-                    borderTop:i===0?"none":`1px solid ${DB.border}`,
-                  }}>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14.5,color:DB.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.name}</div>
-                    {label && <div style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,marginTop:2}}>{label}</div>}
-                  </div>
-                  {isToday && (
-                    <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10.5,color:DB.mintSoft,background:DB.mintTint,padding:"3px 8px",borderRadius:999}}>오늘 수업</span>
-                  )}
-                </div>
-              );
-            })}
-            {hasMore && (
-              <div onClick={onShowAll}
-                style={{padding:"13px 6px",textAlign:"center",cursor:"pointer",borderTop:`1px solid ${DB.border}`,fontFamily:DB.font,fontWeight:700,fontSize:12.5,color:DB.mintSoft}}>
-                전체 결과 보기
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </MemberBottomSheet>
+    </div>
   );
 }
 

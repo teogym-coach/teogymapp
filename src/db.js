@@ -1906,6 +1906,28 @@ export async function getMemberOnboarding(memberId) {
   }
 }
 
+// 유입 분석 전용 — 여러 회원의 온보딩 유입 응답(v2.acquisition)만 한 번에 모아 온다.
+// 저장 구조는 그대로 두고 읽기만 한다(새 컬렉션·필드 없음). 문서 하나가 실패해도 전체가 깨지지 않도록
+// 회원 단위로 개별 catch 하고, 값이 있는 회원만 map에 담는다.
+export async function getMemberAcquisitionOnboardingMap(memberIds = []) {
+  requireUid();
+  const ids = Array.from(new Set((memberIds || []).filter(Boolean).map(String)));
+  if (!ids.length) return {};
+  dbLog("getMemberAcquisitionOnboardingMap", `${ids.length}명 온보딩 유입 응답 조회`);
+  const entries = await Promise.all(ids.map(async (id) => {
+    try {
+      const snap = await getDoc(doc(db, "members", id, "memberOnboarding", "main"));
+      if (!snap.exists()) return null;
+      const acquisition = snap.data()?.v2?.acquisition;
+      return acquisition ? [id, { v2: { acquisition } }] : null;
+    } catch (e) {
+      console.warn("[DB:getMemberAcquisitionOnboardingMap] skip:", { memberId: id, code: e?.code, message: e?.message });
+      return null;
+    }
+  }));
+  return Object.fromEntries(entries.filter(Boolean));
+}
+
 const MEMBER_ONBOARDING_WRITABLE_FIELDS = new Set([
   "gender", "birthYear", "birthMonth", "birthDay", "birthYearMonth", "jobType", "averageWorkoutTime", "averageSteps", "focusAreas",
   "completed", "completedAt", "weightHistoryMode", "calorieHistoryMode",

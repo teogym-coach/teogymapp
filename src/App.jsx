@@ -21,7 +21,7 @@ import {
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
   migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
-  getMemberOnboarding, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, recordGoalChange, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead, republishNotice, getNoticeReads,
+  getMemberOnboarding, getMemberAcquisitionOnboardingMap, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, recordGoalChange, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead, republishNotice, getNoticeReads,
   checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
   getPairSessions, savePairSession, deletePairSession, splitPairSession, updatePairSessionStatus,
   saveFcmToken,
@@ -1295,6 +1295,422 @@ const ACQUISITION_DECISION_TOUCH_OPTIONS = [
 ];
 function acquisitionLabel(options, value) {
   return options.find(o => o.value === value)?.label || "";
+}
+
+// ════════════════════════════════════════════════════════════════
+// 유입(방문 계기) 데이터 정규화 — 관리자 유입 분석의 단일 진입점
+//
+// 같은 "어디서 알고 왔는가"가 서로 다른 3개 구조에 나뉘어 저장돼 있다(모두 기존 구조 그대로 유지).
+//   1) members/{id}.survey.*        — 회원 프로필 수정 > 방문계기 탭 (visitRoutes[] · visitDetail · visitEtc ·
+//                                      visitAiTool · visitKeyword · visitAiMemo · visitReferer · visitRealMemo/visitReason)
+//   2) consultations/{id}.*         — 상담 등록 화면(평탄 필드: visitRoutes[] · visitEtc · visitAiTool · visitKeyword · consultMemo)
+//   3) members/{id}/memberOnboarding/main.v2.acquisition
+//                                   — 회원앱 온보딩 v2 (firstTouch/firstTouchOther/decisionTouch/decisionTouchOther, 코드값 단일 선택)
+//
+// 세 구조는 방문 경로 라벨 자체도 다르다("지인 소개"/"지인 추천"/referral, "지나가다 발견"/"지나가다가"/walk_by 등).
+// 그대로 세면 같은 채널이 쪼개져 집계되므로 아래 alias 표로 하나의 표준 라벨로 모은다.
+// 저장 구조는 전혀 바꾸지 않고 읽을 때만 통합한다(과거 데이터 그대로 사용 가능).
+// ════════════════════════════════════════════════════════════════
+const ACQ_UNKNOWN = "미기재";
+const ACQ_AI_CHANNEL = "AI 검색";
+const ACQ_AI_UNSPECIFIED = "세부 출처 미기재";
+const ACQ_AI_OTHER = "기타 AI 검색";
+
+// 표준 채널 라벨 — 회원 프로필 수정 화면(방문계기 탭)의 선택지를 기준으로 삼고,
+// 상담 등록/온보딩에만 있는 값(네이버 검색·운동닥터·당근·숨고)을 뒤에 덧붙인다.
+const ACQ_CANONICAL_CHANNELS = [
+  "네이버 블로그", "네이버 플레이스", "네이버 검색", "인스타그램", "유튜브",
+  ACQ_AI_CHANNEL, "지인 소개", "기존 회원 소개", "지나가다 발견", "카카오 지도",
+  "운동닥터", "당근", "숨고", "기타",
+];
+
+// 표기 차이 → 표준 라벨. 키는 공백 제거 + 소문자.
+const ACQ_CHANNEL_ALIAS = {
+  "네이버블로그": "네이버 블로그", "naverblog": "네이버 블로그",
+  "네이버플레이스": "네이버 플레이스", "naverplace": "네이버 플레이스", "플레이스": "네이버 플레이스",
+  "네이버검색": "네이버 검색", "네이버": "네이버 검색",
+  "인스타그램": "인스타그램", "인스타": "인스타그램", "instagram": "인스타그램",
+  "유튜브": "유튜브", "youtube": "유튜브",
+  "ai검색": ACQ_AI_CHANNEL, "ai": ACQ_AI_CHANNEL, "ai추천": ACQ_AI_CHANNEL,
+  "지인소개": "지인 소개", "지인추천": "지인 소개", "지인": "지인 소개",
+  "기존회원소개": "기존 회원 소개", "회원소개": "기존 회원 소개",
+  "지나가다발견": "지나가다 발견", "지나가다가": "지나가다 발견", "지나가다": "지나가다 발견",
+  "카카오지도": "카카오 지도", "카카오맵": "카카오 지도", "kakaomap": "카카오 지도",
+  "운동닥터": "운동닥터", "당근": "당근", "당근마켓": "당근", "숨고": "숨고",
+  "기타": "기타", "other": "기타",
+};
+
+// 온보딩 v2 acquisition.firstTouch(코드값) → 표준 채널
+const ACQ_ONBOARDING_CHANNEL = {
+  naver_search: "네이버 검색", naver_place: "네이버 플레이스", naver_blog: "네이버 블로그",
+  instagram: "인스타그램", youtube: "유튜브",
+  chatgpt: ACQ_AI_CHANNEL, gemini: ACQ_AI_CHANNEL, claude: ACQ_AI_CHANNEL, perplexity: ACQ_AI_CHANNEL,
+  workout_doctor: "운동닥터", referral: "지인 소개", walk_by: "지나가다 발견", other: "기타",
+};
+// 온보딩에서 AI를 고른 경우의 세부 출처(AI 검색 상세 카드용)
+const ACQ_ONBOARDING_AI_SOURCE = {
+  chatgpt: "ChatGPT", gemini: "Gemini", claude: "Claude", perplexity: "Perplexity",
+};
+
+// AI 세부 출처 정규화 — 자유 입력이라 표기 차이가 크다. "명확히 매칭되는 값만" 정규화하고,
+// 매칭되지 않는 값은 억지로 추측하지 않고 "기타 AI 검색"으로 둔다(원문은 목록에서 그대로 보여준다).
+const ACQ_AI_SOURCE_RULES = [
+  { label: "ChatGPT",        tests: [/chatgpt/, /chat\s*gpt/, /\bgpt\b/, /gpt[\s-]?[0-9]/, /챗지피티/, /챗gpt/, /지피티/, /openai/, /오픈ai/] },
+  { label: "Gemini",         tests: [/gemini/, /제미나이/, /제미니/, /\bbard\b/, /바드/] },
+  { label: "Claude",         tests: [/claude/, /클로드/] },
+  { label: "Perplexity",     tests: [/perplexity/, /퍼플렉시티/, /퍼플렉서티/, /퍼플렉시/, /퍼플렉/] },
+  { label: "Copilot",        tests: [/copilot/, /코파일럿/, /코파일롯/] },
+  { label: "네이버 AI 브리핑", tests: [/네이버\s*ai/, /naver\s*ai/, /ai\s*브리핑/, /네이버\s*cue/, /^cue$/, /^큐$/] },
+];
+const ACQ_AI_SOURCE_ORDER = ["ChatGPT", "Gemini", "Claude", "Perplexity", "Copilot", "네이버 AI 브리핑", ACQ_AI_OTHER, ACQ_AI_UNSPECIFIED];
+
+function acqArr(v) {
+  if (Array.isArray(v)) return v.filter(Boolean).map(x => String(x).trim()).filter(Boolean);
+  if (v === undefined || v === null || v === "") return [];
+  return [String(v).trim()].filter(Boolean);
+}
+function acqText(v) {
+  return typeof v === "string" ? v.trim() : (v === 0 ? "0" : (v ? String(v).trim() : ""));
+}
+// 알 수 없는 값은 버리지 않고 원문 그대로 채널로 남긴다(데이터 손실 방지).
+function normalizeAcquisitionChannel(raw) {
+  const t = acqText(raw);
+  if (!t) return "";
+  const key = t.replace(/\s+/g, "").toLowerCase();
+  return ACQ_CHANNEL_ALIAS[key] || t;
+}
+function normalizeAiSourceList(raw) {
+  const t = acqText(raw).toLowerCase();
+  if (!t) return [];
+  const found = [];
+  ACQ_AI_SOURCE_RULES.forEach(rule => {
+    if (rule.tests.some(re => re.test(t)) && !found.includes(rule.label)) found.push(rule.label);
+  });
+  return found.length ? found : [ACQ_AI_OTHER];
+}
+
+// 회원(members) · 상담(consultations) · 온보딩(memberOnboarding/main) 세 구조를 하나로 읽는 공용 selector.
+// entity: members 문서(survey 중첩) 또는 consultations 문서(평탄 필드) — 둘 다 그대로 넣으면 된다.
+// onboarding: getMemberOnboarding() 결과(없으면 생략 가능).
+function normalizeMemberAcquisitionData(entity, onboarding) {
+  const e = entity || {};
+  const sv = e.survey || {};
+  const ac = (onboarding && onboarding.v2 && onboarding.v2.acquisition) || (e.v2 && e.v2.acquisition) || {};
+  // survey(회원 프로필) 우선, 없으면 평탄 필드(상담 문서)
+  const pick = (key) => acqText(sv[key]) || acqText(e[key]);
+
+  const sources = [];
+  const pushSource = (raw) => {
+    const c = normalizeAcquisitionChannel(raw);
+    if (c && !sources.includes(c)) sources.push(c);
+  };
+  acqArr(sv.visitRoutes).forEach(pushSource);
+  acqArr(e.visitRoutes).forEach(pushSource);
+  if (ac.firstTouch) pushSource(ACQ_ONBOARDING_CHANNEL[ac.firstTouch] || acquisitionLabel(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch) || ac.firstTouch);
+
+  const aiSources = [];
+  const pushAi = (label) => { if (label && !aiSources.includes(label)) aiSources.push(label); };
+  normalizeAiSourceList(pick("visitAiTool")).forEach(pushAi);
+  if (ACQ_ONBOARDING_AI_SOURCE[ac.firstTouch]) pushAi(ACQ_ONBOARDING_AI_SOURCE[ac.firstTouch]);
+
+  const otherSource = pick("visitEtc") || (ac.firstTouch === "other" ? acqText(ac.firstTouchOther) : "");
+  // 회원이 직접 말한 방문 이유 — 프로필 방문계기 탭의 값이 1순위, 레거시(visitReason)·상담 메모가 그 다음.
+  const memberReason = acqText(sv.visitRealMemo) || acqText(sv.visitReason) || acqText(e.visitRealMemo)
+    || acqText(e.visitReason) || acqText(e.consultMemo);
+  const decisionTouch = ac.decisionTouch
+    ? (ac.decisionTouch === "other" ? (acqText(ac.decisionTouchOther) || "기타") : (acquisitionLabel(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch) || ac.decisionTouch))
+    : "";
+
+  const sourceDetail = pick("visitDetail");
+  const keyword = pick("visitKeyword");
+  const aiMemo = pick("visitAiMemo");
+  const referer = pick("visitReferer");
+  return {
+    // ── 공용 계약(유입 분석·회원 상세가 함께 사용) ──
+    sources, sourceDetail, otherSource, memberReason, aiSources,
+    // ── 화면 표시용 부가 정보 ──
+    keyword, aiMemo, referer, decisionTouch,
+    hasAny: !!(sources.length || sourceDetail || otherSource || memberReason || aiSources.length || keyword),
+  };
+}
+
+// 유입일 — "방문계기를 언제 수정했는지"가 아니라 "언제 유입됐는지"를 쓴다.
+// 우선순위: 전용 유입일(acquisitionDate) → 상담일(최초 접점) → 등록일 → 문서 생성일.
+function acqDateStr(v) {
+  if (!v) return "";
+  if (typeof v === "string") return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : "";
+  const d = typeof v.toDate === "function" ? v.toDate() : (v instanceof Date ? v : null);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function getAcquisitionDate(entity) {
+  const e = entity || {};
+  return acqDateStr(e.acquisitionDate) || acqDateStr(e.consultDate) || acqDateStr(e.startDate) || acqDateStr(e.createdAt);
+}
+function getAcquisitionUpdatedAt(entity) {
+  const e = entity || {};
+  return acqDateStr(e.updatedAt) || acqDateStr(e.survey?.surveyDate) || acqDateStr(e.convertedAt) || "";
+}
+
+// 기간 필터 — 현재 구간과 "직전 동일 기간"을 함께 계산한다. 전체(all)는 비교 대상이 없으므로 comparable=false.
+function acqShiftDate(baseStr, deltaDays) {
+  const d = new Date(`${baseStr}T00:00:00`);
+  d.setDate(d.getDate() + deltaDays);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function buildAcquisitionPeriod(periodKey, todayStr) {
+  const days = Number(periodKey);
+  if (!Number.isFinite(days) || days <= 0) {
+    return { key: "all", days: 0, comparable: false, curFrom: "", curTo: todayStr, prevFrom: "", prevTo: "" };
+  }
+  const curTo = todayStr;
+  const curFrom = acqShiftDate(todayStr, -(days - 1));
+  const prevTo = acqShiftDate(curFrom, -1);
+  const prevFrom = acqShiftDate(prevTo, -(days - 1));
+  return { key: String(days), days, comparable: true, curFrom, curTo, prevFrom, prevTo };
+}
+function inAcqRange(dateStr, from, to) {
+  if (!dateStr) return false;
+  if (from && dateStr < from) return false;
+  if (to && dateStr > to) return false;
+  return true;
+}
+
+// 정식 회원(members) + 미등록 상담 고객(consultations)을 하나의 행 목록으로 만든다.
+// 중복 집계 방지는 "이름"이 아니라 명시적 연결 키로만 한다:
+//   consultation.convertedMemberId 가 있거나, 어떤 member.consultationId 가 이 상담을 가리키면 상담 쪽을 제외.
+function buildAcquisitionRows({ members = [], consultations = [], onboardingById = {} } = {}) {
+  const linkedConsultIds = new Set();
+  members.forEach(m => { if (m && m.consultationId) linkedConsultIds.add(String(m.consultationId)); });
+
+  const memberRows = members.map(m => ({
+    key: `member_${m.id}`,
+    kind: "member",
+    id: m.id,
+    name: m.name || "이름 없음",
+    date: getAcquisitionDate(m),
+    updatedAt: getAcquisitionUpdatedAt(m),
+    statusLabel: "정식 회원",
+    acq: normalizeMemberAcquisitionData(m, onboardingById[m.id]),
+    raw: m,
+  }));
+
+  const leadRows = consultations
+    .filter(c => c && !c.convertedMemberId && !linkedConsultIds.has(String(c.id)))
+    .map(c => ({
+      key: `lead_${c.id}`,
+      kind: "lead",
+      id: c.id,
+      name: c.name || "상담 고객",
+      date: getAcquisitionDate(c),
+      updatedAt: getAcquisitionUpdatedAt(c),
+      statusLabel: "미등록 상담",
+      acq: normalizeMemberAcquisitionData(c),
+      raw: c,
+    }));
+
+  return [...memberRows, ...leadRows];
+}
+
+// 채널별 집계 — 복수 선택 회원은 선택한 채널에 각각 1명으로 들어가지만(합계는 100%를 넘을 수 있음),
+// 같은 회원이 같은 채널에 두 번 세어지지는 않는다. 총 인원(total)은 항상 중복 없는 실인원이다.
+function summarizeAcquisitionRows(rows = []) {
+  const total = rows.length;
+  const memberCount = rows.filter(r => r.kind === "member").length;
+  const leadCount = total - memberCount;
+  const channelMap = new Map();
+  let unknownCount = 0;
+  rows.forEach(r => {
+    const list = r.acq?.sources || [];
+    if (!list.length) {
+      unknownCount += 1;
+      channelMap.set(ACQ_UNKNOWN, (channelMap.get(ACQ_UNKNOWN) || 0) + 1);
+      return;
+    }
+    Array.from(new Set(list)).forEach(c => channelMap.set(c, (channelMap.get(c) || 0) + 1));
+  });
+  const channelOrder = (name) => {
+    const i = ACQ_CANONICAL_CHANNELS.indexOf(name);
+    return i === -1 ? ACQ_CANONICAL_CHANNELS.length : i;
+  };
+  const channels = Array.from(channelMap.entries())
+    .map(([name, count]) => ({ name, count, isUnknown: name === ACQ_UNKNOWN }))
+    .sort((a, b) => b.count - a.count || channelOrder(a.name) - channelOrder(b.name) || a.name.localeCompare(b.name));
+  const namedChannels = channels.filter(c => !c.isUnknown);
+
+  const aiRows = rows.filter(r => (r.acq?.sources || []).includes(ACQ_AI_CHANNEL));
+  const aiMap = new Map();
+  aiRows.forEach(r => {
+    const list = r.acq?.aiSources || [];
+    if (!list.length) { aiMap.set(ACQ_AI_UNSPECIFIED, (aiMap.get(ACQ_AI_UNSPECIFIED) || 0) + 1); return; }
+    Array.from(new Set(list)).forEach(a => aiMap.set(a, (aiMap.get(a) || 0) + 1));
+  });
+  const aiSources = Array.from(aiMap.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || ACQ_AI_SOURCE_ORDER.indexOf(a.name) - ACQ_AI_SOURCE_ORDER.indexOf(b.name));
+
+  const known = total - unknownCount;
+  const top = namedChannels[0] || null;
+  const top3 = namedChannels.slice(0, 3).reduce((s, c) => s + c.count, 0);
+  return {
+    total, memberCount, leadCount, unknownCount,
+    unknownPct: total ? Math.round(unknownCount / total * 100) : 0,
+    channels, namedChannels,
+    aiRows, aiSources,
+    aiCount: aiRows.length,
+    aiPct: total ? Math.round(aiRows.length / total * 100) : 0,
+    topChannel: top,
+    topChannelPct: known && top ? Math.round(top.count / known * 100) : 0,
+    top3Pct: known ? Math.round(top3 / known * 100) : 0,
+    knownCount: known,
+  };
+}
+
+// 증감 — 이전 값이 0일 때 Infinity/NaN 퍼센트가 나오지 않게 "신규 유입 발생"으로 표기한다.
+function acqDelta(cur, prev, comparable = true) {
+  const c = Number(cur) || 0, p = Number(prev) || 0;
+  if (!comparable) return { type: "na", pct: null, diff: 0, text: "비교 데이터 없음" };
+  if (p === 0 && c === 0) return { type: "none", pct: null, diff: 0, text: "유입 없음" };
+  if (p === 0) return { type: "new", pct: null, diff: c, text: "신규 유입 발생" };
+  const diff = c - p;
+  const pct = Math.round(diff / p * 100);
+  if (diff === 0) return { type: "flat", pct: 0, diff: 0, text: "변화 없음" };
+  return { type: diff > 0 ? "up" : "down", pct, diff, text: `${diff > 0 ? "▲" : "▼"} ${Math.abs(pct)}%` };
+}
+
+// 채널 추이 버킷 — 기간에 따라 일/주/월 단위를 자동 선택한다.
+function buildAcquisitionBuckets(rows = [], period, todayStr) {
+  const dated = rows.filter(r => r.date);
+  if (!dated.length) return { unit: "", buckets: [] };
+  const unit = !period.comparable ? "month" : period.days <= 7 ? "day" : period.days <= 90 ? "week" : "month";
+  const from = period.comparable
+    ? period.curFrom
+    : dated.reduce((min, r) => (!min || r.date < min ? r.date : min), "");
+  const to = todayStr;
+  const startOfWeek = (s) => {
+    const d = new Date(`${s}T00:00:00`);
+    d.setDate(d.getDate() - d.getDay());
+    return acqShiftDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, 0);
+  };
+  const bucketKey = (s) => unit === "day" ? s : unit === "week" ? startOfWeek(s) : s.slice(0, 7);
+  const bucketLabel = (k) => unit === "day" ? `${Number(k.slice(5, 7))}/${Number(k.slice(8, 10))}`
+    : unit === "week" ? `${Number(k.slice(5, 7))}/${Number(k.slice(8, 10))}~`
+    : `${Number(k.slice(5, 7))}월`;
+
+  const keys = [];
+  if (unit === "day") {
+    for (let s = from; s <= to; s = acqShiftDate(s, 1)) keys.push(s);
+  } else if (unit === "week") {
+    for (let s = startOfWeek(from); s <= to; s = acqShiftDate(s, 7)) keys.push(s);
+  } else {
+    let y = Number(from.slice(0, 4)), m = Number(from.slice(5, 7));
+    const endKey = to.slice(0, 7);
+    for (let guard = 0; guard < 240; guard += 1) {
+      const k = `${y}-${String(m).padStart(2, "0")}`;
+      keys.push(k);
+      if (k >= endKey) break;
+      m += 1; if (m > 12) { m = 1; y += 1; }
+    }
+  }
+  const trimmed = keys.slice(-14);
+  const buckets = trimmed.map(k => ({ key: k, label: bucketLabel(k), total: 0, byChannel: {} }));
+  const index = new Map(buckets.map((b, i) => [b.key, i]));
+  dated.forEach(r => {
+    if (r.date < from || r.date > to) return;
+    const i = index.get(bucketKey(r.date));
+    if (i === undefined) return;
+    buckets[i].total += 1;
+    const list = (r.acq?.sources || []).length ? Array.from(new Set(r.acq.sources)) : [ACQ_UNKNOWN];
+    list.forEach(c => { buckets[i].byChannel[c] = (buckets[i].byChannel[c] || 0) + 1; });
+  });
+  return { unit, buckets };
+}
+
+// 규칙 기반 인사이트 — 외부 AI 호출 없이 집계된 실제 수치만으로 문장을 만든다.
+// priority가 낮을수록 중요(최대 3개만 노출).
+function buildAcquisitionInsights(cur, prev, period) {
+  const out = [];
+  const comparable = !!period.comparable;
+  const periodLabel = comparable ? `최근 ${period.days}일` : "전체 기간";
+  if (!cur.total) return out;
+
+  if (cur.unknownPct >= 20) {
+    out.push({ priority: 1, tone: "warn", text: `방문 경로 미기재가 ${cur.unknownCount}명(${cur.unknownPct}%)으로, 정확한 마케팅 판단이 어렵습니다.` });
+  }
+  if (cur.topChannel && cur.topChannelPct >= 60 && cur.knownCount >= 3) {
+    out.push({ priority: 2, tone: "warn", text: `${cur.topChannel.name} 한 채널 의존도가 ${cur.topChannelPct}%로 높습니다. 유입 경로 분산이 필요합니다.` });
+  }
+  if (comparable) {
+    let best = null;
+    cur.namedChannels.forEach(c => {
+      const p = (prev.channels.find(x => x.name === c.name) || {}).count || 0;
+      if (p > 0 && c.count > p) {
+        const pct = Math.round((c.count - p) / p * 100);
+        if (pct >= 50 && (!best || pct > best.pct)) best = { name: c.name, pct, cur: c.count, prev: p };
+      } else if (p === 0 && c.count >= 2 && !best) {
+        best = { name: c.name, pct: null, cur: c.count, prev: 0 };
+      }
+    });
+    if (best) {
+      out.push({
+        priority: 3, tone: "good",
+        text: best.pct === null
+          ? `${best.name} 유입이 직전 ${period.days}일에는 없었지만 이번 기간에 ${best.cur}명 발생했습니다.`
+          : `${best.name} 유입이 직전 기간보다 ${best.pct}% 늘었습니다(${best.prev}명 → ${best.cur}명).`,
+      });
+    }
+  }
+  if (cur.topChannel) {
+    out.push({ priority: 4, tone: "good", text: `${periodLabel} 가장 강한 유입 채널은 ${cur.topChannel.name}입니다(${cur.topChannel.count}명).` });
+  }
+  if (comparable) {
+    const dropped = prev.namedChannels.find(p => p.count >= 2 && !cur.channels.some(c => c.name === p.name));
+    if (dropped) out.push({ priority: 5, tone: "warn", text: `${dropped.name} 유입이 최근 ${period.days}일 동안 한 건도 발생하지 않았습니다(직전 기간 ${dropped.count}명).` });
+  }
+  if (cur.aiCount > 0) {
+    const topAi = cur.aiSources.find(a => a.name !== ACQ_AI_UNSPECIFIED && a.name !== ACQ_AI_OTHER);
+    if (topAi) out.push({ priority: 6, tone: "info", text: `AI 검색 유입 ${cur.aiCount}명 중 ${topAi.name}을(를) 통한 유입이 ${topAi.count}명으로 가장 많습니다.` });
+  }
+  return out.sort((a, b) => a.priority - b.priority).slice(0, 3);
+}
+
+// 이번 주 추천 액션 — 실제 집계값이 조건을 만족할 때만 생성한다(임의의 숫자·문구 생성 금지).
+function buildAcquisitionActions(cur, prev, period) {
+  const out = [];
+  if (!cur.total) return out;
+  const countOf = (name) => (cur.channels.find(c => c.name === name) || {}).count || 0;
+  const prevOf = (name) => (prev.channels.find(c => c.name === name) || {}).count || 0;
+
+  if (cur.unknownPct >= 20) {
+    out.push({ priority: 1, text: "신규 상담·회원 등록 시 방문계기 입력을 먼저 받기", why: `미기재 ${cur.unknownCount}명(${cur.unknownPct}%)` });
+  }
+  if (cur.topChannel && (cur.topChannel.name === "지인 소개" || cur.topChannel.name === "기존 회원 소개")) {
+    out.push({ priority: 2, text: "후기 요청·소개 제안을 수업 종료 대화에 넣기", why: `${cur.topChannel.name} ${cur.topChannel.count}명으로 1위` });
+  }
+  const aiPrev = prevOf(ACQ_AI_CHANNEL);
+  if (cur.aiCount > 0 && (!period.comparable || cur.aiCount >= aiPrev)) {
+    out.push({ priority: 3, text: "홈페이지 FAQ·브랜드 설명 문서를 AI가 읽기 쉬운 문장으로 보강", why: `AI 검색 ${cur.aiCount}명(${cur.aiPct}%)` });
+  }
+  if (countOf("네이버 블로그") === 0) {
+    out.push({ priority: 4, text: "상담 전환형 블로그 글 1건 발행(가격·프로그램·후기 중 1개 주제)", why: `${period.comparable ? `최근 ${period.days}일` : "전체 기간"} 네이버 블로그 유입 0명` });
+  }
+  if (countOf("네이버 플레이스") === 0) {
+    out.push({ priority: 5, text: "네이버 플레이스 사진·소식 업데이트 + 방문 회원 후기 요청", why: "네이버 플레이스 유입 0명" });
+  }
+  if (countOf("유튜브") === 0) {
+    out.push({ priority: 6, text: "긴 영상 대신 1분 내외 운동 설명 쇼츠 1건 테스트", why: "유튜브 유입 0명" });
+  }
+  return out.sort((a, b) => a.priority - b.priority).slice(0, 3);
+}
+
+// 방문 이유·콘텐츠 메모 카드에서 이름을 그대로 노출하지 않기 위한 마스킹(성만 남긴다).
+function maskAcquisitionName(name) {
+  const t = acqText(name);
+  if (!t) return "회원";
+  if (t.length === 1) return t;
+  return `${t[0]}${"*".repeat(Math.max(1, t.length - 1))}`;
 }
 
 // 온보딩 v2의 세부 목표(12종) → 기존 회원앱 목표 어휘(AI_GOAL_OPTIONS 5종) 매핑.
@@ -8768,6 +9184,12 @@ export default function App() {
   const [editConsultation, setEditConsultation] = useState(null);
   const [consultSaving, setConsultSaving] = useState(false);
   const [memberFormPrefill, setMemberFormPrefill] = useState(null); // 상담 → 회원 전환 시 MemberForm 초기값
+  // 유입 분석·회원 입력 현황은 회원 상세(분석도구)와 분석 리포트 양쪽에서 진입한다 — 뒤로가기 목적지를 진입 시점에 기록해 둔다.
+  const [analyticsReturn, setAnalyticsReturn] = useState("hub");
+  // 유입 분석 전용 — 회원앱 온보딩 v2의 유입 응답(v2.acquisition)만 모아둔 맵 {memberId: {v2:{acquisition}}}
+  const [acquisitionOnboardingById, setAcquisitionOnboardingById] = useState({});
+  const [acquisitionOnboardingLoading, setAcquisitionOnboardingLoading] = useState(false);
+  const acquisitionOnboardingLoadedRef = useRef(false);
   const memberMode = isMemberMode();
   // 관리자 화면 렌더링 가드 — 회원 계정 여부 확인이 끝나기 전에는 관리자 화면을 절대 그리지 않는다.
   // uid 자체를 저장해두고 현재 user.uid와 비교하는 방식 — 로그아웃 후 다른 계정으로 재로그인해도
@@ -9066,6 +9488,7 @@ export default function App() {
     setHubScrollTarget(opts.scrollTarget || null);
     setTrendInitialDate(opts.initialDate || null);
     setTrendInitialType(opts.initialType || null);
+    setAnalyticsReturn("hub"); // 회원 상세로 들어왔으므로 유입 분석·회원 입력 현황의 뒤로가기는 회원 상세로
     setScreen(opts.targetScreen || "hub");
     // 새 회원 데이터 비동기 로드
     loadMemberData(m.id);
@@ -9235,6 +9658,19 @@ export default function App() {
     catch (e) { console.error("[TEO GYM] getConsultations 실패:", e); showToast("상담 고객을 불러오지 못했습니다.", "err"); }
     finally { setConsultationsLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 유입 분석 화면 진입 시 1회만 — 회원별 온보딩 유입 응답(v2.acquisition)을 모아 온다.
+  // 회원 목록이 이미 로드된 뒤에 호출되며, 실패해도 프로필(survey) 기반 집계는 그대로 동작한다.
+  const loadAcquisitionOnboarding = useCallback(async (memberList) => {
+    if (acquisitionOnboardingLoadedRef.current) return;
+    const ids = (memberList || []).filter(isRegularAdminMember).map(m => m.id).filter(Boolean);
+    if (!ids.length) return;
+    acquisitionOnboardingLoadedRef.current = true;
+    setAcquisitionOnboardingLoading(true);
+    try { setAcquisitionOnboardingById(await getMemberAcquisitionOnboardingMap(ids)); }
+    catch (e) { console.error("[TEO GYM] getMemberAcquisitionOnboardingMap 실패:", e); }
+    finally { setAcquisitionOnboardingLoading(false); }
   }, []);
 
   async function handleSaveConsultation(data) {
@@ -9714,7 +10150,7 @@ export default function App() {
   );
 
   return (
-    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub"||screen==="history")?"#F6F7F9":"#0B1120"}}>
+    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub"||screen==="history"||screen==="report"||screen==="referral")?"#F6F7F9":"#0B1120"}}>
       <style>{CSS}</style>
 
       {toast && (
@@ -9729,7 +10165,7 @@ export default function App() {
       )}
 
       {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)·수업 예정(집중 모드, 확보된 높이를 캘린더에 전부 배정)·회원 상세(오늘 브리핑·오늘 운동·최근 수업·다음 수업 준비 영역을 더 크게 보기 위해 자체 헤더만 사용)에서는 숨김 */}
-      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && (() => {
+      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && screen !== "report" && screen !== "referral" && (() => {
         // 히스토리 화면만 관리자앱 라이트 톤 상단바 — 다른 화면(screen!=="history")은 기존 다크 스타일 그대로 유지
         const navLight = screen === "history";
         return (
@@ -9774,7 +10210,7 @@ export default function App() {
       })()}
 
       {/* SCREENS */}
-      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming"||screen==="consultations"||screen==="consultationForm") ? {width:"100%"} : {
+      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming"||screen==="consultations"||screen==="consultationForm"||screen==="report"||screen==="referral") ? {width:"100%"} : {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
@@ -9813,7 +10249,7 @@ export default function App() {
         {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} initialTab={healthHubInitialTab} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
-        {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen("hub")} onSelectMember={goHub} />}
+        {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "hub")} onSelectMember={goHub} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="bodycheck"  && member && (() => { console.log("[TEO GYM] BodyCheckScreen — memberId:", member.id, "bodyData:", !!bodyData); return true; })() && <BodyCheckScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} bodyData={bodyData} onSaveBodyData={async d => {
@@ -9829,7 +10265,16 @@ export default function App() {
             }
           }} showToast={showToast} />}
         {screen==="metabolism" && member && <MetabolismScreen member={member} sessions={sessions} nutritionData={nutritionData} bodyData={bodyData} onBack={()=>setScreen("hub")} />}
-        {screen==="referral"  && <ReferralStatsScreen members={members} consultations={consultations} onLoadConsultations={loadConsultations} onBack={()=>setScreen("hub")} />}
+        {/* 분석 리포트 허브 — 관리자 홈 사이드바/퀵메뉴 "분석 리포트"의 진입 화면 */}
+        {screen==="report" && <AnalyticsReportScreen members={members} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} onBack={()=>setScreen("home")}
+          onOpenReport={key=>{ setAnalyticsReturn("report"); setScreen(key); }} />}
+        {/* 유입 분석 — 분석 리포트와 회원 상세(분석도구) 두 진입점이 같은 컴포넌트를 재사용한다 */}
+        {screen==="referral"  && <ReferralStatsScreen members={members} consultations={consultations}
+          onboardingById={acquisitionOnboardingById} onboardingLoading={acquisitionOnboardingLoading}
+          onLoadConsultations={loadConsultations} onLoadOnboarding={()=>loadAcquisitionOnboarding(members)}
+          setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast}
+          onOpenMember={m=>goHub(m)} onOpenConsultation={c=>{ setEditConsultation(c); setScreen("consultationForm"); }}
+          onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "hub")} />}
       </div>
       <div id="pportal" style={{display:"none"}} />
     </div>
@@ -10355,7 +10800,7 @@ function AdminSidebar({ active, setScreen, loadMembers, loadPairSessions, goCs }
     {key:"pair21",   label:"2:1 수업 관리", icon:icP2, fn:()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}},
     {key:"sessions", label:"수업 기록",     icon:icCl, fn:goCs},
     {key:"diet",     label:"식단 관리",     icon:icDt, fn:goCs},
-    {key:"report",   label:"분석 리포트",   icon:icBr, fn:goCs},
+    {key:"report",   label:"분석 리포트",   icon:icBr, fn:()=>setScreen("report")},
     {key:"notices",  label:"공지센터 관리", icon:icBl, fn:()=>setScreen("notices")},
     {key:"settings", label:"설정",          icon:icGr, fn:goCs},
   ];
@@ -11617,7 +12062,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <QuickMenuTile icon={qc} label="수업 관리" onClick={goCs} />
             <QuickMenuTile icon={qp} label="2:1 수업" badge={draftPair} onClick={()=>{loadMembers&&loadMembers();loadPairSessions&&loadPairSessions();setScreen("pair21");}} />
             <QuickMenuTile icon={qd} label="식단 관리" onClick={goCs} />
-            <QuickMenuTile icon={qr} label="분석 리포트" onClick={goCs} />
+            <QuickMenuTile icon={qr} label="분석 리포트" onClick={()=>setScreen("report")} />
             <QuickMenuTile icon={qn} label="공지센터" onClick={()=>setScreen("notices")} />
           </div>
         </div>
@@ -13897,7 +14342,11 @@ function MemberForm({ initial, onSave, onBack, prefill = null }) {
   const [visitRoutes, setVisitRoutes] = useState(sv.visitRoutes || prefill?.visitRoutes || []);
   const [visitEtc,    setVisitEtc]    = useState(sv.visitEtc    || prefill?.visitEtc || "");
   // 방문 계기 상세 (신규)
-  const [visitDetail, setVisitDetail] = useState(sv.visitDetail || initial?.visitDetail || initial?.memo?.includes("방문") ? initial?.memo : sv.visitDetail || "");
+  // 저장된 방문 계기 상세 메모가 1순위. 저장값이 아예 없을 때만 회원 메모에서 "방문"이 들어간 내용을 가져온다.
+  // (기존 식은 연산자 우선순위 때문에 저장값이 있으면 오히려 initial.memo로 덮어써져, 수정 저장 시 상세 메모가 유실됐다.)
+  const [visitDetail, setVisitDetail] = useState(
+    sv.visitDetail || initial?.visitDetail || (initial?.memo?.includes("방문") ? initial.memo : "")
+  );
   const [visitAiTool, setVisitAiTool] = useState(sv.visitAiTool || "");
   const [visitKeyword,setVisitKeyword]= useState(sv.visitKeyword|| "");
   const [visitReferer,setVisitReferer]= useState(sv.visitReferer|| "");
@@ -14292,11 +14741,12 @@ function MemberForm({ initial, onSave, onBack, prefill = null }) {
                     placeholder="AI 검색 관련 메모 (AI가 추천한 내용, 회원이 말한 것 등)" rows={2}
                     style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
                       border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0",resize:"none"}} />
-                  <StepLabel label="AI가 추천한 내용 메모" />
-                  <textarea value={visitDetail} onChange={e=>setVisitDetail(e.target.value)}
-                    placeholder="AI가 어떤 내용을 추천했는지 메모" rows={2}
-                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:6,fontSize:12,
-                      border:"1px solid rgba(162,155,254,.2)",background:"#111827",color:"#ddddf0",resize:"none"}} />
+                  {/* "AI가 추천한 내용 메모" 입력칸은 아래 "방문 계기 상세 메모"와 같은 필드(survey.visitDetail)를 쓰고 있어
+                      한쪽에 적으면 다른 쪽이 덮어써지는 문제가 있었다. 새 필드를 만들지 않고 중복 입력칸만 제거한다
+                      (AI 관련 메모는 바로 위 "AI 검색 메모"(visitAiMemo)에 적는다 — 기존 저장값은 그대로 유지). */}
+                  <div style={{marginTop:6,fontFamily:"'DM Mono',monospace",fontSize:9,color:"#a29bfe",lineHeight:1.6}}>
+                    AI가 추천한 내용은 위 “AI 검색 메모”에 적어주세요. 어떤 콘텐츠·키워드를 보고 왔는지는 아래 “방문 계기 상세 메모”에 적습니다.
+                  </div>
                 </div>
               )}
               {/* 소개인 */}
@@ -15051,8 +15501,9 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
 
   // 온보딩 자체가 없거나 v2 이전(기존 회원) — 억지로 빈 항목을 나열하지 않고 상태와 다음 행동만 보여준다.
   if (!v2) {
-    // v2(최초 발견·상담 결정) 이전에 저장된 회원은 관리자가 상담 등록 시 입력한 방문 경로(survey.visitRoutes)만 있을 수 있다 — 있으면 참고용으로 함께 보여준다.
-    const legacyRoutes = Array.isArray(member?.survey?.visitRoutes) ? member.survey.visitRoutes.filter(Boolean) : [];
+    // v2(최초 발견·상담 결정) 이전에 저장된 회원은 관리자가 입력한 방문 경로(survey.visitRoutes)만 있을 수 있다 — 있으면 참고용으로 함께 보여준다.
+    // 유입 분석과 같은 공용 selector를 써서 두 화면의 방문 경로 표기가 항상 일치하게 한다.
+    const legacyRoutes = normalizeMemberAcquisitionData(member, ob).sources;
     return (
       <section style={{...card, padding:"11px 13px", marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",rowGap:3}}>
@@ -15092,6 +15543,8 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
     if (val === "other") return otherText || "기타";
     return acquisitionLabel(options, val) || val;
   };
+  // 유입 분석 화면과 동일한 공용 selector — 온보딩(v2.acquisition)과 프로필 방문계기(survey.visit*)를 합친 표준 채널
+  const acqSummary = normalizeMemberAcquisitionData(member, ob);
 
   return (
     <section className={open ? "is-expanded" : undefined}
@@ -15137,6 +15590,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
             <div>
               {line("최초 발견", acquisitionText(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch, ac.firstTouchOther))}
               {line("상담 결정", acquisitionText(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch, ac.decisionTouchOther))}
+              {line("유입 채널", acqSummary.sources.join(", "))}
               {line("최우선 목표", g.primary)}
               {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
               {line("구체적 목표", g.detail)}
@@ -16498,7 +16952,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                   {menuBtn("📚","운동 라이브러리","부위별 운동 기록","library")}
                   {menuBtn("🧘","컨디셔닝","매일 기능 운동","daily_conditioning")}
                   {menuBtn("🤖","AI 루틴 추천",t("수업기록 기반","운동기록 기반"),"ai_routine")}
-                  {menuBtn("📊","유입 분석","방문 경로 통계","referral")}
+                  {menuBtn("📊","유입 분석","방문 경로와 마케팅 성과","referral")}
                 </div>
                 {member.survey?.surveyDone&&(
                   <div style={{marginBottom:8}}>{menuBtn("🤖","AI 초기 분석 리포트",t("수업 방향 가이드","운동 방향 가이드"),"consultReport")}</div>
@@ -23501,188 +23955,665 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
 }
 
 // ════════════════════════════════════════════
-// 유입 분석 화면
+// 분석 리포트 허브 — 관리자 홈 사이드바/퀵메뉴의 "분석 리포트" 진입 화면
+//
+// 짐 전체 단위로 볼 수 있는 분석(유입 분석·회원 입력 현황)은 여기서 바로 열고,
+// 회원 한 명을 골라야 의미가 있는 분석(운동 분석·훈련 피드백 등)은 회원 목록으로 안내한다.
+// 유입 분석은 화면을 복제하지 않고 회원 상세 > 분석도구와 같은 ReferralStatsScreen을 그대로 연다.
 // ════════════════════════════════════════════
-function ReferralStatsScreen({ members=[], consultations=[], onLoadConsultations, onBack }) {
-  const [period, setPeriod] = useState("all"); // all | 90 | 30
-  // 상담 고객은 상담 화면에서만 로드되므로, 유입 분석으로 바로 들어온 경우 여기서 1회 채운다.
-  const leadsLoadedRef = useRef(false);
+const ANALYTICS_GYM_REPORTS = [
+  { key: "referral", icon: "📊", title: "유입 분석", sub: "방문 경로와 마케팅 성과" },
+  { key: "memberInputStatus", icon: "🗂️", title: "회원 입력 현황", sub: "회원앱 입력 참여도 한눈에 보기" },
+];
+const ANALYTICS_MEMBER_REPORTS = [
+  { icon: "💪", title: "운동 분석", sub: "부위별 훈련량과 성장 추이" },
+  { icon: "🗒️", title: "훈련 피드백", sub: "수업별 피드백 모아보기" },
+  { icon: "🗣️", title: "상담 리포트", sub: "회원의 변화와 다음 목표" },
+  { icon: "🔥", title: "대사 추정", sub: "유산소 · 체중 분석" },
+  { icon: "📋", title: "평가 기록", sub: "체형 · 기능 · 인체도" },
+  { icon: "📚", title: "운동 라이브러리", sub: "부위별 운동 기록" },
+  { icon: "🧘", title: "컨디셔닝", sub: "매일 기능 운동" },
+  { icon: "🤖", title: "AI 루틴 추천", sub: "수업기록 기반 루틴 제안" },
+];
+
+function AnalyticsReportScreen({ members = [], setScreen, loadMembers, loadPairSessions, showToast, onBack, onOpenReport }) {
+  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
   useEffect(() => {
-    if (leadsLoadedRef.current) return;
-    leadsLoadedRef.current = true;
+    const h = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  const isWide = winW >= 1024;
+  const memberCount = members.filter(isRegularAdminMember).length;
+
+  const goMembers = (title) => {
+    loadMembers?.();
+    setScreen?.("members");
+    showToast?.(`회원을 선택하면 상세 화면의 분석도구에서 ${title}을(를) 볼 수 있습니다.`);
+  };
+
+  const cardBase = {
+    background: DB.card, border: `1px solid ${DB.border}`, borderRadius: 16, boxShadow: DB.shadow,
+    padding: "15px 16px", textAlign: "left", cursor: "pointer", minWidth: 0, width: "100%",
+    display: "flex", alignItems: "center", gap: 12, fontFamily: DB.font,
+  };
+
+  const content = (
+    <div style={{ flex: 1, overflowY: isWide ? "auto" : "visible", overscrollBehaviorY: isWide ? "contain" : undefined, minHeight: 0, height: isWide ? "var(--admin-layout-height, 100dvh)" : undefined, background: DB.bg, fontFamily: DB.font }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(246,247,249,.90)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", borderBottom: DB.hairline }}>
+        <div style={{ maxWidth: isWide ? 1400 : 820, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top,0px))" }}>
+          <button onClick={onBack} aria-label="홈으로" style={{ width: 34, height: 34, borderRadius: 11, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 15, cursor: "pointer", boxShadow: DB.shadow, flexShrink: 0 }}>←</button>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap", rowGap: 2 }}>
+            <span style={{ fontWeight: 800, fontSize: isWide ? 20 : 17, color: DB.text, letterSpacing: "-.4px" }}>분석 리포트</span>
+            <span style={{ fontWeight: 700, fontSize: 12, color: DB.faint }}>운영 판단에 쓰는 분석 모음</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: isWide ? 1400 : 820, margin: "0 auto", padding: isWide ? "18px 28px calc(48px + env(safe-area-inset-bottom,0px))" : "14px 16px calc(48px + env(safe-area-inset-bottom,0px))" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: DB.faint, marginBottom: 9, letterSpacing: ".02em" }}>짐 전체 분석</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 10, marginBottom: 20 }}>
+          {ANALYTICS_GYM_REPORTS.map(r => (
+            <button key={r.key} onClick={() => onOpenReport?.(r.key)}
+              style={{ ...cardBase, background: `linear-gradient(135deg,rgba(57,199,184,.09),${DB.card})`, border: "1px solid rgba(57,199,184,.28)" }}>
+              <span style={{ width: 42, height: 42, borderRadius: 13, background: DB.mintTint, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 }}>{r.icon}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontWeight: 800, fontSize: 14.5, color: DB.text, letterSpacing: "-.2px" }}>{r.title}</span>
+                <span style={{ display: "block", fontWeight: 600, fontSize: 11.5, color: DB.sub, marginTop: 2, lineHeight: 1.45, wordBreak: "keep-all" }}>{r.sub}</span>
+              </span>
+              <span style={{ marginLeft: "auto", color: DB.mintSoft, fontSize: 15, fontWeight: 800, flexShrink: 0 }}>→</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 800, color: DB.faint, marginBottom: 4, letterSpacing: ".02em" }}>회원별 분석</div>
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: DB.faint, marginBottom: 9, lineHeight: 1.6 }}>
+          회원 한 명을 선택해야 볼 수 있는 분석입니다. 카드를 누르면 회원 목록({memberCount}명)으로 이동합니다.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 10 }}>
+          {ANALYTICS_MEMBER_REPORTS.map(r => (
+            <button key={r.title} onClick={() => goMembers(r.title)} style={cardBase}>
+              <span style={{ width: 38, height: 38, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{r.icon}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontWeight: 800, fontSize: 13.5, color: DB.text }}>{r.title}</span>
+                <span style={{ display: "block", fontWeight: 600, fontSize: 11, color: DB.faint, marginTop: 2, lineHeight: 1.4, wordBreak: "keep-all" }}>{r.sub}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={isWide ? "admin-scroll-shell" : undefined}
+      style={{ display: "flex", height: isWide ? "var(--admin-layout-height, 100dvh)" : "auto", minHeight: isWide ? undefined : "100dvh", background: DB.bg, overflow: isWide ? "hidden" : "visible" }}>
+      {isWide && (
+        <AdminSidebar active="report" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={() => showToast?.("아직 준비 중인 기능입니다.")} />
+      )}
+      {content}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 유입 분석 — 테오짐 마케팅 의사결정 대시보드
+//
+// 진입점은 두 곳이지만 화면은 이 컴포넌트 하나뿐이다(복제 금지).
+//   · 관리자 홈 > 분석 리포트 > 유입 분석
+//   · 회원 상세 > 분석도구 > 유입 분석
+// 데이터는 전부 normalizeMemberAcquisitionData / buildAcquisitionRows 공용 selector를 거쳐 들어온다.
+// ════════════════════════════════════════════
+const ACQ_TREND_PRESET = ["지인 소개", "기존 회원 소개", ACQ_AI_CHANNEL, "네이버 블로그", "네이버 플레이스", "인스타그램", "유튜브"];
+const ACQ_LIST_FILTERS = [
+  { key: "all", label: "전체" },
+  { key: "member", label: "정식 회원" },
+  { key: "lead", label: "미등록 상담" },
+  { key: "ai", label: "AI 검색" },
+  { key: "referral", label: "지인 소개" },
+  { key: "unknown", label: "미기재" },
+];
+
+// 라이트 테마 공용 카드 — 관리자 홈/회원 목록과 같은 흰 카드 + 얇은 테두리 + 미세 그림자
+function AcqCard({ title, sub, right, children, style, tone }) {
+  const border = tone === "warn" ? "rgba(245,158,11,.32)" : tone === "ai" ? "rgba(57,199,184,.30)" : DB.border;
+  return (
+    <section style={{ background: DB.card, border: `1px solid ${border}`, borderRadius: DB.radiusSm, boxShadow: DB.shadow, padding: "15px 17px", minWidth: 0, ...style }}>
+      {(title || right) && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap", rowGap: 3, marginBottom: 11 }}>
+          <span style={{ fontFamily: DB.font, fontWeight: 800, fontSize: 14, color: DB.text, letterSpacing: "-.2px" }}>{title}</span>
+          {sub && <span style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.faint, fontWeight: 600 }}>{sub}</span>}
+          {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function AcqDeltaBadge({ delta }) {
+  if (!delta) return null;
+  const map = {
+    up: { bg: "rgba(34,197,94,.10)", c: "#15803D" },
+    down: { bg: "rgba(239,68,68,.09)", c: "#B91C1C" },
+    new: { bg: "rgba(57,199,184,.12)", c: DB.mintSoft },
+    flat: { bg: "rgba(100,116,139,.09)", c: DB.sub },
+    none: { bg: "rgba(100,116,139,.09)", c: DB.faint },
+    na: { bg: "rgba(100,116,139,.07)", c: DB.faint },
+  };
+  const s = map[delta.type] || map.na;
+  return (
+    <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: s.bg, color: s.c, fontFamily: DB.font, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>
+      {delta.text}
+    </span>
+  );
+}
+
+// CEO 요약 타일 — 값 하나 + 보조 설명 + 증감 배지
+function AcqStatTile({ label, value, unit, sub, delta, strong }) {
+  return (
+    <div style={{
+      background: strong ? `linear-gradient(135deg,rgba(57,199,184,.10),${DB.card})` : DB.card,
+      border: `1px solid ${strong ? "rgba(57,199,184,.28)" : DB.border}`,
+      borderRadius: 16, padding: "13px 15px", boxShadow: DB.shadow, minWidth: 0,
+    }}>
+      <div style={{ fontFamily: DB.font, fontSize: 11.5, fontWeight: 700, color: DB.faint, marginBottom: 5 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, flexWrap: "wrap", rowGap: 2 }}>
+        <span style={{ fontFamily: DB.font, fontSize: strong ? 24 : 19, fontWeight: 800, color: strong ? DB.mintSoft : DB.text, letterSpacing: "-.5px", wordBreak: "break-all" }}>{value}</span>
+        {unit && <span style={{ fontFamily: DB.font, fontSize: 12, fontWeight: 700, color: DB.sub }}>{unit}</span>}
+      </div>
+      {sub && <div style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.sub, fontWeight: 600, marginTop: 3, lineHeight: 1.45, wordBreak: "keep-all" }}>{sub}</div>}
+      {delta && <div style={{ marginTop: 6 }}><AcqDeltaBadge delta={delta} /></div>}
+    </div>
+  );
+}
+
+function AcqEmpty({ msg }) {
+  return <div style={{ fontFamily: DB.font, fontSize: 12.5, color: DB.faint, fontWeight: 600, padding: "14px 2px", lineHeight: 1.6 }}>{msg}</div>;
+}
+
+function ReferralStatsScreen({
+  members = [], consultations = [], onboardingById = {}, onboardingLoading = false,
+  onLoadConsultations, onLoadOnboarding, onBack, onOpenMember, onOpenConsultation,
+  setScreen, loadMembers, loadPairSessions, showToast,
+}) {
+  const [period, setPeriod] = useState("30"); // 7 | 30 | 90 | all — 기본값은 최근 30일
+  const [showAllChannels, setShowAllChannels] = useState(false);
+  const [trendChannel, setTrendChannel] = useState("__all__");
+  const [listFilter, setListFilter] = useState("all");
+  const [listSearch, setListSearch] = useState("");
+  const [expandedReason, setExpandedReason] = useState({});
+  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const h = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  const isWide = winW >= 1024; // AdminSidebar를 쓰는 다른 관리자 화면과 동일 breakpoint
+
+  // 상담 고객은 상담 화면에서만 로드되므로, 유입 분석으로 바로 들어온 경우 여기서 1회 채운다.
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
     onLoadConsultations?.();
+    if (!members.length) loadMembers?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 대표(TEO) 개인 운동기록·테스트 회원(isTestMember)은 유입 경로 통계에 섞이지 않도록 공통 제외
-  const realMembers = useMemo(()=>members.filter(isRegularAdminMember), [members]);
+  // 대표(TEO) 개인 운동기록·테스트 회원은 기존 규칙 그대로 집계에서 제외
+  const realMembers = useMemo(() => members.filter(isRegularAdminMember), [members]);
 
-  // 등록하지 않은 상담 고객도 유입 경로 통계에 포함한다("미등록"도 유입은 유입).
-  // 이미 정식 회원으로 전환된 상담은 members 쪽에 같은 방문 경로가 들어가 있으므로 중복 집계를 피해 제외한다.
-  // 기존 화면 코드가 전부 m.survey.* / m.startDate 를 읽으므로 같은 모양으로 변환해 그대로 흘려보낸다.
-  const leadRows = useMemo(() => (consultations||[])
-    .filter(c => !c.convertedMemberId)
-    .map(c => ({
-      id: `lead_${c.id}`,
-      name: c.name || "상담 고객",
-      startDate: c.consultDate || "",
-      isLead: true,
-      consultStatus: c.status || "consultation_completed",
-      survey: {
-        visitRoutes: asArr(c.visitRoutes),
-        visitAiTool: c.visitAiTool || "",
-        visitKeyword: c.visitKeyword || "",
-        visitRealMemo: c.consultMemo || "",
-      },
-    })), [consultations]);
-
-  const filtered = useMemo(()=>{
-    const pool = [...realMembers, ...leadRows];
-    if (period === "all") return pool;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - parseInt(period));
-    const cutStr = cutoff.toISOString().split("T")[0];
-    return pool.filter(m => (m.startDate||"") >= cutStr);
-  }, [realMembers, leadRows, period]);
-
-  // 방문 경로 집계
-  const routeCount = useMemo(()=>{
-    const map = {};
-    filtered.forEach(m => {
-      const routes = m.survey?.visitRoutes || [];
-      if (routes.length === 0) { map["미기재"] = (map["미기재"]||0)+1; return; }
-      routes.forEach(r => { map[r] = (map[r]||0)+1; });
-    });
-    return Object.entries(map).sort((a,b)=>b[1]-a[1]);
-  }, [filtered]);
-
-  // AI 검색 상세
-  const aiMembers = filtered.filter(m => (m.survey?.visitRoutes||[]).includes("AI 검색"));
-  const aiToolCount = useMemo(()=>{
-    const map = {};
-    aiMembers.forEach(m => {
-      const t = m.survey?.visitAiTool || "미기재";
-      map[t] = (map[t]||0)+1;
-    });
-    return Object.entries(map).sort((a,b)=>b[1]-a[1]);
-  }, [aiMembers]);
-
-  const keywordList = aiMembers.flatMap(m =>
-    (m.survey?.visitKeyword||"").split(/[,，\s]+/).map(k=>k.trim()).filter(Boolean)
+  // 온보딩 유입 응답은 회원 목록이 채워진 뒤에 읽어야 하므로 회원 수가 잡히면 요청한다(중복 호출은 App 쪽 ref가 막는다).
+  useEffect(() => {
+    if (realMembers.length) onLoadOnboarding?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realMembers.length]);
+  const rows = useMemo(
+    () => buildAcquisitionRows({ members: realMembers, consultations, onboardingById }),
+    [realMembers, consultations, onboardingById]
   );
-  const kwCount = useMemo(()=>{
-    const map = {};
-    keywordList.forEach(k => { map[k] = (map[k]||0)+1; });
-    return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,10);
-  }, [keywordList]);
 
-  const colors = ["#5EEAD4","#818cf8","#f97316","#ffd166","#22c55e","#f87171","#a29bfe","#fdba74","#60a5fa","#94a3b8"];
+  const today = getKoreaDateString();
+  const pd = useMemo(() => buildAcquisitionPeriod(period, today), [period, today]);
+  const undatedRows = useMemo(() => rows.filter(r => !r.date), [rows]);
+  const curRows = useMemo(
+    () => (pd.comparable ? rows.filter(r => inAcqRange(r.date, pd.curFrom, pd.curTo)) : rows),
+    [rows, pd]
+  );
+  const prevRows = useMemo(
+    () => (pd.comparable ? rows.filter(r => inAcqRange(r.date, pd.prevFrom, pd.prevTo)) : []),
+    [rows, pd]
+  );
+  const cur = useMemo(() => summarizeAcquisitionRows(curRows), [curRows]);
+  const prev = useMemo(() => summarizeAcquisitionRows(prevRows), [prevRows]);
+  const insights = useMemo(() => buildAcquisitionInsights(cur, prev, pd), [cur, prev, pd]);
+  const actions = useMemo(() => buildAcquisitionActions(cur, prev, pd), [cur, prev, pd]);
+  const trend = useMemo(() => buildAcquisitionBuckets(curRows, pd, today), [curRows, pd, today]);
 
-  return (
-    <div>
-      <SH title="📊 유입 분석" sub="방문 경로 통계" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
+  const channelDelta = (name) => acqDelta(
+    (cur.channels.find(c => c.name === name) || {}).count || 0,
+    (prev.channels.find(c => c.name === name) || {}).count || 0,
+    pd.comparable
+  );
 
-      {/* 기간 필터 */}
-      <div style={{display:"flex",gap:5,marginBottom:12}}>
-        {[["all","전체"],["90","최근 90일"],["30","최근 30일"]].map(([v,l])=>(
-          <button key={v} onClick={()=>setPeriod(v)}
-            style={{padding:"5px 12px",borderRadius:7,border:"1px solid",fontSize:10,fontWeight:700,cursor:"pointer",
-              borderColor:period===v?"#a29bfe":"rgba(255,255,255,0.1)",
-              background:period===v?"rgba(162,155,254,.12)":"transparent",
-              color:period===v?"#a29bfe":"#94a3b8"}}>
-            {l}
-          </button>
-        ))}
-        <Mo c="#3a4a5a" s={9} style={{alignSelf:"center"}}>총 {filtered.length}명</Mo>
+  // 가장 빠르게 성장한 채널 / 가장 보완이 필요한 채널
+  const growth = useMemo(() => {
+    if (!pd.comparable) return null;
+    let best = null;
+    cur.namedChannels.forEach(c => {
+      const p = (prev.channels.find(x => x.name === c.name) || {}).count || 0;
+      const d = acqDelta(c.count, p, true);
+      if (d.type === "up" && (!best || (d.pct || 0) > (best.delta.pct || 0))) best = { name: c.name, count: c.count, delta: d };
+      if (d.type === "new" && !best) best = { name: c.name, count: c.count, delta: d };
+    });
+    return best;
+  }, [cur, prev, pd]);
+  const weakest = useMemo(() => {
+    const named = cur.namedChannels;
+    if (!named.length) return null;
+    // 이번 기간에 0명이 된 채널이 있으면 그쪽이 우선, 없으면 최소 인원 채널
+    const dropped = prev.namedChannels.find(p => !named.some(c => c.name === p.name));
+    if (dropped) return { name: dropped.name, count: 0, note: `직전 기간 ${dropped.count}명` };
+    const min = named[named.length - 1];
+    return { name: min.name, count: min.count, note: "가장 적은 유입" };
+  }, [cur, prev]);
+
+  const periodLabel = pd.comparable ? `최근 ${pd.days}일` : "전체 기간";
+  const newInflowDelta = acqDelta(cur.total, prev.total, pd.comparable);
+
+  // ── 채널 추이용 채널 후보 ──
+  const trendChannels = useMemo(() => {
+    const present = new Set(rows.flatMap(r => r.acq.sources));
+    return ACQ_TREND_PRESET.filter(c => present.has(c));
+  }, [rows]);
+  const trendMax = Math.max(1, ...trend.buckets.map(b => b.total));
+  const trendHasData = trend.buckets.some(b => b.total > 0);
+
+  // ── 회원이 직접 말한 방문 이유 (최근 5개) ──
+  const reasonRows = useMemo(() => rows
+    .filter(r => r.acq.memberReason)
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, 5), [rows]);
+  // ── 콘텐츠 메모(방문 계기 상세) 최근 목록 — 형태소 분석 없이 원문 목록만 제공 ──
+  const contentRows = useMemo(() => rows
+    .filter(r => r.acq.sourceDetail || r.acq.keyword || r.acq.aiMemo)
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, 6), [rows]);
+
+  // ── 전체 목록 ──
+  const listRows = useMemo(() => {
+    const q = listSearch.trim().toLowerCase();
+    return curRows.filter(r => {
+      if (listFilter === "member" && r.kind !== "member") return false;
+      if (listFilter === "lead" && r.kind !== "lead") return false;
+      if (listFilter === "ai" && !r.acq.sources.includes(ACQ_AI_CHANNEL)) return false;
+      if (listFilter === "referral" && !(r.acq.sources.includes("지인 소개") || r.acq.sources.includes("기존 회원 소개"))) return false;
+      if (listFilter === "unknown" && r.acq.sources.length > 0) return false;
+      if (!q) return true;
+      const hay = [r.name, r.acq.sources.join(" "), r.acq.aiSources.join(" "), r.acq.memberReason, r.acq.sourceDetail, r.acq.otherSource, r.acq.keyword, r.acq.referer]
+        .filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || a.name.localeCompare(b.name));
+  }, [curRows, listFilter, listSearch]);
+
+  const openRow = (r) => {
+    if (r.kind === "member") onOpenMember?.(r.raw);
+    else onOpenConsultation?.(r.raw);
+  };
+
+  const chipStyle = (active) => ({
+    padding: "6px 13px", borderRadius: 999, cursor: "pointer", fontFamily: DB.font, fontSize: 12, fontWeight: active ? 800 : 700,
+    border: `1px solid ${active ? "transparent" : DB.border}`,
+    background: active ? `linear-gradient(135deg,${DB.mint},${DB.mintSoft})` : "#fff",
+    color: active ? "#fff" : DB.sub, whiteSpace: "nowrap",
+  });
+
+  const content = (
+    <div style={{ flex: 1, overflowY: isWide ? "auto" : "visible", overscrollBehaviorY: isWide ? "contain" : undefined, minHeight: 0, height: isWide ? "var(--admin-layout-height, 100dvh)" : undefined, background: DB.bg, fontFamily: DB.font }}>
+      {/* ═══ 헤더 — 관리자 홈과 같은 라이트 스티키 헤더 ═══ */}
+      <div style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(246,247,249,.90)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", borderBottom: DB.hairline }}>
+        <div style={{ maxWidth: isWide ? 1400 : 820, margin: "0 auto", padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top,0px))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <button onClick={onBack} aria-label="뒤로" style={{ width: 34, height: 34, borderRadius: 11, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 15, cursor: "pointer", boxShadow: DB.shadow, flexShrink: 0 }}>←</button>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap", rowGap: 2 }}>
+              <span style={{ fontFamily: DB.font, fontWeight: 800, fontSize: isWide ? 20 : 17, color: DB.text, letterSpacing: "-.4px", whiteSpace: "nowrap" }}>유입 분석</span>
+              <span style={{ fontFamily: DB.font, fontWeight: 700, fontSize: 12, color: DB.faint }}>방문 경로와 마케팅 성과</span>
+            </div>
+          </div>
+          {/* 기간 필터 — 모든 카드·차트·목록이 이 값을 공유한다 */}
+          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", rowGap: 6, alignItems: "center" }}>
+            {[["7", "최근 7일"], ["30", "최근 30일"], ["90", "최근 90일"], ["all", "전체"]].map(([v, l]) => (
+              <button key={v} onClick={() => setPeriod(v)} style={chipStyle(period === v)}>{l}</button>
+            ))}
+            <span style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.faint, fontWeight: 700, marginLeft: 2 }}>
+              {periodLabel} {cur.total}명
+              {onboardingLoading ? " · 온보딩 응답 불러오는 중…" : ""}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* 정식 회원 + 미등록 상담 고객 모수 안내 — "미등록"도 유입 실적이므로 통계에서 빼지 않는다 */}
-      <Card style={{marginBottom:10}}>
-        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-          <div><Mo c="#94a3b8" s={9} style={{display:"block"}}>정식 회원</Mo><Mo c="#5EEAD4" s={14} style={{fontWeight:800}}>{filtered.filter(x=>!x.isLead).length}명</Mo></div>
-          <div><Mo c="#94a3b8" s={9} style={{display:"block"}}>미등록 상담 고객</Mo><Mo c="#a29bfe" s={14} style={{fontWeight:800}}>{filtered.filter(x=>x.isLead).length}명</Mo></div>
+      <div style={{ maxWidth: isWide ? 1400 : 820, margin: "0 auto", padding: isWide ? "18px 28px calc(48px + env(safe-area-inset-bottom,0px))" : "14px 16px calc(48px + env(safe-area-inset-bottom,0px))", display: "grid", gap: 12 }}>
+
+        {/* ═══ 1. CEO 요약 ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))", gap: 10 }}>
+          <AcqStatTile strong label={`${periodLabel} 신규 유입`} value={cur.total} unit="명"
+            sub={`정식 회원 ${cur.memberCount}명 · 미등록 상담 ${cur.leadCount}명`} delta={newInflowDelta} />
+          <AcqStatTile label="가장 효과적인 채널"
+            value={cur.topChannel ? cur.topChannel.name : "-"}
+            sub={cur.topChannel ? `${cur.topChannel.count}명 · 경로 기재 회원의 ${cur.topChannelPct}%` : "기재된 방문 경로 없음"}
+            delta={cur.topChannel ? channelDelta(cur.topChannel.name) : null} />
+          <AcqStatTile label="성장 중인 채널"
+            value={growth ? growth.name : (pd.comparable ? "없음" : "-")}
+            sub={growth ? `${growth.count}명` : (pd.comparable ? "직전 기간보다 늘어난 채널 없음" : "전체 기간은 직전 기간 비교 없음")}
+            delta={growth ? growth.delta : null} />
+          <AcqStatTile label="보완이 필요한 채널"
+            value={weakest ? weakest.name : "-"}
+            sub={weakest ? `${weakest.count}명 · ${weakest.note}` : "비교할 채널 데이터 없음"} />
+          <AcqStatTile label="방문 경로 미기재" value={cur.unknownCount} unit={`명 (${cur.unknownPct}%)`}
+            sub={cur.unknownCount ? "회원 프로필 > 방문계기 탭에서 입력할 수 있습니다" : "모든 회원의 방문 경로가 기재돼 있습니다"} />
+          <AcqStatTile label="AI 검색 비중" value={cur.aiCount} unit={`명 (${cur.aiPct}%)`}
+            sub={cur.aiCount ? `세부 출처 ${cur.aiSources.filter(a => a.name !== ACQ_AI_UNSPECIFIED).length}종` : "AI 검색 유입 없음"}
+            delta={channelDelta(ACQ_AI_CHANNEL)} />
         </div>
-        <Mo c="#475569" s={9} style={{display:"block",marginTop:7,lineHeight:1.6}}>
-          정식 회원으로 전환된 상담은 회원 쪽에 방문 경로가 이미 반영돼 있어 중복 집계하지 않습니다.
-        </Mo>
-      </Card>
 
-      {/* 방문 경로 통계 */}
-      <Card title="📍 방문 경로별 회원 수" style={{marginBottom:10}}>
-        {routeCount.length===0 ? <Emp msg="방문 경로 기록 없음"/> : (
-          <div style={{display:"flex",flexDirection:"column",gap:7}}>
-            {routeCount.map(([route,cnt],i)=>{
-              const pct = filtered.length > 0 ? Math.round(cnt/filtered.length*100) : 0;
-              return (
-                <div key={route}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                    <Mo c="#e2e8f0" s={11}>{route}</Mo>
-                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                      <Mo c={colors[i%colors.length]} s={11} style={{fontWeight:700}}>{cnt}명</Mo>
-                      <Mo c="#3a4a5a" s={9}>{pct}%</Mo>
+        {/* 기간 비교 기준 안내 + 날짜 없는 레거시 데이터 처리 기준 */}
+        <div style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.faint, fontWeight: 600, lineHeight: 1.7, padding: "0 2px" }}>
+          {pd.comparable
+            ? `증감은 직전 동일 기간(${pd.prevFrom} ~ ${pd.prevTo}, ${prev.total}명)과 비교한 값입니다.`
+            : "전체 기간은 비교 대상 기간이 없어 증감 대신 누적 값만 표시합니다."}
+          {undatedRows.length > 0 && ` · 유입일(상담일·등록일)이 없는 레거시 ${undatedRows.length}명은 전체 기간에만 포함되고 기간별 집계에서는 제외됩니다.`}
+        </div>
+
+        {/* ═══ 2. 인사이트 + 이번 주 추천 액션 ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: isWide ? "1.15fr .85fr" : "1fr", gap: 12 }}>
+          <AcqCard title="📌 마케팅 인사이트" sub="집계된 실제 수치 기반">
+            {insights.length === 0 ? <AcqEmpty msg="아직 인사이트를 만들 만한 유입 데이터가 없습니다." /> : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {insights.map((it, i) => {
+                  const tone = it.tone === "warn"
+                    ? { bg: "rgba(245,158,11,.07)", bd: "rgba(245,158,11,.26)", c: "#92600A" }
+                    : it.tone === "good"
+                      ? { bg: "rgba(34,197,94,.06)", bd: "rgba(34,197,94,.22)", c: "#15803D" }
+                      : { bg: DB.mintTint, bd: "rgba(57,199,184,.24)", c: DB.mintSoft };
+                  return (
+                    <div key={i} style={{ background: tone.bg, border: `1px solid ${tone.bd}`, borderRadius: 12, padding: "10px 12px", display: "flex", gap: 8 }}>
+                      <span style={{ fontFamily: DB.font, fontWeight: 800, fontSize: 11, color: tone.c, flexShrink: 0 }}>{i + 1}</span>
+                      <span style={{ fontFamily: DB.font, fontSize: 12.5, fontWeight: 700, color: tone.c, lineHeight: 1.55, wordBreak: "keep-all" }}>{it.text}</span>
                     </div>
-                  </div>
-                  <div style={{height:6,borderRadius:3,background:"rgba(255,255,255,0.06)",overflow:"hidden"}}>
-                    <div style={{height:"100%",width:`${pct}%`,background:colors[i%colors.length],borderRadius:3,transition:"width .4s"}}/>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-
-      {/* AI 검색 상세 */}
-      {aiMembers.length > 0 && (
-        <Card title={`🤖 AI 검색 유입 — ${aiMembers.length}명`} style={{marginBottom:10,border:"1px solid rgba(162,155,254,.2)",background:"rgba(162,155,254,.03)"}}>
-          <div style={{marginBottom:10}}>
-            <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>사용 AI별</Mo>
-            {aiToolCount.map(([tool,cnt],i)=>(
-              <div key={tool} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <Mo c="#94a3b8" s={10}>{tool}</Mo>
-                <Mo c="#a29bfe" s={10} style={{fontWeight:700}}>{cnt}명</Mo>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-          {kwCount.length>0 && (
-            <div>
-              <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:6,fontWeight:700}}>검색 키워드</Mo>
-              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                {kwCount.map(([kw,cnt])=>(
-                  <span key={kw} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 8px",borderRadius:4,
-                    background:"rgba(162,155,254,.12)",color:"#a29bfe"}}>
-                    {kw} ({cnt})
-                  </span>
+            )}
+          </AcqCard>
+
+          <AcqCard title="✅ 이번 주 추천 액션" sub="바로 실행 가능한 것만">
+            {actions.length === 0 ? <AcqEmpty msg="추천할 액션 조건에 해당하는 데이터가 없습니다." /> : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {actions.map((a, i) => (
+                  <div key={i} style={{ borderTop: i ? DB.hairline : "none", paddingTop: i ? 8 : 0 }}>
+                    <div style={{ fontFamily: DB.font, fontSize: 12.5, fontWeight: 800, color: DB.text, lineHeight: 1.5, wordBreak: "keep-all" }}>{a.text}</div>
+                    <div style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 700, color: DB.faint, marginTop: 2 }}>근거 · {a.why}</div>
+                  </div>
                 ))}
               </div>
+            )}
+          </AcqCard>
+        </div>
+
+        {/* ═══ 3. 유입 채널 순위 ═══ */}
+        <AcqCard title="🏆 유입 채널 순위" sub={periodLabel}
+          right={cur.channels.length > 5 && (
+            <button onClick={() => setShowAllChannels(v => !v)} style={{ border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, borderRadius: 10, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, fontFamily: DB.font, cursor: "pointer" }}>
+              {showAllChannels ? "상위 5개만" : `전체 보기 (${cur.channels.length})`}
+            </button>
+          )}>
+          {cur.channels.length === 0 ? <AcqEmpty msg="이 기간에 집계할 방문 경로 데이터가 없습니다." /> : (
+            <div style={{ display: "grid", gap: 9 }}>
+              {(showAllChannels ? cur.channels : cur.channels.slice(0, 5)).map((c, i) => {
+                const pct = cur.total ? Math.round(c.count / cur.total * 100) : 0;
+                const d = channelDelta(c.name);
+                const barColor = c.isUnknown ? "#CBD5E1" : `linear-gradient(90deg,${DB.mint},${DB.mintSoft})`;
+                return (
+                  <div key={c.name} style={{ minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap", rowGap: 3 }}>
+                      <span style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 800, color: c.isUnknown ? DB.faint : DB.mintSoft, width: 18, flexShrink: 0 }}>
+                        {c.isUnknown ? "–" : i + 1}
+                      </span>
+                      <span style={{ fontFamily: DB.font, fontSize: 13, fontWeight: 800, color: c.isUnknown ? DB.sub : DB.text, minWidth: 0, wordBreak: "keep-all" }}>{c.name}</span>
+                      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                        <span style={{ fontFamily: DB.font, fontSize: 12.5, fontWeight: 800, color: DB.text }}>{c.count}명</span>
+                        <span style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 700, color: DB.faint }}>{pct}%</span>
+                        <AcqDeltaBadge delta={d} />
+                      </div>
+                    </div>
+                    <div style={{ height: 7, borderRadius: 4, background: "#F1F5F9", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: barColor, borderRadius: 4, transition: "width .35s" }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-          {/* AI 유입 회원 목록 */}
-          <div style={{marginTop:10}}>
-            <Mo c="#a29bfe" s={9} style={{display:"block",marginBottom:5,fontWeight:700}}>AI 유입 회원</Mo>
-            {aiMembers.map(m=>(
-              <div key={m.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
-                borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-                <Mo c="#e2e8f0" s={10}>{m.name}</Mo>
-                <Mo c="#94a3b8" s={9}>{m.survey?.visitAiTool||""} {m.survey?.visitKeyword?`· ${m.survey.visitKeyword}`:""}</Mo>
+          <div style={{ fontFamily: DB.font, fontSize: 11, color: DB.faint, fontWeight: 600, marginTop: 10, lineHeight: 1.6 }}>
+            복수 선택 기준으로 채널별 집계되어 합계가 100%를 초과할 수 있습니다. 총 인원({cur.total}명)은 중복 없이 계산됩니다.
+          </div>
+        </AcqCard>
+
+        {/* ═══ 4. 채널 추이 ═══ */}
+        <AcqCard title="📈 채널 추이"
+          sub={trend.unit === "day" ? "일 단위" : trend.unit === "week" ? "주 단위" : trend.unit === "month" ? "월 단위" : ""}>
+          {!trendHasData ? <AcqEmpty msg="최근 유입이 아직 충분하지 않습니다." /> : (
+            <>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", rowGap: 6, marginBottom: 12 }}>
+                <button onClick={() => setTrendChannel("__all__")} style={chipStyle(trendChannel === "__all__")}>전체 유입</button>
+                {trendChannels.map(c => (
+                  <button key={c} onClick={() => setTrendChannel(c)} style={chipStyle(trendChannel === c)}>{c}</button>
+                ))}
               </div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 130, overflowX: "auto", paddingBottom: 4 }}>
+                {trend.buckets.map(b => {
+                  const total = b.total;
+                  const val = trendChannel === "__all__" ? total : (b.byChannel[trendChannel] || 0);
+                  const hTotal = Math.round(total / trendMax * 96);
+                  const hVal = Math.round(val / trendMax * 96);
+                  return (
+                    <div key={b.key} style={{ flex: "1 1 26px", minWidth: 26, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontFamily: DB.font, fontSize: 10.5, fontWeight: 800, color: val ? DB.mintSoft : DB.faint }}>{val || ""}</span>
+                      <div style={{ position: "relative", width: "100%", maxWidth: 34, height: 100, display: "flex", alignItems: "flex-end" }}>
+                        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: Math.max(total ? 3 : 0, hTotal), background: "#EEF2F6", borderRadius: 6 }} />
+                        <div style={{ position: "relative", width: "100%", height: Math.max(val ? 3 : 0, hVal), background: `linear-gradient(180deg,${DB.mint},${DB.mintSoft})`, borderRadius: 6 }} />
+                      </div>
+                      <span style={{ fontFamily: DB.font, fontSize: 10, fontWeight: 700, color: DB.faint, whiteSpace: "nowrap" }}>{b.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontFamily: DB.font, fontSize: 11, color: DB.faint, fontWeight: 600, marginTop: 8 }}>
+                연한 막대는 전체 유입, 진한 막대는 선택한 채널입니다.
+              </div>
+            </>
+          )}
+        </AcqCard>
+
+        {/* ═══ 5. AI 검색 상세 + 6. 채널 집중도 ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: isWide ? "1fr 1fr" : "1fr", gap: 12 }}>
+          <AcqCard tone="ai" title="🤖 AI 검색 상세 분석" sub={`${cur.aiCount}명 · 전체 유입의 ${cur.aiPct}%`}>
+            {cur.aiCount === 0 ? <AcqEmpty msg="이 기간에 AI 검색 유입이 없습니다." /> : (
+              <div style={{ display: "grid", gap: 7 }}>
+                {cur.aiSources.map(a => {
+                  const pct = cur.aiCount ? Math.round(a.count / cur.aiCount * 100) : 0;
+                  const muted = a.name === ACQ_AI_UNSPECIFIED;
+                  return (
+                    <div key={a.name}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <span style={{ fontFamily: DB.font, fontSize: 12.5, fontWeight: 700, color: muted ? DB.faint : DB.text }}>{a.name}</span>
+                        <span style={{ marginLeft: "auto", fontFamily: DB.font, fontSize: 12, fontWeight: 800, color: muted ? DB.faint : DB.mintSoft }}>{a.count}명</span>
+                        <span style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 700, color: DB.faint }}>{pct}%</span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 3, background: "#F1F5F9", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: muted ? "#CBD5E1" : `linear-gradient(90deg,${DB.mint},${DB.mintSoft})`, borderRadius: 3 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ fontFamily: DB.font, fontSize: 11, color: DB.faint, fontWeight: 600, marginTop: 4, lineHeight: 1.6 }}>
+                  표기 차이(ChatGPT · chat gpt · 챗지피티 등)는 같은 서비스로 묶었습니다. 명확히 매칭되지 않는 입력은 “{ACQ_AI_OTHER}”으로 둡니다.
+                </div>
+              </div>
+            )}
+          </AcqCard>
+
+          <AcqCard tone={cur.topChannelPct >= 60 ? "warn" : undefined} title="⚖️ 채널 집중도와 위험 신호" sub="복수 선택 기반 참고 지표">
+            {cur.knownCount === 0 ? <AcqEmpty msg="방문 경로가 기재된 회원이 없어 집중도를 계산할 수 없습니다." /> : (
+              <div style={{ display: "grid", gap: 9 }}>
+                {[
+                  { l: "1위 채널 집중도", v: `${cur.topChannelPct}%`, s: cur.topChannel ? `${cur.topChannel.name} ${cur.topChannel.count}명 / 경로 기재 ${cur.knownCount}명` : "" },
+                  { l: "상위 3개 채널 비중", v: `${cur.top3Pct}%`, s: cur.namedChannels.slice(0, 3).map(c => c.name).join(" · ") },
+                  { l: "미기재 비중", v: `${cur.unknownPct}%`, s: `${cur.unknownCount}명 / 전체 ${cur.total}명` },
+                ].map(x => (
+                  <div key={x.l} style={{ display: "flex", alignItems: "baseline", gap: 10, borderTop: DB.hairline, paddingTop: 8 }}>
+                    <span style={{ fontFamily: DB.font, fontSize: 12, fontWeight: 700, color: DB.sub, flex: "0 0 118px" }}>{x.l}</span>
+                    <span style={{ fontFamily: DB.font, fontSize: 15, fontWeight: 800, color: DB.text }}>{x.v}</span>
+                    <span style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 600, color: DB.faint, flex: 1, minWidth: 0, textAlign: "right", wordBreak: "keep-all" }}>{x.s}</span>
+                  </div>
+                ))}
+                {cur.topChannelPct >= 60 && (
+                  <div style={{ background: "rgba(245,158,11,.07)", border: "1px solid rgba(245,158,11,.26)", borderRadius: 12, padding: "9px 11px", fontFamily: DB.font, fontSize: 12, fontWeight: 700, color: "#92600A", lineHeight: 1.55 }}>
+                    ⚠ 한 채널 의존도가 {cur.topChannelPct}%입니다. 해당 채널이 막히면 유입이 급감할 수 있습니다.
+                  </div>
+                )}
+                <div style={{ fontFamily: DB.font, fontSize: 11, color: DB.faint, fontWeight: 600, lineHeight: 1.6 }}>
+                  회원별 대표 유입 경로를 따로 저장하지 않으므로, 위 비중은 복수 선택을 그대로 센 참고 지표입니다(정확한 점유율이 아닙니다).
+                </div>
+              </div>
+            )}
+          </AcqCard>
+        </div>
+
+        {/* ═══ 7. 회원이 실제 말한 방문 이유 + 콘텐츠 메모 ═══ */}
+        {(reasonRows.length > 0 || contentRows.length > 0) && (
+          <div style={{ display: "grid", gridTemplateColumns: isWide ? "1fr 1fr" : "1fr", gap: 12 }}>
+            {reasonRows.length > 0 && (
+              <AcqCard title="💬 회원이 직접 말한 방문 이유" sub={`최근 ${reasonRows.length}건`}>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {reasonRows.map(r => {
+                    const open = !!expandedReason[r.key];
+                    return (
+                      <div key={r.key} style={{ borderTop: DB.hairline, paddingTop: 8 }}>
+                        <div style={{
+                          fontFamily: DB.font, fontSize: 12.5, fontWeight: 700, color: DB.text, lineHeight: 1.6, wordBreak: "keep-all",
+                          ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }),
+                        }}>
+                          “{r.acq.memberReason}”
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 3, flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 700, color: DB.faint }}>
+                            {maskAcquisitionName(r.name)} · {r.acq.sources.join(", ") || ACQ_UNKNOWN}{r.date ? ` · ${r.date}` : ""}
+                          </span>
+                          {r.acq.memberReason.length > 40 && (
+                            <button onClick={() => setExpandedReason(p => ({ ...p, [r.key]: !open }))}
+                              style={{ border: "none", background: "none", color: DB.mintSoft, fontFamily: DB.font, fontSize: 11, fontWeight: 800, cursor: "pointer", padding: 0 }}>
+                              {open ? "접기" : "전체보기"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </AcqCard>
+            )}
+
+            {contentRows.length > 0 && (
+              <AcqCard title="📝 회원이 보고 온 콘텐츠 메모" sub="방문 계기 상세 · 검색 키워드 원문">
+                <div style={{ display: "grid", gap: 8 }}>
+                  {contentRows.map(r => (
+                    <div key={r.key} style={{ borderTop: DB.hairline, paddingTop: 8 }}>
+                      <div style={{ fontFamily: DB.font, fontSize: 12.5, fontWeight: 700, color: DB.text, lineHeight: 1.55, wordBreak: "keep-all" }}>
+                        {[r.acq.sourceDetail, r.acq.aiMemo].filter(Boolean).join(" / ") || r.acq.keyword}
+                      </div>
+                      <div style={{ fontFamily: DB.font, fontSize: 11, fontWeight: 700, color: DB.faint, marginTop: 3 }}>
+                        {maskAcquisitionName(r.name)} · {r.acq.sources.join(", ") || ACQ_UNKNOWN}
+                        {r.acq.keyword ? ` · 검색어 “${r.acq.keyword}”` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontFamily: DB.font, fontSize: 11, color: DB.faint, fontWeight: 600, marginTop: 9, lineHeight: 1.6 }}>
+                  자유 입력 메모라 자동 키워드 통계 대신 원문 그대로 보여줍니다.
+                </div>
+              </AcqCard>
+            )}
+          </div>
+        )}
+
+        {/* ═══ 8. 전체 회원 유입 목록 ═══ */}
+        <AcqCard title="👥 전체 회원 유입 목록" sub={`${listRows.length}명`}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", rowGap: 6, marginBottom: 9 }}>
+            {ACQ_LIST_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setListFilter(f.key)} style={chipStyle(listFilter === f.key)}>{f.label}</button>
             ))}
           </div>
-        </Card>
-      )}
+          <input value={listSearch} onChange={e => setListSearch(e.target.value)}
+            placeholder="회원 이름 · 방문 경로 · 방문 이유 · 콘텐츠 메모 검색"
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${DB.border}`, background: "#fff", borderRadius: 12, padding: "10px 13px", fontSize: 13, fontFamily: DB.font, color: DB.text, marginBottom: 11 }} />
 
-      {/* 회원별 유입 목록 */}
-      <Card title="👥 전체 회원 유입 목록" style={{marginBottom:10}}>
-        {filtered.filter(m=>(m.survey?.visitRoutes||[]).length>0 || m.survey?.visitRealMemo).map(m=>(
-          <div key={m.id} style={{padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-            <div style={{display:"flex",justifyContent:"space-between"}}>
-              <Mo c="#e2e8f0" s={10} style={{fontWeight:700}}>{m.name}</Mo>
-              <Mo c="#5EEAD4" s={9}>{(m.survey?.visitRoutes||[]).join(", ")||"미기재"}</Mo>
+          {listRows.length === 0 ? <AcqEmpty msg="조건에 맞는 회원이 없습니다." /> : (
+            <div style={{ display: "grid", gridTemplateColumns: isWide ? "repeat(auto-fill,minmax(330px,1fr))" : "1fr", gap: 9 }}>
+              {listRows.map(r => (
+                <div key={r.key} role="button" tabIndex={0}
+                  onClick={() => openRow(r)}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); } }}
+                  style={{ border: `1px solid ${DB.border}`, borderRadius: 14, padding: "11px 13px", background: "#fff", cursor: "pointer", minWidth: 0, boxShadow: DB.shadow }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", rowGap: 4 }}>
+                    <span style={{ fontFamily: DB.font, fontSize: 13.5, fontWeight: 800, color: DB.text }}>{r.name}</span>
+                    <span style={{
+                      fontFamily: DB.font, fontSize: 10.5, fontWeight: 800, padding: "2px 8px", borderRadius: 999,
+                      background: r.kind === "member" ? DB.mintTint : "rgba(139,92,246,.10)",
+                      color: r.kind === "member" ? DB.mintSoft : "#7C3AED",
+                    }}>{r.statusLabel}</span>
+                    <span style={{ marginLeft: "auto", fontFamily: DB.font, fontSize: 10.5, fontWeight: 700, color: DB.faint, whiteSpace: "nowrap" }}>
+                      {r.date || "유입일 없음"}
+                    </span>
+                  </div>
+                  <div style={{ fontFamily: DB.font, fontSize: 12, fontWeight: 700, color: r.acq.sources.length ? DB.mintSoft : DB.faint, marginTop: 5, lineHeight: 1.5, wordBreak: "keep-all" }}>
+                    {r.acq.sources.join(", ") || ACQ_UNKNOWN}
+                    {r.acq.aiSources.length ? ` · ${r.acq.aiSources.join(", ")}` : ""}
+                  </div>
+                  {(r.acq.sourceDetail || r.acq.otherSource || r.acq.keyword) && (
+                    <div style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.sub, fontWeight: 600, marginTop: 3, lineHeight: 1.5, wordBreak: "keep-all" }}>
+                      {[r.acq.sourceDetail, r.acq.keyword, r.acq.otherSource].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                  {r.acq.memberReason && (
+                    <div style={{ fontFamily: DB.font, fontSize: 11.5, color: DB.sub, fontWeight: 600, marginTop: 3, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "keep-all" }}>
+                      💬 {r.acq.memberReason}
+                    </div>
+                  )}
+                  {r.updatedAt && (
+                    <div style={{ fontFamily: DB.font, fontSize: 10.5, color: DB.faint, fontWeight: 600, marginTop: 4 }}>마지막 수정 {r.updatedAt}</div>
+                  )}
+                </div>
+              ))}
             </div>
-            {m.survey?.visitRealMemo && <Mo c="#94a3b8" s={8} style={{marginTop:2}}>📝 {m.survey.visitRealMemo}</Mo>}
+          )}
+          <div style={{ fontFamily: DB.font, fontSize: 11, color: DB.faint, fontWeight: 600, marginTop: 10, lineHeight: 1.6 }}>
+            정식 회원으로 전환된 상담은 회원 쪽에 방문 경로가 이미 반영돼 있어 중복 집계하지 않습니다. 카드를 누르면 회원 상세·상담 상세로 이동합니다.
           </div>
-        ))}
-      </Card>
+        </AcqCard>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={isWide ? "admin-scroll-shell" : undefined}
+      style={{ display: "flex", height: isWide ? "var(--admin-layout-height, 100dvh)" : "auto", minHeight: isWide ? undefined : "100dvh", background: DB.bg, overflow: isWide ? "hidden" : "visible" }}>
+      {isWide && setScreen && (
+        <AdminSidebar active="report" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={() => showToast?.("아직 준비 중인 기능입니다.")} />
+      )}
+      {content}
     </div>
   );
 }

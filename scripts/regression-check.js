@@ -76,6 +76,22 @@ function usScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 유입 분석(방문계기 정규화·기간 비교·중복 집계 방지): 실제 실행 시나리오 검증 ──
+// 회원 프로필(survey.visit*) · 상담 문서(평탄 visit*) · 온보딩 v2(v2.acquisition) 세 구조를 하나로 읽는
+// 공용 selector 원본 코드를 그대로 슬라이스해 실행한다(로직을 옮겨 적지 않고 원본 자체를 검증).
+let acquisitionLib = null;
+try {
+  const sliceAcq = app.slice(app.indexOf('const ACQUISITION_FIRST_TOUCH_OPTIONS'), app.indexOf('// 온보딩 v2의 세부 목표(12종)'));
+  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER };`)();
+} catch (e) {
+  console.error('[regression] 유입 분석 정규화 로직 추출 실패:', e.message);
+}
+function acqScenario(name, fn) {
+  if (!acquisitionLib) return [name, false];
+  try { return [name, !!fn(acquisitionLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 회원 상세 "오늘 수업" 카드 부위별 근육통·통증 "최근 상태" 참고 표시: 실제 실행 시나리오 검증 ──
 // getHubBodyPartAwareness는 선택을 막지 않고(HubScreen의 partChip onClick은 항상 동작), 참고 경고 판정에만 쓰인다.
 let hubAwarenessLib = null;
@@ -2483,8 +2499,8 @@ const checks = [
     app.includes('const EDIT_TABS = ["기본","목표·목적","통증·건강","운동경험","방문계기","생활습관","스케줄","메모"];')
   ],
   ['유입 분석: 미등록 상담 고객도 포함하되 전환 완료건은 중복 집계하지 않음',
-    app.includes('.filter(c => !c.convertedMemberId)') &&
-    app.includes('const pool = [...realMembers, ...leadRows];')
+    app.includes('.filter(c => c && !c.convertedMemberId && !linkedConsultIds.has(String(c.id)))') &&
+    app.includes('function buildAcquisitionRows(')
   ],
 
   ['온보딩 v2: 저장 위치는 기존 memberOnboarding/main 한 곳이고 v2 맵만 추가(중복 저장 없음)',
@@ -4791,6 +4807,212 @@ const checks = [
   ['모바일 검색창 placeholder 대비: .home-search-bar 전용 스코프 규칙이 있고, 전역(거의 흰색) 규칙과 분리돼 데스크톱에는 영향 없음',
     app.includes('.home-search-bar input::placeholder{color:') &&
     !app.includes('.home-search-bar input::placeholder{color:rgba(255,255,255')
+  ],
+
+  // ════════════════════════════════════════════
+  // 유입 분석 개편 (방문계기 데이터 통합 + 분석 리포트 연결 + 마케팅 대시보드)
+  // ════════════════════════════════════════════
+  acqScenario('유입 정규화 1: 회원 프로필 방문계기(survey.visitRoutes/visitDetail/visitEtc/visitRealMemo)가 그대로 반영된다', L => {
+    const r = L.normalizeMemberAcquisitionData({ survey: {
+      visitRoutes: ['네이버 블로그', 'AI 검색'], visitDetail: '가격 안내 글', visitEtc: '기타 메모',
+      visitRealMemo: '블로그 보고 왔어요', visitAiTool: 'ChatGPT', visitKeyword: '청라 PT',
+    }});
+    return r.sources.join(',') === '네이버 블로그,AI 검색' && r.sourceDetail === '가격 안내 글'
+      && r.otherSource === '기타 메모' && r.memberReason === '블로그 보고 왔어요'
+      && r.aiSources.join(',') === 'ChatGPT' && r.keyword === '청라 PT';
+  }),
+  acqScenario('유입 정규화 2: 과거 온보딩 v2(v2.acquisition.firstTouch 코드값)도 같은 표준 채널로 정규화된다', L => {
+    const naver = L.normalizeMemberAcquisitionData({}, { v2: { acquisition: { firstTouch: 'naver_place' } } });
+    const ai = L.normalizeMemberAcquisitionData({}, { v2: { acquisition: { firstTouch: 'chatgpt' } } });
+    const etc = L.normalizeMemberAcquisitionData({}, { v2: { acquisition: { firstTouch: 'other', firstTouchOther: '헬스장 앞 배너' } } });
+    return naver.sources.join(',') === '네이버 플레이스'
+      && ai.sources.join(',') === L.ACQ_AI_CHANNEL && ai.aiSources.join(',') === 'ChatGPT'
+      && etc.sources.join(',') === '기타' && etc.otherSource === '헬스장 앞 배너';
+  }),
+  acqScenario('유입 정규화 3: 상담 문서(평탄 필드)의 다른 표기("지인 추천"·"지나가다가")가 회원 프로필 라벨로 통합된다', L => {
+    const r = L.normalizeMemberAcquisitionData({ visitRoutes: ['지인 추천', '지나가다가', '네이버 검색'], consultMemo: '친구가 추천함' });
+    return r.sources.join(',') === '지인 소개,지나가다 발견,네이버 검색' && r.memberReason === '친구가 추천함';
+  }),
+  acqScenario('유입 집계 1: 복수 경로는 각 채널에 모두 집계되지만 회원 총계는 중복되지 않는다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: ['네이버 블로그', 'AI 검색'] } },
+      { id: 'b', name: 'B', startDate: '2026-08-02', survey: { visitRoutes: ['AI 검색'] } },
+    ]});
+    const s = L.summarizeAcquisitionRows(rows);
+    return s.total === 2
+      && (s.channels.find(c => c.name === 'AI 검색') || {}).count === 2
+      && (s.channels.find(c => c.name === '네이버 블로그') || {}).count === 1;
+  }),
+  acqScenario('유입 집계 2: 같은 회원이 같은 채널을 중복 선택해도 1명으로만 센다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: ['지인 소개', '지인 추천'] } },
+    ]});
+    const s = L.summarizeAcquisitionRows(rows);
+    return s.total === 1 && (s.channels.find(c => c.name === '지인 소개') || {}).count === 1;
+  }),
+  acqScenario('유입 집계 3: 정식 회원으로 전환된 상담(convertedMemberId / member.consultationId)은 양쪽에 중복 집계되지 않는다', L => {
+    const rows = L.buildAcquisitionRows({
+      members: [{ id: 'm1', name: '김회원', consultationId: 'c2', startDate: '2026-08-01', survey: { visitRoutes: ['지인 소개'] } }],
+      consultations: [
+        { id: 'c1', name: '전환됨', convertedMemberId: 'mX', consultDate: '2026-07-20', visitRoutes: ['유튜브'] },
+        { id: 'c2', name: '김회원', consultDate: '2026-07-25', visitRoutes: ['지인 소개'] }, // convertedMemberId는 없지만 member.consultationId가 가리킴
+        { id: 'c3', name: '미등록', consultDate: '2026-07-28', visitRoutes: ['인스타그램'] },
+      ],
+    });
+    const s = L.summarizeAcquisitionRows(rows);
+    return s.total === 2 && s.memberCount === 1 && s.leadCount === 1
+      && rows.some(r => r.key === 'lead_c3') && !rows.some(r => r.key === 'lead_c1' || r.key === 'lead_c2');
+  }),
+  acqScenario('유입 집계 4: 방문 경로가 전혀 없는 회원은 "미기재"로 집계된다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: {} },
+      { id: 'b', name: 'B', startDate: '2026-08-02', survey: { visitRoutes: ['유튜브'] } },
+    ]});
+    const s = L.summarizeAcquisitionRows(rows);
+    return s.unknownCount === 1 && s.unknownPct === 50
+      && (s.channels.find(c => c.name === L.ACQ_UNKNOWN) || {}).count === 1
+      && s.namedChannels.every(c => c.name !== L.ACQ_UNKNOWN);
+  }),
+  acqScenario('AI 세부 출처: 표기 차이(chat gpt·챗지피티·GPT)는 ChatGPT로 묶고, 미입력은 "세부 출처 미기재"로 집계한다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: ['AI 검색'], visitAiTool: 'chat gpt' } },
+      { id: 'b', name: 'B', startDate: '2026-08-01', survey: { visitRoutes: ['AI 검색'], visitAiTool: '챗지피티' } },
+      { id: 'c', name: 'C', startDate: '2026-08-01', survey: { visitRoutes: ['AI 검색'], visitAiTool: '네이버 Cue' } },
+      { id: 'd', name: 'D', startDate: '2026-08-01', survey: { visitRoutes: ['AI 검색'] } },
+      { id: 'e', name: 'E', startDate: '2026-08-01', survey: { visitRoutes: ['AI 검색'], visitAiTool: '코파일럿' } },
+    ]});
+    const s = L.summarizeAcquisitionRows(rows);
+    const get = n => (s.aiSources.find(a => a.name === n) || {}).count || 0;
+    return s.aiCount === 5 && get('ChatGPT') === 2 && get('네이버 AI 브리핑') === 1
+      && get('Copilot') === 1 && get(L.ACQ_AI_UNSPECIFIED) === 1;
+  }),
+  acqScenario('AI 세부 출처: 매칭되지 않는 자유 입력은 추측하지 않고 "기타 AI 검색"으로 둔다', L => {
+    return L.normalizeAiSourceList('회사 사내 검색툴').join(',') === L.ACQ_AI_OTHER
+      && L.normalizeAiSourceList('').length === 0
+      && L.normalizeAiSourceList('ChatGPT, Perplexity').join(',') === 'ChatGPT,Perplexity';
+  }),
+  acqScenario('기간 필터: 직전 동일 기간과 비교하고, 전체 기간은 비교 대상이 없음을 명시한다', L => {
+    const p30 = L.buildAcquisitionPeriod('30', '2026-08-06');
+    const all = L.buildAcquisitionPeriod('all', '2026-08-06');
+    return p30.curFrom === '2026-07-08' && p30.curTo === '2026-08-06'
+      && p30.prevFrom === '2026-06-08' && p30.prevTo === '2026-07-07' && p30.comparable === true
+      && all.comparable === false && L.acqDelta(5, 3, false).text === '비교 데이터 없음';
+  }),
+  acqScenario('증감 계산: 이전 값이 0이면 Infinity/NaN 대신 "신규 유입 발생"으로 표시한다', L => {
+    const a = L.acqDelta(3, 0, true), b = L.acqDelta(0, 0, true), c = L.acqDelta(4, 2, true), d = L.acqDelta(2, 2, true);
+    return a.type === 'new' && a.pct === null && a.text === '신규 유입 발생'
+      && b.type === 'none' && Number.isFinite(c.pct) && c.pct === 100 && d.type === 'flat';
+  }),
+  acqScenario('유입일: 방문계기 수정일이 아니라 상담일 → 등록일 순으로 유입일을 잡고, 날짜 없는 레거시는 기간 집계에서 빠진다', L => {
+    const withConsult = L.getAcquisitionDate({ consultDate: '2026-07-01', startDate: '2026-07-20', updatedAt: '2026-08-05' });
+    const onlyStart = L.getAcquisitionDate({ startDate: '2026-07-20', updatedAt: '2026-08-05' });
+    const none = L.getAcquisitionDate({ updatedAt: '2026-08-05' });
+    return withConsult === '2026-07-01' && onlyStart === '2026-07-20' && none === ''
+      && L.inAcqRange('', '2026-07-08', '2026-08-06') === false;
+  }),
+  acqScenario('인사이트·추천 액션: 실제 집계값 조건을 만족할 때만, 최대 3개까지 생성된다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: ['지인 소개'] } },
+      { id: 'b', name: 'B', startDate: '2026-08-02', survey: { visitRoutes: ['지인 소개'] } },
+      { id: 'c', name: 'C', startDate: '2026-08-03', survey: { visitRoutes: ['지인 소개'] } },
+      { id: 'd', name: 'D', startDate: '2026-08-04', survey: {} },
+    ]});
+    const period = L.buildAcquisitionPeriod('30', '2026-08-06');
+    const cur = L.summarizeAcquisitionRows(rows);
+    const prev = L.summarizeAcquisitionRows([]);
+    const ins = L.buildAcquisitionInsights(cur, prev, period);
+    const act = L.buildAcquisitionActions(cur, prev, period);
+    const empty = L.buildAcquisitionInsights(L.summarizeAcquisitionRows([]), prev, period);
+    return ins.length > 0 && ins.length <= 3 && act.length > 0 && act.length <= 3
+      && ins.some(i => i.text.includes('미기재')) && empty.length === 0;
+  }),
+  acqScenario('채널 추이: 기간에 따라 일/주/월 단위를 자동 선택하고, 데이터가 없으면 빈 버킷을 반환한다', L => {
+    const rows = L.buildAcquisitionRows({ members: [
+      { id: 'a', name: 'A', startDate: '2026-08-03', survey: { visitRoutes: ['유튜브'] } },
+    ]});
+    const d7 = L.buildAcquisitionBuckets(rows, L.buildAcquisitionPeriod('7', '2026-08-06'), '2026-08-06');
+    const d30 = L.buildAcquisitionBuckets(rows, L.buildAcquisitionPeriod('30', '2026-08-06'), '2026-08-06');
+    const dAll = L.buildAcquisitionBuckets(rows, L.buildAcquisitionPeriod('all', '2026-08-06'), '2026-08-06');
+    const none = L.buildAcquisitionBuckets([], L.buildAcquisitionPeriod('30', '2026-08-06'), '2026-08-06');
+    return d7.unit === 'day' && d30.unit === 'week' && dAll.unit === 'month'
+      && d7.buckets.some(b => b.byChannel['유튜브'] === 1) && none.buckets.length === 0;
+  }),
+  acqScenario('개인정보: 방문 이유 카드용 이름 마스킹은 성만 남긴다', L =>
+    L.maskAcquisitionName('홍길동') === '홍**' && L.maskAcquisitionName('김민') === '김*' && L.maskAcquisitionName('') === '회원'
+  ),
+
+  ['방문계기 탭: 저장된 방문 계기 상세 메모가 초기값 1순위(연산자 우선순위 버그로 회원 메모에 덮어써지지 않음)',
+    app.includes('sv.visitDetail || initial?.visitDetail || (initial?.memo?.includes("방문") ? initial.memo : "")') &&
+    !app.includes('initial?.memo?.includes("방문") ? initial?.memo : sv.visitDetail || ""')
+  ],
+  ['방문계기 탭: 같은 필드(survey.visitDetail)를 쓰던 중복 입력칸("AI가 추천한 내용 메모") 제거 — 저장 필드 구성은 그대로',
+    !app.includes('placeholder="AI가 어떤 내용을 추천했는지 메모"') &&
+    (app.match(/value=\{visitDetail\} onChange=\{e=>setVisitDetail\(e\.target\.value\)\}/g) || []).length === 1 &&
+    app.includes('visitRoutes, visitEtc, visitDetail, visitAiTool, visitKeyword, visitReferer, visitRealMemo, visitAiMemo,')
+  ],
+  ['유입 분석: 회원 프로필 방문계기 · 상담 문서 · 온보딩 v2 세 구조를 하나의 공용 selector로 읽는다',
+    app.includes('function normalizeMemberAcquisitionData(entity, onboarding)') &&
+    app.includes('const ac = (onboarding && onboarding.v2 && onboarding.v2.acquisition) || (e.v2 && e.v2.acquisition) || {};') &&
+    app.includes('const pick = (key) => acqText(sv[key]) || acqText(e[key]);')
+  ],
+  ['유입 분석: 회원 상세(사전 문진 카드)도 같은 정규화 함수를 사용한다(표기 불일치 방지)',
+    (app.match(/normalizeMemberAcquisitionData\(member, ob\)/g) || []).length === 2 &&
+    !app.includes("const legacyRoutes = Array.isArray(member?.survey?.visitRoutes)")
+  ],
+  ['유입 분석: 온보딩 유입 응답은 기존 memberOnboarding/main을 읽기만 하고 새 컬렉션·필드를 만들지 않는다',
+    db.includes('export async function getMemberAcquisitionOnboardingMap') &&
+    db.includes('const acquisition = snap.data()?.v2?.acquisition;') &&
+    !db.includes('collection(db, "acquisition")')
+  ],
+  ['유입 분석: 대표(TEO)·테스트 회원 제외 규칙(isRegularAdminMember)을 기존 그대로 유지',
+    (() => {
+      const start = app.indexOf('function ReferralStatsScreen(');
+      const slice = app.slice(start, start + 3000);
+      return slice.includes('members.filter(isRegularAdminMember)');
+    })()
+  ],
+  ['유입 분석: 기본 기간은 최근 30일이고 7/30/90/전체 필터를 모든 카드가 공유한다',
+    app.includes('const [period, setPeriod] = useState("30");') &&
+    app.includes('[["7", "최근 7일"], ["30", "최근 30일"], ["90", "최근 90일"], ["all", "전체"]]') &&
+    app.includes('const cur = useMemo(() => summarizeAcquisitionRows(curRows), [curRows]);') &&
+    app.includes('const prev = useMemo(() => summarizeAcquisitionRows(prevRows), [prevRows]);')
+  ],
+  ['유입 분석: 복수 선택으로 합계가 100%를 넘을 수 있다는 안내와 중복 없는 총 인원 기준을 함께 표시',
+    app.includes('복수 선택 기준으로 채널별 집계되어 합계가 100%를 초과할 수 있습니다') &&
+    app.includes('복수 선택 기반 참고 지표')
+  ],
+  ['유입 분석: 전체 목록 필터(전체/정식 회원/미등록 상담/AI 검색/지인 소개/미기재)와 통합 검색을 제공',
+    app.includes('const ACQ_LIST_FILTERS = [') &&
+    app.includes('{ key: "unknown", label: "미기재" }') &&
+    app.includes('placeholder="회원 이름 · 방문 경로 · 방문 이유 · 콘텐츠 메모 검색"')
+  ],
+  ['유입 분석: 목록에서 회원 상세·상담 상세로 이동 가능(정식 회원은 goHub, 상담 고객은 상담 상세)',
+    app.includes('onOpenMember={m=>goHub(m)}') &&
+    app.includes('onOpenConsultation={c=>{ setEditConsultation(c); setScreen("consultationForm"); }}')
+  ],
+  ['분석 리포트: 사이드바·홈 퀵메뉴의 "분석 리포트"가 준비 중(goCs)이 아니라 실제 화면(report)으로 이동',
+    app.includes('{key:"report",   label:"분석 리포트",   icon:icBr, fn:()=>setScreen("report")},') &&
+    app.includes('<QuickMenuTile icon={qr} label="분석 리포트" onClick={()=>setScreen("report")} />')
+  ],
+  ['분석 리포트: 유입 분석 카드(제목 "유입 분석" · 보조설명 "방문 경로와 마케팅 성과")를 명확히 노출',
+    app.includes('{ key: "referral", icon: "📊", title: "유입 분석", sub: "방문 경로와 마케팅 성과" }') &&
+    app.includes('function AnalyticsReportScreen(')
+  ],
+  ['분석 리포트 → 유입 분석: 화면을 복제하지 않고 회원 상세와 같은 ReferralStatsScreen 하나를 재사용',
+    (app.match(/<ReferralStatsScreen/g) || []).length === 1 &&
+    (app.match(/function ReferralStatsScreen\(/g) || []).length === 1
+  ],
+  ['분석 리포트 진입 시 뒤로가기: 유입 분석·회원 입력 현황이 진입 경로(회원 상세 / 분석 리포트)로 되돌아간다',
+    app.includes('const [analyticsReturn, setAnalyticsReturn] = useState("hub");') &&
+    app.includes('onOpenReport={key=>{ setAnalyticsReturn("report"); setScreen(key); }}') &&
+    (app.match(/setScreen\(analyticsReturn === "report" \? "report" : "hub"\)/g) || []).length === 2 &&
+    app.includes('setAnalyticsReturn("hub"); // 회원 상세로 들어왔으므로')
+  ],
+  ['유입 분석/분석 리포트: 관리자 라이트 테마 + AdminSidebar + 반응형 grid(minmax) 사용, 고정폭 남용 없음',
+    app.includes('<AdminSidebar active="report"') &&
+    app.includes('gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))"') &&
+    app.includes('gridTemplateColumns: isWide ? "repeat(auto-fill,minmax(330px,1fr))" : "1fr"') &&
+    app.includes('screen==="report"||screen==="referral") ? {width:"100%"}')
   ],
 ];
 

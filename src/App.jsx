@@ -2172,7 +2172,7 @@ function MemberApp({ onLogout }) {
   const debugMode=isMemberDebugMode();
   const debugPanel=debugMode?<MemberDebugPanel profile={profile} logs={accessLogs} errors={accessErrors}/>:null;
   if(!onboardingReadFailed&&(onboarding?.completed === false || !onboarding?.completedAt)) return <>{debugPanel}<MemberOnboarding profile={profile} body={body} existing={onboarding} onDone={load}/></>;
-  const defaultHistoryStartDate=getMemberHistoryStartDate(profile,effectiveOnboarding); const effectiveBody=applyHistoryMode(body,effectiveOnboarding.weightHistoryMode,effectiveOnboarding.weightHistoryModeStartedAt||defaultHistoryStartDate,"records"); const effectiveNutrition=applyHistoryMode(nutrition,effectiveOnboarding.calorieHistoryMode,effectiveOnboarding.calorieHistoryModeStartedAt||defaultHistoryStartDate,"logs"); const weights=getBodyWeightRecords(effectiveBody), curW=toPositiveNumber(weights.at(-1)?.weight)||toPositiveNumber(profile.currentWeight)||toPositiveNumber(form.weight)||toPositiveNumber(profile.weight)||"-", startW=toPositiveNumber(profile.startWeight)||toPositiveNumber(effectiveOnboarding.startingWeightKg)||toPositiveNumber(weights[0]?.weight)||curW; const totalReg=parseInt(String(profile.totalSessions||"").replace(/[^0-9]/g,""))||0; const remaining=totalReg?Math.max(0,totalReg-sessions.length):"-"; const latest=sessions.at(-1); const kcalLogs=getKcalLogs(effectiveNutrition); const recentKcal=kcalLogs.find(l=>l.date===today)?.kcal??kcalLogs.at(-1)?.kcal??"-"; const steps=(checkins.find(c=>c.date===today||c.id===today)?.steps)||checkins.find(c=>c.steps)?.steps||"-"; const getPubDate=getSessionPublishDate; const unreadCount=sessions.filter(s=>s.isPublished&&!readSessionIds.has(s.id)&&getPubDate(s)>=SESSION_UNREAD_CUTOFF).length; const noticeUnreadCount=(notices||[]).filter(n=>!n.isRead).length;
+  const defaultHistoryStartDate=getMemberHistoryStartDate(profile,effectiveOnboarding); const effectiveBody=applyHistoryMode(body,effectiveOnboarding.weightHistoryMode,effectiveOnboarding.weightHistoryModeStartedAt||defaultHistoryStartDate,"records"); const effectiveNutrition=applyHistoryMode(nutrition,effectiveOnboarding.calorieHistoryMode,effectiveOnboarding.calorieHistoryModeStartedAt||defaultHistoryStartDate,"logs"); const weights=getBodyWeightRecords(effectiveBody), curW=toPositiveNumber(weights.at(-1)?.weight)||toPositiveNumber(profile.currentWeight)||toPositiveNumber(form.weight)||toPositiveNumber(profile.weight)||"-", startW=toPositiveNumber(profile.startWeight)||toPositiveNumber(effectiveOnboarding.startingWeightKg)||toPositiveNumber(weights[0]?.weight)||curW; const latest=sessions.at(-1); const kcalLogs=getKcalLogs(effectiveNutrition); const recentKcal=kcalLogs.find(l=>l.date===today)?.kcal??kcalLogs.at(-1)?.kcal??"-"; const steps=(checkins.find(c=>c.date===today||c.id===today)?.steps)||checkins.find(c=>c.steps)?.steps||"-"; const getPubDate=getSessionPublishDate; const unreadCount=sessions.filter(s=>s.isPublished&&!readSessionIds.has(s.id)&&getPubDate(s)>=SESSION_UNREAD_CUTOFF).length; const noticeUnreadCount=(notices||[]).filter(n=>!n.isRead).length;
   // 저장 직전 소유권 재검증 — profile은 auth.uid로 조회한 본인 문서지만, 혹시 모를 회귀/버그로
   // profile.memberUid가 현재 로그인된 auth.uid와 어긋나 있으면 저장을 즉시 중단하고 에러를 던진다.
   // (Firestore Rules가 최종 방어선이지만, 클라이언트 단에서도 다른 회원 데이터로 저장되는 것을 조기에 막는다)
@@ -2454,7 +2454,7 @@ function MemberApp({ onLogout }) {
   // 운동 종목 후보 — 본인 PT 수업일지 + 본인 개인운동 + 코드 내장 분류 상수(별도 운동 사전 신설 없음)
   const personalExerciseCandidates=buildPersonalExerciseCandidates({sessions,personalWorkouts});
   const completedPersonalWorkouts=personalWorkouts.filter(w=>w.status==="completed");
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,goNoticeCenter,noticeCenterAutoOpen,clearNoticeCenterAutoOpen:()=>setNoticeCenterAutoOpen(false),curW,startW,totalReg,remaining,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,goNoticeCenter,noticeCenterAutoOpen,clearNoticeCenterAutoOpen:()=>setNoticeCenterAutoOpen(false),curW,startW,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
     personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
     personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
     startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast,
@@ -4042,7 +4042,10 @@ function MemberWorkout(p){
   return <>
     <div className="sj-page-head">
       <h1 className="sj-page-title">운동</h1>
-      {doneCount>0&&<span className="sj-page-meta">{doneCount}회 진행{p.remaining!=="-"&&p.remaining!=null?` · ${p.remaining}회 남음`:""}</span>}
+      {/* "N회 남음" 표시는 회원앱에서 제거했다 — 총 등록횟수(totalSessions) − 수업 수로 계산하던 값이라
+          관리자앱이 관리하는 실제 잔여 횟수와 어긋날 수 있고, 잔여·재등록 정보는 현재 단계에서
+          회원에게 노출하지 않는 관리자 전용 데이터다. 진행 횟수만 남긴다. */}
+      {doneCount>0&&<span className="sj-page-meta">{doneCount}회 진행</span>}
     </div>
     <p className="sub sj-page-sub">{view==="journal"?"대표님과 진행한 수업과 직접 기록한 개인운동을 확인해보세요.":"수업 · 개인운동 · 유산소 · 건강 기록을 날짜별로 확인하세요."}</p>
     <MemberSegment ariaLabel="운동 보기 전환" options={[["journal","운동 기록"],["calendar","캘린더"]]} value={view} onChange={k=>{p.setWorkoutView?.(k); p.resetMemberScroll?.();}}/>
@@ -4601,8 +4604,9 @@ function getExerciseRecordDateKey(record){
 //     addSession/updateSession(db.js)을 직접 확인한 결과 session 문서에는 createdAt(생성 시각)·
 //     updatedAt(수정 시각)·publishedAt(트레이너 전송 시각)만 저장되고, 셋 다 "실제 수업 수행 시각"이
 //     아니라 작성·수정·전송 시각이다 — 트레이너가 지난 수업을 며칠 뒤 작성·전송하면 이 값들이 실제
-//     수업일보다 한참 뒤가 되어 순서를 뒤집을 수 있다. completedAt은 session 문서에 아예 기록되지
-//     않는다(personalWorkouts·온보딩 전용 필드). performedAt은 현재 어떤 저장 경로도 채우지 않지만,
+//     수업일보다 한참 뒤가 되어 순서를 뒤집을 수 있다. session 문서의 completedAt은 "회원에게 최초로
+//     공개(완료 확정)한 시각"이지 수업을 수행한 시각이 아니므로(PT 잔여 차감 기준 전용) 여기서는 쓰지
+//     않는다 — personalWorkouts의 completedAt과 의미가 다르다. performedAt은 현재 어떤 저장 경로도 채우지 않지만,
 //     향후 실제 수업 수행 시각 필드가 추가된다면 이 이름을 쓴다는 전제로 유일하게 허용해 둔다.
 //   날짜가 다를 때는 이 시각들을 절대 순서 판정에 쓰지 않고, 같은 날짜 안에서 순서를 가릴 때만
 //   보조로 사용한다(getExerciseRecordOrder 참고). PT 쪽에 신뢰할 시각이 없으면 순서 불명으로 처리한다.
@@ -12566,17 +12570,33 @@ function isPtDebitableSession(session, todayKST) {
   return (s.exercises || []).some(e => e?.name || isFuncEx(e));
 }
 
-// 기준 시각 이후에 "새로 기록된" 수업만 차감 대상이다. 세션 문서 id로 중복을 제거해 같은 수업이 두 번 세어지지 않는다.
-function countPtDebitedSessions(sessions, baselineAtMs, todayKST) {
+// 수업의 "완료 확정 시각".
+//   1순위 completedAt — publishSession()이 최초 공개 때 딱 한 번 기록하고, 이후 수정·공개취소·재공개로도
+//                       절대 바뀌지 않는다(db.js). 그래서 중복 차감도 소급 차감도 생기지 않는다.
+//   2순위 publishedAt — completedAt 도입 이전에 공개된 기록 보완용.
+// createdAt은 쓰지 않는다: 초안을 미리 만들어 두고 나중에 완료하면 실제 완료보다 이른 시각이라 차감이 누락된다.
+// updatedAt도 쓰지 않는다: 수업을 고칠 때마다 갱신돼 과거 수업이 갑자기 "오늘 완료"로 둔갑한다.
+// 둘 다 없으면 null(판단 불가) — 판단 불가는 항상 차감하지 않는 쪽으로 처리한다.
+function getPtSessionCompletedAtMs(session) {
+  return toMillisSafe(session?.completedAt) ?? toMillisSafe(session?.publishedAt);
+}
+
+// 기준 시점 이후에 "실제로 완료된" 수업만 차감 대상이다. 세션 문서 id로 중복을 제거해 같은 수업이 두 번 세어지지 않는다.
+// 두 겹으로 막는다:
+//   ① 완료 확정 시각 > 기준 시각  — 기준 설정 당시 이미 완료돼 있던 수업은 대표가 입력한 잔여에 이미 반영돼 있다.
+//   ② 수업 날짜 >= 기준일          — 기준일보다 앞선 날짜의 수업은 어떤 경로로 완료 시각이 늦게 찍히더라도 차감하지 않는다
+//                                    (completedAt 도입 이전 기록이 재공개되는 경우 등에 대한 안전망).
+function countPtDebitedSessions(sessions, baselineAtMs, baselineDate, todayKST) {
   if (!Number.isFinite(baselineAtMs)) return 0;
   const seen = new Set();
   (sessions || []).forEach((s, i) => {
     if (!s) return;
     const key = s.id != null && s.id !== "" ? String(s.id) : `_idx${i}`;
     if (seen.has(key)) return;
-    const created = toMillisSafe(s.createdAt);
-    if (created == null || created <= baselineAtMs) return; // 기준 이전 기록·판단 불가 기록은 절대 차감하지 않는다
     if (!isPtDebitableSession(s, todayKST)) return;
+    const completedAt = getPtSessionCompletedAtMs(s);
+    if (completedAt == null || completedAt <= baselineAtMs) return; // ①
+    if (baselineDate && String(s.date || "") < baselineDate) return; // ②
     seen.add(key);
   });
   return seen.size;
@@ -12616,7 +12636,7 @@ function getPtBalance(member, sessions = [], registrations = [], todayKST = "") 
     };
   }
   const reg = summarizePtRegistrations(registrations);
-  const debits = countPtDebitedSessions(sessions, base.at, todayKST);
+  const debits = countPtDebitedSessions(sessions, base.at, base.date, todayKST);
   const rawRemaining = base.remaining + reg.renewalAdded + reg.adjustTotal - debits;
   const overdrawn = rawRemaining < 0;
   const remaining = Math.max(0, rawRemaining);

@@ -908,11 +908,29 @@ export async function markMemberNotificationRead(memberId, notificationId) {
 export async function publishSession(memberId, sessionId) {
   await verifyMemberOwnership(memberId);
   dbLog("publishSession", `memberId=${memberId} sessionId=${sessionId}`);
+  const ref = doc(db, "members", memberId, "sessions", sessionId);
+  // ── completedAt: "이 수업이 실제로 완료된 시점"을 딱 한 번만 남기는 필드 ──
+  // publishedAt은 unpublishSession()에서 null로 지워지고 재공개 때 새 시각으로 덮이므로
+  // "완료 시점"의 기준이 될 수 없다. createdAt도 안 된다 — 초안을 미리 만들어 두고 나중에 완료하면
+  // 실제 완료보다 한참 이른 시각이라 PT 잔여 차감이 누락된다.
+  // 이미 값이 있으면 절대 덮어쓰지 않는다(수정·공개취소·재공개를 반복해도 최초 완료 시각 유지 →
+  // PT 잔여의 중복 차감과 과거 수업 소급 차감을 동시에 막는다).
+  let completedAtPatch = {};
   try {
-    await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+    const prevSnap = await getDoc(ref);
+    const prev = prevSnap.exists() ? prevSnap.data() : null;
+    // 이 필드 도입 이전에 이미 공개된 기록은 그때의 publishedAt을 완료 시각으로 승계한다.
+    if (prev && !prev.completedAt) completedAtPatch = { completedAt: prev.publishedAt || serverTimestamp() };
+  } catch(e) {
+    // 읽기에 실패해도 전송 자체는 막지 않는다 — completedAt이 없으면 publishedAt으로 판단이 이어진다.
+    dbLog("publishSession", `completedAt 확인 실패(전송은 계속 진행): ${e.message}`);
+  }
+  try {
+    await updateDoc(ref, {
       status: "published",
       isPublished: true,
       publishedAt: serverTimestamp(),
+      ...completedAtPatch,
       updatedAt: serverTimestamp(),
     });
   } catch(e) {
@@ -945,10 +963,23 @@ export async function sendPairSession(aMemberId, aSessionId, bMemberId, bSession
 export async function unpublishSession(memberId, sessionId, nextStatus = "completed") {
   await verifyMemberOwnership(memberId);
   dbLog("unpublishSession", `memberId=${memberId} sessionId=${sessionId}`);
-  await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+  const ref = doc(db, "members", memberId, "sessions", sessionId);
+  // publishedAt을 null로 지우기 전에 완료 확정 시각을 completedAt으로 보존한다.
+  // 이게 없으면 completedAt 도입 이전에 공개됐던 과거 수업이 재공개될 때 "지금 완료된 수업"으로
+  // 잘못 잡혀 PT 잔여가 소급 차감될 수 있다.
+  let completedAtPatch = {};
+  try {
+    const prevSnap = await getDoc(ref);
+    const prev = prevSnap.exists() ? prevSnap.data() : null;
+    if (prev && !prev.completedAt && prev.publishedAt) completedAtPatch = { completedAt: prev.publishedAt };
+  } catch(e) {
+    dbLog("unpublishSession", `completedAt 확인 실패(공개 취소는 계속 진행): ${e.message}`);
+  }
+  await updateDoc(ref, {
     status: nextStatus === "draft" ? "draft" : "completed",
     isPublished: false,
     publishedAt: null,
+    ...completedAtPatch,
     updatedAt: serverTimestamp(),
   });
   dbLog("unpublishSession", "완료");

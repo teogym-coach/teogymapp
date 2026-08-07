@@ -84,7 +84,7 @@ try {
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceMillis = app.slice(app.indexOf('function toMillisSafe'), app.indexOf('function isAtOrAfterHomeTaskCutoff'));
   const slicePt = app.slice(app.indexOf('function isTrialSessionNo'), app.indexOf('function buildUnsentSessionMembers'));
-  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
+  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
 } catch (e) {
   console.error('[regression] PT 잔여 횟수 헬퍼 추출 실패:', e.message);
 }
@@ -93,6 +93,20 @@ function ptScenario(name, fn) {
   try { return [name, !!fn(ptBalanceLib)]; }
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
+// 회원앱 비노출 검사용 — "실제로 렌더링되는 코드"만 남긴다.
+// 블록 주석(JSX의 {/* ... */} 포함)과 한 줄 전체가 주석인 줄을 제거한다.
+// 줄 중간의 //는 문자열 안 URL(https://...)일 수 있어 건드리지 않는다(과다 제거로 검사가 헐거워지는 것 방지).
+function stripCommentsForRenderCheck(src) {
+  return String(src || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(/\r?\n/)
+    .filter(line => !line.trim().startsWith('//'))
+    .join('\n');
+}
+const memberAppRenderRegion = () => stripCommentsForRenderCheck(
+  app.slice(app.indexOf('function MemberApp({ onLogout })'), app.indexOf('function AdminMemberAppInviteButton'))
+);
+
 // 공통 픽스처 — 기준일 2026-08-07(잔여 8회 · 재등록 2회), 오늘은 2026-08-31로 고정
 const PT_BASELINE_AT = '2026-08-07T00:00:00.000Z';
 const PT_TODAY = '2026-08-31';
@@ -100,10 +114,12 @@ const ptMember = (over = {}) => ({
   id: 'mA', ptBalanceInitialized: true, ptBalanceBaselineAt: PT_BASELINE_AT,
   ptBalanceBaselineDate: '2026-08-07', ptBalanceBaselineRemaining: 8, ptBalanceBaselineRenewalCount: 2, ...over,
 });
-// 기본값 = 기준 이후 새로 기록된 정상 완료 PT 수업(차감 대상)
+// 기본값 = 기준 이후 새로 기록되고 실제로 완료(회원 공개)된 정상 PT 수업(차감 대상)
+// completedAt = publishSession()이 최초 공개 때 1회만 기록하는 완료 확정 시각(차감 판정의 유일한 기준)
 const ptSession = (over = {}) => ({
   id: 's1', date: '2026-08-10', sessionNo: 1, isPublished: true, status: 'published',
-  createdAt: '2026-08-10T02:00:00.000Z', exercises: [{ name: '벤치프레스', sets: [{ weight: 40, reps: 10 }] }], ...over,
+  createdAt: '2026-08-10T01:00:00.000Z', publishedAt: '2026-08-10T02:00:00.000Z', completedAt: '2026-08-10T02:00:00.000Z',
+  exercises: [{ name: '벤치프레스', sets: [{ weight: 40, reps: 10 }] }], ...over,
 });
 
 // ── 유입 분석(방문계기 정규화·기간 비교·중복 집계 방지): 실제 실행 시나리오 검증 ──
@@ -5258,9 +5274,10 @@ const checks = [
     const b = L.getPtBalance(ptMember(), [], [], PT_TODAY);
     return b.initialized === true && b.remaining === 8 && b.baselineRemaining === 8;
   }),
-  ptScenario('PT 잔여: 기준일 이전에 기록된 수업 20건은 다시 차감되지 않는다(잔여 8 유지)', L => {
+  ptScenario('PT 잔여: 기준일 이전에 이미 완료된 수업 20건은 다시 차감되지 않는다(잔여 8 유지)', L => {
     const past = Array.from({ length: 20 }, (_, i) => ptSession({
-      id: `old${i}`, date: '2026-07-20', createdAt: '2026-07-20T02:00:00.000Z',
+      id: `old${i}`, date: '2026-07-20',
+      createdAt: '2026-07-20T01:00:00.000Z', publishedAt: '2026-07-20T02:00:00.000Z', completedAt: '2026-07-20T02:00:00.000Z',
     }));
     const b = L.getPtBalance(ptMember(), past, [], PT_TODAY);
     return b.debits === 0 && b.remaining === 8;
@@ -5286,7 +5303,7 @@ const checks = [
     return b.debits === 0 && b.remaining === 8;
   }),
   ptScenario('PT 잔여: 미래에 잡아놓은 다음 수업·운동 내용 없는 예약은 차감되지 않는다', L => {
-    const future = ptSession({ id: 'f1', date: '2026-09-20', createdAt: '2026-08-20T02:00:00.000Z' });
+    const future = ptSession({ id: 'f1', date: '2026-09-20', completedAt: '2026-08-20T02:00:00.000Z' });
     const booking = ptSession({ id: 'b1', exercises: [] }); // 날짜만 잡아둔 예약(운동 기록 없음)
     const b = L.getPtBalance(ptMember(), [future, booking], [], PT_TODAY);
     return b.debits === 0 && b.remaining === 8;
@@ -5341,18 +5358,88 @@ const checks = [
       && L.needsPtRenewalNotice(at(6)) === false && L.needsPtRenewalNotice(at(3)) === true
       && L.needsPtRenewalNotice(L.getPtBalance({ id: 'x' }, [], [], PT_TODAY)) === false;
   }),
-  ptScenario('PT 잔여: createdAt이 없는 레거시 수업은 판단 불가로 차감하지 않는다(과다 차감 방지)', L => {
-    const legacy = ptSession({ id: 'lg', createdAt: undefined });
-    return L.getPtBalance(ptMember(), [legacy], [], PT_TODAY).debits === 0;
+  ptScenario('PT 잔여: 완료 시각(completedAt·publishedAt)이 전혀 없는 레거시 수업은 판단 불가로 차감하지 않는다', L => {
+    const legacy = ptSession({ id: 'lg', completedAt: undefined, publishedAt: undefined });
+    return L.getPtSessionCompletedAtMs(legacy) === null
+      && L.getPtBalance(ptMember(), [legacy], [], PT_TODAY).debits === 0;
   }),
+  ptScenario('PT 잔여: 차감 기준 시각은 completedAt(1순위) → publishedAt(2순위)이며 createdAt·updatedAt은 쓰지 않는다', L => {
+    const ms = v => new Date(v).getTime();
+    // completedAt이 있으면 publishedAt이 나중이어도 completedAt을 쓴다(재공개로 publishedAt이 갱신돼도 완료 시각은 고정)
+    const both = L.getPtSessionCompletedAtMs({ completedAt: '2026-08-10T02:00:00.000Z', publishedAt: '2026-08-25T02:00:00.000Z' });
+    // completedAt 도입 이전 기록은 publishedAt으로 판단
+    const onlyPublished = L.getPtSessionCompletedAtMs({ publishedAt: '2026-08-10T02:00:00.000Z' });
+    // createdAt·updatedAt만 있는 기록은 판단 불가 → 차감하지 않는다
+    const onlyCreated = L.getPtSessionCompletedAtMs({ createdAt: '2026-08-10T02:00:00.000Z', updatedAt: '2026-08-30T02:00:00.000Z' });
+    return both === ms('2026-08-10T02:00:00.000Z') && onlyPublished === ms('2026-08-10T02:00:00.000Z') && onlyCreated === null;
+  }),
+  // ── 실제 운영 시나리오 A~D ──
+  ptScenario('PT 잔여 시나리오 A: 8/6 초안 생성 → 8/7 기준 8회 설정 → 8/8 실제 완료 → 잔여 7회(초안 생성일 때문에 차감 누락되지 않음)', L => {
+    const s = ptSession({
+      id: 'sA', date: '2026-08-08',
+      createdAt: '2026-08-06T05:00:00.000Z',    // 기준일 이전에 미리 만들어 둔 초안
+      publishedAt: '2026-08-08T11:00:00.000Z',
+      completedAt: '2026-08-08T11:00:00.000Z',  // 실제 완료(회원 공개)는 기준일 이후
+    });
+    const b = L.getPtBalance(ptMember(), [s], [], PT_TODAY);
+    return b.debits === 1 && b.remaining === 7;
+  }),
+  ptScenario('PT 잔여 시나리오 B: 8/6 이미 완료된 과거 수업 → 8/7 기준 8회 설정 → 잔여 8회 그대로(과거 완료 수업 재차감 없음)', L => {
+    const s = ptSession({
+      id: 'sB', date: '2026-08-06',
+      createdAt: '2026-08-06T05:00:00.000Z', publishedAt: '2026-08-06T11:00:00.000Z', completedAt: '2026-08-06T11:00:00.000Z',
+    });
+    const b = L.getPtBalance(ptMember(), [s], [], PT_TODAY);
+    return b.debits === 0 && b.remaining === 8;
+  }),
+  ptScenario('PT 잔여 시나리오 B-2: 기준일 이전 날짜의 수업은 완료 시각이 기준 이후로 찍혀도 차감하지 않는다(소급 차감 안전망)', L => {
+    // completedAt 도입 이전에 공개됐던 과거 수업이 나중에 재공개되며 완료 시각이 늦게 잡히는 경우
+    const s = ptSession({
+      id: 'sB2', date: '2026-08-06',
+      createdAt: '2026-08-06T05:00:00.000Z', publishedAt: '2026-08-20T11:00:00.000Z', completedAt: '2026-08-20T11:00:00.000Z',
+    });
+    return L.getPtBalance(ptMember(), [s], [], PT_TODAY).debits === 0;
+  }),
+  ptScenario('PT 잔여 시나리오 C: 완료 -1 → 수정 변화없음 → 공개취소 변화없음 → 재공개 변화없음', L => {
+    const m = ptMember();
+    const done = ptSession({ id: 'sC' });
+    const afterDone = L.getPtBalance(m, [done], [], PT_TODAY).remaining;
+    // 수정·재저장: updatedAt만 갱신되고 completedAt은 그대로
+    const edited = { ...done, updatedAt: '2026-08-12T03:00:00.000Z' };
+    const afterEdit = L.getPtBalance(m, [edited], [], PT_TODAY).remaining;
+    // 공개 취소: isPublished false + status "completed", publishedAt은 null이 되지만 completedAt은 보존된다
+    const unpublished = { ...edited, isPublished: false, status: 'completed', publishedAt: null };
+    const afterUnpublish = L.getPtBalance(m, [unpublished], [], PT_TODAY).remaining;
+    // 재공개: publishedAt은 새 시각으로 갱신되지만 completedAt은 최초 완료 시각 그대로
+    const republished = { ...unpublished, isPublished: true, status: 'published', publishedAt: '2026-08-15T03:00:00.000Z' };
+    const afterRepublish = L.getPtBalance(m, [republished], [], PT_TODAY).remaining;
+    return afterDone === 7 && afterEdit === 7 && afterUnpublish === 7 && afterRepublish === 7;
+  }),
+  ['PT 잔여 시나리오 C: 완료 확정 시각(completedAt)은 최초 공개 때 1회만 기록되고 공개취소·재공개로 덮어쓰지 않는다',
+    // publishSession: completedAt이 이미 있으면 patch 자체를 만들지 않는다(재공개해도 최초 완료 시각 유지)
+    db.includes('if (prev && !prev.completedAt) completedAtPatch = { completedAt: prev.publishedAt || serverTimestamp() };')
+    // unpublishSession: publishedAt을 null로 지우기 전에 완료 시각을 completedAt으로 보존한다
+    && db.includes('if (prev && !prev.completedAt && prev.publishedAt) completedAtPatch = { completedAt: prev.publishedAt };')
+    && db.includes('publishedAt: null,')
+  ],
+  ['PT 잔여 시나리오 D: 회원앱에서 "N회 남음"·잔여·재등록 정보가 렌더링되지 않고 배선(totalReg/remaining)도 남아있지 않다',
+    (() => {
+      const region = memberAppRenderRegion();
+      return region.length > 10000
+        && !region.includes('회 남음')
+        && !region.includes('잔여')
+        && !/\btotalReg\b/.test(region)
+        && !/p\.remaining/.test(region)
+        && !/profile\.totalSessions|profile\.remainingSessions/.test(region)
+        // 진행 횟수 표시는 그대로 유지된다
+        && region.includes('{doneCount}회 진행');
+    })()
+  ],
   ['PT 잔여: 회원앱(홈·수업·건강·분석·프로필·온보딩·개인운동·공지센터)에는 잔여 횟수 데이터가 전혀 렌더링되지 않는다',
     (() => {
-      const memberAppRegion = app.slice(
-        app.indexOf('function MemberApp({ onLogout })'),
-        app.indexOf('function AdminMemberAppInviteButton')
-      );
-      return memberAppRegion.length > 10000
-        && !/ptBalance|ptRegistrations|getPtBalance|잔여 PT|재등록 안내 필요/.test(memberAppRegion);
+      const region = memberAppRenderRegion();
+      return region.length > 10000
+        && !/ptBalance|ptRegistrations|getPtBalance|잔여 PT|재등록 안내 필요/.test(region);
     })()
   ],
   ['PT 잔여: 잔여·재등록·보정은 관리자 전용 — 회원은 ptRegistrations 읽기·쓰기 불가, 기준 필드도 회원 수정 화이트리스트에 없다',

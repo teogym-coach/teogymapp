@@ -76,6 +76,36 @@ function usScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── PT 잔여 횟수·재등록 관리: 실제 실행 시나리오 검증 ──
+// 잔여 계산은 회원 상세 카드·상단 요약이 모두 getPtBalance() 하나만 쓰므로, 원본 소스를 그대로 슬라이스해 실행한다.
+// 핵심 불변식: ① 기준(baseline) 이전 수업은 절대 차감되지 않는다 ② 같은 수업은 몇 번을 다시 저장·공개해도 1회만 차감된다.
+let ptBalanceLib = null;
+try {
+  const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
+  const sliceMillis = app.slice(app.indexOf('function toMillisSafe'), app.indexOf('function isAtOrAfterHomeTaskCutoff'));
+  const slicePt = app.slice(app.indexOf('function isTrialSessionNo'), app.indexOf('function buildUnsentSessionMembers'));
+  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
+} catch (e) {
+  console.error('[regression] PT 잔여 횟수 헬퍼 추출 실패:', e.message);
+}
+function ptScenario(name, fn) {
+  if (!ptBalanceLib) return [name, false];
+  try { return [name, !!fn(ptBalanceLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+// 공통 픽스처 — 기준일 2026-08-07(잔여 8회 · 재등록 2회), 오늘은 2026-08-31로 고정
+const PT_BASELINE_AT = '2026-08-07T00:00:00.000Z';
+const PT_TODAY = '2026-08-31';
+const ptMember = (over = {}) => ({
+  id: 'mA', ptBalanceInitialized: true, ptBalanceBaselineAt: PT_BASELINE_AT,
+  ptBalanceBaselineDate: '2026-08-07', ptBalanceBaselineRemaining: 8, ptBalanceBaselineRenewalCount: 2, ...over,
+});
+// 기본값 = 기준 이후 새로 기록된 정상 완료 PT 수업(차감 대상)
+const ptSession = (over = {}) => ({
+  id: 's1', date: '2026-08-10', sessionNo: 1, isPublished: true, status: 'published',
+  createdAt: '2026-08-10T02:00:00.000Z', exercises: [{ name: '벤치프레스', sets: [{ weight: 40, reps: 10 }] }], ...over,
+});
+
 // ── 유입 분석(방문계기 정규화·기간 비교·중복 집계 방지): 실제 실행 시나리오 검증 ──
 // 회원 프로필(survey.visit*) · 상담 문서(평탄 visit*) · 온보딩 v2(v2.acquisition) 세 구조를 하나로 읽는
 // 공용 selector 원본 코드를 그대로 슬라이스해 실행한다(로직을 옮겨 적지 않고 원본 자체를 검증).
@@ -5219,6 +5249,143 @@ const checks = [
     (app.match(/setScreen\(analyticsReturn === "report" \? "report" : "hub"\)/g) || []).length === 2 &&
     app.includes('setAnalyticsReturn("hub"); // 회원 상세로 들어왔으므로')
   ],
+  // ── PT 잔여 횟수 · 재등록 관리 ──
+  ptScenario('PT 잔여: 초기 설정 전 회원은 잔여 0회가 아니라 "미설정"으로 표시된다', L => {
+    const b = L.getPtBalance({ id: 'mA' }, [ptSession()], [], PT_TODAY);
+    return b.initialized === false && b.remaining === null && b.status.label === '미설정' && b.debits === 0;
+  }),
+  ptScenario('PT 잔여: 초기 잔여 8회를 설정하면 잔여는 그대로 8회다(과거 기록으로 재계산하지 않음)', L => {
+    const b = L.getPtBalance(ptMember(), [], [], PT_TODAY);
+    return b.initialized === true && b.remaining === 8 && b.baselineRemaining === 8;
+  }),
+  ptScenario('PT 잔여: 기준일 이전에 기록된 수업 20건은 다시 차감되지 않는다(잔여 8 유지)', L => {
+    const past = Array.from({ length: 20 }, (_, i) => ptSession({
+      id: `old${i}`, date: '2026-07-20', createdAt: '2026-07-20T02:00:00.000Z',
+    }));
+    const b = L.getPtBalance(ptMember(), past, [], PT_TODAY);
+    return b.debits === 0 && b.remaining === 8;
+  }),
+  ptScenario('PT 잔여: 기준일 이후 정상 수업이 완료되면 8 → 7로 자동 차감된다', L => {
+    const b = L.getPtBalance(ptMember(), [ptSession()], [], PT_TODAY);
+    return b.debits === 1 && b.remaining === 7;
+  }),
+  ptScenario('PT 잔여: 같은 수업을 수정·재저장·공개취소·재공개해도 중복 차감되지 않는다(7 → 7)', L => {
+    const base = ptSession();
+    const resaved = { ...base, updatedAt: '2026-08-11T05:00:00.000Z' };          // 수정 후 재저장
+    const unpublished = { ...base, isPublished: false, status: 'completed' };     // 회원 공개 취소
+    const republished = { ...base, isPublished: true, status: 'published' };      // 다시 공개
+    const one = L.getPtBalance(ptMember(), [base], [], PT_TODAY).remaining;
+    const many = L.getPtBalance(ptMember(), [base, resaved, unpublished, republished], [], PT_TODAY);
+    // 공개를 취소해도(status "completed") 완료된 수업이므로 차감은 유지되고, 몇 번을 다시 세도 1회다
+    return one === 7 && many.debits === 1 && many.remaining === 7
+      && L.getPtBalance(ptMember(), [unpublished], [], PT_TODAY).remaining === 7;
+  }),
+  ptScenario('PT 잔여: 0회차 체험수업은 차감되지 않는다', L => {
+    const trials = [ptSession({ id: 't1', sessionNo: 0 }), ptSession({ id: 't2', sessionNo: '0' }), ptSession({ id: 't3', sessionNo: '0회차' })];
+    const b = L.getPtBalance(ptMember(), trials, [], PT_TODAY);
+    return b.debits === 0 && b.remaining === 8;
+  }),
+  ptScenario('PT 잔여: 미래에 잡아놓은 다음 수업·운동 내용 없는 예약은 차감되지 않는다', L => {
+    const future = ptSession({ id: 'f1', date: '2026-09-20', createdAt: '2026-08-20T02:00:00.000Z' });
+    const booking = ptSession({ id: 'b1', exercises: [] }); // 날짜만 잡아둔 예약(운동 기록 없음)
+    const b = L.getPtBalance(ptMember(), [future, booking], [], PT_TODAY);
+    return b.debits === 0 && b.remaining === 8;
+  }),
+  ptScenario('PT 잔여: 준비만 하고 완료(회원 공개)하지 않은 임시저장 수업은 차감되지 않는다', L => {
+    const draft = ptSession({ id: 'd1', isPublished: false, status: 'draft' });
+    const b = L.getPtBalance(ptMember(), [draft], [], PT_TODAY);
+    return b.debits === 0 && b.remaining === 8 && L.isPtDebitableSession(draft, PT_TODAY) === false;
+  }),
+  ptScenario('PT 잔여: 2:1 수업은 회원별 세션 문서 기준으로 각자 1회씩만 차감된다', L => {
+    // 2:1은 members/{id}/sessions에 회원마다 각자 문서가 저장되므로, 회원별 배열을 넣으면 각각 1회다
+    const pairA = ptSession({ id: 'pa', sessionType: '2:1', pairMemberId: 'mB' });
+    const pairB = ptSession({ id: 'pb', sessionType: '2:1', pairMemberId: 'mA' });
+    const a = L.getPtBalance(ptMember({ id: 'mA' }), [pairA], [], PT_TODAY);
+    const b = L.getPtBalance(ptMember({ id: 'mB', ptBalanceBaselineRemaining: 5 }), [pairB], [], PT_TODAY);
+    return a.debits === 1 && a.remaining === 7 && b.debits === 1 && b.remaining === 4;
+  }),
+  ptScenario('PT 잔여: 잔여 3회 상태에서 20회 재등록하면 23회가 된다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 3 });
+    const regs = [{ id: 'r1', type: 'renewal', delta: 20, date: '2026-08-20' }];
+    const b = L.getPtBalance(m, [], regs, PT_TODAY);
+    return b.remaining === 23 && b.renewalAdded === 20;
+  }),
+  ptScenario('PT 잔여: 재등록을 추가하면 재등록 횟수가 2 → 3으로 증가한다', L => {
+    const before = L.getPtBalance(ptMember(), [], [], PT_TODAY);
+    const after = L.getPtBalance(ptMember(), [], [{ id: 'r1', type: 'renewal', delta: 20, date: '2026-08-20' }], PT_TODAY);
+    // 잔여 보정(adjustment)은 재등록 횟수를 올리지 않는다
+    const adj = L.getPtBalance(ptMember(), [], [{ id: 'a1', type: 'adjustment', delta: 1, date: '2026-08-20' }], PT_TODAY);
+    return before.renewalCount === 2 && after.renewalCount === 3 && adj.renewalCount === 2;
+  }),
+  ptScenario('PT 잔여: 회원별 데이터가 서로 섞이지 않는다(각자 baseline·세션·등록 이력만 사용)', L => {
+    const a = L.getPtBalance(ptMember({ id: 'mA', ptBalanceBaselineRemaining: 8 }), [ptSession({ id: 'sa' })], [], PT_TODAY);
+    const b = L.getPtBalance(ptMember({ id: 'mB', ptBalanceBaselineRemaining: 2, ptBalanceBaselineRenewalCount: 0 }), [], [{ id: 'r9', type: 'renewal', delta: 10, date: '2026-08-15' }], PT_TODAY);
+    return a.remaining === 7 && a.renewalCount === 2 && b.remaining === 12 && b.renewalCount === 1;
+  }),
+  ptScenario('PT 잔여: 수동 보정 +1은 잔여를 늘리고 -1은 줄인다(사유와 함께 이력으로 남음)', L => {
+    const plus = L.getPtBalance(ptMember(), [], [{ id: 'a1', type: 'adjustment', delta: 1, date: '2026-08-20', memo: '서비스 수업' }], PT_TODAY);
+    const minus = L.getPtBalance(ptMember(), [], [{ id: 'a2', type: 'adjustment', delta: -1, date: '2026-08-20', memo: '누락 수업 반영' }], PT_TODAY);
+    return plus.remaining === 9 && plus.adjustTotal === 1 && minus.remaining === 7 && minus.adjustTotal === -1;
+  }),
+  ptScenario('PT 잔여: 잔여 0회인데 수업이 완료되면 화면은 0회를 유지하고 "잔여 횟수 확인 필요"를 알린다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 0 });
+    const b = L.getPtBalance(m, [ptSession()], [], PT_TODAY);
+    return b.rawRemaining === -1 && b.remaining === 0 && b.overdrawn === true
+      && b.status.label === '잔여 횟수 확인 필요' && L.needsPtRenewalNotice(b) === true;
+  }),
+  ptScenario('PT 잔여: 재등록 안내 기준(6회 이상 정상 / 5회 이하 준비 / 3회 이하 안내 / 0회 소진)', L => {
+    const at = n => L.getPtBalance(ptMember({ ptBalanceBaselineRemaining: n }), [], [], PT_TODAY);
+    return at(6).status.label === '정상' && at(5).status.label === '재등록 준비'
+      && at(4).status.label === '재등록 준비' && at(3).status.label === '재등록 안내 필요'
+      && at(1).status.label === '재등록 안내 필요' && at(0).status.label === '수업 소진'
+      && L.needsPtRenewalNotice(at(6)) === false && L.needsPtRenewalNotice(at(3)) === true
+      && L.needsPtRenewalNotice(L.getPtBalance({ id: 'x' }, [], [], PT_TODAY)) === false;
+  }),
+  ptScenario('PT 잔여: createdAt이 없는 레거시 수업은 판단 불가로 차감하지 않는다(과다 차감 방지)', L => {
+    const legacy = ptSession({ id: 'lg', createdAt: undefined });
+    return L.getPtBalance(ptMember(), [legacy], [], PT_TODAY).debits === 0;
+  }),
+  ['PT 잔여: 회원앱(홈·수업·건강·분석·프로필·온보딩·개인운동·공지센터)에는 잔여 횟수 데이터가 전혀 렌더링되지 않는다',
+    (() => {
+      const memberAppRegion = app.slice(
+        app.indexOf('function MemberApp({ onLogout })'),
+        app.indexOf('function AdminMemberAppInviteButton')
+      );
+      return memberAppRegion.length > 10000
+        && !/ptBalance|ptRegistrations|getPtBalance|잔여 PT|재등록 안내 필요/.test(memberAppRegion);
+    })()
+  ],
+  ['PT 잔여: 잔여·재등록·보정은 관리자 전용 — 회원은 ptRegistrations 읽기·쓰기 불가, 기준 필드도 회원 수정 화이트리스트에 없다',
+    membersBlockFlat.includes('match /ptRegistrations/{registrationId} { allow read, create, update, delete: if isTrainerOfMember(memberId); }')
+    && !/ptBalance/.test(memberUpdateFn)
+    && !memberUpdateFn.includes('ptRegistrations')
+  ],
+  ['PT 잔여: 기존 "등록 구분"(기존 회원/첫 등록/재등록)과 후기 안내 공지 로직을 건드리지 않는다',
+    app.includes('const patch = { registrationType: type, registrationNoticeDone: false };')
+    && app.includes('{regBtn("기존 회원", ()=>saveRegistrationType("existing"), {primary:registrationType==="existing"})}')
+    && app.includes('{regBtn("재등록", ()=>saveRegistrationType("renewal"), {primary:registrationType==="renewal"})}')
+    // 재등록 추가(addPtRegistration) 저장 경로에서 registrationType을 함께 바꾸지 않는다
+    && !/addPtRegistration\([^)]*registrationType/.test(app)
+  ],
+  ['PT 잔여: 회원 상세 "등록 관리" 카드 안에 PT 이용 현황이 들어가고 상단 요약과 같은 계산(getPtBalance) 하나만 쓴다',
+    app.includes('{secPtBalance}')
+    && app.includes('<span style={{fontSize:11,fontWeight:800,color:DB.sub}}>PT 이용 현황</span>')
+    && app.includes('현재 잔여 횟수 설정')
+    && app.includes('PT 등록 추가')
+    && app.includes('잔여 조정')
+    && (app.match(/getPtBalance\(member, sessions, ptRegistrations, ptToday\)/g) || []).length === 1
+    && app.includes('잔여 PT {ptBalance.remaining}회')
+  ],
+  ['PT 잔여: 저장 경로는 members 문서 기준값 + members/{id}/ptRegistrations 이력 두 곳뿐이다',
+    db.includes('collection(db, "members", memberId, "ptRegistrations")')
+    && db.includes('export async function addPtRegistration(memberId, data)')
+    && db.includes('export async function getPtRegistrations(memberId, max = 100)')
+    && db.includes('export async function deletePtRegistration(memberId, registrationId)')
+    && app.includes('ptBalanceInitialized: true,')
+    && app.includes('ptBalanceBaselineRemaining: remaining,')
+    && app.includes('ptBalanceBaselineRenewalCount: renewalCount,')
+  ],
+
   ['유입 분석/분석 리포트: 관리자 라이트 테마 + AdminSidebar + 반응형 grid(minmax) 사용, 고정폭 남용 없음',
     app.includes('<AdminSidebar active="report"') &&
     app.includes('gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))"') &&

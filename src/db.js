@@ -2552,6 +2552,56 @@ export async function deleteCardioLog(memberId, logId) {
   await deleteDoc(doc(db, "members", memberId, "cardioLogs", logId));
 }
 
+// ════════════════════════════════════════════
+// PT 잔여 횟수 재등록·보정 이력 — members/{id}/ptRegistrations/{id}
+//
+// 전부 관리자 전용 데이터다. 회원앱은 어떤 화면에서도 잔여 횟수·재등록 이력을 읽지 않으며
+// Rules에서도 회원 읽기 권한을 주지 않는다(firestore.rules ptRegistrations 블록).
+//
+// 문서 구조
+//   type  : "renewal"(재등록) | "adjustment"(잔여 보정)
+//   delta : 잔여 횟수 증감(재등록은 항상 양수, 보정은 ±)
+//   date  : "YYYY-MM-DD" 등록일·보정일
+//   memo  : 선택 메모(보정 사유 등)
+//
+// 기준값(ptBalanceInitialized/ptBalanceBaselineAt/...)은 members 문서 필드이며
+// 기존 updateMember()로 저장한다(새 저장 경로를 만들지 않는다).
+// ════════════════════════════════════════════
+export async function getPtRegistrations(memberId, max = 100) {
+  requireUid();
+  const path = `members/${memberId}/ptRegistrations`;
+  dbLog("getPtRegistrations", "읽기 시작:", path);
+  try {
+    const snap = await getDocs(query(collection(db, "members", memberId, "ptRegistrations"), orderBy("date", "desc"), limit(max)));
+    dbLog("getPtRegistrations", `성공: ${snap.docs.length}건`);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error("[DB:getPtRegistrations] read failed:", { path, collection: "ptRegistrations", ...describeFirestoreError(e), memberId });
+    throw e;
+  }
+}
+
+export async function addPtRegistration(memberId, data) {
+  await verifyMemberOwnership(memberId);
+  const payload = clean({
+    type: data?.type === "adjustment" ? "adjustment" : "renewal",
+    delta: Math.round(Number(data?.delta) || 0),
+    date: String(data?.date || ""),
+    memo: String(data?.memo || ""),
+  });
+  dbLog("addPtRegistration", `memberId=${memberId} type=${payload.type} delta=${payload.delta}`);
+  const ref = await addDoc(collection(db, "members", memberId, "ptRegistrations"), {
+    ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+  });
+  return { id: ref.id, ...payload };
+}
+
+export async function deletePtRegistration(memberId, registrationId) {
+  await verifyMemberOwnership(memberId);
+  dbLog("deletePtRegistration", `memberId=${memberId} id=${registrationId}`);
+  await deleteDoc(doc(db, "members", memberId, "ptRegistrations", registrationId));
+}
+
 // ════════════════════════════════════════════════════
 // 상담 고객(리드) — consultations/{id}
 //

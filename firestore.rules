@@ -284,6 +284,16 @@ service cloud.firestore {
         allow delete: if canAccessMember(memberId);
       }
 
+      // PT 잔여 횟수 재등록·보정 이력 — 관리자 전용(회원은 읽기도 불가).
+      // cardioLogs/memberCheckins와 달리 canAccessMember(회원 본인 포함)를 쓰지 않는다:
+      // 잔여 횟수·재등록 이력은 현재 단계에서 회원앱에 전혀 노출하지 않는 관리자 운영 데이터다.
+      // 기준값(ptBalanceInitialized/ptBalanceBaselineAt/ptBalanceBaselineRemaining/
+      // ptBalanceBaselineRenewalCount)은 members 문서 필드이며, memberProfileUpdateKeysAllowed()
+      // 화이트리스트에 없으므로 회원 본인 계정으로는 어떤 경로로도 수정할 수 없다.
+      match /ptRegistrations/{registrationId} {
+        allow read, create, update, delete: if isTrainerOfMember(memberId);
+      }
+
       // 개인운동 기록 — 회원이 직접 작성하고 트레이너는 읽기만 한다(1차 범위: 관리자 수정·삭제 없음).
       // 권한 방향이 sessions(트레이너 작성 → 회원 열람)와 정반대라 반드시 별도 컬렉션으로 분리되어 있다.
       //

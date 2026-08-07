@@ -637,6 +637,62 @@ describe("TEO GYM Firestore Rules v8", function () {
     });
   });
 
+  // ════════════════════════════════════════════════════
+  // 6-1-1. ptRegistrations (PT 재등록·잔여 보정 이력) — 관리자 전용
+  // cardioLogs와 달리 회원 본인에게도 read 권한이 없다: 잔여 횟수·재등록 이력은
+  // 현재 단계에서 회원앱에 전혀 노출하지 않는 관리자 운영 데이터다.
+  // ════════════════════════════════════════════════════
+  describe("6-1-1. ptRegistrations (PT 잔여·재등록 이력, 관리자 전용)", () => {
+    beforeEach(async () => {
+      await seedMembers({ "member_a": memberActive, "member_b": memberB });
+      await seedSubcollection("member_a", "ptRegistrations", "reg1", {
+        type: "renewal", delta: 20, date: "2026-08-07", memo: "20회 재등록",
+      });
+    });
+
+    it("[관리자] ptRegistrations read/create/update/delete 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").collection("ptRegistrations").doc("reg1").get());
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("ptRegistrations").add({
+          type: "adjustment", delta: -1, date: "2026-08-08", memo: "누락 수업 반영",
+        })
+      );
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("ptRegistrations").doc("reg1").delete()
+      );
+    });
+
+    it("[진행중 회원] 본인 ptRegistrations read 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_a").collection("ptRegistrations").doc("reg1").get());
+    });
+
+    it("[진행중 회원] 본인 ptRegistrations 생성으로 잔여 횟수 부풀리기 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("ptRegistrations").add({
+          type: "renewal", delta: 100, date: "2026-08-07",
+        })
+      );
+    });
+
+    it("[회원 A] 회원 B ptRegistrations read 차단", async () => {
+      await seedSubcollection("member_b", "ptRegistrations", "reg1", { type: "renewal", delta: 20, date: "2026-08-07" });
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("ptRegistrations").doc("reg1").get());
+    });
+
+    it("[진행중 회원] members 문서의 PT 잔여 기준 필드 직접 수정 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_a").update({
+        ptBalanceInitialized: true, ptBalanceBaselineRemaining: 999, ptBalanceBaselineRenewalCount: 0,
+      }));
+      // 잔여 횟수만 단독으로 바꾸는 것도 차단돼야 한다(화이트리스트 밖 필드)
+      await assertFails(db.collection("members").doc("member_a").update({ ptBalanceBaselineRemaining: 50 }));
+    });
+  });
+
   describe("6-2. correctionSummaries (체형평가 회원 노출용, 회원은 읽기만 가능)", () => {
     beforeEach(async () => {
       await seedMembers({ "member_a": memberActive, "member_paused": memberPaused });

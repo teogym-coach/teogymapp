@@ -30,6 +30,7 @@ import {
   recordMemberAppUsage, getMemberAppUsage, getMemberAppUsageSummary,
   saveAttendance, getAttendanceRecent, deleteAttendance,
   getCardioLogs, saveCardioLog, deleteCardioLog,
+  getPtRegistrations, addPtRegistration, deletePtRegistration,
   PERSONAL_WORKOUT_LIMITS, getPersonalWorkouts, getInProgressPersonalWorkouts,
   createPersonalWorkout, updatePersonalWorkoutProgress, completePersonalWorkout, deletePersonalWorkout,
   editCompletedPersonalWorkout, getPersonalWorkoutSorenessMap, savePersonalWorkoutSoreness,
@@ -9271,6 +9272,7 @@ export default function App() {
   const [nutritionData, setNutritionData] = useState(null);
   const [cardioLogs, setCardioLogs] = useState([]);
   const [memberPersonalWorkouts, setMemberPersonalWorkouts] = useState([]); // 회원 개인운동(조회 전용) — 회원 상세 "최근 개인운동" 카드
+  const [ptRegistrations, setPtRegistrations] = useState([]); // PT 재등록·잔여 보정 이력(관리자 전용) — 회원 상세 "등록 관리 > PT 이용 현황"
   const [memberPersonalSorenessMap, setMemberPersonalSorenessMap] = useState({}); // workoutId → 근육통(위와 같은 카드에서 조회만)
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
@@ -9555,7 +9557,7 @@ export default function App() {
   async function loadMemberData(memberId) {
     console.log("[TEO GYM] loadMemberData:", memberId);
     try {
-      const [ss, bc, nt, priv, cl, srm, au, pw] = await Promise.all([
+      const [ss, bc, nt, priv, cl, srm, au, pw, ptr] = await Promise.all([
         getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
@@ -9565,6 +9567,8 @@ export default function App() {
         getMemberAppUsage(memberId).catch(e => { console.error("[TEO GYM] getMemberAppUsage error:", e); return { summary: null, activeDays30: 0 }; }),
         // 개인운동 — 관리자는 조회만 한다(1차 범위: 수정·삭제 없음). 최근 10건만 읽어 회원 상세 진입 비용을 최소화한다.
         getPersonalWorkouts(memberId, 10).catch(e => { console.error("[TEO GYM] getPersonalWorkouts error:", e); return []; }),
+        // PT 재등록·잔여 보정 이력(관리자 전용) — 읽기에 실패해도 회원 상세 나머지 화면은 그대로 열려야 한다.
+        getPtRegistrations(memberId).catch(e => { console.error("[TEO GYM] getPtRegistrations error:", e); return []; }),
       ]);
       console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
       setSessions(ss);
@@ -9575,6 +9579,7 @@ export default function App() {
       setSessionReadsMap(srm);
       setMemberAppUsage(au);
       setMemberPersonalWorkouts((pw || []).map(normalizePersonalWorkout).filter(Boolean));
+      setPtRegistrations(ptr || []);
       const completedIds = (pw || []).filter(w => w?.status === "completed").map(w => w.id);
       if (completedIds.length) {
         try { setMemberPersonalSorenessMap(await getPersonalWorkoutSorenessMap(memberId, completedIds)); }
@@ -9602,6 +9607,7 @@ export default function App() {
     setCardioLogs([]);
     setMemberPersonalWorkouts([]);
     setMemberPersonalSorenessMap({});
+    setPtRegistrations([]); // 이전 회원의 PT 잔여 데이터가 잠시라도 다른 회원 화면에 남지 않게 즉시 초기화
     setHealthHubInitialTab(opts.healthHubTab || "대시보드");
     setHubScrollTarget(opts.scrollTarget || null);
     setTrendInitialDate(opts.initialDate || null);
@@ -10342,7 +10348,7 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -12507,6 +12513,134 @@ function isTrialSessionNo(sessionNo) {
   if (!numPart || !/^\d+$/.test(numPart)) return false;
   return Number(numPart) === 0;
 }
+
+// ══════════════════════════════════════════════════════════════
+// PT 잔여 횟수 · 재등록 관리 (2026-08-07 운영 시작)
+// ══════════════════════════════════════════════════════════════
+// 과거 등록·수업 이력으로 잔여 횟수를 역산하지 않는다. 대표가 직접 입력한 "기준 시점의 잔여 횟수"를
+// 출발점으로 삼고, 그 이후 발생한 변동만 자동으로 누적한다.
+//
+//   현재 잔여 = 기준 잔여 + 기준 이후 재등록 합 + 수동 보정 합 − 기준 이후 완료된 정상 PT 수업 수
+//
+// 중복 차감이 구조적으로 불가능한 이유:
+//   차감을 "이벤트 기록"이 아니라 "조건에 맞는 세션 문서를 세는" 방식으로 계산한다. 같은 수업을
+//   수정·재저장하거나 공개→공개취소→재공개하거나 새로고침해도 세션 문서는 하나뿐이므로 차감도 1회다.
+//   (문서 id 기준 중복 제거까지 함께 적용한다.)
+// 기준 이전 수업이 다시 차감되지 않는 이유:
+//   세션의 createdAt(서버 시각)이 기준 시각(ptBalanceBaselineAt)보다 이후인 기록만 센다.
+//   createdAt이 없는 레거시 기록은 판단 불가로 항상 제외해 과다 차감이 일어나지 않는다.
+//
+// members/{id} 필드: ptBalanceInitialized / ptBalanceBaselineAt / ptBalanceBaselineDate /
+//                    ptBalanceBaselineRemaining / ptBalanceBaselineRenewalCount
+// 변동 이력:          members/{id}/ptRegistrations (type: renewal | adjustment)
+//
+// 기존 "등록 관리"(registrationType: existing/first/renewal + 후기 안내 공지)와는 완전히 별개다.
+// 그쪽은 회원 분류·후기 안내 정책용이고, 이쪽은 PT 횟수 정산용이라 서로 값을 바꾸지 않는다.
+const PT_BALANCE_LOW_THRESHOLD = 5;     // 이하 → 재등록 준비
+const PT_BALANCE_URGENT_THRESHOLD = 3;  // 이하 → 재등록 안내 필요
+
+function getPtBalanceBaseline(member) {
+  const m = member || {};
+  const raw = Number(m.ptBalanceBaselineRemaining);
+  const initialized = m.ptBalanceInitialized === true && Number.isFinite(raw);
+  return {
+    initialized,
+    at: initialized ? toMillisSafe(m.ptBalanceBaselineAt) : null,
+    date: String(m.ptBalanceBaselineDate || ""),
+    remaining: initialized ? Math.max(0, Math.round(raw)) : 0,
+    renewalCount: Math.max(0, Math.round(Number(m.ptBalanceBaselineRenewalCount) || 0)),
+  };
+}
+
+// 잔여에서 1회 차감할 "실제 완료된 정상 PT 수업" 판정.
+//   차감함   — 회원에게 공개된 기록(isPublished) 또는 공개 후 다시 비공개로 되돌린 완료 기록(status "completed").
+//   차감 안 함 — 0회차 체험수업 / 운동 내용 없이 날짜만 잡아둔 예약 / 미래 날짜 / 임시저장(draft) 상태.
+// 2:1 수업은 회원마다 members/{id}/sessions에 각자 문서가 저장되므로, 회원별로 각각 1회만 차감된다.
+function isPtDebitableSession(session, todayKST) {
+  const s = session || {};
+  if (isTrialSessionNo(s.sessionNo)) return false;
+  if (!(s.isPublished === true || s.status === "completed")) return false;
+  const d = String(s.date || "");
+  if (!d) return false;
+  if (todayKST && d > todayKST) return false;
+  return (s.exercises || []).some(e => e?.name || isFuncEx(e));
+}
+
+// 기준 시각 이후에 "새로 기록된" 수업만 차감 대상이다. 세션 문서 id로 중복을 제거해 같은 수업이 두 번 세어지지 않는다.
+function countPtDebitedSessions(sessions, baselineAtMs, todayKST) {
+  if (!Number.isFinite(baselineAtMs)) return 0;
+  const seen = new Set();
+  (sessions || []).forEach((s, i) => {
+    if (!s) return;
+    const key = s.id != null && s.id !== "" ? String(s.id) : `_idx${i}`;
+    if (seen.has(key)) return;
+    const created = toMillisSafe(s.createdAt);
+    if (created == null || created <= baselineAtMs) return; // 기준 이전 기록·판단 불가 기록은 절대 차감하지 않는다
+    if (!isPtDebitableSession(s, todayKST)) return;
+    seen.add(key);
+  });
+  return seen.size;
+}
+
+function summarizePtRegistrations(registrations) {
+  let renewalAdded = 0, renewalCount = 0, adjustTotal = 0;
+  (registrations || []).forEach(r => {
+    const delta = Math.round(Number(r?.delta) || 0);
+    if (r?.type === "adjustment") { adjustTotal += delta; return; }
+    if (r?.type === "renewal") { renewalCount += 1; if (delta > 0) renewalAdded += delta; }
+  });
+  return { renewalAdded, renewalCount, adjustTotal };
+}
+
+// 잔여 6회 이상 정상 / 5회 이하 재등록 준비 / 3회 이하 재등록 안내 필요 / 0회 수업 소진.
+// 잔여가 음수로 계산되면(등록 누락 등) 화면에는 0회로 보여주고 "확인 필요" 상태로 대표에게 알린다.
+function getPtBalanceStatus(remaining, overdrawn) {
+  if (overdrawn) return { key: "check", label: "잔여 횟수 확인 필요" };
+  if (remaining == null) return { key: "none", label: "미설정" };
+  if (remaining <= 0) return { key: "empty", label: "수업 소진" };
+  if (remaining <= PT_BALANCE_URGENT_THRESHOLD) return { key: "urgent", label: "재등록 안내 필요" };
+  if (remaining <= PT_BALANCE_LOW_THRESHOLD) return { key: "soon", label: "재등록 준비" };
+  return { key: "ok", label: "정상" };
+}
+
+// 회원 상세 카드·상단 요약이 모두 이 함수 하나만 쓴다. 관리자 홈 "재등록 안내 필요" 목록도
+// 같은 인자(회원 문서 + 세션 배열 + ptRegistrations)만 넘기면 그대로 재사용할 수 있다.
+function getPtBalance(member, sessions = [], registrations = [], todayKST = "") {
+  const base = getPtBalanceBaseline(member);
+  if (!base.initialized) {
+    return {
+      initialized: false, baselineDate: "", baselineRemaining: 0,
+      renewalAdded: 0, adjustTotal: 0, debits: 0,
+      rawRemaining: null, remaining: null, renewalCount: 0,
+      overdrawn: false, status: getPtBalanceStatus(null, false),
+    };
+  }
+  const reg = summarizePtRegistrations(registrations);
+  const debits = countPtDebitedSessions(sessions, base.at, todayKST);
+  const rawRemaining = base.remaining + reg.renewalAdded + reg.adjustTotal - debits;
+  const overdrawn = rawRemaining < 0;
+  const remaining = Math.max(0, rawRemaining);
+  return {
+    initialized: true,
+    baselineDate: base.date,
+    baselineRemaining: base.remaining,
+    renewalAdded: reg.renewalAdded,
+    adjustTotal: reg.adjustTotal,
+    debits,
+    rawRemaining,
+    remaining,
+    renewalCount: base.renewalCount + reg.renewalCount,
+    overdrawn,
+    status: getPtBalanceStatus(remaining, overdrawn),
+  };
+}
+
+// 관리자 홈 "오늘 해야 할 일" 확장 지점 — 재등록 안내가 필요한 회원 판정.
+// 홈 UI는 이번 범위에 포함하지 않았고, 이 함수에 getPtBalance() 결과만 넘기면 바로 연결된다.
+function needsPtRenewalNotice(balance) {
+  return !!balance?.initialized && (balance.overdrawn || balance.remaining <= PT_BALANCE_URGENT_THRESHOLD);
+}
+
 // 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
 // 저장돼 있는데 아직 회원에게 전송(isPublished)만 안 된 회원"만 대상 — 오늘 수업 기록이 저장됐지만 미전송,
 // 또는 UNSENT_SESSION_START_DATE 이후 과거 수업 기록이 저장됐지만 미전송인 경우만 포함
@@ -15921,7 +16055,7 @@ function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], persona
   return byPart;
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -16315,6 +16449,17 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     && toComparableIso(todaySession?.publishedAt)
     && toComparableIso(todaySession.updatedAt) > toComparableIso(todaySession.publishedAt));
 
+  // ── PT 잔여 횟수 상태 — 상단 요약 스트립과 "등록 관리 > PT 이용 현황" 카드가 같은 계산 결과 하나를 공유한다 ──
+  const ptToday = getKoreaDateString();
+  const ptBalance = useMemo(
+    () => getPtBalance(member, sessions, ptRegistrations, ptToday),
+    [member, sessions, ptRegistrations, ptToday]
+  );
+  const [ptModal, setPtModal] = useState(null); // null | "init" | "renewal" | "adjust"
+  const [ptBalSaving, setPtBalSaving] = useState(false);
+  const [showPtHistory, setShowPtHistory] = useState(false);
+  const [ptForm, setPtForm] = useState({ remaining:"", renewalCount:"", count:"", delta:"", date:"", memo:"" });
+
   // ── 상단 크롬(스타일·생일 배너·헤더 스트립·회원앱 패널) — 가로/세로 공용 ──
   const topChrome = (
     <>
@@ -16382,7 +16527,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             <div style={{padding:"2px 18px"}}>
               <span style={{fontSize:10,fontWeight:700,color:DB.faint,fontFamily:DB.font}}>{t("수업진행","운동진행")}</span>
               <div style={{fontSize:15.5,fontWeight:800,color:DB.text,fontVariantNumeric:"tabular-nums"}}>{usedCount}<small style={{fontSize:10.5,fontWeight:600,color:DB.faint}}>{totalReg>0?` / ${totalReg}`:""}</small></div>
-              {remaining!==null&&<small style={{fontSize:10,fontWeight:600,color:DB.faint}}>{remaining}회 남음</small>}
+              {/* PT 잔여 관리를 시작한 회원은 새 기준(getPtBalance)이 유일한 잔여 숫자다 —
+                  같은 자리에 총등록-사용횟수로 계산하던 기존 값과 나란히 두면 서로 다른 두 숫자가 보이므로 대체한다.
+                  아직 설정 전인 회원은 기존 표시가 그대로 유지된다(하위 호환). */}
+              {ptBalance.initialized
+                ? <small style={{fontSize:10,fontWeight:800,color:DB.mintSoft}}>잔여 PT {ptBalance.remaining}회</small>
+                : (remaining!==null&&<small style={{fontSize:10,fontWeight:600,color:DB.faint}}>{remaining}회 남음</small>)}
             </div>
             <div style={{padding:"2px 18px",borderLeft:`1px solid ${DB.border}`}}>
               <span style={{fontSize:10,fontWeight:700,color:DB.faint,fontFamily:DB.font}}>체중</span>
@@ -17098,6 +17248,168 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
       opacity:disabled?0.5:1,
     }}>{label}</button>
   );
+  // ⑥-3 PT 이용 현황 — 잔여 횟수 · 재등록 · 잔여 보정.
+  // 위 "등록 구분"(registrationType)과는 별개 데이터다. 등록 구분은 회원 분류·후기 안내 공지용이고
+  // 여기는 PT 횟수 정산용이라, 재등록을 추가해도 registrationType은 건드리지 않는다.
+  // 계산(ptToday/ptBalance)은 상단 요약 스트립(topChrome)에서도 쓰므로 그보다 위에서 선언한다.
+  const openPtModal = (mode) => {
+    if (mode === "init") setPtForm({ remaining:String(ptBalance.baselineRemaining||""), renewalCount:String(ptBalance.renewalCount||""), count:"", delta:"", date:ptToday, memo:"" });
+    else if (mode === "renewal") setPtForm({ remaining:"", renewalCount:"", count:"", delta:"", date:ptToday, memo:"" });
+    else setPtForm({ remaining:"", renewalCount:"", count:"", delta:"", date:ptToday, memo:"" });
+    setPtModal(mode);
+  };
+  // 초기 기준 설정 — 대표가 입력한 숫자를 그대로 저장한다. 과거 수업 기록으로 다시 계산하거나 덮어쓰지 않는다.
+  // ptBalanceBaselineAt(저장 시각) 이후에 새로 기록되는 수업부터만 차감 대상이 된다.
+  const savePtBaseline = async () => {
+    if (ptBalSaving) return;
+    const remaining = Math.round(Number(ptForm.remaining));
+    const renewalCount = Math.round(Number(ptForm.renewalCount || 0));
+    if (!Number.isFinite(remaining) || remaining < 0) { showToast?.("현재 잔여 횟수를 0 이상 숫자로 입력해주세요.", "err"); return; }
+    if (!Number.isFinite(renewalCount) || renewalCount < 0) { showToast?.("재등록 횟수를 0 이상 숫자로 입력해주세요.", "err"); return; }
+    setPtBalSaving(true);
+    try {
+      const patch = {
+        ptBalanceInitialized: true,
+        ptBalanceBaselineAt: new Date().toISOString(),
+        ptBalanceBaselineDate: ptForm.date || ptToday,
+        ptBalanceBaselineRemaining: remaining,
+        ptBalanceBaselineRenewalCount: renewalCount,
+      };
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      setPtModal(null);
+      showToast?.("PT 잔여 횟수 기준을 설정했습니다.");
+    } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setPtBalSaving(false); }
+  };
+  const savePtRegistration = async (type) => {
+    if (ptBalSaving) return;
+    const raw = type === "renewal" ? Number(ptForm.count) : Number(ptForm.delta);
+    const delta = Math.round(raw);
+    if (!Number.isFinite(delta) || delta === 0) { showToast?.(type==="renewal"?"추가할 PT 횟수를 입력해주세요.":"조정할 횟수를 입력해주세요(예: 1 또는 -1).", "err"); return; }
+    if (type === "renewal" && delta < 0) { showToast?.("재등록 횟수는 1회 이상이어야 합니다.", "err"); return; }
+    if (type === "adjustment" && !String(ptForm.memo||"").trim()) { showToast?.("조정 사유를 입력해주세요.", "err"); return; }
+    setPtBalSaving(true);
+    try {
+      const saved = await addPtRegistration(member.id, { type, delta, date: ptForm.date || ptToday, memo: ptForm.memo || "" });
+      onPtRegistrationsChange?.(prev => [{ ...saved, createdAt: new Date() }, ...(prev || [])]);
+      setPtModal(null);
+      showToast?.(type==="renewal" ? `재등록 ${delta}회를 추가했습니다.` : `잔여 횟수를 ${delta>0?"+":""}${delta}회 조정했습니다.`);
+    } catch(e) { console.error(e); showToast?.("저장 실패: " + (e?.message||"오류"), "err"); } finally { setPtBalSaving(false); }
+  };
+  const removePtRegistration = async (row) => {
+    if (ptBalSaving || !row?.id) return;
+    if (!window.confirm(`${row.type==="renewal"?"재등록":"잔여 조정"} 기록(${row.delta>0?"+":""}${row.delta}회)을 삭제할까요? 잔여 횟수가 다시 계산됩니다.`)) return;
+    setPtBalSaving(true);
+    try {
+      await deletePtRegistration(member.id, row.id);
+      onPtRegistrationsChange?.(prev => (prev||[]).filter(r => r.id !== row.id));
+      showToast?.("기록을 삭제했습니다.");
+    } catch(e) { console.error(e); showToast?.("삭제 실패: " + (e?.message||"오류"), "err"); } finally { setPtBalSaving(false); }
+  };
+  // 배지 톤 — 재등록 안내는 "확인해야 할 상태"지 오류가 아니므로, 강한 빨강 대신 기존 카드에서 쓰는 앰버/민트 계열을 사용한다.
+  const PT_STATUS_TONE = {
+    ok:     { bg:DB.mintTintStrong,          fg:DB.mintSoft },
+    soon:   { bg:"rgba(245,158,11,.10)",     fg:"#92600A"   },
+    urgent: { bg:"rgba(245,158,11,.18)",     fg:"#92600A"   },
+    empty:  { bg:"rgba(100,116,139,.12)",    fg:"#475569"   },
+    check:  { bg:"rgba(239,68,68,.10)",      fg:"#B02A2A"   },
+    none:   { bg:DB.bg,                      fg:DB.faint    },
+  };
+  const ptTone = PT_STATUS_TONE[ptBalance.status.key] || PT_STATUS_TONE.none;
+  const ptInput = (value, onChange, extra={}) => (
+    <input type="number" inputMode="numeric" value={value} disabled={ptBalSaving} onChange={e=>onChange(e.target.value)} {...extra}
+      style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"10px 12px",fontSize:14,fontWeight:800,color:DB.text,fontFamily:DB.font}}/>
+  );
+  const ptFieldLabel = (text) => <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:6}}>{text}</span>;
+  const ptSecondaryBtn = (label, onClick, { disabled=false } = {}) => (
+    <button type="button" disabled={disabled||ptBalSaving} onClick={onClick} style={{
+      borderRadius:999,padding:"8px 14px",fontSize:12.5,fontWeight:700,fontFamily:DB.font,
+      cursor:(disabled||ptBalSaving)?"default":"pointer",border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,opacity:(disabled||ptBalSaving)?0.5:1,
+    }}>{label}</button>
+  );
+  const ptPrimaryBtn = (label, onClick, { disabled=false } = {}) => (
+    <button type="button" disabled={disabled||ptBalSaving} onClick={onClick} style={{
+      borderRadius:999,padding:"8px 16px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,
+      cursor:(disabled||ptBalSaving)?"default":"pointer",border:"none",color:"#fff",
+      background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,boxShadow:"0 6px 18px rgba(57,199,184,.28)",opacity:(disabled||ptBalSaving)?0.6:1,
+    }}>{label}</button>
+  );
+  const ptHistoryRows = [...(ptRegistrations||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+  // 잔여 계산 근거 한 줄 — "왜 지금 이 숫자인지"를 대표가 바로 확인할 수 있게 기준값과 변동분을 함께 보여준다.
+  const ptBreakdown = ptBalance.initialized ? [
+    `기준 ${ptBalance.baselineDate||"-"} ${ptBalance.baselineRemaining}회`,
+    ptBalance.renewalAdded>0 ? `재등록 +${ptBalance.renewalAdded}회` : null,
+    ptBalance.adjustTotal!==0 ? `보정 ${ptBalance.adjustTotal>0?"+":""}${ptBalance.adjustTotal}회` : null,
+    ptBalance.debits>0 ? `수업 -${ptBalance.debits}회` : null,
+  ].filter(Boolean).join(" · ") : "";
+
+  const secPtBalance = (
+            <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${DB.border}`}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,fontWeight:800,color:DB.sub}}>PT 이용 현황</span>
+                <span style={{fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:ptTone.bg,color:ptTone.fg}}>{ptBalance.status.label}</span>
+              </div>
+              {!ptBalance.initialized ? (
+                <>
+                  <div style={{background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"12px 14px",marginBottom:10}}>
+                    <span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>잔여 횟수</span>
+                    <div style={{fontSize:20,fontWeight:800,color:DB.faint,letterSpacing:"-.5px",marginTop:2}}>미설정</div>
+                  </div>
+                  <div style={{fontSize:11.5,color:DB.faint,marginBottom:10,lineHeight:1.6}}>현재 잔여 횟수를 한 번 입력하면, 그 이후 완료되는 수업부터 자동으로 1회씩 차감됩니다. 과거 수업 기록은 차감되지 않습니다.</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{ptPrimaryBtn("현재 잔여 횟수 설정", ()=>openPtModal("init"))}</div>
+                </>
+              ) : (
+                <>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                    <div style={{flex:"1 1 150px",minWidth:0,background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"12px 14px"}}>
+                      <span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>잔여 PT</span>
+                      <div style={{fontSize:30,fontWeight:800,color:DB.text,letterSpacing:"-1px",lineHeight:1.15,fontVariantNumeric:"tabular-nums"}}>
+                        {ptBalance.remaining}<small style={{fontSize:13,fontWeight:700,color:DB.faint,marginLeft:2}}>회</small>
+                      </div>
+                    </div>
+                    <div style={{flex:"1 1 110px",minWidth:0,background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"12px 14px"}}>
+                      <span style={{fontSize:10.5,fontWeight:700,color:DB.faint}}>재등록</span>
+                      <div style={{fontSize:20,fontWeight:800,color:DB.text,letterSpacing:"-.5px",lineHeight:1.6,fontVariantNumeric:"tabular-nums"}}>
+                        {ptBalance.renewalCount}<small style={{fontSize:11.5,fontWeight:700,color:DB.faint,marginLeft:2}}>회</small>
+                      </div>
+                    </div>
+                  </div>
+                  {ptBalance.overdrawn && (
+                    <div style={{background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.22)",borderRadius:DB.radiusSm,padding:"9px 12px",marginBottom:10,fontSize:11.5,fontWeight:700,color:"#B02A2A",lineHeight:1.5}}>
+                      잔여 횟수보다 완료된 수업이 {Math.abs(ptBalance.rawRemaining)}회 많습니다. 등록 정보를 확인해주세요.
+                    </div>
+                  )}
+                  {/* 재등록 안내 판정은 관리자 홈 "오늘 해야 할 일" 확장에서도 그대로 쓸 needsPtRenewalNotice() 하나로 통일한다. */}
+                  {needsPtRenewalNotice(ptBalance) && !ptBalance.overdrawn && (
+                    <div style={{background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.25)",borderRadius:DB.radiusSm,padding:"9px 12px",marginBottom:10,fontSize:11.5,fontWeight:700,color:"#92600A",lineHeight:1.5}}>
+                      {ptBalance.remaining===0 ? "잔여 횟수를 모두 사용했습니다. 재등록 여부를 확인해주세요." : `잔여 ${ptBalance.remaining}회입니다. 다음 수업 때 재등록 안내를 해주세요.`}
+                    </div>
+                  )}
+                  <div style={{fontSize:11,color:DB.faint,marginBottom:10,lineHeight:1.6}}>{ptBreakdown}</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {ptPrimaryBtn("PT 등록 추가", ()=>openPtModal("renewal"))}
+                    {ptSecondaryBtn("잔여 조정", ()=>openPtModal("adjust"))}
+                    {ptSecondaryBtn(`이력 ${ptHistoryRows.length}건`, ()=>setShowPtHistory(v=>!v), {disabled:ptHistoryRows.length===0})}
+                    {ptSecondaryBtn("기준 재설정", ()=>openPtModal("init"))}
+                  </div>
+                  {showPtHistory && ptHistoryRows.length>0 && (
+                    <div style={{marginTop:10,background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"6px 12px",maxHeight:200,overflowY:"auto"}}>
+                      {ptHistoryRows.map(r=>(
+                        <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:`1px solid rgba(15,23,42,.05)`}}>
+                          <span style={{fontSize:11,fontWeight:700,color:DB.faint,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{r.date||"-"}</span>
+                          <span style={{fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:999,flexShrink:0,background:r.type==="renewal"?DB.mintTint:"rgba(100,116,139,.10)",color:r.type==="renewal"?DB.mintSoft:"#475569"}}>{r.type==="renewal"?"재등록":"보정"}</span>
+                          <span style={{fontSize:12.5,fontWeight:800,color:DB.text,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{r.delta>0?"+":""}{r.delta}회</span>
+                          <span style={{fontSize:11,color:DB.faint,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.memo||""}</span>
+                          <button type="button" disabled={ptBalSaving} onClick={()=>removePtRegistration(r)} style={{border:"none",background:"none",color:DB.faint,fontSize:11,fontWeight:700,cursor:ptBalSaving?"default":"pointer",flexShrink:0,fontFamily:DB.font}}>삭제</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+  );
+
   const secRegistration = (
           <section id="hub-sec-registration" className="hub-sec-registration" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
@@ -17127,6 +17439,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                 </div>
               </>
             )}
+            {secPtBalance}
           </section>
   );
 
@@ -17336,6 +17649,88 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── PT 잔여 횟수 — 초기 기준 설정 / 재등록 추가 / 잔여 조정 (기존 확인 모달과 같은 중앙 모달 디자인) ── */}
+      {ptModal && (
+        <div role="dialog" aria-modal="true" aria-label={ptModal==="init"?"PT 잔여 횟수 설정":ptModal==="renewal"?"PT 등록 추가":"잔여 횟수 조정"}
+          onClick={e=>{ if (e.target===e.currentTarget && !ptBalSaving) setPtModal(null); }}
+          style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:220,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{width:"100%",maxWidth:360,maxHeight:"90vh",overflowY:"auto",background:"#FFFFFF",borderRadius:20,border:"1px solid #D6DCE3",boxShadow:"0 20px 60px rgba(15,23,42,.25)",padding:"20px 20px 16px"}}>
+            <div style={{fontSize:14.5,fontWeight:800,color:DB.text,marginBottom:4}}>
+              {ptModal==="init" ? "현재 잔여 횟수 설정" : ptModal==="renewal" ? "PT 등록 추가" : "잔여 횟수 조정"}
+            </div>
+            <div style={{fontSize:11.5,color:DB.sub,lineHeight:1.6,marginBottom:16}}>
+              {ptModal==="init"
+                ? "지금 남아있는 횟수를 그대로 입력해주세요. 과거 수업 기록으로 다시 계산하지 않으며, 설정 이후 완료되는 수업부터 자동으로 차감됩니다."
+                : ptModal==="renewal"
+                ? "재등록한 PT 횟수를 입력하면 현재 잔여 횟수에 더해지고, 재등록 횟수도 1회 증가합니다."
+                : "누락 수업·서비스 수업 등으로 잔여 횟수를 보정합니다. 사유가 이력에 함께 남습니다."}
+            </div>
+
+            {ptModal==="init" && (
+              <>
+                <div style={{marginBottom:12}}>{ptFieldLabel("현재 PT 잔여 횟수 (회)")}{ptInput(ptForm.remaining, v=>setPtForm(f=>({...f,remaining:v})), {min:0, placeholder:"8"})}</div>
+                <div style={{marginBottom:12}}>{ptFieldLabel("현재까지 재등록 횟수 (회)")}{ptInput(ptForm.renewalCount, v=>setPtForm(f=>({...f,renewalCount:v})), {min:0, placeholder:"2"})}</div>
+                <div style={{marginBottom:16}}>
+                  {ptFieldLabel("기준일")}
+                  <input type="date" value={ptForm.date} disabled={ptBalSaving} onChange={e=>setPtForm(f=>({...f,date:e.target.value}))}
+                    style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"10px 12px",fontSize:13,fontWeight:800,color:DB.text,fontFamily:DB.font}}/>
+                </div>
+              </>
+            )}
+
+            {ptModal==="renewal" && (
+              <>
+                <div style={{marginBottom:12}}>
+                  {ptFieldLabel("등록 구분")}
+                  <span style={{display:"inline-block",borderRadius:999,padding:"8px 14px",fontSize:12.5,fontWeight:700,border:`1px solid ${DB.mint}`,background:DB.mintTintStrong,color:DB.mintSoft}}>재등록</span>
+                </div>
+                <div style={{marginBottom:12}}>{ptFieldLabel("추가 PT 횟수 (회)")}{ptInput(ptForm.count, v=>setPtForm(f=>({...f,count:v})), {min:1, placeholder:"20"})}</div>
+                <div style={{marginBottom:12}}>
+                  {ptFieldLabel("등록일")}
+                  <input type="date" value={ptForm.date} disabled={ptBalSaving} onChange={e=>setPtForm(f=>({...f,date:e.target.value}))}
+                    style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"10px 12px",fontSize:13,fontWeight:800,color:DB.text,fontFamily:DB.font}}/>
+                </div>
+                <div style={{marginBottom:16}}>
+                  {ptFieldLabel("메모 (선택)")}
+                  <input type="text" value={ptForm.memo} disabled={ptBalSaving} onChange={e=>setPtForm(f=>({...f,memo:e.target.value}))} placeholder="예: 20회 재등록"
+                    style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"10px 12px",fontSize:13,fontWeight:600,color:DB.text,fontFamily:DB.font}}/>
+                </div>
+                {Number(ptForm.count)>0 && (
+                  <div style={{background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"10px 12px",marginBottom:16,fontSize:11.5,fontWeight:700,color:DB.sub}}>
+                    저장 후 잔여 {ptBalance.remaining}회 → <b style={{color:DB.mintSoft}}>{ptBalance.remaining + Math.round(Number(ptForm.count))}회</b> · 재등록 {ptBalance.renewalCount}회 → <b style={{color:DB.mintSoft}}>{ptBalance.renewalCount + 1}회</b>
+                  </div>
+                )}
+              </>
+            )}
+
+            {ptModal==="adjust" && (
+              <>
+                <div style={{marginBottom:12}}>{ptFieldLabel("조정 횟수 (+1 / -1 형태로 입력)")}{ptInput(ptForm.delta, v=>setPtForm(f=>({...f,delta:v})), {placeholder:"-1"})}</div>
+                <div style={{marginBottom:12}}>
+                  {ptFieldLabel("조정일")}
+                  <input type="date" value={ptForm.date} disabled={ptBalSaving} onChange={e=>setPtForm(f=>({...f,date:e.target.value}))}
+                    style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"10px 12px",fontSize:13,fontWeight:800,color:DB.text,fontFamily:DB.font}}/>
+                </div>
+                <div style={{marginBottom:16}}>
+                  {ptFieldLabel("사유 (필수)")}
+                  <input type="text" value={ptForm.memo} disabled={ptBalSaving} onChange={e=>setPtForm(f=>({...f,memo:e.target.value}))} placeholder="예: 서비스 수업 / 누락 수업 반영"
+                    style={{width:"100%",boxSizing:"border-box",border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"10px 12px",fontSize:13,fontWeight:600,color:DB.text,fontFamily:DB.font}}/>
+                </div>
+              </>
+            )}
+
+            <div style={{display:"flex",gap:8}}>
+              <button type="button" disabled={ptBalSaving} onClick={()=>setPtModal(null)} style={{flex:1,border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,borderRadius:12,padding:"11px 10px",fontSize:12.5,fontWeight:700,cursor:ptBalSaving?"default":"pointer",fontFamily:DB.font,opacity:ptBalSaving?0.5:1}}>취소</button>
+              <button type="button" disabled={ptBalSaving}
+                onClick={()=>{ if (ptModal==="init") savePtBaseline(); else savePtRegistration(ptModal==="renewal"?"renewal":"adjustment"); }}
+                style={{flex:1,border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",borderRadius:12,padding:"11px 10px",fontSize:12.5,fontWeight:800,cursor:ptBalSaving?"default":"pointer",fontFamily:DB.font,boxShadow:"0 6px 18px rgba(57,199,184,.32)",opacity:ptBalSaving?0.6:1}}>
+                {ptBalSaving ? "저장 중..." : ptModal==="init" ? "설정 완료" : "저장"}
+              </button>
+            </div>
           </div>
         </div>
       )}

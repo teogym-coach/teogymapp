@@ -5486,13 +5486,107 @@ const checks = [
     && (app.match(/getPtRegistrations\(/g) || []).length === 1
   ],
   ['PT 잔여(홈): 캐시는 회원 상세의 getPtBalance() 결과만 기록하고, 데이터 로딩 전에는 저장하지 않는다',
-    app.includes('const patch = buildPtBalanceCachePatch(ptBalance, member);')
+    app.includes('onSyncPtBalance?.(member.id, { balance: ptBalance, memberDoc: member })')
+    && app.includes('const patch = buildPtBalanceCachePatch(nextBalance, memberDoc);')
     && app.includes('if (!member?.id || !dataLoaded) return;')
     && app.includes('setMemberDataLoaded(false); // 새 회원 데이터를 다 읽기 전에는 잔여 캐시를 쓰지 않는다')
     && app.includes('setMemberDataLoaded(true);')
   ],
   ['PT 잔여(홈): 잔여 캐시 필드도 회원이 수정할 수 없다(members 수정 화이트리스트 밖)',
     !/ptBalanceRemaining|ptBalanceRawRemaining|ptBalanceRenewalCount/.test(memberUpdateFn)
+  ],
+  // ── 수업 삭제 시 잔여 즉시 복구 ──
+  // 삭제 처리에 별도 공식(+1 등)을 두지 않고, 남은 실제 세션으로 getPtBalance()를 다시 돌린 결과만 캐시한다.
+  ptScenario('PT 잔여(삭제): 기준일 이후 정상 완료 수업을 삭제하면 잔여 3 → 4로 복구된다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const keep = ptSession({ id: 'k1', date: '2026-08-10' });
+    const target = ptSession({ id: 'del', date: '2026-08-12', completedAt: '2026-08-12T02:00:00.000Z' });
+    const before = L.getPtBalance(m, [keep, target], [], PT_TODAY);          // 5 - 2 = 3
+    const after = L.getPtBalance(m, [keep], [], PT_TODAY);                   // 5 - 1 = 4
+    return before.remaining === 3 && after.remaining === 4 && after.debits === 1;
+  }),
+  ptScenario('PT 잔여(삭제): 0회차 체험수업을 삭제해도 잔여는 그대로다(단순 +1 처리가 아님)', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const keep = [ptSession({ id: 'k1' }), ptSession({ id: 'k2', date: '2026-08-11', completedAt: '2026-08-11T02:00:00.000Z' })];
+    const trial = ptSession({ id: 'trial', sessionNo: 0, date: '2026-08-12', completedAt: '2026-08-12T02:00:00.000Z' });
+    const before = L.getPtBalance(m, [...keep, trial], [], PT_TODAY);        // 5 - 2 = 3 (0회차는 차감 안 됨)
+    const after = L.getPtBalance(m, keep, [], PT_TODAY);
+    return before.remaining === 3 && after.remaining === 3;
+  }),
+  ptScenario('PT 잔여(삭제): 임시저장(draft) 수업을 삭제해도 잔여는 그대로다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const keep = [ptSession({ id: 'k1' }), ptSession({ id: 'k2', date: '2026-08-11', completedAt: '2026-08-11T02:00:00.000Z' })];
+    const draft = ptSession({ id: 'dr', isPublished: false, status: 'draft', completedAt: undefined, publishedAt: undefined });
+    const before = L.getPtBalance(m, [...keep, draft], [], PT_TODAY);
+    const after = L.getPtBalance(m, keep, [], PT_TODAY);
+    return before.remaining === 3 && after.remaining === 3;
+  }),
+  ptScenario('PT 잔여(삭제): 기준일 이전 과거 완료 수업을 삭제해도 잔여는 그대로다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const keep = [ptSession({ id: 'k1' }), ptSession({ id: 'k2', date: '2026-08-11', completedAt: '2026-08-11T02:00:00.000Z' })];
+    const past = ptSession({ id: 'old', date: '2026-07-20', createdAt: '2026-07-20T01:00:00.000Z', publishedAt: '2026-07-20T02:00:00.000Z', completedAt: '2026-07-20T02:00:00.000Z' });
+    const before = L.getPtBalance(m, [...keep, past], [], PT_TODAY);
+    const after = L.getPtBalance(m, keep, [], PT_TODAY);
+    return before.remaining === 3 && after.remaining === 3;
+  }),
+  ptScenario('PT 잔여(삭제): 2:1 수업은 회원별 문서라 A만 삭제하면 A만 복구되고 B는 그대로다', L => {
+    const mA = ptMember({ id: 'mA', ptBalanceBaselineRemaining: 5 });
+    const mB = ptMember({ id: 'mB', ptBalanceBaselineRemaining: 5 });
+    const aSession = ptSession({ id: 'pa', sessionType: '2:1' });
+    const bSession = ptSession({ id: 'pb', sessionType: '2:1' });
+    const aBefore = L.getPtBalance(mA, [aSession], [], PT_TODAY);
+    const aAfter = L.getPtBalance(mA, [], [], PT_TODAY);            // A 세션만 삭제
+    const bAfter = L.getPtBalance(mB, [bSession], [], PT_TODAY);    // B 세션은 그대로
+    return aBefore.remaining === 4 && aAfter.remaining === 5 && bAfter.remaining === 4;
+  }),
+  ptScenario('PT 잔여(삭제): 삭제 후 캐시 패치가 새 잔여를 담아 홈이 회원 상세를 거치지 않고 바로 새 값을 보여준다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const keep = ptSession({ id: 'k1' });
+    const target = ptSession({ id: 'del', date: '2026-08-12', completedAt: '2026-08-12T02:00:00.000Z' });
+    // 삭제 전 캐시가 잡혀 있는 상태(홈에는 잔여 3으로 보이는 중)
+    const synced = { ...m, ...L.buildPtBalanceCachePatch(L.getPtBalance(m, [keep, target], [], PT_TODAY), m) };
+    if (L.getPtBalanceSummary(synced).remaining !== 3) return false;
+    // 삭제 직후 남은 세션으로 재계산 → 캐시 패치 → 홈 요약이 즉시 4
+    const afterBalance = L.getPtBalance(synced, [keep], [], PT_TODAY);
+    const patch = L.buildPtBalanceCachePatch(afterBalance, synced);
+    const home = L.getPtBalanceSummary({ ...synced, ...patch });
+    return patch && patch.ptBalanceRemaining === 4 && home.remaining === 4 && home.status.label === '재등록 준비';
+  }),
+  ptScenario('PT 잔여(삭제): 차감 대상이 아닌 수업을 지우면 캐시 패치가 null이라 불필요한 write가 없다', L => {
+    const m = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const keep = [ptSession({ id: 'k1' }), ptSession({ id: 'k2', date: '2026-08-11', completedAt: '2026-08-11T02:00:00.000Z' })];
+    const trial = ptSession({ id: 'trial', sessionNo: 0 });
+    const synced = { ...m, ...L.buildPtBalanceCachePatch(L.getPtBalance(m, [...keep, trial], [], PT_TODAY), m) };
+    // 0회차를 지워도 잔여가 그대로라 두 번째 동기화는 write하지 않는다
+    return L.buildPtBalanceCachePatch(L.getPtBalance(synced, keep, [], PT_TODAY), synced) === null;
+  }),
+  ['PT 잔여(삭제): 삭제가 성공한 뒤에만 캐시를 갱신한다 — 삭제 실패 시 잔여가 변하지 않는다',
+    (() => {
+      const fn = app.slice(app.indexOf('async function handleDeleteSession(s)'), app.indexOf('async function handleSavePairSession'));
+      const del = fn.indexOf('await deleteSession(member.id, s.id);');
+      const refresh = fn.indexOf('const fresh = await refreshSessionsForMember(member.id);');
+      const sync = fn.indexOf('await syncPtBalanceAfterSessionChange(member.id, fresh);');
+      // 삭제 → 최신 세션 재조회 → 캐시 동기화 순서이고, 셋 다 같은 try 안에 있어 삭제 실패 시 캐시까지 도달하지 않는다
+      return del > -1 && refresh > del && sync > refresh && /catch\(e\) \{ showToast\(e\.message, "err"\); \}/.test(fn);
+    })()
+  ],
+  ['PT 잔여(삭제): 차감 대상이 바뀔 수 있는 모든 session mutation 뒤에 같은 동기화 함수가 붙어 있다',
+    // 저장·수정 / 전송 / 공개취소 / 삭제 — 4곳 모두 동일 호출
+    (app.match(/syncPtBalanceAfterSessionChange\(member\.id, (fresh|newSessions)\)/g) || []).length === 4
+    && app.includes('await syncPtBalanceAfterSessionChange(member.id, newSessions);')
+    // 공용 helper 하나만 존재하고, 잔여를 직접 증감시키는 임시 처리는 없다
+    && (app.match(/const syncPtBalanceCache = useCallback/g) || []).length === 1
+    && !/ptBalanceRemaining\s*[+-]=|ptBalanceRemaining:\s*[^,}]*[+-]\s*1/.test(app)
+    // 삭제 경로도 별도 공식 없이 공용 getPtBalance()에 위임한다
+    && app.includes('const nextBalance = balance || getPtBalance(memberDoc, ss || [], registrations || [], getKoreaDateString());')
+  ],
+  ['PT 잔여(삭제): 회원 상세 자동 보정과 세션 변경 직후 보정이 같은 공용 함수(syncPtBalanceCache)를 쓰고 중복 write를 막는다',
+    app.includes('onSyncPtBalance={syncPtBalanceCache}')
+    && app.includes('onSyncPtBalance?.(member.id, { balance: ptBalance, memberDoc: member })')
+    && app.includes('const patch = buildPtBalanceCachePatch(nextBalance, memberDoc);')
+    && app.includes('if (!patch) return null;')
+    // 홈 목록(members)까지 같은 패치로 갱신해야 회원 상세를 거치지 않아도 즉시 보인다
+    && app.includes('setMembers(prev => prev.map(m => (m.id === memberId ? { ...m, ...patch } : m)));')
   ],
   ['PT 잔여 시나리오 D: 회원앱에서 "N회 남음"·잔여·재등록 정보가 렌더링되지 않고 배선(totalReg/remaining)도 남아있지 않다',
     (() => {

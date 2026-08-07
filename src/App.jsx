@@ -9995,6 +9995,8 @@ export default function App() {
       const newSessions = await getSessions(member.id);
       setSessions(newSessions);
       setSessionsMap(prev => ({...prev, [member.id]: newSessions}));
+      // 수업 날짜·회차(0회차 전환)·상태를 고쳐 차감 대상 자체가 바뀔 수 있으므로 저장 뒤에도 잔여를 다시 맞춘다.
+      await syncPtBalanceAfterSessionChange(member.id, newSessions);
       const todayStr = new Date().toISOString().split("T")[0];
       const sorted   = [...newSessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
       const last     = sorted[0];
@@ -10080,6 +10082,37 @@ export default function App() {
     return newSessions;
   }
 
+  // ── PT 잔여 캐시 동기화 (공용) ──────────────────────────────
+  // "회원 상세를 열었을 때 자동 보정"과 "세션이 바뀐 직후 즉시 보정"이 모두 이 함수 하나를 쓴다.
+  // 잔여 계산식은 여기서 만들지 않고 공용 getPtBalance()에 그대로 위임한다 —
+  // 삭제 시 +1 같은 개별 보정을 하지 않으므로, 지운 수업이 0회차·draft·기준일 이전 수업처럼
+  // 애초에 차감 대상이 아니었다면 잔여는 그대로 유지된다(남은 실제 세션으로 매번 다시 계산).
+  // 값이 그대로면 buildPtBalanceCachePatch가 null을 돌려줘 Firestore write가 나가지 않는다.
+  // member/members 로컬 상태까지 갱신해, 회원 상세를 거치지 않고 홈으로 가도 새 값이 바로 보인다.
+  const syncPtBalanceCache = useCallback(async (memberId, { balance = null, sessions: ss = null, registrations = null, memberDoc = null } = {}) => {
+    if (!memberId || !memberDoc) return null;
+    const nextBalance = balance || getPtBalance(memberDoc, ss || [], registrations || [], getKoreaDateString());
+    const patch = buildPtBalanceCachePatch(nextBalance, memberDoc);
+    if (!patch) return null;
+    await updateMember(memberId, patch);
+    setMember(prev => (prev && prev.id === memberId ? { ...prev, ...patch } : prev));
+    setMembers(prev => prev.map(m => (m.id === memberId ? { ...m, ...patch } : m)));
+    return patch;
+  }, []);
+
+  // 세션이 바뀐 뒤(저장·수정·전송·공개취소·삭제) 잔여 캐시를 최신 세션 기준으로 다시 맞춘다.
+  // 차감 대상이 바뀔 수 있는 모든 session mutation 뒤에 같은 호출을 붙여, 어느 화면에서 작업하든
+  // 홈·회원 상세가 항상 같은 숫자를 보게 한다. 동기화 실패는 이미 끝난 작업을 되돌리지 않는다
+  // (홈 표시만 잠시 낡고, 회원 상세를 열면 같은 함수로 자동 보정된다).
+  async function syncPtBalanceAfterSessionChange(memberId, freshSessions) {
+    if (!memberId || memberId !== member?.id) return;
+    try {
+      await syncPtBalanceCache(memberId, { sessions: freshSessions, registrations: ptRegistrations, memberDoc: member });
+    } catch(e) {
+      console.warn("[TEO GYM] PT 잔여 캐시 동기화 실패(수업 변경 자체는 이미 완료됨):", e?.message);
+    }
+  }
+
   // 전송(publishSession) 실패·지연 시 버튼이 "전송 중..."에 영구히 멈추지 않도록
   // 오프라인 즉시 차단 + 15초 타임아웃 + 항상 throw(호출부가 재시도 UI를 그릴 수 있도록)로 구성한다.
   // 핵심 저장(publishSession)이 성공하면 이미 전송은 완료된 것으로 보고, 뒤이은 목록 재조회는
@@ -10097,7 +10130,8 @@ export default function App() {
       publishPromise.catch(() => {}); // 타임아웃으로 먼저 실패 처리된 뒤 늦게 도착하는 응답이 unhandled rejection을 남기지 않도록
       await withTimeout(publishPromise, 15000, "전송이 지연되고 있습니다. 인터넷 연결을 확인한 후 다시 시도해주세요.");
       try {
-        await withTimeout(refreshSessionsForMember(member.id), 15000, "목록 새로고침이 지연되고 있습니다.");
+        const fresh = await withTimeout(refreshSessionsForMember(member.id), 15000, "목록 새로고침이 지연되고 있습니다.");
+        await syncPtBalanceAfterSessionChange(member.id, fresh);
       } catch(refreshErr) {
         console.warn("[TEO GYM] 전송 후 세션 목록 새로고침 실패(핵심 전송은 이미 완료됨):", refreshErr.message);
       }
@@ -10114,7 +10148,8 @@ export default function App() {
     setLoading(true);
     try {
       await unpublishSession(member.id, s.id, "completed");
-      await refreshSessionsForMember(member.id);
+      const fresh = await refreshSessionsForMember(member.id);
+      await syncPtBalanceAfterSessionChange(member.id, fresh);
       showToast("회원 공개 취소 완료");
     } catch(e) { showToast(e.message || "공개 취소 실패", "err"); }
     finally { setLoading(false); }
@@ -10123,7 +10158,14 @@ export default function App() {
   async function handleDeleteSession(s) {
     if (!window.confirm("이 수업 기록을 삭제할까요?")) return;
     setLoading(true);
-    try { await deleteSession(member.id, s.id); showToast("삭제 완료"); await refreshSessionsForMember(member.id); }
+    try {
+      // 삭제가 Firestore에서 성공한 뒤에만 캐시를 건드린다 — 실패하면 아래로 내려오지 않아 잔여가 변하지 않는다.
+      await deleteSession(member.id, s.id);
+      showToast("삭제 완료");
+      const fresh = await refreshSessionsForMember(member.id);
+      // 남아있는 실제 세션으로 잔여를 다시 계산한다(삭제한 수업이 차감 대상이었을 때만 자연히 복구된다).
+      await syncPtBalanceAfterSessionChange(member.id, fresh);
+    }
     catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }
@@ -10358,7 +10400,7 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} onSyncPtBalance={syncPtBalanceCache} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -16136,7 +16178,7 @@ function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], persona
   return byPart;
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, dataLoaded=false, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, onSyncPtBalance, dataLoaded=false, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -16544,12 +16586,11 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   // 실제보다 큰 잔여가 캐시될 수 있다.
   useEffect(() => {
     if (!member?.id || !dataLoaded) return;
-    const patch = buildPtBalanceCachePatch(ptBalance, member);
-    if (!patch) return;
-    updateMember(member.id, patch)
-      .then(() => onMemberPatch?.(patch))
-      .catch(e => console.warn("[TEO GYM] PT 잔여 캐시 동기화 실패(회원 상세 표시에는 영향 없음):", e?.message));
-  }, [member, ptBalance, dataLoaded, onMemberPatch]);
+    // 수업 삭제·전송·공개취소·저장 직후에는 이미 같은 함수로 동기화돼 있어 여기서는 write가 나가지 않는다
+    // (buildPtBalanceCachePatch가 같은 값이면 null을 돌려주므로 중복 write가 생기지 않는다).
+    onSyncPtBalance?.(member.id, { balance: ptBalance, memberDoc: member })
+      ?.catch?.(e => console.warn("[TEO GYM] PT 잔여 캐시 동기화 실패(회원 상세 표시에는 영향 없음):", e?.message));
+  }, [member, ptBalance, dataLoaded, onSyncPtBalance]);
 
   const [ptModal, setPtModal] = useState(null); // null | "init" | "renewal" | "adjust"
   const [ptBalSaving, setPtBalSaving] = useState(false);

@@ -9277,6 +9277,9 @@ export default function App() {
   const [cardioLogs, setCardioLogs] = useState([]);
   const [memberPersonalWorkouts, setMemberPersonalWorkouts] = useState([]); // 회원 개인운동(조회 전용) — 회원 상세 "최근 개인운동" 카드
   const [ptRegistrations, setPtRegistrations] = useState([]); // PT 재등록·잔여 보정 이력(관리자 전용) — 회원 상세 "등록 관리 > PT 이용 현황"
+  // 선택한 회원의 상세 데이터(sessions·ptRegistrations 등)를 실제로 다 읽었는지 여부.
+  // PT 잔여 캐시를 "아직 안 읽은 빈 배열" 상태에서 잘못 계산해 저장하지 않기 위한 가드다.
+  const [memberDataLoaded, setMemberDataLoaded] = useState(false);
   const [memberPersonalSorenessMap, setMemberPersonalSorenessMap] = useState({}); // workoutId → 근육통(위와 같은 카드에서 조회만)
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
@@ -9591,6 +9594,8 @@ export default function App() {
       } else {
         setMemberPersonalSorenessMap({});
       }
+      // sessions·ptRegistrations를 모두 읽은 뒤에만 PT 잔여 캐시 동기화를 허용한다.
+      setMemberDataLoaded(true);
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
     }
@@ -9612,6 +9617,7 @@ export default function App() {
     setMemberPersonalWorkouts([]);
     setMemberPersonalSorenessMap({});
     setPtRegistrations([]); // 이전 회원의 PT 잔여 데이터가 잠시라도 다른 회원 화면에 남지 않게 즉시 초기화
+    setMemberDataLoaded(false); // 새 회원 데이터를 다 읽기 전에는 잔여 캐시를 쓰지 않는다
     setHealthHubInitialTab(opts.healthHubTab || "대시보드");
     setHubScrollTarget(opts.scrollTarget || null);
     setTrendInitialDate(opts.initialDate || null);
@@ -10352,7 +10358,7 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -12661,6 +12667,52 @@ function needsPtRenewalNotice(balance) {
   return !!balance?.initialized && (balance.overdrawn || balance.remaining <= PT_BALANCE_URGENT_THRESHOLD);
 }
 
+// ── 홈 회원 목록용 잔여 캐시 ────────────────────────────────
+// 홈은 회원당 최근 5세션(getRecentSessions)만 읽고 ptRegistrations는 아예 읽지 않는다.
+// 잔여를 홈에서 직접 계산하려면 회원 전원의 "전체 세션 + 등록 이력"을 매번 읽어야 하는데,
+// 기준일 이후 수업이 5건을 넘는 순간 최근 5건으로는 값이 틀리고, 회원당 수업이 쌓일수록 read가 계속 늘어난다.
+// → 계산은 회원 상세(getPtBalance)에서만 하고 그 결과를 members 문서에 그대로 복사해 둔다.
+//   홈은 이 값을 "표시"만 하므로 추가 read가 0이고, 두 화면이 다른 숫자를 보여줄 수 없다.
+// 캐시 필드도 memberProfileUpdateKeysAllowed() 화이트리스트 밖이라 회원은 수정할 수 없다.
+const PT_BALANCE_CACHE_FIELDS = ["ptBalanceRemaining", "ptBalanceRawRemaining", "ptBalanceRenewalCount"];
+
+// 캐시가 이미 같은 값이면 null을 돌려준다 — 회원 상세를 열 때마다 불필요한 write가 나가지 않게 한다.
+function buildPtBalanceCachePatch(balance, member) {
+  if (!balance?.initialized) return null;
+  const next = {
+    ptBalanceRemaining: balance.remaining,
+    ptBalanceRawRemaining: balance.rawRemaining,
+    ptBalanceRenewalCount: balance.renewalCount,
+  };
+  const unchanged = PT_BALANCE_CACHE_FIELDS.every(k => Number(member?.[k]) === Number(next[k]));
+  return unchanged ? null : next;
+}
+
+// 전체 세션이 없는 화면(홈 회원 목록)이 쓰는 표시용 요약 — 계산하지 않고 캐시만 읽는다.
+// 임계값·상태 문구는 회원 상세와 똑같은 getPtBalanceStatus()를 쓰므로 두 화면의 기준이 갈라질 수 없다.
+function getPtBalanceSummary(member) {
+  const m = member || {};
+  const notSet = { initialized: false, remaining: null, renewalCount: 0, overdrawn: false, status: getPtBalanceStatus(null, false) };
+  if (m.ptBalanceInitialized !== true) return notSet;
+  const cached = Number(m.ptBalanceRemaining);
+  // 캐시가 아직 없는 회원(초기 설정 후 회원 상세를 다시 열지 않은 경우)은 대표가 입력한 기준 잔여를 쓴다.
+  // 회원 상세를 한 번 열면 그 시점의 정확한 값으로 자동 보정된다.
+  const fallback = Number(m.ptBalanceBaselineRemaining);
+  const base = Number.isFinite(cached) ? cached : fallback;
+  if (!Number.isFinite(base)) return notSet;
+  const rawCached = Number(m.ptBalanceRawRemaining);
+  const rawRemaining = Number.isFinite(rawCached) ? rawCached : base;
+  const remaining = Math.max(0, Math.round(base));
+  const overdrawn = rawRemaining < 0;
+  return {
+    initialized: true,
+    remaining,
+    renewalCount: Math.max(0, Math.round(Number(m.ptBalanceRenewalCount) || Number(m.ptBalanceBaselineRenewalCount) || 0)),
+    overdrawn,
+    status: getPtBalanceStatus(remaining, overdrawn),
+  };
+}
+
 // 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
 // 저장돼 있는데 아직 회원에게 전송(isPublished)만 안 된 회원"만 대상 — 오늘 수업 기록이 저장됐지만 미전송,
 // 또는 UNSENT_SESSION_START_DATE 이후 과거 수업 기록이 저장됐지만 미전송인 경우만 포함
@@ -13102,12 +13154,14 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
       : (m.lastSessionParts?.length ? m.lastSessionParts.join("·") : null);
 
     const usedCount  = ss.length;
-    const totalRaw   = parseInt((m.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
-    const remaining  = totalRaw > 0 ? Math.max(0, totalRaw - usedCount) : null;
+    // 잔여 횟수는 회원 상세와 같은 기준 하나만 쓴다 — 총 등록횟수(totalSessions) − 수업 수로 계산하던
+    // 레거시 방식은 제거했다(초기 등록 이후 재등록·보정을 전혀 반영하지 못해 상세 화면과 숫자가 어긋난다).
+    // 홈은 전체 세션을 갖고 있지 않으므로 계산하지 않고, 회원 상세가 members 문서에 저장해 둔 캐시만 읽는다.
+    const ptBalance = getPtBalanceSummary(m);
     const daysSince  = lastDate
       ? Math.floor((new Date(today) - new Date(lastDate)) / 86400000)
       : null;
-    return { lastDate, lastMuscle, remaining, daysSince, usedCount };
+    return { lastDate, lastMuscle, ptBalance, daysSince, usedCount };
   }
 
   function isTodayBirthday(m) {
@@ -13194,8 +13248,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
       if (sortBy === "name")      return (a.name||"").localeCompare(b.name||"");
       if (sortBy === "startDate") return (b.startDate||"").localeCompare(a.startDate||"");
       if (sortBy === "remaining") {
-        const ra = metaA.remaining ?? 9999;
-        const rb = metaB.remaining ?? 9999;
+        // 정렬 기준만 신규 잔여로 바꿨다(정렬 동작·옵션은 그대로). 미설정 회원은 기존처럼 항상 뒤로 보낸다.
+        const ra = metaA.ptBalance.initialized ? metaA.ptBalance.remaining : 9999;
+        const rb = metaB.ptBalance.initialized ? metaB.ptBalance.remaining : 9999;
         return ra - rb;
       }
       // recent: 최근 세션일 → 이름
@@ -13601,9 +13656,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                             )
                           ) : pastUnrecorded ? pastUnrecordedText : next.text}
                         </span>
-                        {meta.remaining !== null && (
-                          <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,color:meta.remaining<=3?"#B45309":DB.faint,flexShrink:0}}>· 잔여 {meta.remaining}회</span>
-                        )}
+                        {/* 잔여 표시 — 초기 설정을 마친 회원만 숫자를 보여준다. 미설정 회원을 "잔여 0회"로 보여주면
+                            소진된 것으로 오해할 수 있어 "잔여 미설정"으로 구분한다. 강조 기준(3회 이하)은
+                            회원 상세와 같은 getPtBalanceStatus() 결과(urgent·empty·check)를 그대로 쓴다. */}
+                        <span style={{fontFamily:DB.font,fontSize:10.5,fontWeight:700,flexShrink:0,
+                          color:meta.ptBalance.initialized
+                            ? (["urgent","empty","check"].includes(meta.ptBalance.status.key) ? "#B45309" : DB.faint)
+                            : DB.faint}}>
+                          {meta.ptBalance.initialized ? `· 잔여 ${meta.ptBalance.remaining}회` : "· 잔여 미설정"}
+                        </span>
                       </div>
                       {/* 다음 수업 준비 — 오늘 완료 회원만, 오늘 정보와 분리된 별도 줄(민트 톤)로 날짜·부위만 간결하게(메모 제외) */}
                       {todayStatus === "done" && (
@@ -16075,7 +16136,7 @@ function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], persona
   return byPart;
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, dataLoaded=false, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -16153,9 +16214,10 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   };
 
   // ── 수업 진행 ────────────────────────────────────────────
+  // 진행 횟수 / 총 등록 횟수 표시용. 잔여 횟수는 여기서 계산하지 않는다 —
+  // totalSessions − 수업 수 방식은 재등록·보정을 반영하지 못해 PT 잔여 관리(getPtBalance)와 어긋나므로 제거했다.
   const totalReg = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
   const usedCount = sessions.length;
-  const remaining = totalReg > 0 ? Math.max(0, totalReg - usedCount) : null;
 
   // ── 체중 변화 ─────────────────────────────────────────────
   const wEntries = wData.map(d => ({ date:d.date, weight:d.w }));
@@ -16475,6 +16537,20 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     () => getPtBalance(member, sessions, ptRegistrations, ptToday),
     [member, sessions, ptRegistrations, ptToday]
   );
+  // 잔여 캐시 동기화 — 홈 회원 목록이 추가 read 없이 같은 숫자를 보게 members 문서에 복사해 둔다.
+  // 초기 설정·재등록·잔여 조정·수업 완료/공개취소/삭제는 전부 이 화면의 member/sessions/ptRegistrations를
+  // 갱신하므로, 여기 한 곳에서만 동기화하면 모든 변동이 자동으로 반영된다(같은 값이면 write 없음).
+  // dataLoaded 가드가 필수다 — 회원 전환 직후 sessions가 빈 배열인 동안 계산하면 차감이 0이라
+  // 실제보다 큰 잔여가 캐시될 수 있다.
+  useEffect(() => {
+    if (!member?.id || !dataLoaded) return;
+    const patch = buildPtBalanceCachePatch(ptBalance, member);
+    if (!patch) return;
+    updateMember(member.id, patch)
+      .then(() => onMemberPatch?.(patch))
+      .catch(e => console.warn("[TEO GYM] PT 잔여 캐시 동기화 실패(회원 상세 표시에는 영향 없음):", e?.message));
+  }, [member, ptBalance, dataLoaded, onMemberPatch]);
+
   const [ptModal, setPtModal] = useState(null); // null | "init" | "renewal" | "adjust"
   const [ptBalSaving, setPtBalSaving] = useState(false);
   const [showPtHistory, setShowPtHistory] = useState(false);
@@ -16547,12 +16623,11 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             <div style={{padding:"2px 18px"}}>
               <span style={{fontSize:10,fontWeight:700,color:DB.faint,fontFamily:DB.font}}>{t("수업진행","운동진행")}</span>
               <div style={{fontSize:15.5,fontWeight:800,color:DB.text,fontVariantNumeric:"tabular-nums"}}>{usedCount}<small style={{fontSize:10.5,fontWeight:600,color:DB.faint}}>{totalReg>0?` / ${totalReg}`:""}</small></div>
-              {/* PT 잔여 관리를 시작한 회원은 새 기준(getPtBalance)이 유일한 잔여 숫자다 —
-                  같은 자리에 총등록-사용횟수로 계산하던 기존 값과 나란히 두면 서로 다른 두 숫자가 보이므로 대체한다.
-                  아직 설정 전인 회원은 기존 표시가 그대로 유지된다(하위 호환). */}
+              {/* 잔여 숫자는 getPtBalance() 하나만 쓴다. 미설정 회원은 0회로 보이지 않게 "잔여 미설정"으로 구분한다
+                  (홈 회원 목록과 완전히 같은 표기·기준). */}
               {ptBalance.initialized
                 ? <small style={{fontSize:10,fontWeight:800,color:DB.mintSoft}}>잔여 PT {ptBalance.remaining}회</small>
-                : (remaining!==null&&<small style={{fontSize:10,fontWeight:600,color:DB.faint}}>{remaining}회 남음</small>)}
+                : <small style={{fontSize:10,fontWeight:600,color:DB.faint}}>잔여 미설정</small>}
             </div>
             <div style={{padding:"2px 18px",borderLeft:`1px solid ${DB.border}`}}>
               <span style={{fontSize:10,fontWeight:700,color:DB.faint,fontFamily:DB.font}}>체중</span>

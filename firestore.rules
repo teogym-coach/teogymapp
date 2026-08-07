@@ -288,8 +288,10 @@ service cloud.firestore {
       // cardioLogs/memberCheckins와 달리 canAccessMember(회원 본인 포함)를 쓰지 않는다:
       // 잔여 횟수·재등록 이력은 현재 단계에서 회원앱에 전혀 노출하지 않는 관리자 운영 데이터다.
       // 기준값(ptBalanceInitialized/ptBalanceBaselineAt/ptBalanceBaselineRemaining/
-      // ptBalanceBaselineRenewalCount)은 members 문서 필드이며, memberProfileUpdateKeysAllowed()
-      // 화이트리스트에 없으므로 회원 본인 계정으로는 어떤 경로로도 수정할 수 없다.
+      // ptBalanceBaselineRenewalCount)과 홈 회원 목록 표시용 잔여 캐시(ptBalanceRemaining/
+      // ptBalanceRawRemaining/ptBalanceRenewalCount)는 members 문서 필드이며,
+      // memberProfileUpdateKeysAllowed() 화이트리스트에 없으므로 회원 본인 계정으로는
+      // 어떤 경로로도 수정할 수 없다(잔여 횟수 조작 차단).
       match /ptRegistrations/{registrationId} {
         allow read, create, update, delete: if isTrainerOfMember(memberId);
       }

@@ -691,6 +691,21 @@ describe("TEO GYM Firestore Rules v8", function () {
       // 잔여 횟수만 단독으로 바꾸는 것도 차단돼야 한다(화이트리스트 밖 필드)
       await assertFails(db.collection("members").doc("member_a").update({ ptBalanceBaselineRemaining: 50 }));
     });
+
+    it("[진행중 회원] 홈 목록 표시용 잔여 캐시 필드 직접 수정 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_a").update({
+        ptBalanceRemaining: 99, ptBalanceRawRemaining: 99, ptBalanceRenewalCount: 99,
+      }));
+      await assertFails(db.collection("members").doc("member_a").update({ ptBalanceRemaining: 99 }));
+    });
+
+    it("[관리자] 잔여 캐시 필드 저장 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_a").update({
+        ptBalanceRemaining: 7, ptBalanceRawRemaining: 7, ptBalanceRenewalCount: 2,
+      }));
+    });
   });
 
   describe("6-2. correctionSummaries (체형평가 회원 노출용, 회원은 읽기만 가능)", () => {

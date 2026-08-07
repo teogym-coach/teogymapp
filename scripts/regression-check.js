@@ -84,7 +84,7 @@ try {
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceMillis = app.slice(app.indexOf('function toMillisSafe'), app.indexOf('function isAtOrAfterHomeTaskCutoff'));
   const slicePt = app.slice(app.indexOf('function isTrialSessionNo'), app.indexOf('function buildUnsentSessionMembers'));
-  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
+  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
 } catch (e) {
   console.error('[regression] PT 잔여 횟수 헬퍼 추출 실패:', e.message);
 }
@@ -5421,6 +5421,78 @@ const checks = [
     // unpublishSession: publishedAt을 null로 지우기 전에 완료 시각을 completedAt으로 보존한다
     && db.includes('if (prev && !prev.completedAt && prev.publishedAt) completedAtPatch = { completedAt: prev.publishedAt };')
     && db.includes('publishedAt: null,')
+  ],
+  // ── 홈 회원 목록 잔여 통일 ──
+  ptScenario('PT 잔여(홈): 초기 설정 전 회원은 "잔여 미설정" — 0회로 표시되지 않는다', L => {
+    const s = L.getPtBalanceSummary({ id: 'm1', totalSessions: '20회' }); // 레거시 totalSessions가 있어도 무시
+    return s.initialized === false && s.remaining === null && s.status.label === '미설정';
+  }),
+  ptScenario('PT 잔여(홈): 홈 요약과 회원 상세 계산이 같은 숫자·같은 상태를 낸다(캐시는 상세 계산 결과를 그대로 복사)', L => {
+    const member = ptMember({ ptBalanceBaselineRemaining: 5 });
+    const sessions = [ptSession({ id: 'sx' })];
+    const regs = [{ id: 'r1', type: 'renewal', delta: 2, date: '2026-08-20' }];
+    const detail = L.getPtBalance(member, sessions, regs, PT_TODAY); // 5 + 2 - 1 = 6
+    const patch = L.buildPtBalanceCachePatch(detail, member);
+    const home = L.getPtBalanceSummary({ ...member, ...patch });
+    return detail.remaining === 6
+      && home.remaining === detail.remaining
+      && home.renewalCount === detail.renewalCount
+      && home.status.label === detail.status.label
+      && home.overdrawn === detail.overdrawn;
+  }),
+  ptScenario('PT 잔여(홈): 5회 이하·3회 이하·0회·확인 필요 상태 기준이 회원 상세와 동일하다', L => {
+    const homeAt = n => L.getPtBalanceSummary({ ptBalanceInitialized: true, ptBalanceRemaining: n, ptBalanceRawRemaining: n }).status.label;
+    const detailAt = n => L.getPtBalance(ptMember({ ptBalanceBaselineRemaining: n }), [], [], PT_TODAY).status.label;
+    const over = L.getPtBalanceSummary({ ptBalanceInitialized: true, ptBalanceRemaining: 0, ptBalanceRawRemaining: -2 });
+    return [0, 1, 3, 4, 5, 6, 12].every(n => homeAt(n) === detailAt(n))
+      && homeAt(6) === '정상' && homeAt(5) === '재등록 준비' && homeAt(3) === '재등록 안내 필요' && homeAt(0) === '수업 소진'
+      && over.remaining === 0 && over.overdrawn === true && over.status.label === '잔여 횟수 확인 필요';
+  }),
+  ptScenario('PT 잔여(홈): 캐시 값이 그대로면 재저장하지 않는다(불필요한 Firestore write 방지)', L => {
+    const member = ptMember();
+    const detail = L.getPtBalance(member, [], [], PT_TODAY); // 잔여 8
+    const first = L.buildPtBalanceCachePatch(detail, member);           // 캐시 없음 → 저장 필요
+    const synced = { ...member, ...first };
+    const second = L.buildPtBalanceCachePatch(detail, synced);          // 값 동일 → 저장 안 함
+    // 초기 설정 전 회원은 캐시를 만들지 않는다
+    const notInit = L.buildPtBalanceCachePatch(L.getPtBalance({ id: 'x' }, [], [], PT_TODAY), { id: 'x' });
+    return first && first.ptBalanceRemaining === 8 && second === null && notInit === null;
+  }),
+  ptScenario('PT 잔여(홈): 캐시가 아직 없는 회원은 대표가 입력한 기준 잔여로 보이고 상세를 열면 보정된다', L => {
+    const member = ptMember(); // ptBalanceRemaining 캐시 없음, 기준 잔여 8
+    const before = L.getPtBalanceSummary(member);
+    const detail = L.getPtBalance(member, [ptSession()], [], PT_TODAY); // 실제로는 7
+    const after = L.getPtBalanceSummary({ ...member, ...L.buildPtBalanceCachePatch(detail, member) });
+    return before.initialized === true && before.remaining === 8 && after.remaining === 7;
+  }),
+  ['PT 잔여(홈): 홈 회원 목록에서 totalSessions 기반 레거시 잔여 계산이 제거되고 캐시 기반 공용 helper만 쓴다',
+    !/const remaining\s*=\s*totalRaw > 0/.test(app)
+    && !/const remaining\s*=\s*totalReg > 0/.test(app)
+    && !/totalReg\s*-\s*usedCount|totalRaw\s*-\s*usedCount/.test(app)
+    && app.includes('const ptBalance = getPtBalanceSummary(m);')
+    && app.includes('return { lastDate, lastMuscle, ptBalance, daysSince, usedCount };')
+    && app.includes('{meta.ptBalance.initialized ? `· 잔여 ${meta.ptBalance.remaining}회` : "· 잔여 미설정"}')
+    // 정렬 옵션은 그대로 두고 기준만 신규 잔여로 교체
+    && app.includes('{key:"remaining", label:"남은 횟수 적은순"},')
+    && app.includes('const ra = metaA.ptBalance.initialized ? metaA.ptBalance.remaining : 9999;')
+  ],
+  ['PT 잔여(홈): 홈은 잔여 표시를 위해 추가 Firestore 조회를 하지 않는다(members 문서 캐시만 사용)',
+    // getPtBalanceSummary는 member 문서 필드만 읽는다 — sessions/ptRegistrations를 인자로 받지 않는다
+    /function getPtBalanceSummary\(member\)\s*\{/.test(app)
+    && !/getPtBalanceSummary\([^)]*sessions/.test(app)
+    // 홈 목록 로딩은 기존 최근 5세션 조회 그대로 — 회원별 전체 세션·등록 이력 조회를 추가하지 않는다
+    && app.includes('try { const ss = await getRecentSessions(m.id, 5); return [m.id, ss]; }')
+    && !/mbs\.map\([^)]*getPtRegistrations/.test(app)
+    && (app.match(/getPtRegistrations\(/g) || []).length === 1
+  ],
+  ['PT 잔여(홈): 캐시는 회원 상세의 getPtBalance() 결과만 기록하고, 데이터 로딩 전에는 저장하지 않는다',
+    app.includes('const patch = buildPtBalanceCachePatch(ptBalance, member);')
+    && app.includes('if (!member?.id || !dataLoaded) return;')
+    && app.includes('setMemberDataLoaded(false); // 새 회원 데이터를 다 읽기 전에는 잔여 캐시를 쓰지 않는다')
+    && app.includes('setMemberDataLoaded(true);')
+  ],
+  ['PT 잔여(홈): 잔여 캐시 필드도 회원이 수정할 수 없다(members 수정 화이트리스트 밖)',
+    !/ptBalanceRemaining|ptBalanceRawRemaining|ptBalanceRenewalCount/.test(memberUpdateFn)
   ],
   ['PT 잔여 시나리오 D: 회원앱에서 "N회 남음"·잔여·재등록 정보가 렌더링되지 않고 배선(totalReg/remaining)도 남아있지 않다',
     (() => {

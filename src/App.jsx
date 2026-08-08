@@ -11394,6 +11394,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchActiveIdx, setSearchActiveIdx] = useState(-1);
+  const [ptRenewalSavingId, setPtRenewalSavingId] = useState(null); // "재등록 안내 필요" 목록의 "안내 완료" 저장 중인 회원 id(중복 클릭 방지)
   const searchWrapRef = useRef(null);
   const searchInputRef = useRef(null);
   useEffect(()=>{
@@ -11475,6 +11476,13 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
 
   // 대표(TEO) 개인 운동기록·테스트 계정은 홈 KPI·검색 등 "일반 회원" 집계에서 공통 제외
   const regularHomeMembers = useMemo(() => homeMembers.filter(isRegularAdminMember), [homeMembers]);
+
+  // "재등록 안내 필요" — PT 잔여 캐시(members 문서)만 읽으므로 추가 Firestore read 없음.
+  // needsPtRenewalNotice()·getPtBalanceSummary()는 회원 상세 PT 이용 현황과 완전히 동일한 기준.
+  const ptRenewalNoticeList = useMemo(
+    () => buildPtRenewalNoticeList(regularHomeMembers, liveMembersById),
+    [regularHomeMembers, liveMembersById]
+  );
 
   // "사전 문진 미완료" — 회원앱 가입은 했지만 아직 문진을 마치지 않은 회원 + 첫 수업이 임박한 미완료 회원.
   // members에 미러된 온보딩 상태만 사용하므로 홈에서 서브컬렉션을 추가로 읽지 않는다.
@@ -11581,6 +11589,25 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const goCs = ()=>{ if(showToast) showToast("아직 준비 중인 기능입니다."); else setComingSoon(true); };
   // 오늘 해야 할 일 상단 카드 3개 — 모두 다음 예약 필요와 동일한 방식(같은 페이지 하단의 인라인 리스트로 스크롤 이동)으로 통일
   const scrollToSection = (id) => () => { document.getElementById(id)?.scrollIntoView({behavior:"smooth",block:"start"}); };
+  // "재등록 안내 필요" 목록의 "안내 완료" — renewalReminderHandledAt·안내 당시 raw 잔여(renewalReminderLastRawRemaining)를
+  // 저장해 같은 잔여 구간에서는 목록에서 숨긴다(isPtRenewalNoticeHandled). 회원앱은 이 필드를 전혀 읽지 않는다.
+  // members 문서 실시간 구독(liveMembersById)이 write 직후 자동으로 반영하므로 별도의 로컬 상태 동기화가 필요 없다.
+  const handlePtRenewalHandled = async (row) => {
+    if (ptRenewalSavingId) return;
+    setPtRenewalSavingId(row.member.id);
+    try {
+      await updateMember(row.member.id, {
+        renewalReminderHandledAt: new Date().toISOString(),
+        renewalReminderLastRawRemaining: row.balance.rawRemaining,
+      });
+      showToast?.("재등록 안내를 완료 처리했습니다.");
+    } catch(e) {
+      console.error(e);
+      showToast?.("저장 실패: " + (e?.message || "오류"), "err");
+    } finally {
+      setPtRenewalSavingId(null);
+    }
+  };
   // 알림 클릭 — 읽음 처리 후 type별 목적 화면으로 이동 (회원 목록 피드와 동일 동작)
   const openFeedItem = (item)=>{
     const target = homeMembers.find(x=>x.id===item.memberId);
@@ -11944,6 +11971,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={unreadSessionRows.length} unit="명" title="수업일지 미확인" desc="전송했지만 회원이 아직 안 봤어요" doneDesc="전송한 수업일지를 모두 확인했어요" cta="확인하기" onClick={scrollToSection("home-unread-sessions")} />
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={appUsageCheckRows.length} unit="명" title="회원앱 확인 필요" desc="최근 이용 흔적이나 입력이 뜸해요" doneDesc="모든 회원이 앱을 꾸준히 이용하고 있어요" cta="확인하기" onClick={scrollToSection("home-appusage-check")} />
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={ptRenewalNoticeList.length} unit="명" title="재등록 안내 필요" desc="PT 잔여 횟수가 얼마 남지 않았어요" doneDesc="재등록 안내가 필요한 회원이 없어요" cta="확인하기" onClick={scrollToSection("home-pt-renewal")} />
             {onboardingPendingList.length > 0 && (
               <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
             )}
@@ -12194,6 +12222,28 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
           </button>
         )} />
+
+        {/* ═══ 재등록 안내 필요 — PT 잔여 캐시(ptBalanceRemaining 등)만으로 판정, 회원 상세와 완전히 같은 기준(needsPtRenewalNotice) ═══ */}
+        <TodayListCard id="home-pt-renewal" isWide={isWide} title="재등록 안내 필요" count={ptRenewalNoticeList.length} unit="명" captionText="PT 잔여 횟수가 3회 이하로 줄어든 회원입니다(회원 상세 PT 이용 현황과 동일 기준)." emptyText="재등록 안내가 필요한 회원이 없습니다" rows={ptRenewalNoticeList} renderRow={(row,i)=>{
+          const st = row.balance.status;
+          const badgeTone = st.key==="check" ? {bg:"rgba(239,68,68,.10)",fg:"#B02A2A"} : st.key==="empty" ? {bg:"rgba(100,116,139,.12)",fg:"#475569"} : {bg:"rgba(245,158,11,.13)",fg:"#B45309"};
+          const saving = ptRenewalSavingId === row.member.id;
+          return (
+            <div key={row.member.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 2px",borderTop:i===0?"none":DB.hairline,flexWrap:"wrap"}}>
+              <div onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-pt-balance"})} style={{flex:"1 1 160px",minWidth:140,display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+                <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px",display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                    {row.member.name} 회원
+                    <span style={{fontFamily:DB.font,fontWeight:800,fontSize:10,padding:"2px 8px",borderRadius:999,background:badgeTone.bg,color:badgeTone.fg}}>{st.label}</span>
+                  </div>
+                  <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>잔여 {row.balance.remaining}회 · 재등록 {row.balance.renewalCount}회</div>
+                </div>
+              </div>
+              <button type="button" disabled={saving} onClick={()=>handlePtRenewalHandled(row)} style={{flexShrink:0,border:`1px solid ${DB.border}`,borderRadius:10,padding:"8px 14px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>{saving?"처리 중...":"안내 완료"}</button>
+            </div>
+          );
+        }} />
 
         {/* ═══ 사전 문진 미완료 — 회원앱 문진이 끝나지 않아 첫 수업 준비 정보가 비어 있는 회원 ═══ */}
         {onboardingPendingList.length > 0 && (
@@ -12704,7 +12754,8 @@ function getPtBalance(member, sessions = [], registrations = [], todayKST = "") 
 }
 
 // 관리자 홈 "오늘 해야 할 일" 확장 지점 — 재등록 안내가 필요한 회원 판정.
-// 홈 UI는 이번 범위에 포함하지 않았고, 이 함수에 getPtBalance() 결과만 넘기면 바로 연결된다.
+// 회원 상세 PT 이용 현황과 홈 "재등록 안내 필요" 카드가 getPtBalance()/getPtBalanceSummary() 결과를
+// 그대로 이 함수 하나에만 넘겨 같은 기준을 공유한다(아래 buildPtRenewalNoticeList 참고).
 function needsPtRenewalNotice(balance) {
   return !!balance?.initialized && (balance.overdrawn || balance.remaining <= PT_BALANCE_URGENT_THRESHOLD);
 }
@@ -12749,10 +12800,46 @@ function getPtBalanceSummary(member) {
   return {
     initialized: true,
     remaining,
+    rawRemaining,
     renewalCount: Math.max(0, Math.round(Number(m.ptBalanceRenewalCount) || Number(m.ptBalanceBaselineRenewalCount) || 0)),
     overdrawn,
     status: getPtBalanceStatus(remaining, overdrawn),
   };
+}
+
+// 홈 "재등록 안내 필요" — 대표가 목록에서 "안내 완료"를 누르면(renewalReminderHandledAt) 같은 잔여 구간에서는
+// 다시 뜨지 않는다. 단, "안내 당시 raw 잔여"(renewalReminderLastRawRemaining)를 함께 저장해 두고 그 뒤 raw 잔여가
+// 더 줄면(수업이 더 진행되면) 즉시 재노출한다. raw 잔여가 늘면(재등록) needsPtRenewalNotice() 자체가 false가 되어
+// handled 여부와 무관하게 바로 목록에서 빠진다 — 별도의 "재등록 시 초기화" 로직이 필요 없다.
+function isPtRenewalNoticeHandled(member, balance) {
+  const m = member || {};
+  if (!m.renewalReminderHandledAt) return false;
+  const lastRaw = Number(m.renewalReminderLastRawRemaining);
+  if (!Number.isFinite(lastRaw)) return false;
+  return Number(balance?.rawRemaining) >= lastRaw;
+}
+
+// members 캐시(ptBalanceInitialized/ptBalanceRemaining/ptBalanceRawRemaining/ptBalanceRenewalCount)만 읽어
+// 추가 Firestore read 없이 대상을 판정한다 — 홈은 이미 로드된 회원 목록에 이 함수만 적용하면 된다.
+// members는 호출부(HomeScreen)에서 이미 대표 개인 계정·테스트 계정을 뺀 정상 회원 목록(regularHomeMembers)을 넘긴다.
+// 정렬: 확인 필요(overdrawn) → 잔여 0 → 1 → 2 → 3 순, 같은 잔여면 이름순(기존 목록들과 동일 기준).
+function buildPtRenewalNoticeList(members, liveMembersById) {
+  const rows = [];
+  (members || []).forEach(m => {
+    const live = liveMembersById?.[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if ((lm.status || "active") !== "active") return;
+    const balance = getPtBalanceSummary(lm);
+    if (!needsPtRenewalNotice(balance)) return;
+    if (isPtRenewalNoticeHandled(lm, balance)) return;
+    rows.push({ member: lm, balance });
+  });
+  const priorityOf = (balance) => balance.overdrawn ? 0 : (Number(balance.remaining) || 0) + 1;
+  return rows.sort((a, b) => {
+    const pa = priorityOf(a.balance), pb = priorityOf(b.balance);
+    if (pa !== pb) return pa - pb;
+    return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
+  });
 }
 
 // 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
@@ -17480,7 +17567,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   ].filter(Boolean).join(" · ") : "";
 
   const secPtBalance = (
-            <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${DB.border}`}}>
+            <div id="hub-pt-balance" style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${DB.border}`}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:10,flexWrap:"wrap"}}>
                 <span style={{fontSize:11,fontWeight:800,color:DB.sub}}>PT 이용 현황</span>
                 <span style={{fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,background:ptTone.bg,color:ptTone.fg}}>{ptBalance.status.label}</span>
@@ -17515,7 +17602,8 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                       잔여 횟수보다 완료된 수업이 {Math.abs(ptBalance.rawRemaining)}회 많습니다. 등록 정보를 확인해주세요.
                     </div>
                   )}
-                  {/* 재등록 안내 판정은 관리자 홈 "오늘 해야 할 일" 확장에서도 그대로 쓸 needsPtRenewalNotice() 하나로 통일한다. */}
+                  {/* 재등록 안내 판정은 관리자 홈 "오늘 해야 할 일 → 재등록 안내 필요" 카드와 같은 needsPtRenewalNotice() 하나로 통일한다.
+                      (홈 "안내 완료" 처리는 이 화면의 배지·경고문에는 영향을 주지 않는다 — 여기는 항상 현재 실측 기준을 그대로 보여준다.) */}
                   {needsPtRenewalNotice(ptBalance) && !ptBalance.overdrawn && (
                     <div style={{background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.25)",borderRadius:DB.radiusSm,padding:"9px 12px",marginBottom:10,fontSize:11.5,fontWeight:700,color:"#92600A",lineHeight:1.5}}>
                       {ptBalance.remaining===0 ? "잔여 횟수를 모두 사용했습니다. 재등록 여부를 확인해주세요." : `잔여 ${ptBalance.remaining}회입니다. 다음 수업 때 재등록 안내를 해주세요.`}

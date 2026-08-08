@@ -84,7 +84,7 @@ try {
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceMillis = app.slice(app.indexOf('function toMillisSafe'), app.indexOf('function isAtOrAfterHomeTaskCutoff'));
   const slicePt = app.slice(app.indexOf('function isTrialSessionNo'), app.indexOf('function buildUnsentSessionMembers'));
-  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
+  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isPtRenewalNoticeHandled, buildPtRenewalNoticeList, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
 } catch (e) {
   console.error('[regression] PT 잔여 횟수 헬퍼 추출 실패:', e.message);
 }
@@ -5637,6 +5637,84 @@ const checks = [
     && app.includes('ptBalanceInitialized: true,')
     && app.includes('ptBalanceBaselineRemaining: remaining,')
     && app.includes('ptBalanceBaselineRenewalCount: renewalCount,')
+  ],
+
+  // ── 관리자 홈 "오늘 해야 할 일 → 재등록 안내 필요" ──
+  ptScenario('재등록 안내(홈): PT 잔여 초기 설정 전 회원은 대상에서 제외된다', L => {
+    const m = { id: 'm1', name: '미설정', status: 'active', ptBalanceInitialized: false };
+    return L.buildPtRenewalNoticeList([m], {}).length === 0;
+  }),
+  ptScenario('재등록 안내(홈): 잔여 6회는 대상이 아니다', L => {
+    const m = { id: 'm1', name: '잔여6', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 6, ptBalanceRawRemaining: 6, ptBalanceRenewalCount: 1 };
+    return L.buildPtRenewalNoticeList([m], {}).length === 0;
+  }),
+  ptScenario('재등록 안내(홈): 잔여 5회는 홈 카드 대상이 아니지만, 상세 상태는 "재등록 준비"로 그대로 유지된다', L => {
+    const m = { id: 'm1', name: '잔여5', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 5, ptBalanceRawRemaining: 5, ptBalanceRenewalCount: 1 };
+    return L.buildPtRenewalNoticeList([m], {}).length === 0 && L.getPtBalanceSummary(m).status.label === '재등록 준비';
+  }),
+  ptScenario('재등록 안내(홈): 잔여 3·2·1·0회는 모두 대상이고, 0회는 "수업 소진"으로 표시된다', L => {
+    const at = n => ({ id: `m${n}`, name: `잔여${n}`, status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: n, ptBalanceRawRemaining: n, ptBalanceRenewalCount: 1 });
+    const list = L.buildPtRenewalNoticeList([at(3), at(2), at(1), at(0)], {});
+    const zero = list.find(r => r.member.id === 'm0');
+    return list.length === 4 && zero.balance.status.label === '수업 소진';
+  }),
+  ptScenario('재등록 안내(홈): raw 잔여가 음수면(등록 누락) "확인 필요" 상태로 대상에 포함된다', L => {
+    const m = { id: 'm1', name: '확인필요', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 0, ptBalanceRawRemaining: -2, ptBalanceRenewalCount: 1 };
+    const list = L.buildPtRenewalNoticeList([m], {});
+    return list.length === 1 && list[0].balance.overdrawn === true && list[0].balance.status.label === '잔여 횟수 확인 필요';
+  }),
+  ptScenario('재등록 안내(홈): 잔여 4회(대상 아님) → 수업 완료로 3회가 되면 즉시 대상에 추가된다', L => {
+    const before = { id: 'm1', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 4, ptBalanceRawRemaining: 4 };
+    const after = { ...before, ptBalanceRemaining: 3, ptBalanceRawRemaining: 3 };
+    return L.buildPtRenewalNoticeList([before], {}).length === 0 && L.buildPtRenewalNoticeList([after], {}).length === 1;
+  }),
+  ptScenario('재등록 안내(홈): 잔여 3회(대상) → 재등록 20회로 23회가 되면 즉시 대상에서 빠진다', L => {
+    const before = { id: 'm1', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 3, ptBalanceRawRemaining: 3 };
+    const after = { ...before, ptBalanceRemaining: 23, ptBalanceRawRemaining: 23 };
+    return L.buildPtRenewalNoticeList([before], {}).length === 1 && L.buildPtRenewalNoticeList([after], {}).length === 0;
+  }),
+  ptScenario('재등록 안내(홈): 완료 수업 삭제로 잔여 2 → 3이 되어도 여전히 대상이고 표시 숫자가 즉시 바뀐다', L => {
+    const before = { id: 'm1', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 2, ptBalanceRawRemaining: 2 };
+    const after = { ...before, ptBalanceRemaining: 3, ptBalanceRawRemaining: 3 };
+    const b = L.buildPtRenewalNoticeList([before], {})[0];
+    const a = L.buildPtRenewalNoticeList([after], {})[0];
+    return b.balance.remaining === 2 && a.balance.remaining === 3;
+  }),
+  ptScenario('재등록 안내(홈): 회원별 잔여 캐시가 서로 섞이지 않는다', L => {
+    const a = { id: 'mA', name: 'A', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 2, ptBalanceRawRemaining: 2, ptBalanceRenewalCount: 1 };
+    const b = { id: 'mB', name: 'B', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 8, ptBalanceRawRemaining: 8, ptBalanceRenewalCount: 3 };
+    const list = L.buildPtRenewalNoticeList([a, b], {});
+    return list.length === 1 && list[0].member.id === 'mA' && list[0].balance.remaining === 2;
+  }),
+  ptScenario('재등록 안내(홈) "안내 완료": 처리 직후 같은 잔여 구간에서는 숨고, 잔여가 더 줄면 다시 노출된다', L => {
+    const handled = { id: 'm1', status: 'active', ptBalanceInitialized: true, ptBalanceRemaining: 3, ptBalanceRawRemaining: 3, renewalReminderHandledAt: '2026-08-08T00:00:00.000Z', renewalReminderLastRawRemaining: 3 };
+    const stillSame = L.buildPtRenewalNoticeList([handled], {});
+    const decreased = { ...handled, ptBalanceRemaining: 2, ptBalanceRawRemaining: 2 };
+    const reappeared = L.buildPtRenewalNoticeList([decreased], {});
+    return stillSame.length === 0 && reappeared.length === 1 && reappeared[0].balance.remaining === 2;
+  }),
+  ['재등록 안내(홈): 목록 판정 함수는 members 캐시 필드만 읽고 세션·등록 이력을 추가로 조회하지 않는다(추가 Firestore read 없음)',
+    (() => {
+      const fn = app.slice(app.indexOf('function buildPtRenewalNoticeList'), app.indexOf('function buildUnsentSessionMembers'));
+      return fn.includes('getPtBalanceSummary(lm)')
+        && fn.includes('needsPtRenewalNotice(balance)')
+        && !/getRecentSessions|getSessions\(|getPtRegistrations\(|await /.test(fn)
+        && app.includes('buildPtRenewalNoticeList(regularHomeMembers, liveMembersById)')
+        && !/buildPtRenewalNoticeList\([^)]*sessionsMap/.test(app);
+    })()
+  ],
+  ['재등록 안내(홈): 목록에서 회원을 누르면 기존 onSelectMember로 회원 상세(PT 이용 현황)까지 스크롤 이동한다',
+    app.includes('onSelectMember?.(row.member,{scrollTarget:"hub-pt-balance"})')
+    && app.includes('<div id="hub-pt-balance" style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${DB.border}`}}>')
+  ],
+  ['재등록 안내(홈) "안내 완료" 필드는 관리자 전용이다 — 회원 프로필 수정 화이트리스트에 없고 회원앱 렌더링 영역에도 없다',
+    !/renewalReminderHandledAt|renewalReminderLastRawRemaining/.test(memberUpdateFn)
+    && !/renewalReminderHandledAt|renewalReminderLastRawRemaining|안내 완료/.test(memberAppRenderRegion())
+  ],
+  ['재등록 안내(홈): "오늘 해야 할 일" 카드 + 인라인 리스트가 기존 카드들과 같은 컴포넌트(TodayActionCard/TodayListCard)를 재사용한다',
+    app.includes('title="재등록 안내 필요" desc="PT 잔여 횟수가 얼마 남지 않았어요"')
+    && app.includes('onClick={scrollToSection("home-pt-renewal")}')
+    && app.includes('<TodayListCard id="home-pt-renewal"')
   ],
 
   ['유입 분석/분석 리포트: 관리자 라이트 테마 + AdminSidebar + 반응형 grid(minmax) 사용, 고정폭 남용 없음',

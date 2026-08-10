@@ -12616,6 +12616,15 @@ function isTrialSessionNo(sessionNo) {
   return Number(numPart) === 0;
 }
 
+// sessionNo를 숫자로 정규화 — 4, "4", "4회차" 모두 4로 변환. 해석 불가능하면 NaN.
+function sessionNoToNumber(sessionNo) {
+  if (typeof sessionNo === "number") return sessionNo;
+  if (typeof sessionNo !== "string") return NaN;
+  const numPart = sessionNo.trim().replace(/회차\s*$/, "").trim();
+  if (!numPart || !/^\d+$/.test(numPart)) return NaN;
+  return Number(numPart);
+}
+
 // ══════════════════════════════════════════════════════════════
 // PT 잔여 횟수 · 재등록 관리 (2026-08-07 운영 시작)
 // ══════════════════════════════════════════════════════════════
@@ -16346,7 +16355,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   // 진행 횟수 / 총 등록 횟수 표시용. 잔여 횟수는 여기서 계산하지 않는다 —
   // totalSessions − 수업 수 방식은 재등록·보정을 반영하지 못해 PT 잔여 관리(getPtBalance)와 어긋나므로 제거했다.
   const totalReg = parseInt((member.totalSessions||"").replace(/[^0-9]/g,"")) || 0;
-  const usedCount = sessions.length;
+  // 수업진행 회차 = 세션 문서 개수가 아니라 0회차(체험)를 제외한 정규 회차 중 최댓값.
+  // 문서 개수로 세면 0회차(체험)까지 1회로 포함되어 실제보다 한 회차 많게 표시된다.
+  const regularSessionNos = sessions
+    .map(s => sessionNoToNumber(s.sessionNo))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const usedCount = regularSessionNos.length ? Math.max(...regularSessionNos) : 0;
 
   // ── 체중 변화 ─────────────────────────────────────────────
   const wEntries = wData.map(d => ({ date:d.date, weight:d.w }));
@@ -17125,7 +17139,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const secToday = (
           <section className="hub-sec-today" style={{background:`linear-gradient(rgba(57,199,184,.10),rgba(57,199,184,.10)), ${DB.card}`, border:`1px solid rgba(57,199,184,.35)`, borderRadius:DB.radius, boxShadow:DB.shadowLg, padding:"16px 18px"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:9}}>
-              <span style={{fontSize:15,fontWeight:800,letterSpacing:"-.3px",color:DB.text}}>오늘 {t("수업","운동")} <small style={{fontSize:11.5,fontWeight:600,color:DB.sub,marginLeft:6}}>{usedCount+1}{t("회차","회차")} · {todayStr.slice(5)}</small></span>
+              <span style={{fontSize:15,fontWeight:800,letterSpacing:"-.3px",color:DB.text}}>오늘 {t("수업","운동")} <small style={{fontSize:11.5,fontWeight:600,color:DB.sub,marginLeft:6}}>{todaySession ? todaySession.sessionNo : usedCount+1}{t("회차","회차")} · {todayStr.slice(5)}</small></span>
               <button onClick={()=>setScreen("history")} style={{display:"flex",alignItems:"center",gap:5,border:`1px solid rgba(57,199,184,.4)`,background:DB.card,color:DB.mintSoft,borderRadius:999,padding:"6px 12px",fontSize:11,fontWeight:700,fontFamily:DB.font,cursor:"pointer",whiteSpace:"nowrap",boxShadow:DB.shadow}}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/></svg>
                 {t("수업 히스토리","운동 히스토리")}

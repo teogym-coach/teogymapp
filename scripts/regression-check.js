@@ -84,7 +84,7 @@ try {
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceMillis = app.slice(app.indexOf('function toMillisSafe'), app.indexOf('function isAtOrAfterHomeTaskCutoff'));
   const slicePt = app.slice(app.indexOf('function isTrialSessionNo'), app.indexOf('function buildUnsentSessionMembers'));
-  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isPtRenewalNoticeHandled, buildPtRenewalNoticeList, isTrialSessionNo, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
+  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isPtRenewalNoticeHandled, buildPtRenewalNoticeList, isTrialSessionNo, sessionNoToNumber, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
 } catch (e) {
   console.error('[regression] PT 잔여 횟수 헬퍼 추출 실패:', e.message);
 }
@@ -5560,6 +5560,32 @@ const checks = [
     // 0회차를 지워도 잔여가 그대로라 두 번째 동기화는 write하지 않는다
     return L.buildPtBalanceCachePatch(L.getPtBalance(synced, keep, [], PT_TODAY), synced) === null;
   }),
+  // ── 수업진행 회차: 세션 문서 개수가 아니라 0회차(체험)를 제외한 정규 회차 최댓값을 써야 한다 ──
+  // 0~4회차 5개 문서가 있어도 "수업진행"은 4여야 한다(문서 개수로 세면 체험까지 포함돼 5가 되는 버그가 있었다).
+  ptScenario('수업진행 회차: sessionNo가 숫자·"N"·"N회차" 어떤 형태여도 같은 숫자로 정규화된다', L => {
+    return L.sessionNoToNumber(4) === 4 && L.sessionNoToNumber('4') === 4 && L.sessionNoToNumber('4회차') === 4
+      && L.sessionNoToNumber(0) === 0 && L.sessionNoToNumber('0회차') === 0
+      && Number.isNaN(L.sessionNoToNumber('')) && Number.isNaN(L.sessionNoToNumber(undefined));
+  }),
+  ptScenario('수업진행 회차: 0회차(체험)를 제외한 정규 회차 중 최댓값이며, 세션 문서 개수가 아니다', L => {
+    const usedCountOf = (nos) => {
+      const regular = nos.map(n => L.sessionNoToNumber(n)).filter(n => Number.isFinite(n) && n > 0);
+      return regular.length ? Math.max(...regular) : 0;
+    };
+    return usedCountOf([0]) === 0
+      && usedCountOf([0, 1]) === 1
+      && usedCountOf([0, 1, 2, 3, 4]) === 4   // 문서 5개(0~4회차)인데도 4 — 개수 세기가 아님을 증명
+      && usedCountOf([0, 1, 2, 4]) === 4      // 중간 3회차 기록이 없어도 최댓값 기준
+      && usedCountOf(['0', '1', '2', '3', '4회차']) === 4;
+  }),
+  ['수업진행 회차: 회원 상세 화면은 sessions.length(문서 개수)가 아니라 정규 회차 최댓값으로 계산한다',
+    !/const usedCount = sessions\.length;/.test(app)
+    && app.includes('.map(s => sessionNoToNumber(s.sessionNo))')
+    && app.includes('const usedCount = regularSessionNos.length ? Math.max(...regularSessionNos) : 0;')
+  ],
+  ['오늘 수업 회차: 상단 배지는 usedCount+1 파생값이 아니라 실제 오늘 세션의 sessionNo를 우선 사용한다(없을 때만 usedCount+1로 예측)',
+    app.includes('todaySession ? todaySession.sessionNo : usedCount+1')
+  ],
   ['PT 잔여(삭제): 삭제가 성공한 뒤에만 캐시를 갱신한다 — 삭제 실패 시 잔여가 변하지 않는다',
     (() => {
       const fn = app.slice(app.indexOf('async function handleDeleteSession(s)'), app.indexOf('async function handleSavePairSession'));

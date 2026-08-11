@@ -10412,7 +10412,7 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} onSyncPtBalance={syncPtBalanceCache} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} onSyncPtBalance={syncPtBalanceCache} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} liveMembersById={liveMembersById} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -16346,7 +16346,11 @@ function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], persona
   return byPart;
 }
 
-function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, onSyncPtBalance, dataLoaded=false, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory }) {
+function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, onSyncPtBalance, dataLoaded=false, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory, liveMembersById={} }) {
+  // 홈에서 "일정 미정"을 지정하면 Firestore(members 실시간 구독)에만 반영되고, 이 화면의 member prop은
+  // 회원 목록/검색에서 "그 시점의" 회원 객체를 그대로 넘겨받아 최신값이 아닐 수 있다(goHub가 회원 문서를
+  // 다시 읽지 않음). liveMembersById(onSnapshot, 항상 최신)가 있으면 그 값을 우선해 이 화면 안에서만 보정한다.
+  const scheduleFollowupPending = (liveMembersById[member.id]?.scheduleFollowupStatus ?? member.scheduleFollowupStatus) === "pending";
   const isCorr = false;
   const isMyself = isOwner(member);
   const t = (수업, 운동) => isMyself ? 운동 : 수업;
@@ -16394,7 +16398,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     try {
       const patch = { nextWorkoutDate: value, nextWorkoutDateUpdatedAt: new Date().toISOString() };
       // 실제 다음 일정 등록이 최우선 상태 — 관리자가 걸어둔 "일정 미정" 보류가 남아있어도 실제 날짜가 들어오면 자동 해제한다.
-      if (value && member.scheduleFollowupStatus === "pending") {
+      // scheduleFollowupPending(liveMembersById 우선 보정값)으로 판단 — member prop만 보면 홈 목록에서 방금
+      // "일정 미정"을 지정한 직후 이 화면에 들어왔을 때 stale 값이라 자동 해제가 누락될 수 있다.
+      if (value && scheduleFollowupPending) {
         patch.scheduleFollowupStatus = "";
         patch.scheduleFollowupUpdatedAt = new Date().toISOString();
       }
@@ -17388,15 +17394,19 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               <span style={cardTitle}>다음 수업 준비</span>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <span style={{fontSize:10.5,color:DB.faint}}>오늘 수업 기록과 별개로 저장됩니다</span>
-                {member.scheduleFollowupStatus === "pending" && (
-                  <span style={{display:"flex",alignItems:"center",gap:6,fontSize:10.5,fontWeight:700,color:"#B45309",background:"rgba(245,158,11,.10)",borderRadius:999,padding:"3px 5px 3px 10px"}}>
-                    홈 "다음 예약 필요" 알림 보류중
-                    <button onClick={handleReleaseFollowupPending} disabled={ptSaving} style={{border:"none",borderRadius:999,padding:"3px 9px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,color:"#fff",background:"#B45309",cursor:ptSaving?"default":"pointer"}}>일정 미정 해제</button>
-                  </span>
-                )}
                 <button onClick={()=>setScreen("routine_recommend")} style={{border:"none",background:DB.mintTint,color:DB.mintSoft,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>루틴 추천 전송 →</button>
               </div>
             </div>
+            {/* 관리자가 홈에서 "일정 미정"으로 보류한 회원만 노출 — 일정 미정이 아니면 이 블록 자체가 렌더링되지 않는다 */}
+            {scheduleFollowupPending && (
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:12,padding:"10px 12px",borderRadius:DB.radiusSm,background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.28)"}}>
+                <div style={{minWidth:0}}>
+                  <span style={{fontSize:11,fontWeight:800,color:"#B45309",display:"block"}}>다음 일정 · 일정 미정 상태</span>
+                  <span style={{fontSize:10.5,color:"#B45309"}}>홈 "다음 예약이 필요한 회원" 알림에서 제외되어 있습니다</span>
+                </div>
+                <button onClick={handleReleaseFollowupPending} disabled={ptSaving} style={{flexShrink:0,border:"none",borderRadius:9,padding:"7px 14px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:"#fff",background:"#B45309",cursor:ptSaving?"default":"pointer"}}>일정 미정 해제</button>
+              </div>
+            )}
             <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"flex-start"}} className="hub-prep-row">
               <div style={{flex:"0 1 148px",minWidth:128}}>
                 <span style={{fontSize:11,fontWeight:800,color:DB.sub,display:"block",marginBottom:6}}>다음 수업 날짜</span>

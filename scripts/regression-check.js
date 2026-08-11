@@ -572,6 +572,14 @@ const checks = [
       return lib.buildNextBookingList(members, {}, sessionsMap, unsentToday).length === 0;
     }],
   ].map(([name, fn]) => nbScenario(name, fn)),
+  // ── 다음 예약 필요: "일정 미정 해제" 접근 경로 — 홈에서 "일정 미정"을 지정하면 members 실시간 구독에만 반영되고,
+  // HubScreen의 member prop은 goHub 호출 당시 넘겨받은 객체를 그대로 쓸 뿐 회원 문서를 다시 읽지 않아 stale할 수 있다.
+  // liveMembersById를 우선 사용하는 보정값(scheduleFollowupPending)이 없으면 해제 버튼 자체가 렌더링되지 않아
+  // "설정은 되는데 해제할 방법이 없는" 상태에 빠진다 — 이 4개 체크가 그 회귀를 잡는다.
+  ['일정 미정 해제 접근성: HubScreen이 liveMembersById를 전달받아 stale한 member prop 대신 실시간 값으로 일정 미정 상태를 판별한다', app.includes('const scheduleFollowupPending = (liveMembersById[member.id]?.scheduleFollowupStatus ?? member.scheduleFollowupStatus) === "pending";') && app.includes('liveMembersById={liveMembersById} />}')],
+  ['회원 상세 "다음 수업 준비" 카드: 일정 미정 상태일 때만 안내 블록 + 해제 버튼이 노출된다(다른 회원에게는 안 보임)', app.includes('{scheduleFollowupPending && (') && app.includes('다음 일정 · 일정 미정 상태') && app.includes('onClick={handleReleaseFollowupPending}')],
+  ['일정 미정 해제 버튼: Firestore scheduleFollowupStatus를 지워 홈 목록 자동 판정이 다시 그대로 작동하게 한다', app.includes('const handleReleaseFollowupPending = async()') && app.includes('scheduleFollowupStatus: "", scheduleFollowupUpdatedAt: new Date().toISOString()')],
+  ['실제 다음 일정 등록 시 일정 미정 자동 해제: stale한 member prop이 아니라 liveMembersById 보정값(scheduleFollowupPending)을 기준으로 판단한다', app.includes('if (value && scheduleFollowupPending) {') && app.includes('patch.scheduleFollowupStatus = "";')],
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
   ['대표 운동기록 저장', app.includes('isOwner') && app.includes('OWNER_LEGACY_NAME') && app.includes('대표님')],
   ['체형평가 저장', db.includes('export async function saveAssessment') && db.includes('members", memberId, "assessments"')],

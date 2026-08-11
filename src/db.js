@@ -822,6 +822,21 @@ export async function saveSessionSoreness(memberId, sessionId, sorenessReport) {
   dbLog("saveSessionSoreness", "완료");
 }
 
+// 홈 "수업일지 미전송" 관리자 예외 처리 — 자동 판정(isPublished==false + 실제 종목 존재)은 그대로 두고,
+// 이 수업 기록 1건만 목록 노출 대상에서 제외/복귀시키는 boolean 플래그. updateSession()은 withSessionDefaults가
+// isPublished를 항상 같이 덮어써 버려 부분 필드 갱신에 부적합하므로, saveSessionSoreness와 동일하게
+// updateDoc으로 이 필드만 최소 변경한다(다른 세션 필드는 절대 건드리지 않음).
+export async function setSessionJournalDeferred(memberId, sessionId, deferred) {
+  const uid = await verifyMemberOwnership(memberId);
+  dbLog("setSessionJournalDeferred", `memberId=${memberId} sessionId=${sessionId} deferred=${deferred}`);
+  await updateDoc(doc(db, "members", memberId, "sessions", sessionId), {
+    journalSendDeferred: !!deferred,
+    journalSendDeferredAt: serverTimestamp(),
+    journalSendDeferredBy: uid,
+  });
+  dbLog("setSessionJournalDeferred", "완료");
+}
+
 // 근육통(sorenessLevel/sorenessBodyParts)·RPE·메모는 서로 독립적으로 저장된다.
 // feedback 객체에 실제로 들어있는 필드만 payload에 담아 setDoc(..., {merge:true})로 쓰기 때문에,
 // 이번에 건드리지 않은 필드는 payload에 아예 없어 기존 저장값이 그대로 유지된다(덮어쓰기 방지).
@@ -931,6 +946,8 @@ export async function publishSession(memberId, sessionId) {
       isPublished: true,
       publishedAt: serverTimestamp(),
       ...completedAtPatch,
+      // 실제 전송이 최우선 상태 — 관리자가 걸어둔 "보류"가 남아있어도 정상 전송되면 자동으로 정리한다.
+      journalSendDeferred: false,
       updatedAt: serverTimestamp(),
     });
   } catch(e) {

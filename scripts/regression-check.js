@@ -76,6 +76,27 @@ function usScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 홈 "다음 예약이 필요한 회원": 관리자 "일정 미정" 보류 예외 필터 실제 실행 시나리오 검증 ──
+// scheduleFollowupStatus==="pending"인 회원은 기존 자동 판정(다음 예약 없음)을 만족해도 목록에서 제외되고,
+// 해제(빈 문자열)하면 그 시점에도 실제 다음 예약이 없는 한 다시 표시돼야 한다. 자동 판정 조건 자체는 건드리지 않는다.
+let nextBookingLib = null;
+try {
+  const sliceOwner = app.slice(app.indexOf('const isOwner = (m)'), app.indexOf('function isExcludedAdminMember'));
+  const sliceExcluded = app.slice(app.indexOf('function isExcludedAdminMember'), app.indexOf('const isRegularAdminMember'));
+  const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
+  const sliceCore = app.slice(app.indexOf('function normalizeSessionDateKey'), app.indexOf('const TODAY_STATUS_STYLE'));
+  const sliceNextInfo = app.slice(app.indexOf('function getMemberNextSessionInfo'), app.indexOf('function getNextWorkoutSummary'));
+  const sliceNextBooking = app.slice(app.indexOf('function buildNextBookingList'), app.indexOf('const UNSENT_SESSION_START_DATE'));
+  nextBookingLib = new Function(`${sliceOwner}\n${sliceExcluded}\n${sliceFuncEx}\n${sliceCore}\n${sliceNextInfo}\n${sliceNextBooking}\nreturn { buildNextBookingList };`)();
+} catch (e) {
+  console.error('[regression] 다음 예약 필요 헬퍼 추출 실패:', e.message);
+}
+function nbScenario(name, fn) {
+  if (!nextBookingLib) return [name, false];
+  try { return [name, !!fn(nextBookingLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── PT 잔여 횟수·재등록 관리: 실제 실행 시나리오 검증 ──
 // 잔여 계산은 회원 상세 카드·상단 요약이 모두 getPtBalance() 하나만 쓰므로, 원본 소스를 그대로 슬라이스해 실행한다.
 // 핵심 불변식: ① 기준(baseline) 이전 수업은 절대 차감되지 않는다 ② 같은 수업은 몇 번을 다시 저장·공개해도 1회만 차감된다.
@@ -283,7 +304,7 @@ function wgScenario(name, fn) {
 }
 const arrEq = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
 
-const unsentMockMember = (id) => ({ id, name: id, status: 'active' });
+const unsentMockMember = (id, over = {}) => ({ id, name: id, status: 'active', ...over });
 const unsentMockDate = daysAgoStr(1);
 const unsentToday = daysAgoStr(0);
 // 홈 "수업일지 미확인" cutoff 테스트용 — 회귀 스크립트는 항상 배포(cutoff) 이후에 실행되므로 "지금"은 항상 cutoff 이후,
@@ -323,6 +344,30 @@ const checks = [
         nono2: [{ sessionNo: '', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false }],
       };
       return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 2;
+    }],
+    ['수업일지 미전송: 관리자가 이 기록만 보류(journalSendDeferred=true)하면 목록에서 제외', lib => {
+      const members = [unsentMockMember('def1')];
+      const sessionsMap = { def1: [{ id: 'sA', sessionNo: 1, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false, journalSendDeferred: true }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['수업일지 미전송: 보류 해제(journalSendDeferred=false) + 여전히 미전송 → 다시 목록에 표시', lib => {
+      const members = [unsentMockMember('def2')];
+      const sessionsMap = { def2: [{ id: 'sA', sessionNo: 1, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: false, journalSendDeferred: false }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
+    ['수업일지 미전송: 같은 회원의 A수업만 보류해도 B수업(미전송)은 정상 표시 — 회원 단위가 아닌 세션 문서 단위 필터', lib => {
+      const members = [unsentMockMember('def3')];
+      const sessionsMap = { def3: [
+        { id: 'sA', sessionNo: 1, date: daysAgoStr(2), exercises: [{ name: '스쿼트' }], isPublished: false, journalSendDeferred: true },
+        { id: 'sB', sessionNo: 2, date: unsentMockDate, exercises: [{ name: '벤치프레스' }], isPublished: false, journalSendDeferred: false },
+      ] };
+      const rows = lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday);
+      return rows.length === 1 && rows[0].count === 1 && rows[0].sessionId === 'sB';
+    }],
+    ['수업일지 미전송: 실제 전송 완료(isPublished=true)면 보류 여부와 무관하게 목록에 안 나타남(전송이 최우선 상태)', lib => {
+      const members = [unsentMockMember('def4')];
+      const sessionsMap = { def4: [{ id: 'sA', sessionNo: 1, date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: true, journalSendDeferred: true }] };
+      return lib.buildUnsentSessionMembers(members, {}, sessionsMap, unsentToday).length === 0;
     }],
     ['수업일지 미전송(홈): teo(대표) 개인 기록은 조건을 만족해도 제외(isExcludedAdminMember)', lib => {
       const members = [{ id: 'teo_unsent', name: 'teo_unsent', status: 'active', isOwner: true }];
@@ -505,6 +550,28 @@ const checks = [
       return lib.getNoFeedbackActivityMembers(members, {}, sessionsMap, unsentToday).length === 0;
     }],
   ].map(([name, fn]) => usScenario(name, fn)),
+  ...[
+    ['다음 예약 필요: 마지막 수업 후 다음 일정이 없으면 목록에 표시', lib => {
+      const members = [unsentMockMember('nb_a')];
+      const sessionsMap = { nb_a: [{ id: 's1', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: true }] };
+      return lib.buildNextBookingList(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
+    ['다음 예약 필요: 관리자가 "일정 미정"(scheduleFollowupStatus="pending")으로 보류하면 목록에서 제외', lib => {
+      const members = [unsentMockMember('nb_b', { scheduleFollowupStatus: 'pending' })];
+      const sessionsMap = { nb_b: [{ id: 's1', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: true }] };
+      return lib.buildNextBookingList(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+    ['다음 예약 필요: 일정 미정 해제(빈 문자열) + 여전히 다음 일정 없으면 다시 목록에 표시', lib => {
+      const members = [unsentMockMember('nb_c', { scheduleFollowupStatus: '' })];
+      const sessionsMap = { nb_c: [{ id: 's1', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: true }] };
+      return lib.buildNextBookingList(members, {}, sessionsMap, unsentToday).length === 1;
+    }],
+    ['다음 예약 필요: pending 상태여도 실제 다음 일정이 등록돼 있으면(자동 조건 자체 해당없음) 목록에 안 나타남', lib => {
+      const members = [unsentMockMember('nb_d', { scheduleFollowupStatus: 'pending', nextWorkoutDate: daysFromNowStr(3) })];
+      const sessionsMap = { nb_d: [{ id: 's1', date: unsentMockDate, exercises: [{ name: '스쿼트' }], isPublished: true }] };
+      return lib.buildNextBookingList(members, {}, sessionsMap, unsentToday).length === 0;
+    }],
+  ].map(([name, fn]) => nbScenario(name, fn)),
   ['운동기록 저장', app.includes('exercises') && app.includes('sets') && app.includes('calcVol')],
   ['대표 운동기록 저장', app.includes('isOwner') && app.includes('OWNER_LEGACY_NAME') && app.includes('대표님')],
   ['체형평가 저장', db.includes('export async function saveAssessment') && db.includes('members", memberId, "assessments"')],

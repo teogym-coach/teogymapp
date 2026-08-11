@@ -16,7 +16,7 @@ import {
 } from "firebase/auth";
 import {
   getMembers, addMember, updateMember, deleteMember,
-  getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession,
+  getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession, setSessionJournalDeferred,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
@@ -10155,6 +10155,18 @@ export default function App() {
     finally { setLoading(false); }
   }
 
+  // 홈 "수업일지 미전송" 관리자 예외 필터 — 이 수업 기록 1건만 그 목록에서 보류/재노출한다.
+  // 자동 판정(isPublished) 자체는 건드리지 않으므로 HistoryScreen/HubScreen 목록에는 항상 그대로 나타난다.
+  async function handleToggleJournalDefer(s) {
+    if (!member?.id || !s?.id) return;
+    const next = !s.journalSendDeferred;
+    try {
+      await setSessionJournalDeferred(member.id, s.id, next);
+      await refreshSessionsForMember(member.id);
+      showToast(next ? "수업일지 미전송 알림을 보류했습니다." : "보류를 해제했습니다.");
+    } catch(e) { showToast(e.message || "처리 실패", "err"); }
+  }
+
   async function handleDeleteSession(s) {
     if (!window.confirm("이 수업 기록을 삭제할까요?")) return;
     setLoading(true);
@@ -10405,7 +10417,7 @@ export default function App() {
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen key={editPairSession?.id||"new"} editData={editPairSession} initialDate={pairFormInitialDate} members={members} pairSessions={pairSessions} onSelectExistingTeam={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); }} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
-        {screen==="history"    && <HistoryScreen sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} initialReadFilter={historyInitialReadFilter} onInitialReadFilterConsumed={()=>setHistoryInitialReadFilter(null)} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onToggleJournalDefer={handleToggleJournalDefer} onSendPair={handleSendPairSession} initialReadFilter={historyInitialReadFilter} onInitialReadFilterConsumed={()=>setHistoryInitialReadFilter(null)} />}
         {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
         {screen==="counselReport" && member && <CounselReportScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -11395,6 +11407,11 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchActiveIdx, setSearchActiveIdx] = useState(-1);
   const [ptRenewalSavingId, setPtRenewalSavingId] = useState(null); // "재등록 안내 필요" 목록의 "안내 완료" 저장 중인 회원 id(중복 클릭 방지)
+  const [followupSavingId, setFollowupSavingId] = useState(null); // "다음 예약이 필요한 회원" 목록의 "일정 미정" 저장 중인 회원 id(중복 클릭 방지)
+  // "수업일지 미전송" 목록의 "보류" — sessionsMap은 실시간 구독이 아니라 1회성 로드라, write 성공 직후
+  // 이 로컬 오버레이로 즉시 목록에서 뺀다(새로고침하면 sessionsMap 자체가 최신값을 담아 오버레이 없이도 동일 결과).
+  const [journalDeferOverrides, setJournalDeferOverrides] = useState({}); // {sessionId: true}
+  const [journalDeferSavingId, setJournalDeferSavingId] = useState(null);
   const searchWrapRef = useRef(null);
   const searchInputRef = useRef(null);
   useEffect(()=>{
@@ -11440,10 +11457,16 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
     [homeMembers, liveMembersById, sessionsMap, todayKST]
   );
   // "수업일지 미전송" — 실제 종목이 저장됐지만 아직 회원에게 공개(isPublished)되지 않은 기록이 있는 회원(예약만 있는 회원은 제외)
-  const unsentSessionRows = useMemo(
-    () => buildUnsentSessionMembers(homeMembers, liveMembersById, sessionsMap || {}, todayKST),
-    [homeMembers, liveMembersById, sessionsMap, todayKST]
-  );
+  // journalDeferOverrides — sessionsMap(1회성 로드)에는 아직 반영되지 않은 "방금 보류한" 세션을 로컬에서 즉시 반영한다.
+  const unsentSessionRows = useMemo(() => {
+    const hasOverrides = Object.keys(journalDeferOverrides).length > 0;
+    const effectiveMap = hasOverrides
+      ? Object.fromEntries(Object.entries(sessionsMap || {}).map(([mid, ss]) => [
+          mid, (ss || []).map(s => journalDeferOverrides[s.id] ? { ...s, journalSendDeferred: true } : s),
+        ]))
+      : (sessionsMap || {});
+    return buildUnsentSessionMembers(homeMembers, liveMembersById, effectiveMap, todayKST);
+  }, [homeMembers, liveMembersById, sessionsMap, todayKST, journalDeferOverrides]);
   // "수업일지 미확인" — 미전송과 달리 이미 공개는 됐지만 회원이 아직 상세를 열어보지 않은 최근 14일 이내 기록
   const unreadSessionRows = useMemo(
     () => buildUnreadSessionMembers(homeMembers, liveMembersById, sessionsMap || {}, sessionReadsMapByMember || {}, todayKST),
@@ -11606,6 +11629,41 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
       showToast?.("저장 실패: " + (e?.message || "오류"), "err");
     } finally {
       setPtRenewalSavingId(null);
+    }
+  };
+  // "다음 예약이 필요한 회원" — 관리자가 "일정 미정"으로 명시 보류. 자동 판정(nextScheduleNeeded)은 그대로 두고
+  // buildNextBookingList가 scheduleFollowupStatus==="pending"인 회원만 제외한다(members/{id} 필드, 새 컬렉션 없음).
+  // members 실시간 구독(liveMembersById)이 write 직후 자동 반영하므로 별도 로컬 상태 동기화가 필요 없다.
+  const handleSetFollowupPending = async (row) => {
+    if (followupSavingId) return;
+    setFollowupSavingId(row.member.id);
+    try {
+      await updateMember(row.member.id, {
+        scheduleFollowupStatus: "pending",
+        scheduleFollowupUpdatedAt: new Date().toISOString(),
+      });
+      showToast?.("다음 일정 알림에서 제외했습니다.");
+    } catch(e) {
+      console.error(e);
+      showToast?.("저장 실패: " + (e?.message || "오류"), "err");
+    } finally {
+      setFollowupSavingId(null);
+    }
+  };
+  // "수업일지 미전송" — 관리자가 해당 수업 기록 1건만 명시 보류(회원 단위가 아니라 세션 문서 단위).
+  // 자동 판정은 그대로 두고 buildUnsentSessionMembers가 journalSendDeferred===true인 세션만 제외한다.
+  const handleDeferUnsentJournal = async (row) => {
+    if (!row.sessionId || journalDeferSavingId) return;
+    setJournalDeferSavingId(row.sessionId);
+    try {
+      await setSessionJournalDeferred(row.member.id, row.sessionId, true);
+      setJournalDeferOverrides(prev => ({ ...prev, [row.sessionId]: true }));
+      showToast?.("수업일지 미전송 알림을 보류했습니다.");
+    } catch(e) {
+      console.error(e);
+      showToast?.("저장 실패: " + (e?.message || "오류"), "err");
+    } finally {
+      setJournalDeferSavingId(null);
     }
   };
   // 알림 클릭 — 읽음 처리 후 type별 목적 화면으로 이동 (회원 목록 피드와 동일 동작)
@@ -12167,21 +12225,27 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                 <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.lastDate)} 수업 · {statusText} · 다음 예약 없음</div>
               </div>
               <span style={{flexShrink:0,fontFamily:DB.font,fontWeight:700,fontSize:10,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.10)",color:"#B45309"}}>{badge}</span>
-              <button onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-next-session"})} style={{flexShrink:0,border:"none",borderRadius:10,padding:"9px 15px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,cursor:"pointer"}}>다음 일정 등록</button>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-next-session"})} style={{flexShrink:0,border:"none",borderRadius:10,padding:"9px 15px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:"#fff",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,cursor:"pointer"}}>다음 일정 등록</button>
+                <button onClick={()=>handleSetFollowupPending(row)} disabled={followupSavingId===row.member.id} title="지금은 다음 일정 알림에서 제외합니다(회원 상세에서 다시 해제할 수 있어요)" style={{flexShrink:0,border:`1px solid ${DB.border}`,borderRadius:10,padding:"9px 13px",fontSize:12,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,cursor:followupSavingId===row.member.id?"default":"pointer",opacity:followupSavingId===row.member.id?0.6:1}}>{followupSavingId===row.member.id?"처리 중...":"일정 미정"}</button>
+              </div>
             </div>
           );
         }} />
 
         {/* ═══ 수업일지 미전송 — 실제 수업 기록은 저장됐지만 아직 회원에게 전송하지 않은 회원 (예약만 있는 회원은 제외) ═══ */}
         <TodayListCard id="home-unsent-sessions" isWide={isWide} title="수업일지 미전송" count={unsentSessionRows.length} unit="건" captionText="수업 기록은 저장됐지만 아직 회원에게 전송하지 않았습니다." emptyText="모든 수업일지가 전송됐습니다" rows={unsentSessionRows} renderRow={(row,i)=>(
-          <button key={row.member.id} onClick={()=>onSelectMember?.(row.member)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
-            <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
-              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 수업일지 미전송{row.count>1?` · 미전송 ${row.count}건`:""}</div>
-            </div>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
-          </button>
+          <div key={row.member.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 2px",borderTop:i===0?"none":DB.hairline}}>
+            <button onClick={()=>onSelectMember?.(row.member)} style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:12,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"}}>
+              <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(245,158,11,.13)",color:"#B45309",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px"}}>{row.member.name} 회원</div>
+                <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>{formatMonthDayKo(row.date)} 수업 · 수업일지 미전송{row.count>1?` · 미전송 ${row.count}건`:""}</div>
+              </div>
+            </button>
+            <button onClick={()=>handleDeferUnsentJournal(row)} disabled={journalDeferSavingId===row.sessionId} title="이 수업 기록만 미전송 알림에서 제외합니다(회원 상세 히스토리에서 다시 해제할 수 있어요)" style={{flexShrink:0,border:`1px solid ${DB.border}`,borderRadius:9,padding:"6px 11px",fontSize:11,fontWeight:700,fontFamily:DB.font,color:DB.sub,background:DB.card,cursor:journalDeferSavingId===row.sessionId?"default":"pointer",opacity:journalDeferSavingId===row.sessionId?0.6:1}}>{journalDeferSavingId===row.sessionId?"처리 중...":"보류"}</button>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}><polyline points="9 6 15 12 9 18"/></svg>
+          </div>
         )} />
 
         {/* ═══ 수업일지 미확인 — 이미 회원에게 공개됐지만 회원이 아직 상세를 열어보지 않은 최근 14일 이내 기록 (미전송과는 별개 상태) ═══ */}
@@ -12519,6 +12583,8 @@ function buildTodaySummary(members, liveMembersById, todayKST) {
 // nextWorkoutDate가 비어 있으면 그대로 "다음 예약 없음"으로 처리된다.
 // 회원 상태 필터 — 기존 member.status 필드(값 없으면 "active" 기본, MembersScreen의 mStatus(m)와 동일 판정)를 그대로 재사용해
 // "active"가 아닌 회원(휴식중=paused/종료=ended 등)은 다음 예약 판별 이전에 제외한다. 새 상태값·새 필드는 만들지 않는다.
+// 관리자 예외 필터 — members/{id}.scheduleFollowupStatus === "pending"(관리자가 "일정 미정"으로 보류)이면
+// 기존 자동 조건을 만족해도 목록에서 제외한다. 자동 판정 자체는 건드리지 않고, 그 위에 얹는 필터일 뿐이다.
 function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
   const rows = [];
   (members || []).forEach(m => {
@@ -12526,6 +12592,7 @@ function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
     const live = liveMembersById[m.id];
     const lm = live ? { ...m, ...live } : m;
     if ((lm.status || "active") !== "active") return; // 휴식중/종료 등 비유효 회원 제외
+    if (lm.scheduleFollowupStatus === "pending") return; // 관리자가 "일정 미정"으로 보류한 회원 제외
     const ss = sessionsMap?.[lm.id] || [];
     const realPast = ss
       .filter(s => {
@@ -12856,7 +12923,10 @@ function buildPtRenewalNoticeList(members, liveMembersById) {
 // 또는 UNSENT_SESSION_START_DATE 이후 과거 수업 기록이 저장됐지만 미전송인 경우만 포함
 // (hasRealExercise 판별은 buildNextBookingList와 동일). 미래 날짜 데이터가 섞여도 d<=todayKST로 방어.
 // 0회차(체험 수업, isTrialSessionNo)는 판정 대상에서 완전히 제외 — 기록 자체는 삭제·숨김하지 않고 이 목록에서만 뺀다.
-// 회원당 한 행만 노출(가장 최근 미전송 날짜 대표 표시) — 추가 미전송 건수는 count로 함께 반환해 목록에서 보조 표시한다.
+// 관리자 예외 필터 — 세션 문서 단위 journalSendDeferred===true(관리자가 "보류")는 이 목록에서만 제외한다.
+// 회원 단위가 아니라 세션 단위라 같은 회원의 다른 미전송 기록은 그대로 노출된다.
+// 회원당 한 행만 노출(가장 최근 미전송 날짜 대표 표시, sessionId도 함께 반환해 그 기록 단위로 보류 처리 가능) —
+// 추가 미전송 건수는 count로 함께 반환해 목록에서 보조 표시한다.
 function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayKST) {
   const rows = [];
   (members || []).forEach(m => {
@@ -12866,17 +12936,19 @@ function buildUnsentSessionMembers(members, liveMembersById, sessionsMap, todayK
     if ((lm.status || "active") !== "active") return;
     const ss = sessionsMap?.[lm.id] || [];
     let latestDate = "";
+    let latestSessionId = null;
     let unsentCount = 0;
     ss.forEach(s => {
       if (isTrialSessionNo(s.sessionNo)) return; // 체험 수업(0회차)은 미전송 판정 대상 아님
+      if (s.journalSendDeferred === true) return; // 관리자가 이 기록만 보류
       const d = toUnsentCheckDateKey(s.date || s.sessionDate || s.createdAt);
       if (!d || d < UNSENT_SESSION_START_DATE || d > todayKST) return; // 기준일 이전·미래 예약은 제외
       const hasRealExercise = (s.exercises || []).some(e => e?.name || isFuncEx(e));
       if (!hasRealExercise || s.isPublished === true) return;
       unsentCount += 1;
-      if (d > latestDate) latestDate = d;
+      if (d > latestDate) { latestDate = d; latestSessionId = s.id; }
     });
-    if (unsentCount > 0) rows.push({ member: lm, date: latestDate, count: unsentCount });
+    if (unsentCount > 0) rows.push({ member: lm, date: latestDate, count: unsentCount, sessionId: latestSessionId });
   });
   return rows.sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;
@@ -16321,9 +16393,26 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     setPtSaving(true);
     try {
       const patch = { nextWorkoutDate: value, nextWorkoutDateUpdatedAt: new Date().toISOString() };
+      // 실제 다음 일정 등록이 최우선 상태 — 관리자가 걸어둔 "일정 미정" 보류가 남아있어도 실제 날짜가 들어오면 자동 해제한다.
+      if (value && member.scheduleFollowupStatus === "pending") {
+        patch.scheduleFollowupStatus = "";
+        patch.scheduleFollowupUpdatedAt = new Date().toISOString();
+      }
       await updateMember(member.id, patch);
       onMemberPatch(patch);
     } catch(e) { console.error(e); } finally { setPtSaving(false); }
+  };
+  // "다음 예약이 필요한 회원" 홈 목록에서 건 "일정 미정" 보류를 회원 상세에서 직접 해제 — 해제 시점에도
+  // 실제 다음 일정이 없으면 자동 판정 조건이 다시 그대로 살아나 홈 목록에 재노출된다(별도 상태 전이 없음).
+  const handleReleaseFollowupPending = async() => {
+    if (ptSaving) return;
+    setPtSaving(true);
+    try {
+      const patch = { scheduleFollowupStatus: "", scheduleFollowupUpdatedAt: new Date().toISOString() };
+      await updateMember(member.id, patch);
+      onMemberPatch(patch);
+      showToast?.("일정 미정 보류를 해제했습니다.");
+    } catch(e) { console.error(e); showToast?.("해제 실패: " + (e?.message||"오류"), "err"); } finally { setPtSaving(false); }
   };
   const handleSaveNextPart = async(value) => {
     if (ptSaving) return;
@@ -17299,6 +17388,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               <span style={cardTitle}>다음 수업 준비</span>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <span style={{fontSize:10.5,color:DB.faint}}>오늘 수업 기록과 별개로 저장됩니다</span>
+                {member.scheduleFollowupStatus === "pending" && (
+                  <span style={{display:"flex",alignItems:"center",gap:6,fontSize:10.5,fontWeight:700,color:"#B45309",background:"rgba(245,158,11,.10)",borderRadius:999,padding:"3px 5px 3px 10px"}}>
+                    홈 "다음 예약 필요" 알림 보류중
+                    <button onClick={handleReleaseFollowupPending} disabled={ptSaving} style={{border:"none",borderRadius:999,padding:"3px 9px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,color:"#fff",background:"#B45309",cursor:ptSaving?"default":"pointer"}}>일정 미정 해제</button>
+                  </span>
+                )}
                 <button onClick={()=>setScreen("routine_recommend")} style={{border:"none",background:DB.mintTint,color:DB.mintSoft,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>루틴 추천 전송 →</button>
               </div>
             </div>
@@ -21889,7 +21984,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onSendPair, member, initialReadFilter=null, onInitialReadFilterConsumed }) {
+function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onToggleJournalDefer, onSendPair, member, initialReadFilter=null, onInitialReadFilterConsumed }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   // 세션 날짜(YYYY-MM-DD) 기준으로 그날 회원이 입력한 체중/칼로리/유산소를 매칭 — 새 저장 경로 없이 기존 기록만 조회
   const weightByDate = useMemo(() => {
@@ -22293,6 +22388,16 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
                           background:"rgba(15,148,136,.10)",color:DB.mintSoft}}>
                           ✅ 기록 완료{s.pairRecordedAt ? ` · ${String((s.pairRecordedAt?.toDate ? s.pairRecordedAt.toDate() : s.pairRecordedAt) || "").slice(0,16).replace("T"," ")}` : ""}
                         </span>
+                      )}
+                      {/* 홈 "수업일지 미전송" 알림 보류 — 공개 전 기록에만 의미가 있고, 0회차(체험)는 애초에 그 목록 대상이 아니라 노출하지 않는다 */}
+                      {!s.isPublished && !isTrialSessionNo(s.sessionNo) && (
+                        <button onClick={() => onToggleJournalDefer?.(s)}
+                          title={s.journalSendDeferred ? "이 기록을 다시 미전송 알림 대상으로 되돌립니다" : "이 기록만 미전송 알림에서 제외합니다"}
+                          style={{background: s.journalSendDeferred ? "rgba(245,158,11,.14)" : "rgba(245,158,11,.06)",
+                            border:"1px solid rgba(245,158,11,.35)",borderRadius:8,
+                            color:"#B45309",fontSize:12,fontWeight:700,padding:"6px 12px",cursor:"pointer"}}>
+                          {s.journalSendDeferred ? "보류 해제" : "보류"}
+                        </button>
                       )}
                       <div style={{display:"flex",gap:8,width:isMobile?"100%":"auto"}}>
                         <button onClick={() => onEdit(s)}

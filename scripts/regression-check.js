@@ -312,7 +312,27 @@ const unsentToday = daysAgoStr(0);
 const unsentPublishedAfterCutoff = new Date().toISOString();
 const unsentPublishedBeforeCutoff = new Date(Date.now() - 365 * 86400000).toISOString();
 const checks = [
-  ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id')],
+  ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('addSession(member.id, { ...payload, createdAt: now })') && app.includes('updateSession(member.id, editSess.id, payload)') && app.includes('await withTimeout(writePromise')],
+  ['수업일지 저장: 좁은 화면 무한 로딩 원인(SessionScreen 저장 버튼에 중복 클릭 가드·저장 중 표시가 전혀 없던 문제) 수정', (() => {
+    const i = app.indexOf('function SessionScreen(');
+    const j = app.indexOf('function CardSaveView');
+    const slice = app.slice(i, j);
+    return slice.includes('const savingRef = useRef(false);') &&
+      slice.includes('const [saving, setSaving] = useState(false);') &&
+      slice.includes('async function handleSave()') &&
+      slice.includes('if (savingRef.current) return;') &&
+      slice.includes('await onSave(payload);') &&
+      slice.includes('savingRef.current = false;') &&
+      slice.includes('setSaving(false);');
+  })()],
+  ['수업일지 저장: 상단·하단 저장 버튼 모두 저장 중에는 disabled + "저장 중..." 표시(중복 저장 방지)', (() => {
+    const i = app.indexOf('function SessionScreen(');
+    const j = app.indexOf('function CardSaveView');
+    const slice = app.slice(i, j);
+    return slice.includes('<button onClick={handleSaveTop} disabled={saving}') &&
+      slice.includes('{saving ? "저장 중..." : `💾 ${isOwner(member) ? "운동 저장" : "저장"}`}') &&
+      slice.includes('<Btn full onClick={handleSave} disabled={saving}');
+  })()],
   ...[
     ['수업일지 미전송: 0회차(숫자) + 미전송 → 목록에서 제외', lib => {
       const members = [unsentMockMember('trial_num')];
@@ -3889,7 +3909,7 @@ const checks = [
     })()
   ],
   ['수업 준비: PT 저장 구조·저장 로직에 영향 없음(기존 handleSaveSession 경로 그대로)',
-    app.includes('async function handleSaveSession') && app.includes('await addSession(member.id') && app.includes('await updateSession(member.id') &&
+    app.includes('async function handleSaveSession') && app.includes('addSession(member.id, { ...payload, createdAt: now })') && app.includes('updateSession(member.id, editSess.id, payload)') && app.includes('await withTimeout(writePromise') &&
     // 준비 카드에서 파생된 값을 세션 문서에 저장하지 않는다
     !/recommendedStartWeight|sessionPrepResult|prepRecommendation/.test(app) &&
     !/recommendedStartWeight|sessionPrepResult|prepRecommendation/.test(db)

@@ -9980,17 +9980,26 @@ export default function App() {
   }
   async function handleSaveSession(d) {
     console.log("[TEO GYM] handleSaveSession — memberId:", member?.id, "data:", d?.sessionNo);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      const offlineErr = new Error("인터넷 연결이 원활하지 않습니다. 연결 후 다시 저장해주세요.");
+      showToast(offlineErr.message, "err");
+      throw offlineErr;
+    }
     setLoading(true);
     try {
       const now = new Date().toISOString();
       const payload = { ...d, updatedAt: now };
-      if (editSess?.id) {
-        await updateSession(member.id, editSess.id, payload);
-        showToast("수업 수정 완료 ✓");
-      } else {
-        await addSession(member.id, { ...payload, createdAt: now });
-        showToast("수업 저장 완료 ✓");
-      }
+      const isEditSave = !!editSess?.id;
+      // Firestore 쓰기가 네트워크 문제로 응답 없이 멈추는 경우를 막는 최후의 안전장치(handlePublishSession과 동일한 패턴).
+      // 원인 자체(중복 클릭 등)는 SessionScreen의 saving 가드로 이미 막혀 있으므로, 여기서는 응답이 정말
+      // 오지 않을 때만 타임아웃으로 빠져나온다. 타임아웃이어도 Firestore 쓰기 자체가 취소되는 것은 아니므로
+      // 자동 재시도(중복 저장 위험)는 하지 않고, 사용자가 목록에서 실제 저장 여부를 확인하도록 안내한다.
+      const writePromise = isEditSave
+        ? updateSession(member.id, editSess.id, payload)
+        : addSession(member.id, { ...payload, createdAt: now });
+      writePromise.catch(() => {}); // 타임아웃 처리 후 늦게 도착하는 응답이 unhandled rejection을 남기지 않도록
+      await withTimeout(writePromise, 20000, "저장이 지연되고 있습니다. 잠시 후 목록에서 실제로 저장되었는지 확인한 뒤 필요하면 다시 시도해주세요.");
+      showToast(isEditSave ? "수업 수정 완료 ✓" : "수업 저장 완료 ✓");
       setEditSess(null);
       const newSessions = await getSessions(member.id);
       setSessions(newSessions);
@@ -18791,6 +18800,13 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const [draftPopup,  setDraftPopup]  = useState(null); // draft 복원 팝업 데이터sessions.length > 0 ? sessions[sessions.length-1] : null;
   const pRef   = useRef(null);
 
+  // ── 저장 진행 상태 & 중복 제출 방지 ──────────────────────────────────
+  // 좁은 화면에서는 폼이 길어져 상단 sticky 저장 버튼(handleSaveTop)을 반복해서 누르기 쉽고,
+  // 하단 저장 버튼(handleSave)과 겹쳐 눌릴 수도 있다. 두 버튼이 같은 handleSave를 호출하므로
+  // savingRef(동기 가드) + saving(버튼 비활성/문구 표시)로 어떤 경로로 눌러도 동시에 하나만 실행되게 막는다.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+
   const [trainerName,    setTrainerName]    = useState(editData?.trainerName    || last?.trainerName    || "김태오");
   const [gymName,        setGymName]        = useState(editData?.gymName        || last?.gymName        || "테오짐");
   // 날짜·"오늘의 운동 부위" 초기값 — 신규 기록이면 회원의 "다음 수업 준비"(nextWorkoutDate/nextWorkoutPart)를 반영한다.
@@ -19295,8 +19311,15 @@ function updateEx(ei, key, val) {
     }));
   }
 
-  function handleSave() {
+  async function handleSave() {
+    // 동기 가드를 가장 먼저 검사 — 같은 틱에서 두 번째 호출(빠른 연속 클릭·터치 더블 이벤트·
+    // 상단/하단 버튼 동시 눌림)이 들어와도 saving state 갱신을 기다리지 않고 즉시 막는다.
+    if (savingRef.current) return;
     if (!sessionNo) { showToast("회차를 입력해주세요","err"); return; }
+    savingRef.current = true;
+    setSaving(true);
+
+    try {
 
     // 내부 state 필드 제거 후 저장 (_histIdx, _loaded, partAutoAssigned 등 Firestore에 불필요 — 화면 상태 전용)
     const cleanExercises = exercises.map(e => {
@@ -19392,7 +19415,19 @@ function updateEx(ei, key, val) {
     }
 
     // 회원1(A) 저장 — 2:1이든 1:1이든 항상 A는 onSave로 저장
-    onSave(payload);
+    await onSave(payload);
+    } catch(e) {
+      // onSave(App의 handleSaveSession)는 실패 시 이미 자체적으로 toast를 띄운 뒤 정상 resolve하므로
+      // (오프라인 등 일부 경우만 예외로 throw) 여기서 다시 toast를 띄우면 같은 실패가 중복 안내된다.
+      // handlePublishSession 호출부(22174행 부근)와 동일한 관례: 여기서는 saving 상태만 해제해
+      // 버튼을 다시 누를 수 있게 하고, 실제 안내는 App 쪽 toast에 맡긴다.
+      // 저장 성공 여부가 불확실한 상태이므로 여기서 자동 재시도는 하지 않는다.
+    } finally {
+      // 저장 성공/실패와 무관하게, 그리고 이후 화면 전환·목록 재조회가 실패하더라도
+      // "저장 중" 상태가 무한히 유지되지 않도록 항상 해제한다.
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
 
   function handleSaveTop() { handleSave(); }
@@ -19506,11 +19541,11 @@ function updateEx(ei, key, val) {
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
             {draftStatus && !isEdit && <span style={{fontSize:10,color:"#94A3B8",whiteSpace:"nowrap"}}>{draftStatus}</span>}
-            <button onClick={handleSaveTop}
-              style={{padding:"10px 18px",borderRadius:10,border:"none",cursor:"pointer",
+            <button onClick={handleSaveTop} disabled={saving}
+              style={{padding:"10px 18px",borderRadius:10,border:"none",cursor:saving?"default":"pointer",
                 background:"#0F9488",color:"#fff",fontSize:13.5,fontWeight:800,whiteSpace:"nowrap",
-                boxShadow:"0 3px 10px rgba(15,148,136,.28)"}}>
-              💾 {isOwner(member) ? "운동 저장" : "저장"}
+                boxShadow:"0 3px 10px rgba(15,148,136,.28)",opacity:saving?0.65:1}}>
+              {saving ? "저장 중..." : `💾 ${isOwner(member) ? "운동 저장" : "저장"}`}
             </button>
           </div>
         </div>
@@ -20520,7 +20555,7 @@ function updateEx(ei, key, val) {
           state와 handleSave 저장 로직은 그대로 유지 — 기존 값이 있으면 수정 없이 그대로 재저장된다. */}
 
       <div style={{marginTop:14,paddingBottom:32}}>
-        <Btn full onClick={handleSave} style={{background:"#39C7B8",color:"#fff"}}>{isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "관리자용 저장 →" : "관리자용 저장 →")}</Btn>
+        <Btn full onClick={handleSave} disabled={saving} style={{background:"#39C7B8",color:"#fff",opacity:saving?0.65:1,cursor:saving?"default":"pointer"}}>{saving ? "저장 중..." : (isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "관리자용 저장 →" : "관리자용 저장 →"))}</Btn>
       </div>
 
       <div ref={pRef} style={{display:"none"}}>

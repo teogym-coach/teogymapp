@@ -9904,9 +9904,22 @@ export default function App() {
     finally { setLoading(false); }
   }
 
-  // 회원 상태 변경 (active | paused | ended | waiting)
+  // 회원 상태 변경 실행 — 실제 Firestore write(updateMember)와 members state 동기화를 한 곳에서만 담당한다.
+  // 일반 회원 확인창(handleStatusChange)과 테스트 회원 전용 확인창(handleTestMemberStatusChange) 모두
+  // 이 함수 하나만 호출해 저장 경로가 갈라지지 않게 한다.
+  const MEMBER_STATUS_LABELS = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
+  async function applyMemberStatusChange(id, newStatus) {
+    const patch = { status: newStatus };
+    if (newStatus === "ended")  patch.endedAt = new Date().toISOString().split("T")[0];
+    if (newStatus === "active") patch.endedAt = null;
+    await updateMember(id, patch);
+    setMembers(prev => prev.map(m => m.id === id ? {...m, ...patch} : m));
+    return patch;
+  }
+
+  // 회원 상태 변경 (active | paused | ended | waiting) — 일반 회원 "⋯" 메뉴 전용, window.confirm으로 확인
   async function handleStatusChange(id, newStatus) {
-    const labels = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
+    const labels = MEMBER_STATUS_LABELS;
     const msg = newStatus === "ended"
       ? `종료 처리하시겠습니까?\n수업 기록은 유지됩니다.`
       : newStatus === "waiting"
@@ -9914,13 +9927,16 @@ export default function App() {
       : `${labels[newStatus]}으로 변경하시겠습니까?`;
     if (!window.confirm(msg)) return;
     try {
-      const patch = { status: newStatus };
-      if (newStatus === "ended")  patch.endedAt = new Date().toISOString().split("T")[0];
-      if (newStatus === "active") patch.endedAt = null;
-      await updateMember(id, patch);
-      setMembers(prev => prev.map(m => m.id === id ? {...m, ...patch} : m));
+      await applyMemberStatusChange(id, newStatus);
       showToast(`${labels[newStatus]} 처리 완료 ✓`);
     } catch(e) { showToast(e.message, "err"); }
+  }
+
+  // 테스트 회원 전용 상태 변경 — "🧪 테스트 회원 관리" 패널의 전용 확인 모달에서 이미 확인을 마친 뒤 호출된다.
+  // isTestMember===true 판별은 호출부(MembersScreen 테스트 패널)에서 먼저 방어적으로 확인하며,
+  // 저장 경로는 일반 회원과 완전히 동일한 applyMemberStatusChange/updateMember를 그대로 재사용한다.
+  async function handleTestMemberStatusChange(id, newStatus) {
+    return applyMemberStatusChange(id, newStatus);
   }
 
   // 최종 확인은 호출부(MembersScreen의 삭제 확인 모달)에서 이미 마쳤으므로 여기서는 실행만 담당한다.
@@ -10433,7 +10449,7 @@ export default function App() {
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
         {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} sessionReadsMapByMember={sessionReadsMapByMember} appUsageSummaryByMember={appUsageSummaryByMember} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} onOpenMemberUnreadHistory={openMemberUnreadHistory} />}
-        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} weightBodyById={weightBodyById} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
+        {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} weightBodyById={weightBodyById} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onTestStatusChange={handleTestMemberStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm prefill={memberFormPrefill} onBack={() => { setMemberFormPrefill(null); if (memberFormPrefill) { setScreen("consultations"); return; } loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
@@ -12486,10 +12502,27 @@ function canUseMemberLinkedFeatures(member) {
 }
 
 // 회원앱 로그인/상태 차단/공지/2:1 테스트용 프리셋 — docs/member-app-test-accounts.md 참고
-// 계정 1개를 만들어두고 상태(active/paused/ended)만 바꿔가며 재사용한다.
+// 계정 1개를 만들어두고 상태(active/paused/ended/waiting)만 바꿔가며 재사용한다.
 const TEST_MEMBER_PRESETS = [
   { key:"test", name:"🧪 TEST MEMBER", email:"teogymapptest@gmail.com", status:"active" },
 ];
+// "🧪 테스트 회원 관리" 패널 전용 상태 변경 옵션 — 내부 저장값은 일반 회원과 완전히 동일(active/paused/ended/waiting)하다.
+const TEST_STATUS_OPTIONS = [
+  { key:"active",  label:"활성" },
+  { key:"paused",  label:"휴식" },
+  { key:"ended",   label:"종료" },
+  { key:"waiting", label:"수업 대기" },
+];
+const TEST_STATUS_LABELS = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
+// 방어적 테스트 회원 판별 — email 프리셋 일치만으로 판단하지 않고 isTestMember===true·이름까지 함께 확인해야
+// 이 헬퍼가 실제 문서를 반환한다. 테스트 패널의 상태 변경은 반드시 이 헬퍼를 통과한 문서에만 적용된다.
+function findTestMemberDoc(preset, memberList) {
+  return (memberList || []).find(m =>
+    m && m.isTestMember === true &&
+    (m.email || "").trim().toLowerCase() === preset.email &&
+    m.name === preset.name
+  ) || null;
+}
 
 // 회원 카드 "오늘 입력" 배지/최근 활동 표시 우선순위 (스펙: 메모>근육통>RPE>체중>유산소>칼로리>걸음수)
 // personalWorkout* 3종은 PT 수업의 soreness/rpe와 절대 같은 type을 쓰지 않는다(집계·문구가 섞이면 출처 구분이 깨짐).
@@ -13288,7 +13321,7 @@ function StatusBlock({icon,label,value,tone,muted,sub,subTone}){
   );
 }
 
-function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyById={}, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast, initialFilter=null, onInitialFilterConsumed }) {
+function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyById={}, loading, membersError=null, onSelect, onAdd, onAddTestMember, onRefresh, onDelete, onStatusChange, onTestStatusChange, onResumeDraft2_1, onPair21, pairSessions=[], notificationReads=null, onMarkEventsRead, onBack, setScreen, loadPairSessions, showToast, initialFilter=null, onInitialFilterConsumed }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   useEffect(()=>{
     const h=()=>setWinW(window.innerWidth);
@@ -13316,6 +13349,9 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
   const [showSort,   setShowSort]   = useState(false);
   const [statusMenu, setStatusMenu] = useState(null); // 상태 메뉴 열린 회원 id
   const [showTestPanel, setShowTestPanel] = useState(false);
+  const [testStatusConfirm, setTestStatusConfirm] = useState(null); // {preset, testMember, targetStatus} — 테스트 회원 상태 변경 확인 모달
+  const [testStatusBusyKey, setTestStatusBusyKey] = useState(null); // 저장 중인 preset.key(중복 클릭 방지)
+  const [testStatusMsgByKey, setTestStatusMsgByKey] = useState({}); // preset.key → {ok, text} 성공/실패 결과 메시지
   const [deleteConfirmMember, setDeleteConfirmMember] = useState(null); // 회원 삭제 최종 확인 모달 대상 회원
   const [deletingMember, setDeletingMember] = useState(false); // 삭제 처리 중 — 중복 클릭 방지
 
@@ -13586,15 +13622,47 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
       {showTestPanel && (
         <div style={{marginBottom:12,padding:"12px 14px",borderRadius:14,background:"#fff",border:"1px solid rgba(139,92,246,.2)",boxShadow:DB.shadow}}>
           <div style={{fontSize:11,color:"#7C3AED",fontWeight:600,fontFamily:DB.font}}>회원앱 로그인/상태차단/공지/2:1 테스트 전용 — 실제 회원과 무관</div>
-          <div style={{display:"grid",gap:6,marginTop:8}}>
+          <div style={{display:"grid",gap:10,marginTop:8}}>
             {TEST_MEMBER_PRESETS.map(preset=>{
-              const exists = members.some(m => (m.email||"").trim().toLowerCase() === preset.email);
+              // 방어적 판별 — email 프리셋 일치만으로 대상을 정하지 않고 isTestMember===true·이름까지 함께 확인한다.
+              // 이 헬퍼로 찾은 문서만 아래 상태 변경 버튼의 대상이 될 수 있어, 일반 회원을 실수로 건드릴 수 없다.
+              const testMember = findTestMemberDoc(preset, members);
+              const exists = !!testMember;
+              const testStatus = testMember ? mStatus(testMember) : null;
+              const msg = testStatusMsgByKey[preset.key];
               return (
-                <div key={preset.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-                  <div style={{fontSize:11.5,color:DB.text,fontFamily:DB.font}}>{preset.name} <span style={{color:DB.faint}}>({preset.email})</span></div>
-                  <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font}}>
-                    {exists?"생성됨":"생성"}
-                  </button>
+                <div key={preset.key} style={{display:"grid",gap:6}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                    <div style={{fontSize:11.5,color:DB.text,fontFamily:DB.font}}>{preset.name} <span style={{color:DB.faint}}>({preset.email})</span></div>
+                    <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font}}>
+                      {exists?"생성됨":"생성"}
+                    </button>
+                  </div>
+                  {testMember && (
+                    <div style={{background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.15)",borderRadius:10,padding:"9px 10px",display:"grid",gap:6}}>
+                      <div style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font,lineHeight:1.6}}>
+                        테스트 전용 계정 — 이 상태 변경은 회원 ID <b style={{color:DB.text}}>{testMember.id}</b>의 🧪 테스트 문서에만 적용됩니다.
+                      </div>
+                      <div style={{fontSize:11,color:DB.text,fontFamily:DB.font,fontWeight:700}}>
+                        현재 상태: <span style={{color:"#7C3AED"}}>{TEST_STATUS_LABELS[testStatus]||testStatus}</span>
+                      </div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {TEST_STATUS_OPTIONS.map(opt=>(
+                          <button key={opt.key} disabled={testStatus===opt.key||testStatusBusyKey===preset.key}
+                            onClick={()=>setTestStatusConfirm({preset, testMember, targetStatus:opt.key})}
+                            style={{border:`1px solid ${testStatus===opt.key?"rgba(124,58,237,.4)":DB.border}`,
+                              background:testStatus===opt.key?"rgba(139,92,246,.12)":"#fff",
+                              color:testStatus===opt.key?"#7C3AED":DB.text,
+                              borderRadius:999,padding:"5px 11px",fontSize:10.5,fontWeight:700,
+                              cursor:(testStatus===opt.key||testStatusBusyKey===preset.key)?"default":"pointer",
+                              fontFamily:DB.font,opacity:testStatusBusyKey===preset.key?.6:1}}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {msg && <div style={{fontSize:10.5,fontWeight:700,fontFamily:DB.font,color:msg.ok?"#0F9488":DB.danger}}>{msg.text}</div>}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -13603,6 +13671,33 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
             생성 후 회원 상세 → 회원앱 관리 → 회원앱 초대 버튼으로 Firebase Auth 계정을 연결해야 로그인 테스트가 가능합니다.
           </div>
         </div>
+      )}
+      {testStatusConfirm && (
+        <TestMemberStatusConfirmModal
+          memberName={testStatusConfirm.preset.name}
+          targetLabel={TEST_STATUS_LABELS[testStatusConfirm.targetStatus]}
+          busy={testStatusBusyKey===testStatusConfirm.preset.key}
+          onCancel={()=>{ if(testStatusBusyKey!==testStatusConfirm.preset.key) setTestStatusConfirm(null); }}
+          onConfirm={async()=>{
+            const { preset, testMember, targetStatus } = testStatusConfirm;
+            // 실행 직전 다시 한번 방어적으로 확인 — isTestMember===true가 아니면 절대 실행하지 않는다.
+            if (!testMember || testMember.isTestMember !== true) {
+              setTestStatusMsgByKey(prev=>({...prev, [preset.key]:{ok:false,text:"테스트 회원으로 확인되지 않아 취소했습니다."}}));
+              setTestStatusConfirm(null);
+              return;
+            }
+            setTestStatusBusyKey(preset.key);
+            try {
+              await onTestStatusChange?.(testMember.id, targetStatus);
+              await onRefresh?.(); // Firestore에 실제로 저장된 값을 다시 읽어와 반영
+              setTestStatusMsgByKey(prev=>({...prev, [preset.key]:{ok:true,text:`✓ ${TEST_STATUS_LABELS[targetStatus]}(으)로 변경 완료 · 재조회로 확인됨`}}));
+              setTestStatusConfirm(null);
+            } catch(e) {
+              setTestStatusMsgByKey(prev=>({...prev, [preset.key]:{ok:false,text:e?.message||"상태 변경 실패"}}));
+            } finally {
+              setTestStatusBusyKey(null);
+            }
+          }}/>
       )}
 
       {/* 검색창 — 필터 탭 행 안으로 이동. 검색·필터 로직은 변경 없음, 배치만 변경.
@@ -14035,6 +14130,35 @@ function MemberDeleteConfirmModal({ member, busy, onCancel, onConfirm }) {
           <button onClick={onConfirm} disabled={busy}
             style={{flex:1,border:"none",background:DB.danger,color:"#fff",borderRadius:12,padding:"11px 0",fontSize:13,fontWeight:800,fontFamily:DB.font,cursor:busy?"default":"pointer",opacity:busy?.7:1}}>
             {busy?"삭제 중...":"회원 삭제"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 테스트 회원 상태 변경 확인 모달 — "🧪 테스트 회원 관리" 패널 전용. 실제 회원 삭제/상태 변경 모달과
+// 구조는 비슷하지만 위험 동작이 아니므로(가역적, 실제 회원 데이터 무관) danger 색상은 쓰지 않는다.
+function TestMemberStatusConfirmModal({ memberName, targetLabel, busy, onCancel, onConfirm }) {
+  const cancelRef = useRef(null);
+  useEffect(() => { cancelRef.current?.focus(); }, []);
+  return (
+    <div role="dialog" aria-modal="true" aria-label="테스트 회원 상태 변경 확인"
+      onClick={e=>{ if (e.target===e.currentTarget && !busy) onCancel(); }}
+      style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{width:"100%",maxWidth:360,background:"#FFFFFF",borderRadius:20,border:"1px solid #D6DCE3",boxShadow:"0 20px 60px rgba(15,23,42,.25)",padding:"22px 20px 18px"}}>
+        <div style={{fontSize:15.5,fontWeight:800,color:DB.text,marginBottom:8,fontFamily:DB.font}}>테스트 회원 상태를 변경할까요?</div>
+        <div style={{fontSize:12.5,color:DB.sub,lineHeight:1.6,marginBottom:20,fontFamily:DB.font}}>
+          {memberName}의 상태를 '{targetLabel}'로 변경합니다. 실제 회원 데이터에는 영향을 주지 않습니다.
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button ref={cancelRef} onClick={onCancel} disabled={busy}
+            style={{flex:1,border:`1px solid ${DB.border}`,background:"#fff",color:DB.text,borderRadius:12,padding:"11px 0",fontSize:13,fontWeight:700,fontFamily:DB.font,cursor:busy?"default":"pointer"}}>
+            취소
+          </button>
+          <button onClick={onConfirm} disabled={busy}
+            style={{flex:1,border:"none",background:"#7C3AED",color:"#fff",borderRadius:12,padding:"11px 0",fontSize:13,fontWeight:800,fontFamily:DB.font,cursor:busy?"default":"pointer",opacity:busy?.7:1}}>
+            {busy?"변경 중...":"상태 변경"}
           </button>
         </div>
       </div>

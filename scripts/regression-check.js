@@ -5847,10 +5847,32 @@ const checks = [
 
   // ── 회원 상태 "수업 대기"(waiting) 신설 + 삭제 확인 모달 ──
   ['회원 상태: "수업 대기"(waiting) 상태값이 상태 변경 라벨/메뉴/배지에 일관 반영됨(휴식·종료와 다른 별도 값)',
-    app.includes('const labels = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };')
+    app.includes('const MEMBER_STATUS_LABELS = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };')
     && app.includes('⏳ 수업 대기')
     && app.includes('const isWaiting = status === "waiting";')
     && app.includes('{isWaiting && <span')
+  ],
+  ['회원 상태 변경 저장 경로 단일화: 일반 회원(window.confirm)과 테스트 회원 전용 패널이 같은 applyMemberStatusChange/updateMember를 공유',
+    app.includes('async function applyMemberStatusChange(id, newStatus) {')
+    && app.includes('async function handleTestMemberStatusChange(id, newStatus) {')
+    && app.includes('return applyMemberStatusChange(id, newStatus);')
+  ],
+  ['테스트 회원 전용 상태 패널: isTestMember===true + 이메일 + 이름까지 모두 일치해야 대상이 되는 방어적 판별(findTestMemberDoc), 실행 직전 재확인 포함',
+    app.includes('function findTestMemberDoc(preset, memberList) {')
+    && app.includes('m.isTestMember === true &&')
+    && app.includes("(m.email || \"\").trim().toLowerCase() === preset.email &&")
+    && app.includes('m.name === preset.name')
+    && app.includes('if (!testMember || testMember.isTestMember !== true) {')
+  ],
+  ['테스트 회원 전용 상태 패널: 상태 변경 전 전용 확인 모달(TestMemberStatusConfirmModal) 표시 + 변경 후 onRefresh로 Firestore 재조회',
+    app.includes('function TestMemberStatusConfirmModal({ memberName, targetLabel, busy, onCancel, onConfirm }) {')
+    && app.includes('테스트 회원 상태를 변경할까요?')
+    && app.includes("의 상태를 '{targetLabel}'로 변경합니다. 실제 회원 데이터에는 영향을 주지 않습니다.")
+    && app.includes('await onTestStatusChange?.(testMember.id, targetStatus);')
+    && app.includes('await onRefresh?.(); // Firestore에 실제로 저장된 값을 다시 읽어와 반영')
+  ],
+  ['테스트 회원 전용 상태 패널이 일반 회원 목록/집계 제외 로직(isExcludedAdminMember)을 그대로 유지 — isTestMember 회원은 여전히 일반 목록에서 제외',
+    app.includes('if (m.isTestMember === true) return true;')
   ],
   ['회원 상태 필터: MORE_FILTERS/passFilter/검색 결과 라벨에 "수업 대기"(waiting) 추가 — 활성/휴식/종료와 각각 구분',
     app.includes('{key:"waiting", label:"수업 대기"},')

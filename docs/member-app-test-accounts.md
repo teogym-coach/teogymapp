@@ -59,27 +59,34 @@ memberUid는 실제 Firebase Auth 계정의 UID여야 한다. 아래 두 방법 
 
 ## 3. 상태 전환 방법 (매 테스트마다 반복)
 
-🧪 TEST MEMBER는 `isOwner`가 아니므로 일반 회원과 동일하게 회원 목록의 **`···` 상태 변경 메뉴**가 그대로 보인다.
+🧪 TEST MEMBER(`isTestMember: true`)는 `isExcludedAdminMember()`에 의해 일반 회원 목록·검색·모든 상태 필터에서 항상 제외된다(2026-07-15부터 있던 기존 동작). 그래서 일반 회원 카드의 **`···` 상태 변경 메뉴로는 접근할 수 없다** — 대신 관리자 앱의 **`🧪 테스트 회원 관리` 패널** 안에서 상태를 확인하고 변경한다.
 
-1. 관리자앱 → 회원 목록 → 🧪 TEST MEMBER 카드의 **`···`** 버튼 클릭
-2. 드롭다운에서 원하는 상태로 클릭
-   - **✅ 진행중으로 변경** → `status: "active"`
-   - **⏸️ 휴식 처리** → `status: "paused"`
-   - **🔒 종료 처리** → `status: "ended"`
-3. 상태 변경 후 회원앱(`teogymapptest@gmail.com`)으로 로그인해 해당 상태의 동작을 확인
+1. 관리자앱 → 회원 목록 → `🧪 테스트 회원 관리 ▼` 펼치기
+2. 🧪 TEST MEMBER 행 아래에 표시되는 **현재 상태**와 회원 ID를 확인
+3. 원하는 상태 버튼 클릭(활성/휴식/종료/수업 대기) → "테스트 회원 상태를 변경할까요?" 확인 모달에서 **상태 변경** 클릭
+   - **활성** → `status: "active"`
+   - **휴식** → `status: "paused"`
+   - **종료** → `status: "ended"`
+   - **수업 대기** → `status: "waiting"`
+4. 저장 후 패널이 회원 목록을 다시 조회(re-fetch)해 실제 Firestore에 저장된 상태를 그대로 보여주고 "✓ …(으)로 변경 완료 · 재조회로 확인됨" 메시지를 표시한다
+5. 상태 변경 후 회원앱(`teogymapptest@gmail.com`)으로 로그인해 해당 상태의 동작을 확인
+
+이 패널의 상태 변경 버튼은 `isTestMember===true`이면서 프리셋 이메일·이름이 모두 일치하는 문서에만 동작한다(`findTestMemberDoc`) — 일반 회원 상태를 이 패널에서 바꿀 수 없다.
 
 ---
 
 ## 4. 테스트 순서
 
-1. `···` → **진행중으로 변경** → 회원앱 로그인
+1. 패널에서 **활성**으로 변경 → 회원앱 로그인
    - 기대 결과: 정상 로그인, 프로필/수업일지/건강관리/공지 탭 정상 접근
-2. `···` → **휴식 처리** → 회원앱 로그인 (기존 로그인 세션이 남아있다면 새로고침 후 확인)
-   - 기대 결과: "현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요." 메시지, 내부 데이터 접근 불가
-3. `···` → **종료 처리** → 회원앱 로그인
-   - 기대 결과: 휴식중과 동일하게 접근 차단
-4. `···` → **진행중으로 변경**(원상복구) → 관리자앱에서 🧪 TEST MEMBER에게 공지 발행 → 회원앱 공지 탭에서 확인
-5. 🧪 TEST MEMBER를 포함해 2:1 수업 생성 → 정상 저장·목록 표시 확인 (상대방은 실제 회원과 섞지 말 것. 부득이 상대 회원이 필요하면 테스트 종료 후 즉시 2:1 기록 삭제)
+2. 패널에서 **휴식**으로 변경 → 회원앱 로그인 (기존 로그인 세션이 남아있다면 새로고침 후 확인)
+   - 기대 결과: "잠시 쉬어가고 있어요" 안내 화면, 내부 데이터 접근 불가
+3. 패널에서 **종료**로 변경 → 회원앱 로그인
+   - 기대 결과: "함께한 운동 기록을 보관하고 있어요" 안내 화면, 내부 데이터 접근 불가(휴식과 문구만 다르고 차단 정책은 동일)
+4. 패널에서 **수업 대기**로 변경 → 회원앱 로그인
+   - 기대 결과: 차단 없이 정상 로그인, 기존 수업일지·개인운동·건강 기록·분석 화면 조회 가능. 관리자 회원 목록의 "수업 대기" 필터에는 이 테스트 회원이 뜨지 않아야 한다(테스트 회원은 `isExcludedAdminMember`로 일반 목록·필터에서 항상 제외되기 때문)
+5. 패널에서 **활성**으로 변경(원상복구) → 관리자앱에서 🧪 TEST MEMBER에게 공지 발행 → 회원앱 공지 탭에서 확인
+6. 🧪 TEST MEMBER를 포함해 2:1 수업 생성 → 정상 저장·목록 표시 확인 (상대방은 실제 회원과 섞지 말 것. 부득이 상대 회원이 필요하면 테스트 종료 후 즉시 2:1 기록 삭제)
 
 각 단계 사이에 브라우저 캐시로 이전 상태가 남아 보일 수 있으니, 상태를 바꾼 뒤에는 회원앱을 새로고침(강력 새로고침)하고 다시 로그인해서 확인한다.
 
@@ -137,6 +144,9 @@ TEO는 이 가이드의 테스트 대상이 아니다. 아래 원칙은 절대 �
 - 테스트 회원 프리셋: `src/App.jsx` `TEST_MEMBER_PRESETS`
 - 생성 버튼/패널: `src/App.jsx` `MembersScreen` 내 `🧪 테스트 회원 관리` 섹션
 - 생성 핸들러: `src/App.jsx` `handleAddTestMember`
-- 상태 전환: `src/App.jsx` `handleStatusChange` (일반 회원과 동일한 `···` 드롭다운)
+- 일반 회원 목록·집계 제외: `src/App.jsx` `isExcludedAdminMember` (`isTestMember===true`면 항상 제외 — 테스트 패널과 별개로 유지되는 안전장치)
+- 테스트 전용 상태 조회/변경: `src/App.jsx` `findTestMemberDoc`(방어적 판별) · `TEST_STATUS_OPTIONS`/`TEST_STATUS_LABELS` · `TestMemberStatusConfirmModal`(확인 모달) · `handleTestMemberStatusChange`(실행)
+- 일반 회원 상태 전환: `src/App.jsx` `handleStatusChange` (일반 회원 `···` 드롭다운, window.confirm)
+- 두 상태 변경 경로가 공유하는 저장 함수: `src/App.jsx` `applyMemberStatusChange` → `db.js` `updateMember()` (저장 경로 단일화)
 - owner 상태 복구 버튼: `src/App.jsx` `AdminMemberAppPanel` 내 `restoreOwnerActiveStatus`
-- 회원앱 접근 게이트: `src/db.js` `getMemberAppProfile()`, `firestore.rules` `isMemberStatusActive`
+- 회원앱 접근 게이트: `src/db.js` `getMemberAppProfile()`, `firestore.rules` `isMemberStatusActive` (waiting은 차단하지 않음)

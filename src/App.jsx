@@ -2468,7 +2468,22 @@ function CopyValueButton({value,label="복사"}){const [done,setDone]=useState(f
 function MemberDiagnostics({profile,details}){const d=profile?._diagnostics||details||{}; const matched=profile||{}; const queryErrors=d.queryErrors||{}; return <><div className="notice"><b>auth.uid:</b> {d.authUid||auth.currentUser?.uid||"-"}<CopyValueButton value={d.authUid||auth.currentUser?.uid||""}/><br/><b>auth.email:</b> {d.authEmail||auth.currentUser?.email||"-"}<br/><b>members.memberUid 쿼리 성공 여부:</b> {d.membersQueryRead?"성공":"실패/없음"}<br/><b>members/{d.matchedMemberId||matched.id||"memberId"} 조회 성공 여부:</b> {d.membersRead?"성공":"실패/없음"}<br/><b>실패한 Firestore 경로:</b> {d.failedFirestorePath||Object.values(queryErrors)[0]?.path||"-"}<br/><b>최종 매칭된 memberId:</b> {d.matchedMemberId||matched.id||"-"}<br/><b>최종 매칭 기준:</b> {d.matchedBy||matched._matchedBy||"none"}<br/><b>최종 매칭 name:</b> {matched.name||"-"}<br/><b>최종 매칭 email:</b> {matched.email||"-"}<br/><b>최종 매칭 memberUid:</b> {matched.memberUid||"-"}</div>{Object.keys(queryErrors).length>0&&<div className="danger">진단 조회 실패: {Object.entries(queryErrors).map(([k,e])=>`${k} · ${e.path} (${e.code||"unknown"})`).join(" · ")}</div>}</>;}
 function MemberDebugPanel({profile,logs,errors}){const failed=Object.values(errors||{}); return <MCard title="회원앱 문서 매칭 진단"><MemberDiagnostics profile={profile}/>{failed.length>0&&<div className="danger">권한/조회 실패 경로: {failed.map(e=>`${e.path} (${e.code})`).join(" · ")}</div>}<div className="notice"><b>Firestore 읽기 순서</b>{(logs||[]).map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div></MCard>}
 
-function MemberAppError({message,details,logs,onRetry,onLogout}){const isAuthMissing=details?.code==="auth/user-not-found"; const debugMode=isMemberDebugMode(); return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><div className="member-page"><MCard title="회원앱을 열 수 없습니다"><p className="danger">{message}</p>{debugMode&&details&&<><div className="notice"><b>오류 코드:</b> {details.code||"unknown"}{details.path&&<><br/><b>실패 경로:</b> {details.path}</>}</div><MemberDiagnostics details={details}/></>}{debugMode&&logs?.length>0&&<div className="notice"><b>Firestore 읽기 순서</b>{logs.map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div>}<p className="notice">{isAuthMissing?"Firebase Authentication 사용자 계정을 찾을 수 없습니다. 회원앱 초대/비밀번호 설정 상태를 확인해주세요.":"회원 정보 확인 중 문제가 발생했습니다. 다시 시도 후에도 계속되면 대표에게 문의해주세요."}</p><button className="primary" onClick={onRetry}>다시 시도</button><button className="ghost" onClick={onLogout}>로그아웃</button></MCard></div></div>}
+function MemberAppError({message,details,logs,onRetry,onLogout}){
+  const isAuthMissing=details?.code==="auth/user-not-found";
+  // 휴식(paused)/종료(ended) 상태로 인한 접근 제한은 오류가 아니라 안내이므로, 빨간 danger 텍스트 대신
+  // 차분한 notice 톤 + db.js가 함께 내려준 전용 제목(details.title)을 그대로 사용한다.
+  const isFriendlyStatus=details?.code==="member/paused"||details?.code==="member/ended";
+  const title=details?.title||"회원앱을 열 수 없습니다";
+  const debugMode=isMemberDebugMode();
+  return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><div className="member-page"><MCard title={title}>
+    <p className={isFriendlyStatus?"notice":"danger"}>{message}</p>
+    {debugMode&&details&&<><div className="notice"><b>오류 코드:</b> {details.code||"unknown"}{details.path&&<><br/><b>실패 경로:</b> {details.path}</>}</div><MemberDiagnostics details={details}/></>}
+    {debugMode&&logs?.length>0&&<div className="notice"><b>Firestore 읽기 순서</b>{logs.map((l,i)=><div key={i}>{l.step}) {l.path} — {l.status}{l.code?` / ${l.code}`:""}</div>)}</div>}
+    {!isFriendlyStatus&&<p className="notice">{isAuthMissing?"Firebase Authentication 사용자 계정을 찾을 수 없습니다. 회원앱 초대/비밀번호 설정 상태를 확인해주세요.":"회원 정보 확인 중 문제가 발생했습니다. 다시 시도 후에도 계속되면 대표에게 문의해주세요."}</p>}
+    <button className="primary" onClick={onRetry}>다시 시도</button>
+    <button className="ghost" onClick={onLogout}>로그아웃</button>
+  </MCard></div></div>;
+}
 // ── 회원앱 사전 문진(온보딩) — v2 ────────────────────────────────────────────
 // 관리자 "신규 상담 등록"에서 뺀 운동 목적·경험·생활습관·통증·병력·일정·성향 질문이 여기로 왔다.
 // 저장 위치는 기존과 동일한 members/{id}/memberOnboarding/main 한 곳이며,
@@ -9889,11 +9904,13 @@ export default function App() {
     finally { setLoading(false); }
   }
 
-  // 회원 상태 변경 (active | paused | ended)
+  // 회원 상태 변경 (active | paused | ended | waiting)
   async function handleStatusChange(id, newStatus) {
-    const labels = { active:"진행중", paused:"휴식중", ended:"종료" };
+    const labels = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
     const msg = newStatus === "ended"
       ? `종료 처리하시겠습니까?\n수업 기록은 유지됩니다.`
+      : newStatus === "waiting"
+      ? `수업 대기로 변경하시겠습니까?\n회원앱 로그인과 이용에는 영향이 없습니다.`
       : `${labels[newStatus]}으로 변경하시겠습니까?`;
     if (!window.confirm(msg)) return;
     try {
@@ -9906,8 +9923,8 @@ export default function App() {
     } catch(e) { showToast(e.message, "err"); }
   }
 
+  // 최종 확인은 호출부(MembersScreen의 삭제 확인 모달)에서 이미 마쳤으므로 여기서는 실행만 담당한다.
   async function handleDeleteMember(id) {
-    if (!window.confirm("이 회원의 모든 기록이 삭제됩니다. 계속할까요?")) return;
     setLoading(true);
     const linkedConsultationId = members.find(m => m.id === id)?.consultationId || "";
     try {
@@ -11700,7 +11717,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const searchResultsShown = searchResults.slice(0, 6);
   const searchHasMore = searchResults.length > 6;
   const todayMemberIds = useMemo(() => new Set(todaySess.flatMap(x => x.isPair ? [x.m.id, x.mB.id] : [x.m.id])), [todaySess]);
-  const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료" };
+  const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
 
   // 검색 결과 드롭다운 — 데스크톱 검색창(768px 이상)과 모바일 인라인 검색창(768px 미만)이 완전히 동일한 JSX를
   // 공유한다. 새 검색 로직이나 별도 모바일 전용 결과 UI를 만들지 않고, searchOpen/searchResultsShown 등
@@ -12591,7 +12608,7 @@ function buildTodaySummary(members, liveMembersById, todayKST) {
 // 임시저장(실제 종목 없는 빈 세션)은 hasRealExercise 조건으로 자연히 제외되고, 취소 플래그는 데이터 구조상 없어
 // nextWorkoutDate가 비어 있으면 그대로 "다음 예약 없음"으로 처리된다.
 // 회원 상태 필터 — 기존 member.status 필드(값 없으면 "active" 기본, MembersScreen의 mStatus(m)와 동일 판정)를 그대로 재사용해
-// "active"가 아닌 회원(휴식중=paused/종료=ended 등)은 다음 예약 판별 이전에 제외한다. 새 상태값·새 필드는 만들지 않는다.
+// "active"가 아닌 회원(휴식중=paused/종료=ended/수업대기=waiting 등)은 다음 예약 판별 이전에 제외한다. 새 필드는 만들지 않는다.
 // 관리자 예외 필터 — members/{id}.scheduleFollowupStatus === "pending"(관리자가 "일정 미정"으로 보류)이면
 // 기존 자동 조건을 만족해도 목록에서 제외한다. 자동 판정 자체는 건드리지 않고, 그 위에 얹는 필터일 뿐이다.
 function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
@@ -12600,7 +12617,7 @@ function buildNextBookingList(members, liveMembersById, sessionsMap, todayKST) {
     if (isExcludedAdminMember(m)) return;
     const live = liveMembersById[m.id];
     const lm = live ? { ...m, ...live } : m;
-    if ((lm.status || "active") !== "active") return; // 휴식중/종료 등 비유효 회원 제외
+    if ((lm.status || "active") !== "active") return; // 휴식중/종료/수업대기 등 비유효 회원 제외
     if (lm.scheduleFollowupStatus === "pending") return; // 관리자가 "일정 미정"으로 보류한 회원 제외
     const ss = sessionsMap?.[lm.id] || [];
     const realPast = ss
@@ -13299,6 +13316,8 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
   const [showSort,   setShowSort]   = useState(false);
   const [statusMenu, setStatusMenu] = useState(null); // 상태 메뉴 열린 회원 id
   const [showTestPanel, setShowTestPanel] = useState(false);
+  const [deleteConfirmMember, setDeleteConfirmMember] = useState(null); // 회원 삭제 최종 확인 모달 대상 회원
+  const [deletingMember, setDeletingMember] = useState(false); // 삭제 처리 중 — 중복 클릭 방지
 
   // 상태 헬퍼 (status 없으면 active)
   function mStatus(m) { return m.status || "active"; }
@@ -13401,6 +13420,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
   const MORE_FILTERS = [
     {key:"paused",  label:"휴식중"},
     {key:"ended",   label:"종료회원"},
+    {key:"waiting", label:"수업 대기"},
     {key:"consult", label:"상담"},
     {key:"all",     label:"모든 상태"},
     {key:"7days",   label:"7일 미방문"},
@@ -13424,6 +13444,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
     if (filter === "active")  return status === "active";
     if (filter === "paused")  return status === "paused";
     if (filter === "ended")   return status === "ended";
+    if (filter === "waiting") return status === "waiting";
     if (filter === "all")     return true;
     // 아래 필터는 active/paused만 (종료 회원 제외, 검색 시 포함)
     if (!isSearching && status === "ended") return false;
@@ -13773,6 +13794,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
             const status    = mStatus(m);
             const isEnded   = status === "ended";
             const isPaused  = status === "paused";
+            const isWaiting = status === "waiting";
             // 실시간 활동 요약 — liveMembersById(onSnapshot)가 있으면 우선 사용, 없으면 기존 members 값으로 폴백
             const live = liveMembersById[m.id];
             const liveMember = live ? { ...m, ...live } : m;
@@ -13843,6 +13865,7 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                         {!isEnded && statusStyle && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:statusStyle.tint,color:statusStyle.soft,fontWeight:800,fontFamily:DB.font}}>{statusStyle.label}</span>}
                         {m.isTestMember && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(139,92,246,.1)",color:"#7C3AED",fontWeight:800,fontFamily:DB.font}}>TEST</span>}
                         {isPaused && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309",fontWeight:800,fontFamily:DB.font}}>휴식중</span>}
+                        {isWaiting && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(14,165,233,.12)",color:"#0369A1",fontWeight:800,fontFamily:DB.font}}>수업 대기</span>}
                         {isEnded && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(100,116,139,.1)",color:DB.sub,fontWeight:800,fontFamily:DB.font}}>종료</span>}
                         {isBirthday && <span style={{fontSize:9,padding:"2px 7px",borderRadius:999,background:"rgba(244,114,182,.12)",color:"#DB2777",fontWeight:800,fontFamily:DB.font}}>🎂 생일</span>}
                         {/* 사전 문진 상태 — members에 미러된 값만 사용해 회원 수만큼 서브문서를 추가로 읽지 않는다.
@@ -13953,8 +13976,15 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                       🔒 종료 처리
                     </button>
                   )}
+                  {status !== "waiting" && (
+                    <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onStatusChange(m.id,"waiting");}}
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:9,
+                        border:"none",background:"none",color:"#0369A1",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>
+                      ⏳ 수업 대기
+                    </button>
+                  )}
                   <div style={{height:1,background:DB.border,margin:"4px 4px"}}/>
-                  <button onClick={e=>{e.stopPropagation();setStatusMenu(null);onDelete(m.id);}}
+                  <button onClick={e=>{e.stopPropagation();setStatusMenu(null);setDeleteConfirmMember(m);}}
                     style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:9,
                       border:"none",background:"none",color:DB.danger,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:DB.font}}>
                     🗑 회원 삭제
@@ -13966,8 +13996,48 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
           })}
         </div>
       )}
+      {deleteConfirmMember && (
+        <MemberDeleteConfirmModal member={deleteConfirmMember} busy={deletingMember}
+          onCancel={()=>{ if(!deletingMember) setDeleteConfirmMember(null); }}
+          onConfirm={async()=>{
+            if(deletingMember) return;
+            setDeletingMember(true);
+            try{ await onDelete(deleteConfirmMember.id); setDeleteConfirmMember(null); }
+            finally{ setDeletingMember(false); }
+          }}/>
+      )}
       </div>
     </div>
+    </div>
+  );
+}
+
+// 회원 삭제 최종 확인 모달 — 단순 window.confirm 대신 회원 이름을 문구에 포함하고,
+// 삭제 버튼은 위험 색상(DB.danger), 취소 버튼이 기본 포커스를 받도록 구성한다.
+function MemberDeleteConfirmModal({ member, busy, onCancel, onConfirm }) {
+  const cancelRef = useRef(null);
+  useEffect(() => { cancelRef.current?.focus(); }, []);
+  const name = member?.name || "이 회원";
+  return (
+    <div role="dialog" aria-modal="true" aria-label="회원 삭제 확인"
+      onClick={e=>{ if (e.target===e.currentTarget && !busy) onCancel(); }}
+      style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{width:"100%",maxWidth:360,background:"#FFFFFF",borderRadius:20,border:"1px solid #D6DCE3",boxShadow:"0 20px 60px rgba(15,23,42,.25)",padding:"22px 20px 18px"}}>
+        <div style={{fontSize:15.5,fontWeight:800,color:DB.text,marginBottom:8,fontFamily:DB.font}}>정말 회원을 삭제할까요?</div>
+        <div style={{fontSize:12.5,color:DB.sub,lineHeight:1.6,marginBottom:20,fontFamily:DB.font}}>
+          '{name}' 회원과 연결된 정보가 삭제될 수 있습니다. 휴식이나 수업 대기 상태로 보관할 수 있으니, 완전히 삭제하려는 경우에만 진행해 주세요.
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button ref={cancelRef} onClick={onCancel} disabled={busy}
+            style={{flex:1,border:`1px solid ${DB.border}`,background:"#fff",color:DB.text,borderRadius:12,padding:"11px 0",fontSize:13,fontWeight:700,fontFamily:DB.font,cursor:busy?"default":"pointer"}}>
+            취소
+          </button>
+          <button onClick={onConfirm} disabled={busy}
+            style={{flex:1,border:"none",background:DB.danger,color:"#fff",borderRadius:12,padding:"11px 0",fontSize:13,fontWeight:800,fontFamily:DB.font,cursor:busy?"default":"pointer",opacity:busy?.7:1}}>
+            {busy?"삭제 중...":"회원 삭제"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

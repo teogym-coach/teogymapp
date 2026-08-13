@@ -6,8 +6,8 @@ rules_version = '2';
 //  회원앱 원칙:
 //    - 대표자: members/{memberId}.trainerUid == request.auth.uid 인 데이터 접근
 //    - 회원 본인: members/{memberId}.memberUid == request.auth.uid
-//               이면서 status == "active" (진행중) 인 회원만 접근 허용
-//    - 휴식중(paused) / 종료(ended) / 상태값 없음 / 알 수 없는 상태 → 회원 self-access 차단
+//               이면서 status == "active"(진행중) 또는 "waiting"(수업 대기) 인 회원만 접근 허용
+//    - 휴식중(paused) / 종료(ended) / 상태값 불명 → 회원 self-access 차단 (수업 대기(waiting)는 차단하지 않음)
 //    - 수업일지는 회원 본인에게 isPublished == true 일 때만 공개
 //    - 개인운동(personalWorkouts)은 방향이 반대다: 회원이 쓰고 트레이너는 읽기만 한다(§personalWorkouts)
 //
@@ -20,7 +20,7 @@ rules_version = '2';
 //       → 전부 isTrainerOfMember/isMemberSelfActive가 memberDoc(memberId).memberUid를 실제로 조회해
 //         request.auth.uid와 대조하므로, 클라이언트가 보낸 memberId가 본인 것이 아니면 차단됨
 //    3. isPublished == false 인 세션은 회원 자신의 세션이라도 read 차단 (§2 "비공개 세션 read 차단")
-//    4. 휴식중(paused)/종료(ended)/상태 불명 회원은 본인 문서라도 전 컬렉션 접근 차단 (§1, §2, §4~9)
+//    4. 휴식중(paused)/종료(ended)/상태 불명 회원은 본인 문서라도 전 컬렉션 접근 차단 (§1, §2, §4~9) — 수업 대기(waiting)는 차단하지 않음
 //    5. 관리자(trainerUid 일치)는 본인이 담당하는 회원 전체에 대해 read/write 가능,
 //       타 트레이너 회원 문서는 차단 (§1 "타 트레이너 회원 get/delete 차단")
 //    6. 회원은 memberProfileUpdateKeysAllowed()에 없는 필드(trainerUid/memberUid/isOwner 등) 수정 불가
@@ -49,9 +49,9 @@ service cloud.firestore {
       return isSignedIn() && data.get('memberUid', '') == uid();
     }
 
-    // 진행중 상태 확인: active 계열 값만 허용
+    // 진행중 상태 확인: active 계열 값 + 수업 대기(waiting)를 허용
     // status/memberStatus 필드 없으면(== '') active 간주 — 관리자앱 기본값(m.status||"active")과 동일
-    // paused/ended 등 명시적 비활성 값이 있을 때만 차단
+    // paused/ended 등 명시적 비활성 값이 있을 때만 차단. waiting은 휴식/종료와 달리 회원앱 접근을 막지 않는 별도 상태값이다.
     function isMemberStatusActive(data) {
       let s = data.get('status', '');
       let ms = data.get('memberStatus', '');
@@ -63,7 +63,8 @@ service cloud.firestore {
           || s == "진행중" || ms == "진행중"
           || s == "진행" || ms == "진행"
           || s == "pt진행" || ms == "pt진행"
-          || s == "pt 진행중" || ms == "pt 진행중";
+          || s == "pt 진행중" || ms == "pt 진행중"
+          || s == "waiting" || ms == "waiting";
     }
 
     function canReadMemberData(data) {
@@ -233,7 +234,7 @@ service cloud.firestore {
 
     match /members/{memberId} {
 
-      // get/list: 관리자(trainerUid) + 진행중 회원 본인(memberUid + status==active)
+      // get/list: 관리자(trainerUid) + 진행중/수업대기 회원 본인(memberUid + isMemberStatusActive)
       allow get, list: if canReadMemberData(resource.data);
 
       // 생성: 반드시 내 uid로 trainerUid 설정

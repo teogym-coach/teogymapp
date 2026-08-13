@@ -89,6 +89,17 @@ const MEMBER_ACTIVE_STATUSES = new Set([
   "active", "pt", "pt_active", "in_progress",
   "진행중", "진행", "pt진행", "pt 진행중",
 ]);
+// 수업 대기 — 휴식/종료와 달리 회원앱 로그인·이용을 차단하지 않는 별도 상태값(firestore.rules isMemberStatusActive와 반드시 함께 유지)
+const MEMBER_WAITING_STATUS = "waiting";
+// 휴식/종료 회원 전용 안내 문구 — "접근 권한 없음"류 표현 대신 기록을 보관하고 있다는 톤을 사용한다.
+const MEMBER_PAUSED_MESSAGE = {
+  title: "잠시 쉬어가고 있어요",
+  body: "회원님의 운동 기록은 안전하게 보관하고 있습니다. 다시 운동을 시작하실 때 테오짐에 문의해 주시면 앱 이용을 도와드리겠습니다.",
+};
+const MEMBER_ENDED_MESSAGE = {
+  title: "함께한 운동 기록을 보관하고 있어요",
+  body: "그동안 함께해 주셔서 감사합니다. 회원님의 운동 기록은 안전하게 보관하고 있습니다. 다시 운동을 시작하고 싶으실 때 언제든 테오짐에 문의해 주세요.",
+};
 
 function describeFirestoreError(e) {
   return {
@@ -1856,17 +1867,21 @@ export async function getMemberAppProfile() {
   debugMemberProfile("4) status/memberStatus 값:", { status: data.status ?? null, memberStatus: data.memberStatus ?? null, isActive: data.isActive ?? null });
   debugMemberProfile("5) isOwner/role 값:", { isOwner: data.isOwner ?? null, role: data.role ?? null });
 
-  // memberStatus 검사 — "active" 계열 진행중 회원만 허용
+  // memberStatus 검사 — "active" 계열 진행중 회원 + "수업 대기"(waiting) 회원만 허용
   // status/memberStatus 필드 없으면 active 간주 (관리자앱 기본값과 동일)
   const rawStatus = String(data.status || data.memberStatus || "").trim().toLowerCase();
+  const isWaitingStatus = rawStatus === MEMBER_WAITING_STATUS;
   const statusIsActive = !rawStatus
     ? true
-    : (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행"));
+    : (MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행") || isWaitingStatus);
   if (!statusIsActive || data.isActive === false) {
+    const isPausedStatus = rawStatus === "paused" || rawStatus.includes("휴식");
+    const isEndedStatus = rawStatus === "ended" || rawStatus.includes("종료");
+    const friendly = isPausedStatus ? MEMBER_PAUSED_MESSAGE : isEndedStatus ? MEMBER_ENDED_MESSAGE : null;
     debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile status 차단 분기 (member/inactive) — rawStatus:", rawStatus, "statusIsActive:", statusIsActive, "isActive:", data.isActive);
-    const err = new Error("현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
-    err.code = "member/inactive";
-    err.memberAppDetails = { code: "member/inactive", matchedMemberId: memberDoc.id };
+    const err = new Error(friendly ? friendly.body : "현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
+    err.code = isPausedStatus ? "member/paused" : isEndedStatus ? "member/ended" : "member/inactive";
+    err.memberAppDetails = { code: err.code, title: friendly?.title, matchedMemberId: memberDoc.id };
     throw err;
   }
 

@@ -5844,6 +5844,47 @@ const checks = [
     app.includes('gridTemplateColumns: isWide ? "repeat(auto-fill,minmax(330px,1fr))" : "1fr"') &&
     app.includes('screen==="report"||screen==="referral") ? {width:"100%"}')
   ],
+
+  // ── 회원 상태 "수업 대기"(waiting) 신설 + 삭제 확인 모달 ──
+  ['회원 상태: "수업 대기"(waiting) 상태값이 상태 변경 라벨/메뉴/배지에 일관 반영됨(휴식·종료와 다른 별도 값)',
+    app.includes('const labels = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };')
+    && app.includes('⏳ 수업 대기')
+    && app.includes('const isWaiting = status === "waiting";')
+    && app.includes('{isWaiting && <span')
+  ],
+  ['회원 상태 필터: MORE_FILTERS/passFilter/검색 결과 라벨에 "수업 대기"(waiting) 추가 — 활성/휴식/종료와 각각 구분',
+    app.includes('{key:"waiting", label:"수업 대기"},')
+    && app.includes('if (filter === "waiting") return status === "waiting";')
+    && app.includes('const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };')
+  ],
+  ['회원앱 접근 게이트: db.js가 "waiting" 상태를 active와 동일하게 허용해 로그인·이용을 차단하지 않음',
+    db.includes('const MEMBER_WAITING_STATUS = "waiting";')
+    && db.includes('const isWaitingStatus = rawStatus === MEMBER_WAITING_STATUS;')
+    && db.includes('(MEMBER_ACTIVE_STATUSES.has(rawStatus) || rawStatus.includes("진행") || isWaitingStatus);')
+  ],
+  ['Firestore 규칙: isMemberStatusActive가 "waiting" 상태를 회원 self-access 허용 목록에 포함(휴식/종료는 계속 차단)',
+    firestoreRules.includes('s == "waiting" || ms == "waiting";')
+  ],
+  ['휴식/종료 회원 로그인 차단 안내 문구: "접근 권한 없음"류 표현 없이 기록 보관 톤의 제목/본문을 상태별로 분리해 전달',
+    db.includes('title: "잠시 쉬어가고 있어요"')
+    && db.includes('회원님의 운동 기록은 안전하게 보관하고 있습니다. 다시 운동을 시작하실 때 테오짐에 문의해 주시면 앱 이용을 도와드리겠습니다.')
+    && db.includes('title: "함께한 운동 기록을 보관하고 있어요"')
+    && db.includes('그동안 함께해 주셔서 감사합니다. 회원님의 운동 기록은 안전하게 보관하고 있습니다. 다시 운동을 시작하고 싶으실 때 언제든 테오짐에 문의해 주세요.')
+    && db.includes('err.code = isPausedStatus ? "member/paused" : isEndedStatus ? "member/ended" : "member/inactive";')
+  ],
+  ['회원앱 에러 화면: 휴식/종료 상태는 danger(빨강) 대신 notice 톤 + db.js가 내려준 전용 제목(details.title)을 사용',
+    app.includes('const isFriendlyStatus=details?.code==="member/paused"||details?.code==="member/ended";')
+    && app.includes('const title=details?.title||"회원앱을 열 수 없습니다";')
+    && app.includes('<p className={isFriendlyStatus?"notice":"danger"}>{message}</p>')
+  ],
+  ['회원 삭제: window.confirm 대신 회원 이름을 포함한 전용 확인 모달을 사용하고, 취소가 기본 포커스 + 삭제 버튼은 danger 색상',
+    !app.includes('window.confirm("이 회원의 모든 기록이 삭제됩니다. 계속할까요?")')
+    && app.includes('function MemberDeleteConfirmModal({ member, busy, onCancel, onConfirm }) {')
+    && app.includes('정말 회원을 삭제할까요?')
+    && app.includes("' 회원과 연결된 정보가 삭제될 수 있습니다. 휴식이나 수업 대기 상태로 보관할 수 있으니, 완전히 삭제하려는 경우에만 진행해 주세요.")
+    && app.includes('useEffect(() => { cancelRef.current?.focus(); }, []);')
+    && app.includes('background:DB.danger,color:"#fff",borderRadius:12')
+  ],
 ];
 
 let failed = 0;

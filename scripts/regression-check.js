@@ -71,6 +71,24 @@ function pairScenario(name, fn) {
   try { return [name, !!fn(pairPersonalLib)]; }
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
+
+// ── 운동 기록 단위(kg/단/맨몸): 실제 실행 시나리오 검증 ──
+// 스미스머신 푸쉬업처럼 숫자가 중량(kg)이 아니라 "단"(바 높이)이거나 "맨몸"(중량 없음)인 기록은
+// calcVol/exVol이 반환하는 볼륨에서 반드시 제외돼야 하고, 단위 필드가 없는 기존 기록은 계속 kg로 해석돼야 한다.
+// isFuncEx~exVol 구간을 원본 그대로 슬라이스해 실행한다(값을 다시 옮겨 적지 않고 실제 로직을 검증).
+let unitVolLib = null;
+try {
+  const sliceUnitVol = app.slice(app.indexOf('function isFuncEx'), app.indexOf('// ─── CSS ───'));
+  unitVolLib = new Function(`${sliceUnitVol}\nreturn { calcVol, exVol, getExerciseType, isFuncEx, getRecordUnit, formatRecordValue, getWeightColumnLabel };`)();
+} catch (e) {
+  console.error('[regression] 기록 단위(kg/단/맨몸) 헬퍼 추출 실패:', e.message);
+}
+function unitScenario(name, fn) {
+  if (!unitVolLib) return [name, false];
+  try { return [name, !!fn(unitVolLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // 시나리오 공용 픽스처 — 랫풀다운(공통) + 벤치프레스(A만) + 레그프레스(B만)
 const pairFixtureExercises = () => ([
   { name:'랫풀다운', only:'', muscleTop:'등', equipment:'머신',
@@ -1734,8 +1752,8 @@ const checks = [
         body.includes('{!isLatest&&<p>{typeName}</p>}');
     })()
   ],
-  ['수업일지: 세트 표가 운동 유형별 열 자동 구성(중량/반복/시간, 값 있는 열만 표시)',
-    app.includes('sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:"중량"') &&
+  ['수업일지: 세트 표가 운동 유형별 열 자동 구성(중량/반복/시간, 값 있는 열만 표시) — 중량 열은 기록 단위(kg/단)에 따라 라벨·표기가 바뀐다',
+    app.includes('recordUnit!=="bodyweight" && sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:getWeightColumnLabel(recordUnit)') &&
     app.includes('sets.some(x=>toPositiveNumber(x.reps))&&{key:"reps",label:"반복"') &&
     app.includes('sets.some(getSetDurationValue)&&{key:"dur",label:"시간"')
   ],
@@ -6105,6 +6123,52 @@ const checks = [
     && app.includes("' 회원과 연결된 정보가 삭제될 수 있습니다. 휴식이나 수업 대기 상태로 보관할 수 있으니, 완전히 삭제하려는 경우에만 진행해 주세요.")
     && app.includes('useEffect(() => { cancelRef.current?.focus(); }, []);')
     && app.includes('background:DB.danger,color:"#fff",borderRadius:12')
+  ],
+
+  // ── 운동 기록 단위(kg/단/맨몸) ──
+  unitScenario('A. 일반 웨이트(kg): 체스트프레스머신 20kg×10회는 기존과 동일하게 볼륨 200을 계산한다', L =>
+    L.exVol({ name:'체스트프레스머신', unitType:'kg', sets:[{weight:'20',reps:'10'}] }) === 200
+  ),
+  unitScenario('B. 단(step): 스미스머신 푸쉬업 6단×10 + 5단×10 + 5단×10 은 kg 볼륨이 0이다(6×10=60 등으로 합산되지 않음)', L =>
+    L.exVol({ name:'스미스머신 푸쉬업', unitType:'step', sets:[{weight:'6',reps:'10'},{weight:'5',reps:'10'},{weight:'5',reps:'10'}] }) === 0
+  ),
+  unitScenario('C. 맨몸(bodyweight): 푸쉬업을 맨몸으로 명시 선택하면 반복만 기록되고 kg 볼륨은 0이다', L =>
+    L.exVol({ name:'푸쉬업', unitType:'bodyweight', sets:[{weight:'',reps:'10'}] }) === 0
+  ),
+  unitScenario('D. 기존 데이터 호환: unitType 필드가 없는 과거 웨이트 기록은 그대로 kg로 해석돼 볼륨이 정상 계산된다', L =>
+    L.exVol({ name:'벤치프레스', sets:[{weight:'40',reps:'8'}] }) === 320
+    && L.getRecordUnit({ name:'벤치프레스', sets:[{weight:'40',reps:'8'}] }) === 'kg'
+  ),
+  unitScenario('푸쉬업 이름만으로 자동으로 단/맨몸이 고정되지 않는다 — unitType 미지정 시 기본값은 kg', L =>
+    L.getRecordUnit({ name:'푸쉬업' }) === 'kg' && L.getRecordUnit({ name:'스미스머신 푸쉬업' }) === 'kg'
+  ),
+  unitScenario('calcVol: recordUnit이 "step"/"bodyweight"면 exType(assist/bodyweight) 분기보다 우선해 0을 반환한다', L =>
+    L.calcVol('6','10', L.getExerciseType('스미스머신 푸쉬업'), '70', 'step') === 0
+    && L.calcVol('6','10', L.getExerciseType('스미스머신 푸쉬업'), '70', 'bodyweight') === 0
+  ),
+  unitScenario('calcVol: recordUnit 인자가 없으면(레거시 호출부) 기존 kg 계산 로직이 그대로 동작한다', L =>
+    L.calcVol('20','10', null, '') === 200
+  ),
+  unitScenario('표시 포맷: formatRecordValue는 kg는 "20kg", 단은 "6단"으로 표기하고 맨몸은 값을 표시하지 않는다(null)', L =>
+    L.formatRecordValue('20','kg') === '20kg'
+    && L.formatRecordValue('6','step') === '6단'
+    && L.formatRecordValue('5','bodyweight') === null
+  ),
+  unitScenario('컬럼 라벨: kg는 "중량", 단은 "높이", 맨몸은 "맨몸"으로 라벨이 바뀐다', L =>
+    L.getWeightColumnLabel('kg') === '중량' && L.getWeightColumnLabel('step') === '높이' && L.getWeightColumnLabel('bodyweight') === '맨몸'
+  ),
+  ['운동 카드 UI: 기록 단위 선택지(중량(kg)/단(높이)/맨몸(반복만))가 기능운동이 아닐 때만 노출된다',
+    app.includes('{!isFuncEx(ex) && (') && app.includes('["kg","중량(kg)"],["step","단(높이)"],["bodyweight","맨몸(반복만)"]')
+  ],
+  ['수업일지 저장: totalVolume이 exVol()을 그대로 합산해 단/맨몸 기록을 제외한다(회원1 payload)',
+    app.includes('totalVolume: exList.reduce((s,e)=>s+exVol(e), 0)')
+  ],
+  ['운동 종목 학습: 트레이너가 명시적으로 선택한 unitType만 exerciseClassifications에 저장/재사용된다(이름 키워드 자동 추정 없음)',
+    app.includes('function suggestRecordUnit(name, classifications) {')
+    && app.includes("if (ex.name) onLearnExercise?.(ex.name, { unitType: val });")
+  ],
+  ['회원앱 노출: db.js가 세션 exercises를 publicExercise로 걸러낼 때 unitType 필드를 화이트리스트에 포함해 회원 화면에도 전달된다',
+    db.includes('const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "unitType",')
   ],
 ];
 

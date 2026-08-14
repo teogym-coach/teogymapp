@@ -21553,7 +21553,9 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     if (isEdit && pairSessionHasContent(editData)) return editData.date || initialDate || getKoreaDateString();
     return initialDate || getKoreaDateString();
   });
-  const [intensity, setIntensity] = useState(editData?.intensity||"중강도");
+  // 강도는 화면에서 입력받지 않지만(2:1 기록에서 UI 제거), 저장 payload에는 기존 값을 그대로 실어
+  // 이미 저장된 문서의 intensity가 사라지지 않게 한다.
+  const [intensity] = useState(editData?.intensity||"중강도");
   // 오늘 운동 부위는 회원별로 관리한다(A는 상체 / B는 하체처럼 서로 다른 프로그램이 가능해야 하기 때문).
   // 새 회차 기록은 1:1 getInitialNewSessionValues와 동일한 우선순위로 각 회원의 "다음 수업 준비" 부위를
   // 반영한다(SESSION_BODY_PART_OPTIONS에 있는 값만 채택). 실제 작성 중이던 기록은 저장된 값을 그대로 유지하며,
@@ -21685,7 +21687,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
         return;
       }
       if (typeof d.date === "string" && d.date) setDate(d.date);
-      if (typeof d.intensity === "string" && d.intensity) setIntensity(d.intensity);
+      // 강도는 이 화면에서 입력받지 않으므로 임시 기록에서 되돌리지 않는다(저장된 문서 값을 그대로 쓴다).
       // 회원별 부위가 저장된 임시 기록이면 그대로, 이전 버전(공통 selectedTypes만 있는 임시 기록)이면
       // 두 회원 모두 그 값으로 복원한다.
       if (Array.isArray(d.selectedTypesA)) setSelectedTypesA(d.selectedTypesA);
@@ -21984,24 +21986,15 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
             </div>
           </div>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <div style={{flex:1}}>
-            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
-            {/* 완료된 회차를 보고 있어도 날짜만은 항상 바꿀 수 있게 둔다 — 다른 날짜를 고르는 순간
-                isSplitDone이 즉시 풀려 다음 회차를 같은 팀 문서에 바로 이어 작성할 수 있다. */}
-            <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
-                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
-          </div>
-          <div style={{flex:1}}>
-            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>강도</Mo>
-            <select value={intensity} onChange={e=>setIntensity(e.target.value)}
-              disabled={isSplitDone}
-              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
-                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}}>
-              {["저강도","중강도","고강도"].map(v=><option key={v}>{v}</option>)}
-            </select>
-          </div>
+        {/* 강도 입력 UI는 2:1 기록에서 제거했다(필요성이 낮음). intensity 값 자체는 state·저장 payload에
+            그대로 남아 기존 문서 값이 유지되며, 개인 수업일지·홈 그룹 카드의 강도 표시도 영향을 받지 않는다. */}
+        <div style={{maxWidth:200}}>
+          <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
+          {/* 완료된 회차를 보고 있어도 날짜만은 항상 바꿀 수 있게 둔다 — 다른 날짜를 고르는 순간
+              isSplitDone이 즉시 풀려 다음 회차를 같은 팀 문서에 바로 이어 작성할 수 있다. */}
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+            style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+              background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
         </div>
       </div>
 
@@ -22132,20 +22125,26 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
               })}
             </div>
 
-            {/* 근육/장비 */}
+            {/* 운동 부위(muscleTop) · 기구(equipment) — 라벨 명칭은 1:1 수업일지와 동일하게 맞춘다 */}
             <div style={{display:"flex",gap:6,marginBottom:8}}>
-              <select value={ex.muscleTop||"가슴"} onChange={e=>updateEx(ei,"muscleTop",e.target.value)}
-                disabled={isSplitDone}
-                style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,.06)",
-                  background:"#0c1523",color:"#94a3b8",fontSize:10,boxSizing:"border-box"}}>
-                {["가슴","등","어깨","팔-이두근","팔-삼두근","하체","복근","코어","기능","기타"].map(v=><option key={v}>{v}</option>)}
-              </select>
-              <select value={ex.equipment||"바벨"} onChange={e=>updateEx(ei,"equipment",e.target.value)}
-                disabled={isSplitDone}
-                style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,.06)",
-                  background:"#0c1523",color:"#94a3b8",fontSize:10,boxSizing:"border-box"}}>
-                {["바벨","덤벨","케이블","머신","맨몸","기능"].map(v=><option key={v}>{v}</option>)}
-              </select>
+              <div style={{flex:1,minWidth:0}}>
+                <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>운동 부위</Mo>
+                <select value={ex.muscleTop||"가슴"} onChange={e=>updateEx(ei,"muscleTop",e.target.value)}
+                  disabled={isSplitDone}
+                  style={{width:"100%",padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,.06)",
+                    background:"#0c1523",color:"#94a3b8",fontSize:10,boxSizing:"border-box"}}>
+                  {["가슴","등","어깨","팔-이두근","팔-삼두근","하체","복근","코어","기능","기타"].map(v=><option key={v}>{v}</option>)}
+                </select>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>기구</Mo>
+                <select value={ex.equipment||"바벨"} onChange={e=>updateEx(ei,"equipment",e.target.value)}
+                  disabled={isSplitDone}
+                  style={{width:"100%",padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,.06)",
+                    background:"#0c1523",color:"#94a3b8",fontSize:10,boxSizing:"border-box"}}>
+                  {["바벨","덤벨","케이블","머신","맨몸","기능"].map(v=><option key={v}>{v}</option>)}
+                </select>
+              </div>
             </div>
 
             {/* 기능 운동 세부 정보 (equipment=기능 또는 muscleTop=기능일 때) */}

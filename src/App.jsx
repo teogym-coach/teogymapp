@@ -2049,6 +2049,73 @@ function pairSessionCompletedToday(ps, checkDate = getKoreaDateString()) {
   if (isNaN(d?.getTime?.())) return false;
   return getKoreaDateString(d) === checkDate;
 }
+
+// ════════════════════════════════════════════════════
+// 2:1 회원별 개인화 — 종목 대상(only) · 회원별 운동 부위 · 회원 한 명분 기록 변환
+// ════════════════════════════════════════════════════
+// 2:1 수업은 "대부분 두 회원이 같은 운동을 하고, 필요할 때만 한 명에게만 시킨다"가 현장 기본이다.
+// 그래서 종목 배열(exercises)은 팀 하나로 유지하고 종목마다 대상 태그만 붙인다(배열을 A/B로 쪼개지 않는다).
+//   only 없음 · "" → 두 회원 공통 (기존에 저장된 2:1 문서는 전부 여기에 해당 → 마이그레이션 불필요)
+//   only "A"/"B"  → 해당 회원만 수행
+function pairExerciseTarget(ex) {
+  const only = String(ex?.only || "").trim().toUpperCase();
+  return (only === "A" || only === "B") ? only : "";
+}
+function pairExerciseIncludes(ex, who) {
+  const only = pairExerciseTarget(ex);
+  return !only || only === who;
+}
+// 회원별 오늘 운동 부위 — selectedTypesA/B가 비어 있으면 팀 공통 selectedTypes(구버전 문서)로 폴백한다.
+function getPairMemberTypes(ps, who) {
+  const own = who === "B" ? ps?.selectedTypesB : ps?.selectedTypesA;
+  if (Array.isArray(own) && own.length) return own.filter(Boolean);
+  return normalizeTypes(ps?.selectedTypes || ps?.type);
+}
+// 팀 공통으로 저장할 부위 — A/B 합집합. 홈 "오늘 수업" 그룹 카드와 기존 코드가 계속 selectedTypes/type을
+// 읽으므로, 회원별로 나뉜 뒤에도 팀 단위 표시가 비지 않도록 합집합을 함께 저장한다.
+function mergePairTypes(typesA, typesB) {
+  return [...new Set([...(typesA || []), ...(typesB || [])].filter(Boolean))];
+}
+// "나눠서 기록"에서 회원 한 명분 종목 배열을 만든다(setsA/setsB → sets, feedbackA/B → feedback/rpe/stimRating).
+// 대상이 아닌 종목은 여기서 제외되므로 상대 회원의 개인 수업일지·히스토리·분석에 절대 섞이지 않는다.
+function buildPairSplitExercises(exercises, who) {
+  return (exercises || [])
+    .filter(ex => pairExerciseIncludes(ex, who))
+    .map(ex => {
+      const fb = (who === "B" ? ex.feedbackB : ex.feedbackA) || {};
+      return {
+        name: ex.name, muscleTop: ex.muscleTop, muscleSub: ex.muscleSub,
+        equipment: ex.equipment,
+        sets: (who === "B" ? ex.setsB : ex.setsA) || [],
+        feedback: fb.note || "",
+        stimRating: fb.stimRating || null,
+        rpe: fb.rpe || "",
+        ...(ex.funcCategory ? { funcCategory: ex.funcCategory } : {}),
+        ...(ex.funcBodyPart?.length ? { funcBodyPart: ex.funcBodyPart } : {}),
+        ...(ex.funcTool ? { funcTool: ex.funcTool } : {}),
+        ...(ex.movementPurpose ? { movementPurpose: ex.movementPurpose } : {}),
+      };
+    });
+}
+
+// 2:1 화면 "지난 기록" 한 줄 요약 — 가장 무거운 유효 세트를 대표로 보여 준다(수업 중 즉시 판단용).
+// 값이 하나도 없는 기록이면 빈 문자열을 돌려주고, 호출부는 "지난 기록 없음"으로 표시한다.
+function summarizePastPairSets(sets = []) {
+  const rows = (sets || []).filter(s =>
+    (parseFloat(s?.weight) || 0) > 0 || (parseInt(s?.reps) || 0) > 0 || (parseInt(s?.durationSec) || 0) > 0);
+  if (!rows.length) return "";
+  const best = rows.reduce((a, b) => ((parseFloat(b.weight) || 0) > (parseFloat(a.weight) || 0) ? b : a), rows[0]);
+  const w = parseFloat(best.weight) || 0;
+  const r = parseInt(best.reps) || 0;
+  const d = parseInt(best.durationSec) || 0;
+  let head = "";
+  if (w > 0 && r > 0) head = `${w}kg × ${r}회`;
+  else if (w > 0)     head = `${w}kg`;
+  else if (d > 0)     head = `${d}초`;
+  else                head = `${r}회`;
+  return `${head} · ${rows.length}세트`;
+}
+
 function formatParts(data = {}) {
   const parts = Array.isArray(data.targetParts) && data.targetParts.length ? data.targetParts : (data.targetPart ? String(data.targetPart).split(/\s*[+,·/]\s*/).filter(Boolean) : []);
   return parts.join(" + ") || data.title || "추천 부위 미입력";
@@ -10288,28 +10355,9 @@ export default function App() {
       const noA = ssA.length > 0 ? Number(ssA[ssA.length-1].sessionNo||0)+1 : 1;
       const noB = ssB.length > 0 ? Number(ssB[ssB.length-1].sessionNo||0)+1 : 1;
 
-      const exToA = (pairSession.exercises||[]).map(ex => ({
-        name: ex.name, muscleTop: ex.muscleTop, muscleSub: ex.muscleSub,
-        equipment: ex.equipment, sets: ex.setsA || [],
-        feedback: ex.feedbackA?.note || "",
-        stimRating: ex.feedbackA?.stimRating || null,
-        rpe: ex.feedbackA?.rpe || "",
-        ...(ex.funcCategory ? { funcCategory: ex.funcCategory } : {}),
-        ...(ex.funcBodyPart?.length ? { funcBodyPart: ex.funcBodyPart } : {}),
-        ...(ex.funcTool ? { funcTool: ex.funcTool } : {}),
-        ...(ex.movementPurpose ? { movementPurpose: ex.movementPurpose } : {}),
-      }));
-      const exToB = (pairSession.exercises||[]).map(ex => ({
-        name: ex.name, muscleTop: ex.muscleTop, muscleSub: ex.muscleSub,
-        equipment: ex.equipment, sets: ex.setsB || [],
-        feedback: ex.feedbackB?.note || "",
-        stimRating: ex.feedbackB?.stimRating || null,
-        rpe: ex.feedbackB?.rpe || "",
-        ...(ex.funcCategory ? { funcCategory: ex.funcCategory } : {}),
-        ...(ex.funcBodyPart?.length ? { funcBodyPart: ex.funcBodyPart } : {}),
-        ...(ex.funcTool ? { funcTool: ex.funcTool } : {}),
-        ...(ex.movementPurpose ? { movementPurpose: ex.movementPurpose } : {}),
-      }));
+      // 회원별 종목 분리 — only 태그가 붙은 종목은 대상 회원 기록에만 들어간다(공통/구버전 문서는 둘 다 포함).
+      const exToA = buildPairSplitExercises(pairSession.exercises, "A");
+      const exToB = buildPairSplitExercises(pairSession.exercises, "B");
 
       const calcVol = (exList) => exList.reduce((s,e)=>{
         return s + (e.sets||[]).reduce((ss,r)=>{
@@ -10318,15 +10366,17 @@ export default function App() {
         },0);
       },0);
 
-      const splitType = pairSession.type || (pairSession.selectedTypes?.join(" · ")) || "기타";
-      const splitSelectedTypes = pairSession.selectedTypes || (pairSession.type ? [pairSession.type] : ["기타"]);
+      // 오늘 운동 부위도 회원별로 저장한다 — selectedTypesA/B가 없는 구버전 문서는 팀 공통값으로 폴백된다.
+      const typesA = getPairMemberTypes(pairSession, "A");
+      const typesB = getPairMemberTypes(pairSession, "B");
+      const splitTypes = (types) => (types.length ? types : ["기타"]);
       const aData = {
         memberId: mA.id, memberName: mA.name,
         date: pairSession.date, sessionNo: noA,
         sessionType: "2:1", pairSourceId: pairSession.id,
         exercises: exToA, trainerComment: pairSession.trainerCommentA || "",
         intensity: pairSession.intensity || "중강도",
-        type: splitType, selectedTypes: splitSelectedTypes,
+        type: splitTypes(typesA).join(" · "), selectedTypes: splitTypes(typesA),
         totalVolume: calcVol(exToA),
         isPublished: false, status: "draft",
       };
@@ -10336,7 +10386,7 @@ export default function App() {
         sessionType: "2:1", pairSourceId: pairSession.id,
         exercises: exToB, trainerComment: pairSession.trainerCommentB || "",
         intensity: pairSession.intensity || "중강도",
-        type: splitType, selectedTypes: splitSelectedTypes,
+        type: splitTypes(typesB).join(" · "), selectedTypes: splitTypes(typesB),
         totalVolume: calcVol(exToB),
         isPublished: false, status: "draft",
       };
@@ -21471,6 +21521,14 @@ function PairSessionListScreen({ pairSessions=[], members=[], loading, onBack, o
   );
 }
 
+// 2:1 화면의 회원 A/B 색상 — 기존 화면에서 쓰던 값(A=노랑, B=보라)을 그대로 상수로 옮겨 재사용한다.
+const PAIR_SIDES = [
+  { who:"A", color:"#ffd166", tint:"rgba(255,209,102,.14)", soft:"rgba(255,209,102,.05)", border:"rgba(255,209,102,.25)" },
+  { who:"B", color:"#a29bfe", tint:"rgba(162,155,254,.14)", soft:"rgba(162,155,254,.05)", border:"rgba(162,155,254,.25)" },
+];
+// 종목 대상 선택 라벨 — 저장값(only)은 ""/"A"/"B"지만 화면에는 회원 이름으로만 보여 준다.
+const PAIR_ONLY_OPTIONS = [{ value:"", label:"둘 다" }, { value:"A" }, { value:"B" }];
+
 function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSessions=[], onSelectExistingTeam, onSave, onSaveNextSession, onBack, onSplit, showToast, loading, classifications={}, onLearnExercise }) {
   const isEdit = !!(editData?.id);
 
@@ -21496,13 +21554,23 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     return initialDate || getKoreaDateString();
   });
   const [intensity, setIntensity] = useState(editData?.intensity||"중강도");
-  // 새 회차 기록은 1:1 getInitialNewSessionValues와 동일한 우선순위로 A 회원의 "다음 수업 준비" 부위를
-  // 반영한다(SESSION_BODY_PART_OPTIONS에 있는 값만 채택). 실제 작성 중이던 기록은 저장된 값을 그대로 유지.
-  const [selectedTypes, setSelectedTypes] = useState(() => {
-    if (isEdit && pairSessionHasContent(editData)) return normalizeTypes(editData?.selectedTypes || editData?.type);
-    const nextParts = parseNextParts(memberA?.nextWorkoutPart || memberA?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
-    return nextParts.length ? nextParts : normalizeTypes(editData?.selectedTypes || editData?.type);
-  });
+  // 오늘 운동 부위는 회원별로 관리한다(A는 상체 / B는 하체처럼 서로 다른 프로그램이 가능해야 하기 때문).
+  // 새 회차 기록은 1:1 getInitialNewSessionValues와 동일한 우선순위로 각 회원의 "다음 수업 준비" 부위를
+  // 반영한다(SESSION_BODY_PART_OPTIONS에 있는 값만 채택). 실제 작성 중이던 기록은 저장된 값을 그대로 유지하며,
+  // selectedTypesA/B가 없는 기존 문서는 getPairMemberTypes가 팀 공통 selectedTypes로 폴백한다.
+  const initialTypesFor = (who) => {
+    if (isEdit && pairSessionHasContent(editData)) return getPairMemberTypes(editData, who);
+    const mem = who === "B" ? memberB : memberA;
+    const np = parseNextParts(mem?.nextWorkoutPart || mem?.nextPtPart).filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
+    return np.length ? np : getPairMemberTypes(editData, who);
+  };
+  const [selectedTypesA, setSelectedTypesA] = useState(() => initialTypesFor("A"));
+  const [selectedTypesB, setSelectedTypesB] = useState(() => initialTypesFor("B"));
+  const getTypesOf = (who) => (who === "B" ? selectedTypesB : selectedTypesA);
+  const toggleTypeOf = (who, t) => {
+    const setter = who === "B" ? setSelectedTypesB : setSelectedTypesA;
+    setter(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+  };
   const [trainerCommentA, setTrainerCommentA] = useState(editData?.trainerCommentA||"");
   const [trainerCommentB, setTrainerCommentB] = useState(editData?.trainerCommentB||"");
   const [saving, setSaving] = useState(false);
@@ -21513,32 +21581,50 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
   // 한 번에 저장한다(새 컬렉션·새 필드 없음). 기본값은 두 회원 모두 선택 상태이며 체크 해제 시 그 회원은 제외된다.
   const [nextTargetA, setNextTargetA] = useState(true);
   const [nextTargetB, setNextTargetB] = useState(true);
-  const [nextDate, setNextDate] = useState(() => memberA?.nextWorkoutDate || "");
-  const [nextTime, setNextTime] = useState(() => memberA?.nextWorkoutTime || "");
-  const [nextParts, setNextParts] = useState(() => parseNextParts(memberA?.nextWorkoutPart || memberA?.nextPtPart));
+  // 다음 운동 부위는 항상 회원별로 따로 저장한다(A는 하체 / B는 상체). 날짜·시간은 같은 시간에 함께 오는
+  // 경우가 대부분이라 기본은 공통 입력이고, 필요할 때만 "회원별로 다르게"를 켜서 각자 지정한다.
+  const [nextSameSchedule, setNextSameSchedule] = useState(true);
+  const [nextDateA, setNextDateA] = useState(() => memberA?.nextWorkoutDate || "");
+  const [nextTimeA, setNextTimeA] = useState(() => memberA?.nextWorkoutTime || "");
+  const [nextPartsA, setNextPartsA] = useState(() => parseNextParts(memberA?.nextWorkoutPart || memberA?.nextPtPart));
+  const [nextDateB, setNextDateB] = useState(() => memberB?.nextWorkoutDate || "");
+  const [nextTimeB, setNextTimeB] = useState(() => memberB?.nextWorkoutTime || "");
+  const [nextPartsB, setNextPartsB] = useState(() => parseNextParts(memberB?.nextWorkoutPart || memberB?.nextPtPart));
   const [nextSaving, setNextSaving] = useState(false);
-  const toggleNextPairPart = (x) => {
-    setNextParts(prev => x==="미정" ? [] : (prev.includes(x) ? prev.filter(p=>p!==x) : [...prev, x]));
+  const toggleNextPairPart = (who, x) => {
+    const setter = who === "B" ? setNextPartsB : setNextPartsA;
+    setter(prev => x==="미정" ? [] : (prev.includes(x) ? prev.filter(p=>p!==x) : [...prev, x]));
   };
   // 두 회원을 한 번에 Promise.all로 저장하면 한 명만 실패해도 어느 쪽이 실패했는지 알 수 없어
   // 회원별로 개별 저장 후 Promise.allSettled로 결과를 따로 판정한다(다음 수업 저장은 nextWorkoutDate 등
   // 회원 문서 필드만 바꾸고, 현재 pairSessions 기록·날짜는 절대 건드리지 않는다).
+  // 저장 필드는 1:1과 완전히 같은 회원 문서 필드(nextWorkoutDate/Time/Part·nextPtPart)라, 다음 수업이
+  // 2:1이든 1:1이든 그대로 이어진다(1:1은 getInitialNewSessionValues, 2:1은 initialTypesFor가 읽는다).
   const handleSaveNextPairSession = async () => {
     if (nextSaving) return;
     const targets = [];
-    if (nextTargetA && memberAId) targets.push({id:memberAId, name:memberA?.name||"A 회원"});
-    if (nextTargetB && memberBId) targets.push({id:memberBId, name:memberB?.name||"B 회원"});
+    if (nextTargetA && memberAId) targets.push({
+      id: memberAId, name: memberA?.name||"A 회원",
+      date: nextDateA, time: nextTimeA, parts: nextPartsA,
+    });
+    if (nextTargetB && memberBId) targets.push({
+      id: memberBId, name: memberB?.name||"B 회원",
+      date: nextSameSchedule ? nextDateA : nextDateB,
+      time: nextSameSchedule ? nextTimeA : nextTimeB,
+      parts: nextPartsB,
+    });
     if (!targets.length) { showToast("최소 한 명은 선택해야 합니다", "err"); return; }
     setNextSaving(true);
     try {
-      const part = nextParts.length ? nextParts.join(" · ") : "미정";
-      const patch = {
-        nextWorkoutDate: nextDate || "",
-        nextWorkoutTime: nextTime || "",
-        nextWorkoutPart: part, nextPtPart: part,
-        nextWorkoutDateUpdatedAt: new Date().toISOString(),
-      };
-      const results = await Promise.allSettled(targets.map(t => onSaveNextSession?.([t.id], patch)));
+      const results = await Promise.allSettled(targets.map(t => {
+        const part = t.parts.length ? t.parts.join(" · ") : "미정";
+        return onSaveNextSession?.([t.id], {
+          nextWorkoutDate: t.date || "",
+          nextWorkoutTime: t.time || "",
+          nextWorkoutPart: part, nextPtPart: part,
+          nextWorkoutDateUpdatedAt: new Date().toISOString(),
+        });
+      }));
       const failed = targets.filter((t,i)=>results[i].status==="rejected");
       if (failed.length === 0) {
         showToast(`다음 수업 저장 완료 ✓ (${targets.length}명)`);
@@ -21552,8 +21638,9 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
   };
 
   const mkPairSet = () => ({weight:"", reps:"", durationSec:""});
+  // only: "" = 두 회원 공통(기본값). 필요할 때만 "A"/"B"로 바꿔 한 회원 전용 종목으로 만든다.
   const mkPairEx = () => ({
-    name:"", muscleTop:"가슴", muscleSub:"윗가슴", equipment:"바벨",
+    name:"", muscleTop:"가슴", muscleSub:"윗가슴", equipment:"바벨", only:"",
     funcCategory:"", funcBodyPart:[], funcTool:"", movementPurpose:"",
     setsA: [mkPairSet(),mkPairSet(),mkPairSet()],
     setsB: [mkPairSet(),mkPairSet(),mkPairSet()],
@@ -21599,7 +21686,12 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
       }
       if (typeof d.date === "string" && d.date) setDate(d.date);
       if (typeof d.intensity === "string" && d.intensity) setIntensity(d.intensity);
-      if (Array.isArray(d.selectedTypes)) setSelectedTypes(d.selectedTypes);
+      // 회원별 부위가 저장된 임시 기록이면 그대로, 이전 버전(공통 selectedTypes만 있는 임시 기록)이면
+      // 두 회원 모두 그 값으로 복원한다.
+      if (Array.isArray(d.selectedTypesA)) setSelectedTypesA(d.selectedTypesA);
+      else if (Array.isArray(d.selectedTypes)) setSelectedTypesA(d.selectedTypes);
+      if (Array.isArray(d.selectedTypesB)) setSelectedTypesB(d.selectedTypesB);
+      else if (Array.isArray(d.selectedTypes)) setSelectedTypesB(d.selectedTypes);
       if (Array.isArray(d.exercises) && d.exercises.length) setExercises(d.exercises);
       if (typeof d.trainerCommentA === "string") setTrainerCommentA(d.trainerCommentA);
       if (typeof d.trainerCommentB === "string") setTrainerCommentB(d.trainerCommentB);
@@ -21612,13 +21704,69 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     if (!draftKey) return;
     try {
       localStorage.setItem(draftKey, JSON.stringify({
-        date, intensity, selectedTypes, exercises, trainerCommentA, trainerCommentB,
+        date, intensity, selectedTypesA, selectedTypesB, exercises, trainerCommentA, trainerCommentB,
         savedAt: Date.now(),
       }));
     } catch(e) {}
-  }, [draftKey, date, intensity, selectedTypes, exercises, trainerCommentA, trainerCommentB]);
+  }, [draftKey, date, intensity, selectedTypesA, selectedTypesB, exercises, trainerCommentA, trainerCommentB]);
 
   const clearDraft = () => { if (draftKey) { try { localStorage.removeItem(draftKey); } catch(e) {} } };
+
+  // ── 반응형 ─────────────────────────────────────────────────────────────
+  // 태블릿·PC(≥768)는 두 회원을 나란히 두고 같은 종목의 수행 내용을 바로 비교한다.
+  // 좁은 화면은 좌우 2열을 억지로 유지하면 입력칸이 절반으로 줄어 숫자 입력이 어려워지므로,
+  // 회원 탭으로 한 명씩 전환한다. breakpoint 값(768)은 HomeScreen의 isWide와 동일 기준을 재사용한다.
+  const [winW, setWinW] = useState(typeof window!=="undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const h = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", h);
+    window.addEventListener("orientationchange", h);
+    return () => { window.removeEventListener("resize", h); window.removeEventListener("orientationchange", h); };
+  }, []);
+  const isWide = winW >= 768;
+  const [activeWho, setActiveWho] = useState("A");   // 좁은 화면에서 현재 보고 있는 회원
+
+  // ── 회원별 이전 운동 기록 ────────────────────────────────────────────────
+  // 1:1 화면과 같은 findPastExRecords를 그대로 재사용한다(별도 기록 시스템을 새로 만들지 않는다).
+  // A/B가 정해진 뒤 각 회원의 수업일지를 한 번만 읽어 두고, 종목명이 입력될 때마다 로컬에서 조회한다.
+  const [pastSessions, setPastSessions] = useState({ A: [], B: [] });
+  const [pastLoading, setPastLoading] = useState(false);
+  useEffect(() => {
+    if (!memberAId || !memberBId) return;
+    let alive = true;
+    setPastLoading(true);
+    Promise.all([
+      getSessions(memberAId).catch(() => []),
+      getSessions(memberBId).catch(() => []),
+    ]).then(([a, b]) => {
+      if (!alive) return;
+      setPastSessions({ A: a || [], B: b || [] });
+    }).finally(() => { if (alive) setPastLoading(false); });
+    return () => { alive = false; };
+  }, [memberAId, memberBId]);
+
+  // 신규 팀 생성처럼 회원이 화면 안에서 나중에 정해지는 경우, 그 회원의 "다음 수업 준비" 값을 기본값으로
+  // 한 번만 채운다. 이미 값이 들어있으면(사용자가 직접 고른 경우 포함) 절대 덮어쓰지 않는다.
+  const prefilledRef = useRef({ A:false, B:false });
+  useEffect(() => {
+    [["A", memberA], ["B", memberB]].forEach(([who, mem]) => {
+      if (!mem || prefilledRef.current[who]) return;
+      prefilledRef.current[who] = true;
+      const np = parseNextParts(mem.nextWorkoutPart || mem.nextPtPart);
+      const bodyParts = np.filter(p => SESSION_BODY_PART_OPTIONS.includes(p));
+      if (who === "A") {
+        if (bodyParts.length) setSelectedTypesA(prev => prev.length ? prev : bodyParts);
+        setNextPartsA(prev => prev.length ? prev : np);
+        setNextDateA(prev => prev || mem.nextWorkoutDate || "");
+        setNextTimeA(prev => prev || mem.nextWorkoutTime || "");
+      } else {
+        if (bodyParts.length) setSelectedTypesB(prev => prev.length ? prev : bodyParts);
+        setNextPartsB(prev => prev.length ? prev : np);
+        setNextDateB(prev => prev || mem.nextWorkoutDate || "");
+        setNextTimeB(prev => prev || mem.nextWorkoutTime || "");
+      }
+    });
+  }, [memberA, memberB]);
 
   const addEx = () => setExercises(prev=>[...prev, mkPairEx()]);
   const removeEx = (ei) => {
@@ -21679,18 +21827,36 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     return {...e,[key]:sets};
   }));
 
+  // 지난 기록 불러오기 — 해당 회원의 세트만 교체한다(상대 회원 세트는 절대 건드리지 않는다).
+  // Firestore 쓰기는 없고 로컬 state만 바꾸므로, 저장은 기존 "저장"/"나눠서 기록" 버튼에서만 일어난다.
+  const loadPastSets = (ei, who, rec, name) => {
+    if (!rec) return;
+    const key = who==="A"?"setsA":"setsB";
+    const next = (rec.sets||[]).map(s => ({
+      weight: s.weight != null ? String(s.weight) : "",
+      reps: s.reps != null ? String(s.reps) : "",
+      durationSec: s.durationSec != null ? String(s.durationSec) : "",
+    }));
+    setExercises(prev=>prev.map((e,i)=> i===ei ? {...e, [key]: next.length ? next : [mkPairSet()]} : e));
+    showToast(`${name} 지난 기록을 불러왔습니다 ✓`);
+  };
+
   // 원본 저장 — 성공/실패를 boolean으로 반환한다("나눠서 기록" 흐름이 원본 저장 실패 시
   // 다음 단계(A/B 분할)로 넘어가지 않고 여기서 멈추도록 신호를 줘야 하기 때문).
   const handleManualSave = async () => {
     if (!memberAId || !memberBId) { showToast("A, B 회원을 모두 선택하세요","err"); return false; }
     setSaving(true);
     try {
+      // type/selectedTypes(팀 공통)는 A/B 합집합으로 계속 저장한다 — 홈 "오늘 수업" 그룹 카드 등
+      // 기존 화면이 이 필드를 읽기 때문이다. 회원별 값은 selectedTypesA/B에 따로 저장된다.
+      const mergedTypes = mergePairTypes(selectedTypesA, selectedTypesB);
       await onSave({
         memberAId, memberAName: memberA?.name||"",
         memberBId, memberBName: memberB?.name||"",
         date, intensity,
-        type: selectedTypes.length ? selectedTypes.join(" · ") : "기타",
-        selectedTypes: selectedTypes.length ? selectedTypes : ["기타"],
+        type: mergedTypes.length ? mergedTypes.join(" · ") : "기타",
+        selectedTypes: mergedTypes.length ? mergedTypes : ["기타"],
+        selectedTypesA, selectedTypesB,
         exercises, trainerCommentA, trainerCommentB,
         status: "draft",
       });
@@ -21782,6 +21948,8 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
   // 팀 문서를 재사용하는 구조라 오늘 날짜로만 판단하면 같은 날 안에 다음 회차(예: 내일 수업)를
   // 미리 준비하려 해도 폼이 잠긴 채로 남는다. date를 다른 날짜로 바꾸면 즉시 잠금이 풀린다.
   const isSplitDone = pairSessionCompletedToday(editData, date);
+  // 넓은 화면은 두 회원을 항상 나란히, 좁은 화면은 탭으로 고른 한 명만 그린다.
+  const visibleSides = isWide ? PAIR_SIDES : PAIR_SIDES.filter(s => s.who === activeWho);
 
   return (
     <div>
@@ -21845,36 +22013,77 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
         </div>
       )}
 
-      {/* 수업 유형 (운동 부위) */}
-      <div style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,
-        padding:"12px 13px",marginBottom:10}}>
-        <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:7,fontWeight:700}}>
-          수업 유형 <span style={{color:"#cbd5e1",fontSize:8,fontWeight:400}}>(복수 선택 가능)</span>
-        </Mo>
-        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-          {SESSION_TYPE_OPTIONS.map(t => {
-            const active = selectedTypes.includes(t);
+      {/* 좁은 화면 회원 전환 탭 — 넓은 화면(태블릿·PC)에서는 두 회원이 항상 나란히 보이므로 탭이 없다 */}
+      {!isWide && (
+        <div style={{display:"flex",gap:6,marginBottom:10,position:"sticky",top:0,zIndex:20,
+          background:"#0B1120",padding:"6px 0"}}>
+          {PAIR_SIDES.map(({who,color,tint}) => {
+            const on = activeWho===who;
+            const name = (who==="A"?memberA?.name:memberB?.name) || `${who} 회원`;
             return (
-              <button key={t} type="button" disabled={isSplitDone}
-                onClick={() => setSelectedTypes(prev => prev.includes(t) ? prev.filter(x=>x!==t) : [...prev, t])}
-                style={{padding:"4px 10px",borderRadius:14,border:"1px solid",cursor:isSplitDone?"default":"pointer",
-                  fontSize:11,fontWeight:active?700:400,
-                  borderColor:active?"#5EEAD4":"rgba(255,255,255,0.08)",
-                  background:active?"rgba(0,229,160,.15)":"transparent",
-                  color:active?"#5EEAD4":"#94a3b8"}}>
-                {t}
+              <button key={who} type="button" onClick={()=>setActiveWho(who)}
+                style={{flex:1,padding:"11px 8px",borderRadius:10,cursor:"pointer",
+                  border:`1.5px solid ${on?color:"rgba(255,255,255,.12)"}`,
+                  background:on?tint:"transparent",color:on?color:"#94a3b8",
+                  fontSize:13.5,fontWeight:on?800:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                {name}
               </button>
             );
           })}
         </div>
-        {selectedTypes.length===0 && <Mo c="#cbd5e1" s={7} style={{display:"block",marginTop:4}}>선택 없으면 "기타"로 저장됩니다</Mo>}
+      )}
+
+      {/* 오늘 운동 부위 — 회원별로 따로 지정한다(A는 상체 / B는 하체처럼 서로 다른 프로그램 가능) */}
+      <div style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,
+        padding:"12px 13px",marginBottom:10}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+          <Mo c="#94a3b8" s={9} style={{fontWeight:700}}>
+            오늘 운동 부위 <span style={{color:"#cbd5e1",fontSize:8,fontWeight:400}}>(회원별 · 복수 선택 가능)</span>
+          </Mo>
+          {/* 두 회원이 같은 부위를 하는 대부분의 수업에서 한 번만 고르고 그대로 복사할 수 있게 한다 */}
+          {!isSplitDone && (
+            <button type="button" onClick={()=>{
+              if (activeWho==="B" && !isWide) setSelectedTypesA([...selectedTypesB]);
+              else setSelectedTypesB([...selectedTypesA]);
+              showToast("두 회원 부위를 같게 맞췄습니다");
+            }}
+              style={{padding:"4px 10px",borderRadius:14,border:"1px solid rgba(94,234,212,.3)",
+                background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+              둘 다 같게
+            </button>
+          )}
+        </div>
+        {visibleSides.map(({who,color,tint}) => {
+          const types = getTypesOf(who);
+          const name = (who==="A"?memberA?.name:memberB?.name) || `${who} 회원`;
+          return (
+            <div key={who} style={{marginBottom:8}}>
+              <Mo c={color} s={9} style={{display:"block",fontWeight:800,marginBottom:5}}>{name}</Mo>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {SESSION_TYPE_OPTIONS.map(t => {
+                  const active = types.includes(t);
+                  return (
+                    <button key={t} type="button" disabled={isSplitDone}
+                      onClick={() => toggleTypeOf(who, t)}
+                      style={{padding:"4px 10px",borderRadius:14,border:"1px solid",cursor:isSplitDone?"default":"pointer",
+                        fontSize:11,fontWeight:active?700:400,
+                        borderColor:active?color:"rgba(255,255,255,0.08)",
+                        background:active?tint:"transparent",
+                        color:active?color:"#94a3b8"}}>
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+              {types.length===0 && <Mo c="#cbd5e1" s={7} style={{display:"block",marginTop:4}}>선택 없으면 "기타"로 저장됩니다</Mo>}
+            </div>
+          );
+        })}
       </div>
 
       {/* 운동 목록 */}
       {exercises.map((ex, ei) => {
-        const setsA = ex.setsA||[];
-        const setsB = ex.setsB||[];
-        const maxSets = Math.max(setsA.length, setsB.length);
+        const only = pairExerciseTarget(ex);
         return (
           <div key={ei} style={{background:"#111827",border:"1px solid rgba(255,255,255,.06)",
             borderRadius:10,padding:"12px 13px",marginBottom:10}}>
@@ -21898,6 +22107,29 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
                   style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,107,107,.2)",
                     background:"none",color:"#ff6b6b",fontSize:11,cursor:"pointer"}}>✕</button>
               )}
+            </div>
+
+            {/* 운동 대상 — 기본은 "둘 다"이고, 필요할 때만 한 회원 전용으로 바꾼다.
+                (저장은 only 필드지만 화면에는 회원 이름으로만 보여 준다) */}
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+              <Mo c="#94a3b8" s={8} style={{fontWeight:700,flexShrink:0}}>대상</Mo>
+              {PAIR_ONLY_OPTIONS.map(opt => {
+                const active = only === opt.value;
+                const side = PAIR_SIDES.find(s => s.who === opt.value);
+                const label = opt.label || `${(opt.value==="A"?memberA?.name:memberB?.name) || `${opt.value} 회원`}만`;
+                const tone = side ? side.color : "#5EEAD4";
+                return (
+                  <button key={opt.value||"both"} type="button" disabled={isSplitDone}
+                    onClick={()=>updateEx(ei,"only",opt.value)}
+                    style={{padding:"4px 11px",borderRadius:14,border:"1px solid",cursor:isSplitDone?"default":"pointer",
+                      fontSize:10.5,fontWeight:active?800:500,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                      borderColor:active?tone:"rgba(255,255,255,.08)",
+                      background:active?(side?side.tint:"rgba(94,234,212,.14)"):"transparent",
+                      color:active?tone:"#94a3b8"}}>
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* 근육/장비 */}
@@ -21964,105 +22196,106 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
               </div>
             )}
 
-            {/* 좌우 헤더 */}
-            <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:4}}>
-              <div/>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3,borderRadius:5,
-                padding:"4px 6px",background:"rgba(255,209,102,.06)",border:"1px solid rgba(255,209,102,.15)"}}>
-                <Mo c="#ffd166" s={8} style={{textAlign:"center",fontWeight:800}}>{memberA?.name||"A"}</Mo>
-                <Mo c="#ffd166" s={7} style={{textAlign:"center"}}>중량/횟수</Mo>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3,borderRadius:5,
-                padding:"4px 6px",background:"rgba(162,155,254,.06)",border:"1px solid rgba(162,155,254,.15)"}}>
-                <Mo c="#a29bfe" s={8} style={{textAlign:"center",fontWeight:800}}>{memberB?.name||"B"}</Mo>
-                <Mo c="#a29bfe" s={7} style={{textAlign:"center"}}>중량/횟수</Mo>
-              </div>
-            </div>
+            {/* 회원별 수행 기록 — 넓은 화면은 두 회원을 나란히 두어 같은 종목의 수행 내용을 바로 비교하고,
+                좁은 화면은 탭으로 고른 회원 한 명만 그려 입력칸 폭을 유지한다. */}
+            <div style={{display:isWide?"grid":"block",gridTemplateColumns:isWide?"1fr 1fr":undefined,gap:8}}>
+              {visibleSides.map(side => {
+                const { who, color, tint, border } = side;
+                const name = (who==="A"?memberA?.name:memberB?.name) || `${who} 회원`;
+                const setsKey = who==="B" ? "setsB" : "setsA";
+                const fbKey   = who==="B" ? "feedbackB" : "feedbackA";
+                const sets    = ex[setsKey] || [];
 
-            {/* 세트 행 */}
-            {Array.from({length:maxSets}).map((_,si)=>{
-              const rA = setsA[si]||{};
-              const rB = setsB[si]||{};
-              return (
-                <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:4,alignItems:"center"}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
-                    background:"#0c1523",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    {si+1}
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
-                    <input type="number" placeholder="kg" value={rA.weight||""}
-                      disabled={isSplitDone}
-                      onChange={e=>updateSet(ei,"A",si,"weight",e.target.value)}
-                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
-                        borderRadius:4,border:"1px solid rgba(255,209,102,.2)",background:"#0c1523",color:"#ffd166"}} />
-                    <input type="number" placeholder="회" value={rA.reps||""}
-                      disabled={isSplitDone}
-                      onChange={e=>updateSet(ei,"A",si,"reps",e.target.value)}
-                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
-                        borderRadius:4,border:"1px solid rgba(255,209,102,.15)",background:"#0c1523",color:"#ffd166"}} />
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
-                    <input type="number" placeholder="kg" value={rB.weight||""}
-                      disabled={isSplitDone}
-                      onChange={e=>updateSet(ei,"B",si,"weight",e.target.value)}
-                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
-                        borderRadius:4,border:"1px solid rgba(162,155,254,.2)",background:"#0c1523",color:"#a29bfe"}} />
-                    <input type="number" placeholder="회" value={rB.reps||""}
-                      disabled={isSplitDone}
-                      onChange={e=>updateSet(ei,"B",si,"reps",e.target.value)}
-                      style={{textAlign:"center",height:32,padding:"0 3px",fontSize:14,fontWeight:700,
-                        borderRadius:4,border:"1px solid rgba(162,155,254,.15)",background:"#0c1523",color:"#a29bfe"}} />
-                  </div>
-                </div>
-              );
-            })}
+                // 이 종목의 대상이 아닌 회원 — 입력칸 대신 안내만 남겨 "누가 무엇을 했는지"가 한눈에 보이게 한다.
+                if (!pairExerciseIncludes(ex, who)) {
+                  return (
+                    <div key={who} style={{padding:"14px 10px",borderRadius:7,border:"1px dashed rgba(255,255,255,.1)",
+                      background:"rgba(255,255,255,.015)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <Mo c="#64748b" s={9} style={{fontWeight:700,textAlign:"center"}}>{name} 미실시</Mo>
+                    </div>
+                  );
+                }
 
-            {/* 세트 추가/삭제 */}
-            {!isSplitDone && (
-              <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr",gap:4,marginBottom:8}}>
-                <div/>
-                <div style={{display:"flex",gap:3}}>
-                  <button onClick={()=>addSet(ei,"A")}
-                    style={{flex:1,padding:"5px",border:"1px dashed rgba(255,209,102,.25)",borderRadius:4,
-                      background:"none",color:"#ffd166",fontSize:9,fontWeight:700,cursor:"pointer"}}>
-                    +A세트
-                  </button>
-                  {setsA.length>1&&<button onClick={()=>removeSet(ei,"A",setsA.length-1)}
-                    style={{padding:"5px 7px",border:"1px solid rgba(255,107,107,.2)",borderRadius:4,
-                      background:"none",color:"#ff6b6b",fontSize:9,cursor:"pointer"}}>−</button>}
-                </div>
-                <div style={{display:"flex",gap:3}}>
-                  <button onClick={()=>addSet(ei,"B")}
-                    style={{flex:1,padding:"5px",border:"1px dashed rgba(162,155,254,.25)",borderRadius:4,
-                      background:"none",color:"#a29bfe",fontSize:9,fontWeight:700,cursor:"pointer"}}>
-                    +B세트
-                  </button>
-                  {setsB.length>1&&<button onClick={()=>removeSet(ei,"B",setsB.length-1)}
-                    style={{padding:"5px 7px",border:"1px solid rgba(255,107,107,.2)",borderRadius:4,
-                      background:"none",color:"#ff6b6b",fontSize:9,cursor:"pointer"}}>−</button>}
-                </div>
-              </div>
-            )}
+                // 이전 기록 — 1:1과 동일한 findPastExRecords를 그대로 재사용한다(가장 최근 1건만 한 줄로).
+                const past = ex.name ? (findPastExRecords(pastSessions[who], ex.name, 1)[0] || null) : null;
+                const pastSummary = past ? summarizePastPairSets(past.sets) : "";
 
-            {/* 피드백 A/B — 2:1 화면에서는 RPE·자극도 입력을 제거하고 회원별 메모만 남긴다.
-                (기존 기록에 저장된 feedbackA/B.rpe·stimRating 값은 그대로 두고 건드리지 않는다 — updateFeedback은
-                note 필드만 갱신하므로 다른 필드는 spread로 그대로 보존된다) */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-            {[{who:"A",label:memberA?.name||"A",color:"#ffd166",borderColor:"rgba(255,209,102,.15)",key:"feedbackA"},
-              {who:"B",label:memberB?.name||"B",color:"#a29bfe",borderColor:"rgba(162,155,254,.15)",key:"feedbackB"}].map(({who,label,color,borderColor,key})=>{
-              return (
-              <div key={who} style={{padding:"7px 9px",borderRadius:6,
-                border:`1px solid ${borderColor}`,background:"rgba(255,255,255,.02)"}}>
-                <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:6}}>{label} 피드백</Mo>
-                <input placeholder="메모" value={ex[key]?.note||""}
-                  disabled={isSplitDone}
-                  onChange={e=>updateFeedback(ei,who,"note",e.target.value)}
-                  style={{width:"100%",padding:"5px 8px",borderRadius:5,
-                    border:`1px solid ${borderColor}`,background:"#0c1523",
-                    color:"#ddddf0",fontSize:10,boxSizing:"border-box"}} />
-              </div>
-              );
-            })}
+                return (
+                  <div key={who} style={{borderRadius:7,border:`1px solid ${border}`,overflow:"hidden",
+                    marginBottom:isWide?0:8}}>
+                    <div style={{padding:"5px 9px",background:tint,display:"flex",alignItems:"center",
+                      justifyContent:"space-between",gap:6}}>
+                      <Mo c={color} s={9} style={{fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</Mo>
+                      <Mo c={color} s={7} style={{opacity:.8,flexShrink:0}}>중량 / 횟수</Mo>
+                    </div>
+
+                    {/* 지난 기록 한 줄 + 원터치 불러오기 */}
+                    {ex.name && (
+                      <div style={{padding:"5px 9px",borderBottom:"1px solid rgba(255,255,255,.05)",
+                        display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                        {pastSummary ? (
+                          <>
+                            <Mo c="#94a3b8" s={8} style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              📅 지난 {String(past.date||"").slice(5)} · <b style={{color:"#cbd5e1"}}>{pastSummary}</b>
+                              {past.rpe != null && past.rpe !== "" ? ` · RPE ${past.rpe}` : ""}
+                            </Mo>
+                            {!isSplitDone && (
+                              <button type="button" onClick={()=>loadPastSets(ei, who, past, name)}
+                                style={{flexShrink:0,padding:"3px 8px",borderRadius:10,border:`1px solid ${border}`,
+                                  background:"transparent",color:color,fontSize:9,fontWeight:700,cursor:"pointer"}}>
+                                불러오기
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <Mo c="#64748b" s={8}>{pastLoading ? "지난 기록 확인 중..." : "지난 기록 없음"}</Mo>
+                        )}
+                      </div>
+                    )}
+
+                    <div style={{padding:"7px 9px"}}>
+                      {sets.map((row, si) => (
+                        <div key={si} style={{display:"grid",gridTemplateColumns:"22px 1fr 1fr 18px",gap:4,
+                          marginBottom:4,alignItems:"center"}}>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",
+                            background:"#0c1523",borderRadius:4,height:34,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            {si+1}
+                          </div>
+                          <input type="number" inputMode="decimal" placeholder="kg" value={row.weight||""}
+                            disabled={isSplitDone}
+                            onChange={e=>updateSet(ei,who,si,"weight",e.target.value)}
+                            style={{textAlign:"center",height:34,padding:"0 3px",fontSize:15,fontWeight:700,
+                              borderRadius:4,border:`1px solid ${border}`,background:"#0c1523",color:color,minWidth:0}} />
+                          <input type="number" inputMode="numeric" placeholder="회" value={row.reps||""}
+                            disabled={isSplitDone}
+                            onChange={e=>updateSet(ei,who,si,"reps",e.target.value)}
+                            style={{textAlign:"center",height:34,padding:"0 3px",fontSize:15,fontWeight:700,
+                              borderRadius:4,border:`1px solid ${border}`,background:"#0c1523",color:color,minWidth:0}} />
+                          {!isSplitDone && sets.length>1
+                            ? <button onClick={()=>removeSet(ei,who,si)}
+                                style={{background:"none",border:"none",color:"#64748b",fontSize:12,padding:0,cursor:"pointer"}}>✕</button>
+                            : <div/>}
+                        </div>
+                      ))}
+                      {!isSplitDone && (
+                        <button onClick={()=>addSet(ei,who)}
+                          style={{width:"100%",marginTop:2,padding:"6px",border:`1px dashed ${border}`,borderRadius:5,
+                            background:"none",color:color,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                          + 세트 추가
+                        </button>
+                      )}
+                      {/* 회원별 코치 메모 — RPE·자극도는 회원앱에서 회원이 직접 입력하므로 여기서는 메모만 받는다.
+                          (기존 기록에 저장된 feedbackA/B.rpe·stimRating 값은 updateFeedback이 note만 갱신하므로 그대로 보존된다) */}
+                      <input placeholder={`${name} 메모`} value={ex[fbKey]?.note||""}
+                        disabled={isSplitDone}
+                        onChange={e=>updateFeedback(ei,who,"note",e.target.value)}
+                        style={{width:"100%",marginTop:5,padding:"6px 8px",borderRadius:5,
+                          border:`1px solid ${border}`,background:"#0c1523",
+                          color:"#ddddf0",fontSize:11,boxSizing:"border-box"}} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -22077,19 +22310,23 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
         </button>
       )}
 
-      {/* 트레이너 코멘트 */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-        {[{who:"A",label:memberA?.name||"A",color:"#ffd166",val:trainerCommentA,set:setTrainerCommentA},
-          {who:"B",label:memberB?.name||"B",color:"#a29bfe",val:trainerCommentB,set:setTrainerCommentB}].map(({who,label,color,val,set})=>(
-          <div key={who}>
-            <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:3}}>{label} 코멘트</Mo>
-            <textarea value={val} onChange={e=>set(e.target.value)} disabled={isSplitDone}
-              placeholder={`${label} 트레이너 코멘트`}
-              rows={3}
-              style={{width:"100%",padding:"8px",borderRadius:7,border:`1px solid ${color}22`,
-                background:"#0c1523",color:"#ddddf0",fontSize:11,boxSizing:"border-box",resize:"vertical"}} />
-          </div>
-        ))}
+      {/* 트레이너 코멘트 — 회원별. 좁은 화면에서는 현재 보고 있는 회원 것만 표시한다. */}
+      <div style={{display:isWide?"grid":"block",gridTemplateColumns:isWide?"1fr 1fr":undefined,gap:8,marginBottom:10}}>
+        {visibleSides.map(({who,color})=>{
+          const label = (who==="A"?memberA?.name:memberB?.name) || `${who} 회원`;
+          const val = who==="A" ? trainerCommentA : trainerCommentB;
+          const set = who==="A" ? setTrainerCommentA : setTrainerCommentB;
+          return (
+            <div key={who} style={{marginBottom:isWide?0:8}}>
+              <Mo c={color} s={8} style={{display:"block",fontWeight:700,marginBottom:3}}>{label} 코멘트</Mo>
+              <textarea value={val} onChange={e=>set(e.target.value)} disabled={isSplitDone}
+                placeholder={`${label} 트레이너 코멘트`}
+                rows={3}
+                style={{width:"100%",padding:"8px",borderRadius:7,border:`1px solid ${color}22`,
+                  background:"#0c1523",color:"#ddddf0",fontSize:11,boxSizing:"border-box",resize:"vertical"}} />
+            </div>
+          );
+        })}
       </div>
 
       {/* 다음 2:1 수업 — 두 회원에게 한 번에 저장(체크 해제한 회원은 제외) */}
@@ -22113,35 +22350,92 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
             </label>
           ))}
         </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-          <div style={{flex:"1 1 130px",minWidth:120}}>
-            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
-            <input type="date" value={nextDate} onChange={e=>setNextDate(e.target.value)}
-              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
-                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+        {/* 날짜·시간 — 같은 시간에 함께 오는 경우가 대부분이라 기본은 공통 입력이고,
+            "회원별로 다르게"를 켜면 각 회원 블록 안에서 따로 지정한다. */}
+        {nextSameSchedule && (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+            <div style={{flex:"1 1 130px",minWidth:120}}>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜 (두 회원 공통)</Mo>
+              <input type="date" value={nextDateA} onChange={e=>setNextDateA(e.target.value)}
+                style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                  background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+            </div>
+            <div style={{flex:"1 1 110px",minWidth:100}}>
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>시간 (두 회원 공통)</Mo>
+              <select value={nextTimeA} onChange={e=>setNextTimeA(e.target.value)}
+                style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                  background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}}>
+                <option value="">시간 미정</option>
+                {NEXT_SESSION_TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
           </div>
-          <div style={{flex:"1 1 110px",minWidth:100}}>
-            <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>시간</Mo>
-            <select value={nextTime} onChange={e=>setNextTime(e.target.value)}
-              style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
-                background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}}>
-              <option value="">시간 미정</option>
-              {NEXT_SESSION_TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-        <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:5}}>운동 부위</Mo>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
-          {NEXT_PT_PART_OPTIONS.map(x=>{
-            const active = x==="미정" ? nextParts.length===0 : nextParts.includes(x);
-            return (
-              <button key={x} type="button" onClick={()=>toggleNextPairPart(x)}
-                style={{borderRadius:999,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",
-                  border:`1px solid ${active?"#5EEAD4":"rgba(255,255,255,.1)"}`,
-                  background:active?"rgba(94,234,212,.12)":"transparent",color:active?"#5EEAD4":"#94a3b8"}}>{x}</button>
-            );
-          })}
-        </div>
+        )}
+        <label style={{display:"flex",alignItems:"center",gap:7,marginBottom:10,cursor:"pointer",
+          fontSize:11,fontWeight:700,color:"#94a3b8"}}>
+          <input type="checkbox" checked={!nextSameSchedule} onChange={e=>setNextSameSchedule(!e.target.checked)}
+            style={{width:16,height:16,minWidth:16,margin:0,flexShrink:0,accentColor:"#5EEAD4",cursor:"pointer"}} />
+          <span>날짜·시간도 회원별로 다르게</span>
+        </label>
+
+        {/* 다음 운동 부위는 항상 회원별로 따로 저장된다(김OO 하체 / 이OO 상체) */}
+        {PAIR_SIDES.map(({who,color,tint,soft,border}) => {
+          const name = (who==="A"?memberA?.name:memberB?.name) || `${who} 회원`;
+          const parts = who==="A" ? nextPartsA : nextPartsB;
+          const dateV = who==="A" ? nextDateA : nextDateB;
+          const timeV = who==="A" ? nextTimeA : nextTimeB;
+          const setDateV = who==="A" ? setNextDateA : setNextDateB;
+          const setTimeV = who==="A" ? setNextTimeA : setNextTimeB;
+          const enabled = who==="A" ? nextTargetA : nextTargetB;
+          return (
+            <div key={who} style={{marginBottom:10,padding:"9px 10px",borderRadius:8,
+              border:`1px solid ${enabled?border:"rgba(255,255,255,.08)"}`,
+              background:enabled?soft:"transparent",opacity:enabled?1:.55}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:7,flexWrap:"wrap"}}>
+                <Mo c={color} s={10} style={{fontWeight:800}}>{name}</Mo>
+                {/* A에서 고른 부위를 그대로 복사 — 같은 부위를 하는 날 두 번 고르지 않게 한다 */}
+                {who==="B" && (
+                  <button type="button" onClick={()=>setNextPartsB([...nextPartsA])}
+                    style={{padding:"3px 9px",borderRadius:12,border:"1px solid rgba(94,234,212,.3)",
+                      background:"rgba(94,234,212,.08)",color:"#5EEAD4",fontSize:9.5,fontWeight:700,cursor:"pointer"}}>
+                    위와 같게
+                  </button>
+                )}
+              </div>
+              {!nextSameSchedule && (
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                  <div style={{flex:"1 1 130px",minWidth:120}}>
+                    <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>날짜</Mo>
+                    <input type="date" value={dateV} onChange={e=>setDateV(e.target.value)}
+                      style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                        background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}} />
+                  </div>
+                  <div style={{flex:"1 1 110px",minWidth:100}}>
+                    <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:3}}>시간</Mo>
+                    <select value={timeV} onChange={e=>setTimeV(e.target.value)}
+                      style={{width:"100%",padding:"7px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                        background:"#0c1523",color:"#ddddf0",fontSize:12,boxSizing:"border-box"}}>
+                      <option value="">시간 미정</option>
+                      {NEXT_SESSION_TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              <Mo c="#94a3b8" s={8} style={{display:"block",marginBottom:5}}>다음 운동 부위</Mo>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {NEXT_PT_PART_OPTIONS.map(x=>{
+                  const active = x==="미정" ? parts.length===0 : parts.includes(x);
+                  return (
+                    <button key={x} type="button" onClick={()=>toggleNextPairPart(who, x)}
+                      style={{borderRadius:999,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",
+                        border:`1px solid ${active?color:"rgba(255,255,255,.1)"}`,
+                        background:active?tint:"transparent",color:active?color:"#94a3b8"}}>{x}</button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
         <button onClick={handleSaveNextPairSession} disabled={nextSaving}
           style={{padding:"10px 20px",borderRadius:9,border:"none",cursor:nextSaving?"not-allowed":"pointer",
             background:"linear-gradient(135deg,#5EEAD4,#2DD4BF)",color:"#0B1120",fontSize:12.5,fontWeight:800,opacity:nextSaving?0.7:1}}>
@@ -22201,7 +22495,15 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
                   // 앞 단계가 실패하면 다음 단계로 넘어가지 않고 여기서 멈춘다.
                   const savedOk = await handleManualSave();
                   if (!savedOk) return;
-                  const splitResult = await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB, memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name, date, intensity, type: selectedTypes.length ? selectedTypes.join(" · ") : "기타", selectedTypes: selectedTypes.length ? selectedTypes : ["기타"]} : null);
+                  const mergedTypes = mergePairTypes(selectedTypesA, selectedTypesB);
+                  const splitResult = await onSplit(editData ? {...editData,
+                    exercises, trainerCommentA, trainerCommentB,
+                    memberAId, memberBId, memberAName:memberA?.name, memberBName:memberB?.name,
+                    date, intensity,
+                    type: mergedTypes.length ? mergedTypes.join(" · ") : "기타",
+                    selectedTypes: mergedTypes.length ? mergedTypes : ["기타"],
+                    selectedTypesA, selectedTypesB,
+                  } : null);
                   if (!splitResult) return;
                   clearDraft();
                   setConfirmSplit(false);

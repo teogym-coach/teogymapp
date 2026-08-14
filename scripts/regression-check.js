@@ -52,6 +52,34 @@ function wpScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 2:1 회원별 개인화(종목 대상 only · 회원별 운동 부위 · 회원 한 명분 기록 변환): 실제 실행 시나리오 검증 ──
+// "나눠서 기록"이 실제로 쓰는 원본 함수를 그대로 슬라이스해 실행한다 — A 전용 종목이 B 기록/분석에 섞이는
+// 사고를 문자열 검사가 아니라 실행 결과로 막는다.
+let pairPersonalLib = null;
+try {
+  const sliceTypes = app.slice(app.indexOf('function normalizeTypes'), app.indexOf('function formatTypes'));
+  const slicePair  = app.slice(app.indexOf('function pairExerciseTarget'), app.indexOf('function formatParts'));
+  pairPersonalLib = new Function(`${sliceTypes}\n${slicePair}\nreturn { pairExerciseTarget, pairExerciseIncludes, getPairMemberTypes, mergePairTypes, buildPairSplitExercises, summarizePastPairSets };`)();
+} catch (e) {
+  console.error('[regression] 2:1 개인화 헬퍼 추출 실패:', e.message);
+}
+function pairScenario(name, fn) {
+  if (!pairPersonalLib) return [name, false];
+  try { return [name, !!fn(pairPersonalLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+// 시나리오 공용 픽스처 — 랫풀다운(공통) + 벤치프레스(A만) + 레그프레스(B만)
+const pairFixtureExercises = () => ([
+  { name:'랫풀다운', only:'', muscleTop:'등', equipment:'머신',
+    setsA:[{weight:'30',reps:'12'},{weight:'30',reps:'12'},{weight:'30',reps:'12'}],
+    setsB:[{weight:'20',reps:'15'},{weight:'20',reps:'15'},{weight:'20',reps:'15'}],
+    feedbackA:{note:'광배 자극 좋음'}, feedbackB:{note:'가동범위 주의'} },
+  { name:'벤치프레스', only:'A', muscleTop:'가슴', equipment:'바벨',
+    setsA:[{weight:'50',reps:'10'}], setsB:[], feedbackA:{note:''}, feedbackB:{note:''} },
+  { name:'레그프레스', only:'B', muscleTop:'하체', equipment:'머신',
+    setsA:[], setsB:[{weight:'80',reps:'12'}], feedbackA:{note:''}, feedbackB:{note:''} },
+]);
+
 // ── 홈 "수업일지 미전송"/"수업일지 미확인": 0회차 제외·회원 확인 판정 실제 실행 시나리오 검증 ──
 // 0회차(숫자 0·문자열 "0"·"0회차")는 미전송 목록에서 제외되고, 1회차 이상과 회차 정보 없는 기록은 기존 기준 그대로 판정돼야 한다.
 // getSessionReadStatus/summarizeSessionReadStatus/buildUnreadSessionMembers(수업일지 "회원 확인")도 같은 스코프에서 함께 검증한다.
@@ -897,6 +925,117 @@ const checks = [
     })()
   ],
 
+  // ── 2:1 회원별 개인화 (세미프라이빗 코칭: 같이 운동하되 기록·관리는 각자) ──
+  pairScenario('2:1 시나리오A: 같은 종목을 둘 다 해도 회원별 중량/횟수/세트가 각자 기록으로 분리된다', L => {
+    const a = L.buildPairSplitExercises(pairFixtureExercises(), 'A');
+    const b = L.buildPairSplitExercises(pairFixtureExercises(), 'B');
+    const latA = a.find(e => e.name === '랫풀다운');
+    const latB = b.find(e => e.name === '랫풀다운');
+    return latA.sets.length === 3 && latA.sets[0].weight === '30' && latA.sets[0].reps === '12'
+        && latB.sets.length === 3 && latB.sets[0].weight === '20' && latB.sets[0].reps === '15'
+        && latA.feedback === '광배 자극 좋음' && latB.feedback === '가동범위 주의';
+  }),
+  pairScenario('2:1 시나리오B: A 전용 종목(벤치프레스)은 B의 개인 기록에 절대 포함되지 않는다', L => {
+    const a = L.buildPairSplitExercises(pairFixtureExercises(), 'A');
+    const b = L.buildPairSplitExercises(pairFixtureExercises(), 'B');
+    return a.some(e => e.name === '벤치프레스') && !b.some(e => e.name === '벤치프레스');
+  }),
+  pairScenario('2:1 시나리오C: B 전용 종목(레그프레스)은 A의 개인 기록에 절대 포함되지 않는다', L => {
+    const a = L.buildPairSplitExercises(pairFixtureExercises(), 'A');
+    const b = L.buildPairSplitExercises(pairFixtureExercises(), 'B');
+    return b.some(e => e.name === '레그프레스') && !a.some(e => e.name === '레그프레스');
+  }),
+  pairScenario('2:1 시나리오D: 오늘 운동 부위를 A=상체 / B=하체로 서로 다르게 저장·조회할 수 있다', L => {
+    const ps = { selectedTypesA:['상체'], selectedTypesB:['하체'], selectedTypes:['상체','하체'] };
+    const ta = L.getPairMemberTypes(ps, 'A');
+    const tb = L.getPairMemberTypes(ps, 'B');
+    const merged = L.mergePairTypes(ta, tb);
+    return ta.length === 1 && ta[0] === '상체'
+        && tb.length === 1 && tb[0] === '하체'
+        && merged.length === 2 && merged.includes('상체') && merged.includes('하체');
+  }),
+  pairScenario('2:1 시나리오F: only가 없는 기존 pairSessions 문서는 모두 두 회원 공통 운동으로 해석된다', L => {
+    const legacy = [
+      { name:'스쿼트', setsA:[{weight:'40',reps:'10'}], setsB:[{weight:'20',reps:'10'}], feedbackA:{}, feedbackB:{} },
+      { name:'데드리프트', only:'', setsA:[{weight:'60',reps:'8'}], setsB:[{weight:'30',reps:'8'}], feedbackA:{}, feedbackB:{} },
+    ];
+    const a = L.buildPairSplitExercises(legacy, 'A');
+    const b = L.buildPairSplitExercises(legacy, 'B');
+    return a.length === 2 && b.length === 2
+        && L.pairExerciseTarget(legacy[0]) === '' && L.pairExerciseIncludes(legacy[0], 'A') && L.pairExerciseIncludes(legacy[0], 'B');
+  }),
+  pairScenario('2:1 시나리오F-2: selectedTypesA/B가 없는 기존 문서는 팀 공통 selectedTypes/type으로 폴백된다', L => {
+    const legacyArr = { selectedTypes:['가슴','삼두'] };
+    const legacyStr = { type:'하체' };
+    const a = L.getPairMemberTypes(legacyArr, 'A');
+    const b = L.getPairMemberTypes(legacyArr, 'B');
+    const s = L.getPairMemberTypes(legacyStr, 'B');
+    return a.join('·') === '가슴·삼두' && b.join('·') === '가슴·삼두' && s.join('·') === '하체';
+  }),
+  pairScenario('2:1 시나리오G: 회원별 총 볼륨·종목 수가 자기 운동만으로 계산돼 분석에 상대 회원 운동이 섞이지 않는다', L => {
+    const calcVol = (exList) => exList.reduce((s,e)=> s + (e.sets||[]).reduce((ss,r)=>{
+      const w=parseFloat(r.weight)||0, reps=parseInt(r.reps)||0;
+      return ss + (w>0 && reps>0 ? Math.round(w*reps*10)/10 : 0);
+    },0), 0);
+    const a = L.buildPairSplitExercises(pairFixtureExercises(), 'A');
+    const b = L.buildPairSplitExercises(pairFixtureExercises(), 'B');
+    // A: 랫풀다운 30×12×3(1080) + 벤치프레스 50×10(500) = 1580 / B: 랫풀다운 20×15×3(900) + 레그프레스 80×12(960) = 1860
+    return a.length === 2 && b.length === 2 && calcVol(a) === 1580 && calcVol(b) === 1860;
+  }),
+  pairScenario('2:1 지난 기록 요약: 가장 무거운 유효 세트를 대표로 보여 주고, 값이 없으면 빈 문자열을 돌려준다', L => {
+    const s = L.summarizePastPairSets([{weight:'25',reps:'12'},{weight:'27.5',reps:'12'},{weight:'27.5',reps:'10'}]);
+    const empty = L.summarizePastPairSets([{weight:'',reps:''},{}]);
+    const timeOnly = L.summarizePastPairSets([{durationSec:'40'}]);
+    return s === '27.5kg × 12회 · 3세트' && empty === '' && timeOnly === '40초 · 1세트';
+  }),
+  ['2:1 개인화: 종목 대상(only)은 화면에 "둘 다 / 회원 이름만"으로만 노출되고 개발용 값(only)을 그대로 보여 주지 않는다',
+    app.includes('const PAIR_ONLY_OPTIONS = [{ value:"", label:"둘 다" }, { value:"A" }, { value:"B" }];') &&
+    app.includes('const label = opt.label || `${(opt.value==="A"?memberA?.name:memberB?.name) || `${opt.value} 회원`}만`;') &&
+    app.includes('updateEx(ei,"only",opt.value)')
+  ],
+  ['2:1 개인화: 나눠서 기록이 회원별 종목 필터(buildPairSplitExercises)와 회원별 부위(getPairMemberTypes)를 사용',
+    app.includes('const exToA = buildPairSplitExercises(pairSession.exercises, "A");') &&
+    app.includes('const exToB = buildPairSplitExercises(pairSession.exercises, "B");') &&
+    app.includes('const typesA = getPairMemberTypes(pairSession, "A");') &&
+    app.includes('const typesB = getPairMemberTypes(pairSession, "B");')
+  ],
+  ['2:1 개인화: selectedTypesA/B를 pairSessions에 저장하고, 나눠서 기록 후 다음 회차용으로 함께 초기화',
+    db.includes('selectedTypesA: data.selectedTypesA || [],') &&
+    db.includes('selectedTypesB: data.selectedTypesB || [],') &&
+    db.includes('selectedTypesA: [],') &&
+    db.includes('selectedTypesB: [],')
+  ],
+  ['2:1 개인화: 팀 공통 type/selectedTypes는 A/B 합집합으로 계속 저장(홈 "오늘 수업" 그룹 카드 표시 유지)',
+    app.includes('const mergedTypes = mergePairTypes(selectedTypesA, selectedTypesB);') &&
+    app.includes('selectedTypes: mergedTypes.length ? mergedTypes : ["기타"],')
+  ],
+  ['2:1 시나리오E: 다음 수업 준비가 회원별로 각각 저장된다(부위는 항상 개별, 날짜·시간은 공통 입력 + 개별 전환 가능)',
+    app.includes('const [nextSameSchedule, setNextSameSchedule] = useState(true);') &&
+    app.includes('date: nextSameSchedule ? nextDateA : nextDateB,') &&
+    app.includes('parts: nextPartsB,') &&
+    app.includes('const part = t.parts.length ? t.parts.join(" · ") : "미정";')
+  ],
+  ['2:1 시나리오E-2: 다음 수업 저장은 1:1과 같은 회원 문서 필드를 그대로 재사용(새 컬렉션·새 필드 없음)',
+    app.includes('nextWorkoutDate: t.date || "",') &&
+    app.includes('nextWorkoutPart: part, nextPtPart: part,') &&
+    app.includes('nextWorkoutDateUpdatedAt: new Date().toISOString(),')
+  ],
+  ['2:1 이전 기록: 1:1과 같은 findPastExRecords를 재사용하고 회원별로 따로 조회(별도 기록 시스템 신설 없음)',
+    app.includes('findPastExRecords(pastSessions[who], ex.name, 1)') &&
+    app.includes('getSessions(memberAId).catch(() => []),') &&
+    app.includes('getSessions(memberBId).catch(() => []),')
+  ],
+  ['2:1 이전 기록 불러오기: 해당 회원 세트만 교체하고 상대 회원 세트는 건드리지 않는다',
+    app.includes('const loadPastSets = (ei, who, rec, name) => {') &&
+    app.includes('const key = who==="A"?"setsA":"setsB";') &&
+    app.includes('i===ei ? {...e, [key]: next.length ? next : [mkPairSet()]} : e')
+  ],
+  ['2:1 반응형: 태블릿·PC(≥768)는 두 회원 나란히, 좁은 화면은 회원 탭 전환(기존 breakpoint 재사용)',
+    app.includes('const isWide = winW >= 768;') &&
+    app.includes('const [activeWho, setActiveWho] = useState("A");') &&
+    app.includes('const visibleSides = isWide ? PAIR_SIDES : PAIR_SIDES.filter(s => s.who === activeWho);')
+  ],
+
   // ── 2:1 페어 세션 체크 ──
   ['2:1 pairStatus draft 저장 (신규/수정 시 초안 유지)',
     app.includes('["recorded","sent"].includes(editData?.pairStatus)') &&
@@ -1388,7 +1527,10 @@ const checks = [
     db.includes('return { aSessionId: aRef.id, bSessionId: bRef.id };')
   ],
   ['2:1 나눠서 기록 후: 폼 화면이 목록으로 돌아가 로컬 state(운동종목/세트/중량)가 리셋된 문서와 어긋나지 않게 처리',
-    app.includes('await onSplit(editData ? {...editData, exercises, trainerCommentA, trainerCommentB,') &&
+    // 회원별 개인화(selectedTypesA/B) 추가로 호출부가 여러 줄로 나뉘었다 — CRLF 때문에 여러 줄을 한 번에
+    // 매칭하면 항상 실패하므로 한 줄 단위로 확인한다(검사 의도는 동일: editData 기반 split + 목록 복귀).
+    app.includes('await onSplit(editData ? {...editData,') &&
+    app.includes('exercises, trainerCommentA, trainerCommentB,') &&
     app.includes('onBack?.();')
   ],
 

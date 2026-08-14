@@ -2445,6 +2445,11 @@ export async function savePairSession(data, id = null) {
     teamStatus: data.teamStatus || undefined,
     splitDone: data.splitDone || false,
     splitAt: data.splitAt || null,
+    // 회원별 오늘 운동 부위(2:1 개인화) — 기존 문서에는 없는 필드이며, 비어 있으면 읽는 쪽에서
+    // 팀 공통 selectedTypes/type으로 폴백한다(getPairMemberTypes). type/selectedTypes는 A/B 합집합으로
+    // 계속 저장되므로 홈 "오늘 수업" 그룹 카드 등 기존 화면 표시는 그대로 유지된다.
+    selectedTypesA: data.selectedTypesA || [],
+    selectedTypesB: data.selectedTypesB || [],
     exercises: data.exercises || [],
     trainerCommentA: data.trainerCommentA || "",
     trainerCommentB: data.trainerCommentB || "",
@@ -2512,6 +2517,8 @@ export async function splitPairSession(pairSessionId, memberASessionData, member
     intensity: "중강도",
     type: "",
     selectedTypes: [],
+    selectedTypesA: [],
+    selectedTypesB: [],
     date: getKoreaDateString(),
     splitDone: false,
     status: "draft",

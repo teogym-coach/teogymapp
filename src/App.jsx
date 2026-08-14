@@ -2076,6 +2076,22 @@ function getPairMemberTypes(ps, who) {
 function mergePairTypes(typesA, typesB) {
   return [...new Set([...(typesA || []), ...(typesB || [])].filter(Boolean))];
 }
+// 두 부위 배열이 완전히 같은 집합인지(순서 무관) — "A/B가 같은 부위일 때만 공통 운동 카드에 자동 반영"을 판정한다.
+function sameBodyParts(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort(), sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
+// 2:1 운동 카드 하나의 muscleTop 자동값을 대상(only)에 따라 유도한다 — 다음 수업 준비에서 저장해 둔
+// 회원별 오늘 운동 부위(selectedTypesA/B)를 종목 대상에 맞게 반영한다(1:1의 getTodayMuscleTop을 그대로 재사용).
+//   only="A"        → A의 오늘 운동 부위
+//   only="B"        → B의 오늘 운동 부위
+//   only 없음("둘 다") → A/B가 완전히 같은 부위일 때만 그 부위, 다르면 어느 한쪽도 임의로 넣지 않음("")
+function derivePairCardMuscleTop(only, typesA, typesB) {
+  if (only === "A") return getTodayMuscleTop(typesA);
+  if (only === "B") return getTodayMuscleTop(typesB);
+  return sameBodyParts(typesA || [], typesB || []) ? getTodayMuscleTop(typesA) : "";
+}
 // "나눠서 기록"에서 회원 한 명분 종목 배열을 만든다(setsA/setsB → sets, feedbackA/B → feedback/rpe/stimRating).
 // 대상이 아닌 종목은 여기서 제외되므로 상대 회원의 개인 수업일지·히스토리·분석에 절대 섞이지 않는다.
 function buildPairSplitExercises(exercises, who) {
@@ -21641,18 +21657,28 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
 
   const mkPairSet = () => ({weight:"", reps:"", durationSec:""});
   // only: "" = 두 회원 공통(기본값). 필요할 때만 "A"/"B"로 바꿔 한 회원 전용 종목으로 만든다.
-  const mkPairEx = () => ({
-    name:"", muscleTop:"가슴", muscleSub:"윗가슴", equipment:"바벨", only:"",
-    funcCategory:"", funcBodyPart:[], funcTool:"", movementPurpose:"",
-    setsA: [mkPairSet(),mkPairSet(),mkPairSet()],
-    setsB: [mkPairSet(),mkPairSet(),mkPairSet()],
-    feedbackA:{rpe:"",stimRating:null,note:""},
-    feedbackB:{rpe:"",stimRating:null,note:""},
-  });
+  // top이 없으면(다음 수업 준비가 없거나 A/B 부위가 서로 달라 자동 적용 대상이 아닐 때) 기존과 동일하게
+  // "가슴" 기본값을 쓴다(1:1 mkEx()와 같은 정책 — 임의 부위를 새로 만들지 않고 기존 기본값을 그대로 재사용).
+  // 새로 만든 카드는 _muscleManual이 없어(falsy) "다음 수업 부위 자동 반영" useEffect의 갱신 대상이 된다.
+  const mkPairEx = (top) => {
+    const t = top || "가슴";
+    return {
+      name:"", muscleTop:t, muscleSub: mSubs(t)[0]||"윗가슴", equipment:"바벨", only:"",
+      funcCategory:"", funcBodyPart:[], funcTool:"", movementPurpose:"",
+      setsA: [mkPairSet(),mkPairSet(),mkPairSet()],
+      setsB: [mkPairSet(),mkPairSet(),mkPairSet()],
+      feedbackA:{rpe:"",stimRating:null,note:""},
+      feedbackB:{rpe:"",stimRating:null,note:""},
+    };
+  };
 
   const [exercises, setExercises] = useState(() => {
-    if (editData?.exercises?.length > 0) return editData.exercises;
-    return [mkPairEx()];
+    if (editData?.exercises?.length > 0) {
+      // 이미 저장된(또는 draft 복원된) 카드는 대표가 이미 확인한 muscleTop이므로, "다음 수업 부위 자동
+      // 반영" 대상에서 제외한다(_muscleManual이 없는 옛 데이터도 방어적으로 true로 채워 보호한다).
+      return editData.exercises.map(e => ({...e, _muscleManual: e._muscleManual !== undefined ? e._muscleManual : true}));
+    }
+    return [mkPairEx(derivePairCardMuscleTop("", selectedTypesA, selectedTypesB))];
   });
 
   // 입력할 때마다 Firebase에 쓰던 debounce 자동 저장은 완전히 제거했다(원인: "나눠서 기록"으로 방금 초기화한
@@ -21770,7 +21796,8 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     });
   }, [memberA, memberB]);
 
-  const addEx = () => setExercises(prev=>[...prev, mkPairEx()]);
+  // 새 운동은 항상 대상="둘 다"로 시작하므로, 그 기준(A/B 부위가 같을 때만)으로 muscleTop 초기값을 유도한다.
+  const addEx = () => setExercises(prev=>[...prev, mkPairEx(derivePairCardMuscleTop("", selectedTypesA, selectedTypesB))]);
   const removeEx = (ei) => {
     if (exercises.length <= 1) { showToast("최소 1개 종목이 필요합니다"); return; }
     setExercises(prev=>prev.filter((_,i)=>i!==ei));
@@ -21800,6 +21827,13 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     } else if (field==="equipment") {
       u._equipManual = true;
       if (e.name) onLearnExercise?.(e.name, { equipment: val });
+    } else if (field==="only") {
+      // 대상을 바꾼 직후 — 아직 muscleTop을 직접 고르지 않은 카드라면(_muscleManual 없음)
+      // 새 대상 기준으로 다음 수업 부위를 즉시 반영한다. 이미 직접 고른 카드는 건드리지 않는다.
+      if (!e._muscleManual) {
+        const top = derivePairCardMuscleTop(val, selectedTypesA, selectedTypesB);
+        if (top) { u.muscleTop = top; u.muscleSub = mSubs(top)[0] || u.muscleSub; }
+      }
     }
     return u;
   }));
@@ -21808,6 +21842,18 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
     const key = who==="A"?"feedbackA":"feedbackB";
     return {...e, [key]:{...(e[key]||{}), [field]:val}};
   }));
+
+  // 오늘 운동 부위(다음 수업 준비 자동 반영 포함)가 바뀔 때마다, 아직 muscleTop을 직접 고르지 않은 카드만
+  // 새 부위로 갱신한다. _muscleManual이 있는 카드(사용자 직접 선택 · 기존 저장 기록 · 이름 기반 자동 매칭)는
+  // 절대 덮어쓰지 않는다 — 대상(only)이 바뀔 때는 updateEx의 "only" 분기가 같은 규칙으로 즉시 처리한다.
+  useEffect(() => {
+    setExercises(prev => prev.map(e => {
+      if (e._muscleManual) return e;
+      const top = derivePairCardMuscleTop(pairExerciseTarget(e), selectedTypesA, selectedTypesB);
+      if (!top || top === e.muscleTop) return e;
+      return { ...e, muscleTop: top, muscleSub: mSubs(top)[0] || e.muscleSub };
+    }));
+  }, [selectedTypesA, selectedTypesB]);
 
   const addSet = (ei, who) => setExercises(prev=>prev.map((e,i)=>{
     if(i!==ei)return e;

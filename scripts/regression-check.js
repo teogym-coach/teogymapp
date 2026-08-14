@@ -57,9 +57,12 @@ function wpScenario(name, fn) {
 // 사고를 문자열 검사가 아니라 실행 결과로 막는다.
 let pairPersonalLib = null;
 try {
+  // 다음 수업 부위 자동 반영에 필요한 getTodayMuscleTop/SESSION_BODY_PART_OPTIONS/SESSION_PART_TO_MUSCLE_TOP도
+  // 1:1과 같은 원본 정의를 그대로 슬라이스한다(2:1 전용 해석 규칙을 새로 만들지 않는다).
+  const sliceBodyPart = app.slice(app.indexOf('const SESSION_BODY_PART_OPTIONS'), app.indexOf('function normalizeTypes'));
   const sliceTypes = app.slice(app.indexOf('function normalizeTypes'), app.indexOf('function formatTypes'));
   const slicePair  = app.slice(app.indexOf('function pairExerciseTarget'), app.indexOf('function formatParts'));
-  pairPersonalLib = new Function(`${sliceTypes}\n${slicePair}\nreturn { pairExerciseTarget, pairExerciseIncludes, getPairMemberTypes, mergePairTypes, buildPairSplitExercises, summarizePastPairSets };`)();
+  pairPersonalLib = new Function(`${sliceBodyPart}\n${sliceTypes}\n${slicePair}\nreturn { pairExerciseTarget, pairExerciseIncludes, getPairMemberTypes, mergePairTypes, buildPairSplitExercises, summarizePastPairSets, sameBodyParts, derivePairCardMuscleTop, getTodayMuscleTop };`)();
 } catch (e) {
   console.error('[regression] 2:1 개인화 헬퍼 추출 실패:', e.message);
 }
@@ -988,6 +991,60 @@ const checks = [
     const timeOnly = L.summarizePastPairSets([{durationSec:'40'}]);
     return s === '27.5kg × 12회 · 3세트' && empty === '' && timeOnly === '40초 · 1세트';
   }),
+
+  // ── 2:1 다음 수업 부위 자동 반영 — 회원별 selectedTypesA/B와 기본 운동 1의 muscleTop을
+  //    각 회원의 "다음 수업 준비"(nextWorkoutPart/nextPtPart)로 자동 초기화한다 ──
+  pairScenario('2:1 자동초기값 시나리오A: A/B 다음 부위가 같으면(하체=하체) 공통 운동의 muscleTop도 그 부위로 자동 반영된다', L => {
+    const typesA = ['하체'], typesB = ['하체'];
+    return L.sameBodyParts(typesA, typesB) === true
+        && L.derivePairCardMuscleTop('', typesA, typesB) === '하체'
+        && L.getTodayMuscleTop(typesA) === '하체';
+  }),
+  pairScenario('2:1 자동초기값 시나리오B: A/B 다음 부위가 다르면(상체/하체) 각자 자동 선택되되 공통 운동엔 어느 쪽도 임의로 들어가지 않는다', L => {
+    const typesA = ['상체'], typesB = ['하체'];
+    return L.derivePairCardMuscleTop('A', typesA, typesB) === '' // "상체"는 SESSION_PART_TO_MUSCLE_TOP에 없어 매핑 없음(1:1과 동일 정책)
+        && L.derivePairCardMuscleTop('B', typesA, typesB) === '하체'
+        && L.derivePairCardMuscleTop('', typesA, typesB) === ''; // 공통 카드엔 임의로 반영하지 않음
+  }),
+  pairScenario('2:1 자동초기값 시나리오B-2: 매핑 가능한 부위(가슴/하체)로 A/B가 다르면 각자 정확히 자기 부위만 반영된다', L => {
+    const typesA = ['가슴'], typesB = ['하체'];
+    return L.derivePairCardMuscleTop('A', typesA, typesB) === '가슴'
+        && L.derivePairCardMuscleTop('B', typesA, typesB) === '하체'
+        && L.derivePairCardMuscleTop('', typesA, typesB) === '';
+  }),
+  pairScenario('2:1 자동초기값 시나리오C: A/B 모두 다음 부위 정보가 없으면 빈 값으로 시작한다(임의 기본 부위 선택 없음)', L => {
+    return L.sameBodyParts([], []) === true && L.derivePairCardMuscleTop('', [], []) === '';
+  }),
+  pairScenario('2:1 자동초기값 시나리오D: 한 명만 다음 부위가 있으면(A=하체, B=없음) A만 자동 반영되고 공통 운동엔 들어가지 않는다', L => {
+    const typesA = ['하체'], typesB = [];
+    return L.derivePairCardMuscleTop('A', typesA, typesB) === '하체'
+        && L.derivePairCardMuscleTop('B', typesA, typesB) === ''
+        && L.derivePairCardMuscleTop('', typesA, typesB) === ''; // A만 있고 B는 없어 "같음"이 아니므로 공통엔 미반영
+  }),
+  pairScenario('2:1 자동초기값 시나리오G: 새 운동 추가 시 대상(둘 다/A만/B만)에 따라 다른 초기값이 유도된다', L => {
+    const typesA = ['가슴'], typesB = ['하체'];
+    const both = L.derivePairCardMuscleTop('', typesA, typesB);   // 둘 다 + 다른 부위 → 빈 값
+    const onlyA = L.derivePairCardMuscleTop('A', typesA, typesB); // A만 → A의 부위
+    const onlyB = L.derivePairCardMuscleTop('B', typesA, typesB); // B만 → B의 부위
+    const sameBoth = L.derivePairCardMuscleTop('', ['등'], ['등']); // 둘 다 + 같은 부위 → 그 부위
+    return both === '' && onlyA === '가슴' && onlyB === '하체' && sameBoth === '등';
+  }),
+  ['2:1 자동초기값: 기본 운동 1의 muscleTop이 derivePairCardMuscleTop("", selectedTypesA, selectedTypesB)로 초기화된다',
+    app.includes('return [mkPairEx(derivePairCardMuscleTop("", selectedTypesA, selectedTypesB))];')
+  ],
+  ['2:1 자동초기값: "운동 추가"도 같은 유도 함수로 초기화되고, 대상(only) 변경 시 아직 직접 수정 안 한 카드만 즉시 갱신된다',
+    app.includes('const addEx = () => setExercises(prev=>[...prev, mkPairEx(derivePairCardMuscleTop("", selectedTypesA, selectedTypesB))]);') &&
+    app.includes('const top = derivePairCardMuscleTop(val, selectedTypesA, selectedTypesB);') &&
+    app.includes('if (top) { u.muscleTop = top; u.muscleSub = mSubs(top)[0] || u.muscleSub; }')
+  ],
+  ['2:1 자동초기값 시나리오F: 다음 수업 부위가 바뀌어도 이미 직접 muscleTop을 고른 카드(_muscleManual)는 절대 덮어쓰지 않는다',
+    app.includes('if (e._muscleManual) return e;') &&
+    app.includes('const top = derivePairCardMuscleTop(pairExerciseTarget(e), selectedTypesA, selectedTypesB);') &&
+    app.includes('u._muscleManual = true;') // muscleTop 직접 변경 시(field==="muscleTop") 세워지는 기존 가드를 그대로 재사용
+  ],
+  ['2:1 자동초기값 시나리오E/6: 기존 저장·draft 복원된 운동은 방어적으로 _muscleManual=true 처리되어 자동 반영 대상에서 제외된다',
+    app.includes('return editData.exercises.map(e => ({...e, _muscleManual: e._muscleManual !== undefined ? e._muscleManual : true}));')
+  ],
   ['2:1 개인화: 종목 대상(only)은 화면에 "둘 다 / 회원 이름만"으로만 노출되고 개발용 값(only)을 그대로 보여 주지 않는다',
     app.includes('const PAIR_ONLY_OPTIONS = [{ value:"", label:"둘 다" }, { value:"A" }, { value:"B" }];') &&
     app.includes('const label = opt.label || `${(opt.value==="A"?memberA?.name:memberB?.name) || `${opt.value} 회원`}만`;') &&

@@ -150,8 +150,9 @@ const SESSION_TYPE_OPTIONS = [
 ];
 // ── "오늘의 운동 부위" — 세션 전체 수업 부위 선택(selectedTypes를 그대로 재사용).
 // 새 운동 카드의 기본 muscleTop(운동 부위)에 자동 상속되며, 첫 선택값만 사용한다(SESSION_PART_TO_MUSCLE_TOP 참고). ──
-const SESSION_BODY_PART_OPTIONS = ["등","가슴","하체","어깨","이두","삼두","상체"];
-// 오늘의 운동 부위 값 → 운동 카드 muscleTop(MUSCLE_MAP 키) 매핑. "상체"는 단일 muscleTop과 대응되지 않아 매핑하지 않는다(자동 기본값 미적용).
+// "팔"은 다음 수업 준비(NEXT_PT_PART_OPTIONS)에서 저장되는 기존 값과 동일한 문자열을 그대로 재사용한다(신규 값 발명 금지).
+const SESSION_BODY_PART_OPTIONS = ["등","가슴","하체","어깨","이두","삼두","팔","상체"];
+// 오늘의 운동 부위 값 → 운동 카드 muscleTop(MUSCLE_MAP 키) 매핑. "상체"/"팔"은 단일 muscleTop과 대응되지 않아 매핑하지 않는다(자동 기본값 미적용, 이두·삼두와 동일 원칙).
 const SESSION_PART_TO_MUSCLE_TOP = { "가슴":"가슴", "등":"등", "하체":"하체", "어깨":"어깨", "이두":"팔-이두근", "삼두":"팔-삼두근" };
 function getTodayMuscleTop(selectedTypes) {
   const parts = (selectedTypes||[]).filter(t => SESSION_BODY_PART_OPTIONS.includes(t));

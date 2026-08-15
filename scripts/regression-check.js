@@ -62,7 +62,7 @@ try {
   const sliceBodyPart = app.slice(app.indexOf('const SESSION_BODY_PART_OPTIONS'), app.indexOf('function normalizeTypes'));
   const sliceTypes = app.slice(app.indexOf('function normalizeTypes'), app.indexOf('function formatTypes'));
   const slicePair  = app.slice(app.indexOf('function pairExerciseTarget'), app.indexOf('function formatParts'));
-  pairPersonalLib = new Function(`${sliceBodyPart}\n${sliceTypes}\n${slicePair}\nreturn { pairExerciseTarget, pairExerciseIncludes, getPairMemberTypes, mergePairTypes, buildPairSplitExercises, summarizePastPairSets, sameBodyParts, derivePairCardMuscleTop, getTodayMuscleTop };`)();
+  pairPersonalLib = new Function(`${sliceBodyPart}\n${sliceTypes}\n${slicePair}\nreturn { pairExerciseTarget, pairExerciseIncludes, getPairMemberTypes, mergePairTypes, buildPairSplitExercises, summarizePastPairSets, sameBodyParts, derivePairCardMuscleTop, getTodayMuscleTop, SESSION_BODY_PART_OPTIONS };`)();
 } catch (e) {
   console.error('[regression] 2:1 개인화 헬퍼 추출 실패:', e.message);
 }
@@ -1023,6 +1023,13 @@ const checks = [
     return L.derivePairCardMuscleTop('A', typesA, typesB) === '' // "상체"는 SESSION_PART_TO_MUSCLE_TOP에 없어 매핑 없음(1:1과 동일 정책)
         && L.derivePairCardMuscleTop('B', typesA, typesB) === '하체'
         && L.derivePairCardMuscleTop('', typesA, typesB) === ''; // 공통 카드엔 임의로 반영하지 않음
+  }),
+  pairScenario('2:1 자동초기값: "팔"도 SESSION_BODY_PART_OPTIONS에 포함되어 다음 수업 준비 값이 그대로 회원별 selectedTypes로 채택되지만(선택 목록 자동 반영), muscleTop 자동 매핑은 "상체"와 동일하게 없음', L => {
+    const typesA = ['팔'], typesB = ['하체'];
+    return L.SESSION_BODY_PART_OPTIONS.includes('팔')
+        && L.derivePairCardMuscleTop('A', typesA, typesB) === ''
+        && L.derivePairCardMuscleTop('B', typesA, typesB) === '하체'
+        && L.getTodayMuscleTop(['팔']) === '';
   }),
   pairScenario('2:1 자동초기값 시나리오B-2: 매핑 가능한 부위(가슴/하체)로 A/B가 다르면 각자 정확히 자기 부위만 반영된다', L => {
     const typesA = ['가슴'], typesB = ['하체'];
@@ -4811,6 +4818,9 @@ const checks = [
     })()
   ],
 
+  ['오늘의 운동 부위 옵션에 "팔"이 추가됨 — 1:1·2:1 화면이 공유하는 SESSION_BODY_PART_OPTIONS 하나에만 추가해 화면별 목록이 다시 어긋나지 않는다',
+    app.includes('const SESSION_BODY_PART_OPTIONS = ["등","가슴","하체","어깨","이두","삼두","팔","상체"];')
+  ],
   ['수업 기록 화면: 신규 기록 날짜·오늘의 운동 부위 초기값이 getInitialNewSessionValues 통합 헬퍼를 통해 계산됨',
     app.includes('const initialSessionValues = getInitialNewSessionValues({') &&
     app.includes('const [date,           setDate]           = useState(initialSessionValues.date);') &&
@@ -4846,10 +4856,15 @@ const checks = [
     const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
     return r.date === '2026-08-05' && JSON.stringify(r.selectedTypes) === JSON.stringify(['하체']);
   }),
-  siScenario('신규 기록 초기값: NEXT_PT_PART_OPTIONS 전용 값(팔/코어 등)은 오늘의 운동 부위 UI 값이 아니므로 걸러지고, 대응되는 값만 적용', lib => {
+  siScenario('신규 기록 초기값: NEXT_PT_PART_OPTIONS 전용 값(코어 등 대응 없는 값)은 오늘의 운동 부위 UI 값이 아니므로 걸러지고, 대응되는 값만 적용 — "팔"은 SESSION_BODY_PART_OPTIONS에 포함돼 그대로 적용됨', lib => {
     const member = { nextWorkoutPart: '어깨 · 팔 · 코어' };
     const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
-    return JSON.stringify(r.selectedTypes) === JSON.stringify(['어깨']);
+    return JSON.stringify(r.selectedTypes) === JSON.stringify(['어깨', '팔']);
+  }),
+  siScenario('신규 기록 초기값: 다음 수업 부위가 "팔"만 저장된 경우 1:1 수업 기록 화면에 "팔"이 자동 선택된다', lib => {
+    const member = { nextWorkoutPart: '팔' };
+    const r = lib.getInitialNewSessionValues({ editingSession: null, member, todayStr: '2026-08-01' });
+    return JSON.stringify(r.selectedTypes) === JSON.stringify(['팔']);
   }),
   siScenario('신규 기록 초기값 시나리오H: Firestore Timestamp({seconds}) 날짜도 한국 기준 자정 경계에서 하루 밀리지 않는다', lib => {
     // 2026-08-03 00:30 KST = 2026-08-02 15:30 UTC — toISOString 기반이면 하루 밀릴 수 있는 경계 시각

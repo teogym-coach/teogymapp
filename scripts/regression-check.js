@@ -18,6 +18,12 @@ const membersBlock = firestoreRules.slice(
 );
 const membersBlockFlat = membersBlock.replace(/\s+/g, ' ');
 
+// ── 2:1 종료(teamStatus)와 개인 회원 상태(status) 분리 검증용 슬라이스 ──
+const updatePairSessionStatusFn = db.slice(db.indexOf('export async function updatePairSessionStatus'), db.indexOf('export async function splitPairSession'));
+const handlePairStatusChangeFn = app.slice(app.indexOf('async function handlePairStatusChange'), app.indexOf('async function handleSplitPairSession'));
+const applyMemberStatusChangeFn = app.slice(app.indexOf('async function applyMemberStatusChange'), app.indexOf('async function handleStatusChange'));
+const isMemberStatusActiveFn = firestoreRules.slice(firestoreRules.indexOf('function isMemberStatusActive'), firestoreRules.indexOf('function canReadMemberData'));
+
 // ── 오늘의 운동 가이드: 실제 실행 시나리오 검증 ──
 // App.jsx는 JSX/Firebase 등을 포함해 그대로 require할 수 없으므로, 분할 추천에 필요한 "JSX 없는 순수 함수"만
 // 원본 소스에서 그대로 슬라이스해 new Function으로 실행한다 — 로직을 다시 옮겨 적지 않고 원본 코드 자체를 검증한다.
@@ -1493,6 +1499,33 @@ const checks = [
     app.includes('TEAM_STATUS_LABELS') &&
     app.includes('TEAM_STATUS_COLORS') &&
     app.includes('getTeamStatus(ps)')
+  ],
+  ['2:1 종료(teamStatus) 변경 시 members 문서 미접촉',
+    !updatePairSessionStatusFn.includes('"members"') &&
+    !updatePairSessionStatusFn.includes('updateMember')
+  ],
+  ['2:1 종료(teamStatus) 변경은 pairSessions 문서 필드만 update',
+    updatePairSessionStatusFn.includes('doc(db, "pairSessions", id)') &&
+    updatePairSessionStatusFn.includes('updateDoc(ref, { teamStatus, updatedAt: serverTimestamp() })')
+  ],
+  ['handlePairStatusChange가 개인 회원 status 변경 함수를 호출하지 않음',
+    !handlePairStatusChangeFn.includes('applyMemberStatusChange') &&
+    !handlePairStatusChangeFn.includes('updateMember')
+  ],
+  ['개인 회원 상태 변경(applyMemberStatusChange)은 pairSessions/teamStatus와 무관하게 members 문서만 수정',
+    applyMemberStatusChangeFn.includes('updateMember(id, patch)') &&
+    !applyMemberStatusChangeFn.includes('pairSessions') &&
+    !applyMemberStatusChangeFn.includes('teamStatus')
+  ],
+  ['회원앱 접근 판정(getMemberAppProfile)이 2:1 teamStatus/pairStatus를 참조하지 않음',
+    !memberProfileFn.includes('teamStatus') &&
+    !memberProfileFn.includes('pairStatus') &&
+    !memberProfileFn.includes('pairSessions')
+  ],
+  ['Firestore Rules 회원 접근 판정(isMemberStatusActive)이 2:1 teamStatus/pairStatus를 참조하지 않음',
+    !isMemberStatusActiveFn.includes('teamStatus') &&
+    !isMemberStatusActiveFn.includes('pairStatus') &&
+    !isMemberStatusActiveFn.includes('pairSessions')
   ],
 
   // ── 유산소 기록 기능 ──

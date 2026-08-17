@@ -13730,9 +13730,18 @@ function MembersScreen({ members, liveMembersById={}, sessionsMap, weightBodyByI
                 <div key={preset.key} style={{display:"grid",gap:6}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
                     <div style={{fontSize:11.5,color:DB.text,fontFamily:DB.font}}>{preset.name} <span style={{color:DB.faint}}>({preset.email})</span></div>
-                    <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font}}>
-                      {exists?"생성됨":"생성"}
-                    </button>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      {/* 일반 회원 목록·검색에서는 계속 제외된 채로, 테스트 패널에서만 기존 회원 상세(HubScreen) 진입 경로를 연다.
+                          onSelect는 MembersScreen이 이미 받는 goHub 그대로라 별도 상세 화면·진입 함수를 새로 만들지 않는다. */}
+                      {exists && (
+                        <button onClick={()=>onSelect(testMember)} style={{border:"1px solid rgba(139,92,246,.35)",background:"#fff",color:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:DB.font,whiteSpace:"nowrap"}}>
+                          상세 보기 →
+                        </button>
+                      )}
+                      <button disabled={exists} onClick={()=>onAddTestMember?.(preset)} style={{border:`1px solid ${exists?DB.border:"rgba(139,92,246,.35)"}`,background:"#fff",color:exists?DB.faint:"#7C3AED",borderRadius:9,padding:"5px 11px",fontSize:11,fontWeight:700,cursor:exists?"default":"pointer",fontFamily:DB.font,whiteSpace:"nowrap"}}>
+                        {exists?"생성됨":"생성"}
+                      </button>
+                    </div>
                   </div>
                   {testMember && (
                     <div style={{background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.15)",borderRadius:10,padding:"9px 10px",display:"grid",gap:6}}>

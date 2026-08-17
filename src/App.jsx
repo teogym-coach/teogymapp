@@ -12595,9 +12595,12 @@ function canUseMemberLinkedFeatures(member) {
 }
 
 // 회원앱 로그인/상태 차단/공지/2:1 테스트용 프리셋 — docs/member-app-test-accounts.md 참고
-// 계정 1개를 만들어두고 상태(active/paused/ended/waiting)만 바꿔가며 재사용한다.
+// 각 계정은 상태(active/paused/ended/waiting)만 바꿔가며 재사용한다.
+// testB는 2:1(듀오) 조합·팀 상태 테스트를 위해 A와 별도로 운영하는 두 번째 테스트 계정이다 — A와 완전히
+// 독립된 members 문서·Firebase Auth 계정을 가지며, 판별은 동일하게 isTestMember===true 하나로 공유한다.
 const TEST_MEMBER_PRESETS = [
-  { key:"test", name:"🧪 TEST MEMBER", email:"teogymapptest@gmail.com", status:"active" },
+  { key:"test",  name:"🧪 TEST MEMBER",   email:"teogymapptest@gmail.com",   status:"active" },
+  { key:"testB", name:"🧪 TEST MEMBER B", email:"teogym12+testb@gmail.com", status:"active" },
 ];
 // "🧪 테스트 회원 관리" 패널 전용 상태 변경 옵션 — 내부 저장값은 일반 회원과 완전히 동일(active/paused/ended/waiting)하다.
 const TEST_STATUS_OPTIONS = [

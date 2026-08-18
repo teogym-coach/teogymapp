@@ -57,6 +57,25 @@ function wpScenario(name, fn) {
   try { return [name, !!fn(weightProgressLib)]; }
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
+// ── 회원앱 홈 "30일 체중 변화" 카드: 실제 실행 시나리오 검증 ──
+// 정확히 29일 전 기록이 없어도(최근 30일 범위 안 가장 오래된 기록 기준) 변화가 반영되어야 하고,
+// 최근 30일 안에 기록이 전혀 없으면 오래된 기록 하나를 자기 자신과 비교해 "0kg"을 만들어내면 안 된다.
+let weightCardLib = null;
+try {
+  const sliceNum = app.slice(app.indexOf('function toPositiveNumber'), app.indexOf('function getBodyWeightRecords'));
+  const sliceRec = app.slice(app.indexOf('function getBodyWeightRecords'), app.indexOf('function getLatestBodyWeight'));
+  const sliceKst = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceDaysAgo = app.slice(app.indexOf('function dateStrDaysAgo'), app.indexOf('function summarizeCardioWindow'));
+  const sliceCard = app.slice(app.indexOf('function computeWeightCard'), app.indexOf('function computeWeeklyWorkoutCard'));
+  weightCardLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceKst}\n${sliceDaysAgo}\n${sliceCard}\nreturn { computeWeightCard, getBodyWeightRecords, dateStrDaysAgo };`)();
+} catch (e) {
+  console.error('[regression] 30일 체중 변화 카드 헬퍼 추출 실패:', e.message);
+}
+function wcScenario(name, fn) {
+  if (!weightCardLib) return [name, false];
+  try { return [name, !!fn(weightCardLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
 
 // ── 2:1 회원별 개인화(종목 대상 only · 회원별 운동 부위 · 회원 한 명분 기록 변환): 실제 실행 시나리오 검증 ──
 // "나눠서 기록"이 실제로 쓰는 원본 함수를 그대로 슬라이스해 실행한다 — A 전용 종목이 B 기록/분석에 섞이는
@@ -2871,6 +2890,52 @@ const checks = [
       lib.formatWeightChange(0) === '0kg' && lib.formatWeightChange(1.2000000001) === '+1.2kg' &&
       lib.formatWeightChange(-2.7000000001) === '-2.7kg';
   }),
+
+  // ── 회원앱 홈 "30일 체중 변화" 카드 버그 수정 (2026-08-18) ──────────────────────
+  wcScenario('30일 체중 변화 ①: 최근 30일 안에 기록이 여러 개면 첫 기록↔최근 기록 차이를 반영(-2.0kg)', lib => {
+    const body = { records: [
+      { date: daysAgoStr(28), weight: 83.0 }, { date: daysAgoStr(20), weight: 82.4 },
+      { date: daysAgoStr(13), weight: 81.8 }, { date: daysAgoStr(6), weight: 81.3 },
+      { date: daysAgoStr(0), weight: 81.0 },
+    ] };
+    const c = lib.computeWeightCard(body);
+    return c.delta === -2 && c.value === '81kg';
+  }),
+  wcScenario('30일 체중 변화 ②: 정확히 30일 전 기록은 없지만 최근 30일 안에 여러 기록이 있으면 그 범위 안 최고령 기록을 기준으로 계산(회귀 확인 — 예전엔 delta=null로 빠졌음)', lib => {
+    const body = { records: [{ date: daysAgoStr(20), weight: 80 }, { date: daysAgoStr(10), weight: 79 }, { date: daysAgoStr(0), weight: 78 }] };
+    const c = lib.computeWeightCard(body);
+    return c.delta === -2;
+  }),
+  wcScenario('30일 체중 변화 ③: 오늘 새로 기록하면 최신 기록으로 즉시 반영', lib => {
+    const c = lib.computeWeightCard({ records: [{ date: daysAgoStr(25), weight: 70 }, { date: daysAgoStr(0), weight: 69 }] });
+    return c.value === '69kg' && c.delta === -1;
+  }),
+  wcScenario('30일 체중 변화 ④: 최근 30일 기록이 1개뿐이면 delta=null(0kg으로 단정하지 않고 현재 체중만 표시)', lib => {
+    const body = { records: [{ date: daysAgoStr(60), weight: 90 }, { date: daysAgoStr(5), weight: 75 }] };
+    const c = lib.computeWeightCard(body);
+    return c.delta === null && c.value === '75kg';
+  }),
+  wcScenario('30일 체중 변화 ⑤: 최근 30일 기록이 아예 없으면 오래된 기록 하나를 자기 자신과 비교해 "0kg"을 만들지 않고 delta=null(수정 전 버그 재현 방지)', lib => {
+    const c = lib.computeWeightCard({ records: [{ date: daysAgoStr(60), weight: 80 }] });
+    return c.delta === null && c.value === '80kg';
+  }),
+  wcScenario('30일 체중 변화 ⑥: 체중 증가도 동일하게 반영(+2kg)', lib => {
+    const c = lib.computeWeightCard({ records: [{ date: daysAgoStr(20), weight: 70 }, { date: daysAgoStr(0), weight: 72 }] });
+    return c.delta === 2;
+  }),
+  wcScenario('30일 체중 변화 ⑦: 기록이 전혀 없으면 "기록 필요"', lib => {
+    const a = lib.computeWeightCard(null), b = lib.computeWeightCard({ records: [] });
+    return a.value === '기록 필요' && a.delta === null && b.value === '기록 필요' && b.delta === null;
+  }),
+  wcScenario('30일 체중 변화 ⑧: 같은 날짜 중복 기록이 섞여 있어도 예외 없이 계산됨(정상 저장 경로는 upsertBodyRecord/upsertRecordByDate로 날짜당 1건만 유지)', lib => {
+    const body = { records: [{ date: daysAgoStr(20), weight: 70 }, { date: daysAgoStr(20), weight: 71 }, { date: daysAgoStr(0), weight: 69 }] };
+    const c = lib.computeWeightCard(body);
+    return Number.isFinite(c.delta) && c.value === '69kg';
+  }),
+  ['30일 체중 변화 ⑨: HomeWeightSpark 그래프와 동일한 dateStrDaysAgo(29) 기준을 공유(카드 수치와 그래프 범위 불일치 없음)',
+    app.includes("const pts=getBodyWeightRecords(body).filter(r=>r.date>=dateStrDaysAgo(29)&&Number.isFinite(Number(r.weight)));") &&
+    app.includes('const since=dateStrDaysAgo(29);') && app.includes('const windowRecords=weights.filter(w=>w.date>=since);')
+  ],
 
   // ── 상담 고객 분리 · 회원앱 사전 문진(온보딩 v2) 개편 ──────────────────────────
   ['상담 분리: 신규 상담은 members가 아니라 consultations 문서만 생성',

@@ -6272,13 +6272,19 @@ function toEditablePersonalExercises(exercises){
 // ════════════════════════════════════════════════════
 // 건강 탭 대시보드 — 동기부여 지표 계산 (기존 데이터만 사용, 신규 저장 없음)
 // ════════════════════════════════════════════════════
+// 정확히 29일 전 기록을 요구하지 않는다 — 최근 30일(오늘 포함) 범위 안에 실제로 존재하는
+// 가장 오래된 기록을 기준으로 삼는다. 그렇지 않으면 가입한 지 30일이 안 됐거나 기록 간격이
+// 불규칙한 회원은 항상 delta=null로 빠지고(변화가 반영되지 않음), 반대로 최근 30일 안에는
+// 기록이 전혀 없는데 그보다 오래된 기록 하나만 있는 경우 그 기록을 자기 자신과 비교해
+// "0kg"이 잘못 표시되는 문제가 있었다.
 function computeWeightCard(body){
   const weights=getBodyWeightRecords(body);
   const latest=weights.at(-1);
   if(!latest) return {value:"기록 필요",delta:null};
   const since=dateStrDaysAgo(29);
-  const past=weights.filter(w=>w.date<=since).at(-1);
-  const delta=past?Math.round((latest.weight-past.weight)*10)/10:null;
+  const windowRecords=weights.filter(w=>w.date>=since);
+  const start=windowRecords[0];
+  const delta=(start&&windowRecords.length>=2)?Math.round((latest.weight-start.weight)*10)/10:null;
   return {value:`${latest.weight}kg`,delta};
 }
 function computeWeeklyWorkoutCard(attendance=[],onboarding={}){

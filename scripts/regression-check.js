@@ -77,6 +77,25 @@ function wcScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 회원앱 분석 탭 "체중 추이" 그래프 집계(2026-08-18): 실제 실행 시나리오 검증 ──
+// 원본 배열을 mutate하지 않는지, 기록 없는 날짜를 0으로 채우지 않는지, 전체 기간에서
+// 포인트가 과도하게 생성되지 않는지를 원본 헬퍼 코드를 그대로 슬라이스해 실행 결과로 확인한다.
+let weightTrendLib = null;
+try {
+  const sliceAvg = app.slice(app.indexOf('function average(arr=[])'), app.indexOf('function epochDay'));
+  const sliceTrend = app.slice(app.indexOf('function epochDay'), app.indexOf('function buildTopExercisesByFrequency'));
+  const sliceKst = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
+  const sliceDaysAgo = app.slice(app.indexOf('function dateStrDaysAgo'), app.indexOf('function summarizeCardioWindow'));
+  weightTrendLib = new Function(`${sliceKst}\n${sliceDaysAgo}\n${sliceAvg}\n${sliceTrend}\nreturn { epochDay, round1, weightMovingAverage7, pickWeightTrendGranularity, weightTrendBucketKey, weightTrendBucketLabel, buildWeightTrendBuckets, buildWeightRecentSummary, average, dateStrDaysAgo };`)();
+} catch (e) {
+  console.error('[regression] 체중 추이 그래프 집계 헬퍼 추출 실패:', e.message);
+}
+function wtScenario(name, fn) {
+  if (!weightTrendLib) return [name, false];
+  try { return [name, !!fn(weightTrendLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 2:1 회원별 개인화(종목 대상 only · 회원별 운동 부위 · 회원 한 명분 기록 변환): 실제 실행 시나리오 검증 ──
 // "나눠서 기록"이 실제로 쓰는 원본 함수를 그대로 슬라이스해 실행한다 — A 전용 종목이 B 기록/분석에 섞이는
 // 사고를 문자열 검사가 아니라 실행 결과로 막는다.
@@ -6283,6 +6302,85 @@ const checks = [
   ['회원앱 노출: db.js가 세션 exercises를 publicExercise로 걸러낼 때 unitType 필드를 화이트리스트에 포함해 회원 화면에도 전달된다',
     db.includes('const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "unitType",')
   ],
+
+  // ── 회원앱 분석 탭 "체중 추이" 그래프 집계(2026-08-18) — 원본 데이터는 그대로 두고 그래프 표시용 배열만 기간별로 평균 집계 ──
+  wtScenario('체중 추이 집계 단위: 1개월=일별, 3개월=기록량과 무관하게 항상 주간, 6개월=span 기준 주간→2주 자동 전환, 1년=월간', lib =>
+    lib.pickWeightTrendGranularity('1m', 200) === 'day' &&
+    lib.pickWeightTrendGranularity('3m', 10) === 'week' &&
+    lib.pickWeightTrendGranularity('3m', 300) === 'week' &&
+    lib.pickWeightTrendGranularity('6m', 60) === 'week' &&
+    lib.pickWeightTrendGranularity('6m', 180) === '2week' &&
+    lib.pickWeightTrendGranularity('1y', 40) === 'month' &&
+    lib.pickWeightTrendGranularity('1y', 365) === 'month'
+  ),
+  wtScenario('체중 추이 집계 단위: "전체" 기간은 실제 기록 span(첫~최근 기록 간격) 기준으로 주→2주→월→2개월→분기 자동 확장', lib =>
+    lib.pickWeightTrendGranularity('all', 30) === 'week' &&
+    lib.pickWeightTrendGranularity('all', 150) === '2week' &&
+    lib.pickWeightTrendGranularity('all', 400) === 'month' &&
+    lib.pickWeightTrendGranularity('all', 800) === '2month' &&
+    lib.pickWeightTrendGranularity('all', 2000) === 'quarter'
+  ),
+  wtScenario('7일 이동평균(1개월 뷰 메인 추세선): 달력 기준 최근 7일 안에 실제 존재하는 기록만 평균 — 창 밖 기록은 섞이지 않음', lib => {
+    const weights = [
+      { date: '2026-08-01', weight: 80 },
+      { date: '2026-08-03', weight: 82 },
+      { date: '2026-08-10', weight: 79 }, // 8/1·8/3과 7일 이상 떨어져 창에 혼자만 남는다
+    ];
+    const byDate = Object.fromEntries(lib.weightMovingAverage7(weights).map(m => [m.date, m.ma7]));
+    return byDate['2026-08-01'] === 80 && byDate['2026-08-03'] === 81 && byDate['2026-08-10'] === 79;
+  }),
+  wtScenario('체중 추이 버킷(1개월=day): 원본 weights/kcalRows 배열을 mutate하지 않고 실측값+7일 이동평균+칼로리를 날짜별로 합친다', lib => {
+    const weights = [{ date: '2026-08-01', weight: 80 }, { date: '2026-08-02', weight: 81 }];
+    const kcalRows = [{ date: '2026-08-02', kcal: 1800 }, { date: '2026-08-03', kcal: 1700 }];
+    const before = [JSON.stringify(weights), JSON.stringify(kcalRows)];
+    const pts = lib.buildWeightTrendBuckets(weights, kcalRows, 'day');
+    const byDate = Object.fromEntries(pts.map(p => [p.date, p]));
+    return before[0] === JSON.stringify(weights) && before[1] === JSON.stringify(kcalRows) &&
+      pts.length === 3 &&
+      byDate['2026-08-01'].weight === 80 && byDate['2026-08-01'].kcal === null &&
+      byDate['2026-08-02'].weight === 81 && byDate['2026-08-02'].kcal === 1800 &&
+      byDate['2026-08-03'].weight === null && byDate['2026-08-03'].weightMA7 === null && byDate['2026-08-03'].kcal === 1700;
+  }),
+  wtScenario('체중 추이 버킷(주간 이상): 기록이 있는 날짜만 평균에 포함하고 기록 없는 날을 0으로 계산하지 않는다(NaN도 없음)', lib => {
+    const weights = [
+      { date: '2026-08-03', weight: 80 }, { date: '2026-08-04', weight: 82 }, { date: '2026-08-05', weight: 78 },
+    ]; // 세 기록 모두 같은 주 버킷 — 3건 평균이지 7일로 나누지 않는다
+    const pts = lib.buildWeightTrendBuckets(weights, [], 'week');
+    return pts.length === 1 && pts[0].weight === 80 && Number.isFinite(pts[0].weight);
+  }),
+  wtScenario('체중 추이 버킷: 체중·칼로리 기록이 모두 없으면 빈 배열(포인트를 억지로 만들지 않음)', lib => {
+    const pts = lib.buildWeightTrendBuckets([], [], 'week');
+    return Array.isArray(pts) && pts.length === 0;
+  }),
+  wtScenario('체중 추이: "전체" 기간에 매일 500일치 기록이 있어도 자동 집계로 그래프 포인트가 과도하게 생성되지 않는다(8~20개)', lib => {
+    const weights = Array.from({ length: 500 }, (_, i) => {
+      const d = new Date('2025-01-01T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i);
+      return { date: d.toISOString().slice(0, 10), weight: +(80 - i * 0.02).toFixed(1) };
+    });
+    const days = weights.map(w => lib.epochDay(w.date));
+    const span = Math.max(...days) - Math.min(...days);
+    const pts = lib.buildWeightTrendBuckets(weights, [], lib.pickWeightTrendGranularity('all', span));
+    return pts.length >= 8 && pts.length <= 20 && pts.every(p => Number.isFinite(p.weight));
+  }),
+  wtScenario('체중 추이 라벨: 월간 버킷은 "N월", 여러 해에 걸치면 연도 prefix가 붙는다', lib =>
+    lib.weightTrendBucketLabel('2026-09-05', 'month', false) === '9월' &&
+    lib.weightTrendBucketLabel('2025-09-05', 'month', true) === '25.9월'
+  ),
+  wtScenario('최근 7일 평균 요약: 최근 7일 vs 이전 7일 평균을 비교해 하락 방향을 판단한다(오늘 기준, 선택된 기간 탭과 무관)', lib => {
+    const all = [
+      { date: daysAgoStr(12), weight: 82.0 }, { date: daysAgoStr(10), weight: 81.6 },
+      { date: daysAgoStr(3), weight: 81.0 }, { date: daysAgoStr(1), weight: 80.4 },
+    ];
+    const s = lib.buildWeightRecentSummary(all);
+    return s !== null && s.recentAvg === lib.round1((81.0 + 80.4) / 2) && s.prevAvg === lib.round1((82.0 + 81.6) / 2) && s.diff < 0;
+  }),
+  wtScenario('최근 7일 평균 요약: 이전 7일 기록이 없으면 diff 없이 최근 평균만 반환한다(0kg으로 단정하지 않음)', lib => {
+    const s = lib.buildWeightRecentSummary([{ date: daysAgoStr(2), weight: 75 }]);
+    return s !== null && s.recentAvg === 75 && s.prevAvg === null && s.diff === null;
+  }),
+  wtScenario('최근 7일 평균 요약: 최근 7일 기록이 전혀 없으면 null을 반환한다(오래된 기록을 억지로 끌어와 계산하지 않음)', lib =>
+    lib.buildWeightRecentSummary([{ date: daysAgoStr(20), weight: 75 }]) === null
+  ),
 ];
 
 let failed = 0;

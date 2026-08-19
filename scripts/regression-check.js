@@ -1773,7 +1773,7 @@ const checks = [
       return !!body && !body.includes('setOpenId') && !body.includes('setExpandedFeedbackIds') && !body.includes('setFeedbackOpen');
     })() &&
     (() => {
-      const start = app.indexOf('const load=useCallback(async()=>{');
+      const start = app.indexOf('const load=useCallback(async(opts={})=>{');
       const end = app.indexOf('if(loading) return', start);
       const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
       return !!body && !body.includes('setExpandedFeedbackIds') && !body.includes('setFeedbackOpen');
@@ -6381,6 +6381,52 @@ const checks = [
   wtScenario('최근 7일 평균 요약: 최근 7일 기록이 전혀 없으면 null을 반환한다(오래된 기록을 억지로 끌어와 계산하지 않음)', lib =>
     lib.buildWeightRecentSummary([{ date: daysAgoStr(20), weight: 75 }]) === null
   ),
+
+  // ── 회원앱 저장 안정성: 저장 성공 후 재조회(load) 실패가 전체 앱 오류 화면(다시 시도/로그아웃)으로 전파되지 않음 ──
+  ['회원앱 저장 안정성: load()가 silent 옵션을 지원 — silent일 때는 setLoading(true)/setMemberError로 화면을 덮지 않는다',
+    app.includes('const load=useCallback(async(opts={})=>{const silent=!!opts.silent; if(!silent){setLoading(true); setMemberError(""); setMemberErrorDetails(null);}')
+  ],
+  ['회원앱 저장 안정성: silent 재조회가 실패해도 setMemberError를 호출하지 않고 console.error로만 남긴다(저장 성공 화면이 오류 화면으로 바뀌지 않음)',
+    app.includes('} else { console.error("[MemberApp Save Error]",{action:"member-data-refresh",memberId:auth.currentUser?.uid||null,errorCode:e?.code,message:e?.message,error:e}); } }finally{ if(!silent) setLoading(false); }')
+  ],
+  ['회원앱 저장 안정성: silent 재조회에서 프로필이 비어 와도(p가 falsy) 이미 화면에 있던 profile을 null로 덮어써 오류 화면으로 넘기지 않는다',
+    app.includes('if(p||!silent){setProfile(p);}')
+  ],
+  ['회원앱 저장 안정성: 초기 로딩(useEffect)과 오류 화면의 "다시 시도" 버튼은 기존과 동일하게 non-silent(전체 로딩/오류 화면 유지)로 load()를 호출한다',
+    app.includes('useEffect(()=>{load();},[load]);') && app.includes('onRetry={load}')
+  ],
+  ['회원앱 저장 안정성: 체중·칼로리·걸음수/컨디션/통증/건강기록삭제/근육통/수업피드백/프로필정보/유산소/목표수정 저장 후 재조회가 모두 load({silent:true})로 호출된다(전체 reload가 저장 실패로 오인되지 않음)',
+    (() => {
+      const count = app.split('await load({silent:true})').length - 1;
+      return count >= 9;
+    })() &&
+    !app.includes('await saveMemberHealthInputs(profile.id,dateKey,{weight:weightValue,kcal:kcalValue,steps:stepsValue}); if(parsedWeight){setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`member_${dateKey}`,date:dateKey,weight:parsedWeight,note:"회원앱 직접 입력"})}));} setForm(f=>({...f,weight:"",kcal:"",steps:""})); await load(); ')
+  ],
+  ['회원앱 저장 안정성: 저장 함수(건강기록/컨디션/통증/건강기록삭제/유산소)는 중복 실행 방지 가드가 Promise 시작 전에 즉시 저장 상태를 잠근다',
+    app.includes('const saveCheck=async()=>{if(healthSaving)return;') &&
+    app.includes('const saveCondition=async()=>{if(conditionSaving)return;') &&
+    app.includes('const savePain=async()=>{if(painSaving)return;') &&
+    app.includes('if(cardioSaving) return;')
+  ],
+  ['회원앱 저장 안정성: 저장 실패 시 finally 블록에서 healthSaving/conditionSaving/painSaving/cardioSaving이 반드시 false로 해제된다(무한 "저장 중" 방지)',
+    app.includes('finally{setHealthSaving(false);}') &&
+    app.includes('finally{setConditionSaving(false);}') &&
+    app.includes('finally{setPainSaving(false);}') &&
+    app.includes('finally{ setCardioSaving(false); }')
+  ],
+  ['회원앱 저장 안정성: 네트워크성 오류 코드(unavailable/deadline-exceeded/network-request-failed 등)는 로그아웃이 아니라 재시도 가능한 "네트워크 상태를 확인" 안내로 처리된다',
+    app.includes('const MEMBER_SAVE_NETWORK_CODES=new Set(["unavailable","deadline-exceeded","network-request-failed","cancelled","resource-exhausted"]);') &&
+    app.includes('const memberSaveErrorMessage=(error,fallback)=>MEMBER_SAVE_NETWORK_CODES.has(error?.code||"")?"저장하지 못했습니다. 네트워크 상태를 확인한 후 다시 시도해주세요.":(error?.message||fallback);')
+  ],
+  ['회원앱 저장 안정성: 저장 오류 로그가 action/memberId/errorCode/message 구조로 남아 간헐적 실패 재발 시 원인을 추적할 수 있다(건강정보 전체 값은 남기지 않음)',
+    app.includes('const logMemberSaveError=(action,error)=>{ console.error("[MemberApp Save Error]",{action,memberId:profile?.id||null,errorCode:error?.code,message:error?.message,error}); };')
+  ],
+  ['수업 후 상태(MemberFeedbackForm): RPE·근육통·메모 저장 실패가 카드 안 saveError로만 안내되고 입력값·펼침 상태가 유지된다(전체 앱 오류 화면으로 전파되지 않음)',
+    app.includes('setSaveError({key,message:e?.message||"저장하지 못했습니다. 네트워크 상태를 확인한 후 다시 시도해주세요."});') &&
+    app.includes('{saveError?.key==="rpe"&&<p className="pw-error">{saveError.message}</p>}') &&
+    app.includes('{saveError?.key==="soreness"&&<p className="pw-error">{saveError.message}</p>}') &&
+    app.includes('{saveError?.key==="memo"&&<p className="pw-error">{saveError.message}</p>}')
+  ],
 ];
 
 let failed = 0;

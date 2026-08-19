@@ -96,6 +96,38 @@ function wtScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 회원앱 건강 탭 "어제 기록/오늘 상태" 날짜 규칙: 실제 실행 시나리오 검증 ──
+// 월/연도 경계에서도 KST 달력일 기준으로 정확한 어제 날짜를 계산해야 한다(24시간을 단순히 빼는 방식의 오류 방지).
+let healthDateLib = null;
+try {
+  const sliceKst = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function isPublishedData'));
+  healthDateLib = new Function(`${sliceKst}\nreturn { getKoreaDateString, getKoreaYesterdayDateString };`)();
+} catch (e) {
+  console.error('[regression] 건강 탭 날짜 헬퍼 추출 실패:', e.message);
+}
+function healthDateScenario(name, fn) {
+  if (!healthDateLib) return [name, false];
+  try { return [name, !!fn(healthDateLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
+// ── 회원앱 분석 탭 "전날 생활 → 당일 체중" D-1 매칭: 실제 실행 시나리오 검증 ──
+// 원본 체중/칼로리/걸음수/유산소 기록의 날짜는 그대로 두고, 조회 시점에만 전날 값을 당일 체중에 연결해야 한다.
+let prevDayLib = null;
+try {
+  const sliceTypes = app.slice(app.indexOf('function normalizeTypes'), app.indexOf('function formatTypes'));
+  const sliceCardioTypes = app.slice(app.indexOf('function getCardioTypes'), app.indexOf('function calcCardioCalories'));
+  const slicePrevDay = app.slice(app.indexOf('function prevCalendarDate'), app.indexOf('function weightMovingAverage7'));
+  prevDayLib = new Function(`${sliceTypes}\n${sliceCardioTypes}\n${slicePrevDay}\nreturn { prevCalendarDate, buildPrevDayLifestyleRows };`)();
+} catch (e) {
+  console.error('[regression] 전날 생활 매칭 헬퍼 추출 실패:', e.message);
+}
+function prevDayScenario(name, fn) {
+  if (!prevDayLib) return [name, false];
+  try { return [name, !!fn(prevDayLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 2:1 회원별 개인화(종목 대상 only · 회원별 운동 부위 · 회원 한 명분 기록 변환): 실제 실행 시나리오 검증 ──
 // "나눠서 기록"이 실제로 쓰는 원본 함수를 그대로 슬라이스해 실행한다 — A 전용 종목이 B 기록/분석에 섞이는
 // 사고를 문자열 검사가 아니라 실행 결과로 막는다.
@@ -1603,7 +1635,7 @@ const checks = [
     !app.includes('["analysis","유산소 분석"]') &&
     app.includes('function MemberHealth(p)') &&
     app.includes('{key:"cardio",label:"유산소"') &&
-    app.includes('<CardioEntryForm key={todayCardio?.id||"new"} p={p} initialDate={today} initialLog={todayCardio} onSaved={()=>setSheet(null)}/>')
+    app.includes('<CardioEntryForm key={yesterdayCardio?.id||"new"} p={p} initialDate={yesterday} initialLog={yesterdayCardio} onSaved={()=>setSheet(null)}/>')
   ],
   ['관리자앱 건강관리 허브: 유산소 탭 연동(최근 기록/주간 요약/Zone2/체중 비교)',
     app.includes('function AdminCardioSection(') &&
@@ -1863,14 +1895,38 @@ const checks = [
   ],
 
   // ── 회원앱 건강 탭: 카드 하나 = 입력 항목 하나 재설계 ──
-  ['건강 탭 카드 순서: 체중·칼로리·걸음수·컨디션·통증·유산소 6개 카드가 이 순서로 배치(카드 하나 = 입력 항목 하나)',
+  // ── 회원앱 건강 탭: 전날 생활(그룹A)/오늘 상태(그룹B) 2그룹 재설계 ──
+  ['건강 탭 카드 순서: 어제 기록 그룹(칼로리·걸음수·유산소)·오늘 상태 그룹(체중·컨디션·통증) 순서로 각각 배치',
     (() => {
-      const i = app.indexOf('function buildTodayHealthTiles(p,today,open){');
-      const block = app.slice(i, i + 2200);
-      const order = ['key:"weight"', 'key:"kcal"', 'key:"steps"', 'key:"condition"', 'key:"pain"', 'key:"cardio"'];
-      let pos = -1;
-      return order.every(tok => { const idx = block.indexOf(tok); if (idx === -1 || idx <= pos) return false; pos = idx; return true; });
+      const iY = app.indexOf('function buildYesterdayHealthTiles(p,yesterday,open){');
+      const blockY = app.slice(iY, iY + 900);
+      const orderY = ['key:"kcal"', 'key:"steps"', 'key:"cardio"'];
+      let posY = -1;
+      const okY = iY !== -1 && orderY.every(tok => { const idx = blockY.indexOf(tok); if (idx === -1 || idx <= posY) return false; posY = idx; return true; });
+      const iT = app.indexOf('function buildTodayStatusTiles(p,today,open){');
+      const blockT = app.slice(iT, iT + 900);
+      const orderT = ['key:"weight"', 'key:"condition"', 'key:"pain"'];
+      let posT = -1;
+      const okT = iT !== -1 && orderT.every(tok => { const idx = blockT.indexOf(tok); if (idx === -1 || idx <= posT) return false; posT = idx; return true; });
+      return okY && okT;
     })()
+  ],
+  ['건강 탭 기본 날짜: 칼로리·걸음수·유산소 카드는 어제 날짜를 기본값으로 열고, 체중·컨디션·통증 카드는 오늘 날짜를 기본값으로 연다',
+    (() => {
+      const i = app.indexOf('function MemberHealth(p){');
+      const block = app.slice(i, app.indexOf('function CardioEntryForm', i));
+      return block.includes('weight:()=>{ p.setForm(f=>({...f,date:today,') &&
+        block.includes('kcal:()=>{ p.setForm(f=>({...f,date:yesterday,') &&
+        block.includes('steps:()=>{ p.setForm(f=>({...f,date:yesterday,') &&
+        block.includes('condition:()=>{ p.setForm(f=>({...f,date:today,') &&
+        block.includes('pain:()=>{ p.setForm(f=>({...f,date:today,') &&
+        block.includes('initialDate={yesterday} initialLog={yesterdayCardio}');
+    })()
+  ],
+  ['건강 탭: 과거 기록 수정(캘린더에서 특정 날짜 선택)은 여전히 그 날짜(selected)를 그대로 쓰고 오늘/어제로 강제되지 않는다',
+    app.includes('const openMeasure=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("measure"); };') &&
+    app.includes('const openCondition=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("condition"); };') &&
+    app.includes('<CardioEntryForm key={selected} p={p} initialDate={selected} onSaved={()=>setSheet(null)}/>')
   ],
   ['최근 건강 기록 카드 제거: 건강 탭 입력 카드 영역에는 조회 전용 최근 기록 카드가 없음(RecentHealthRecords/buildRecentHealthRecords 삭제)',
     !app.includes('function RecentHealthRecords(') &&
@@ -1879,11 +1935,12 @@ const checks = [
   ],
 
   // ── 건강 탭 프리미엄 리디자인(동기부여 대시보드) ──
-  ['건강 탭: 오늘 건강 기록 카드 6종이 하나의 health-hub 카드로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
+  ['건강 탭: 건강 기록 카드 6종이 하나의 health-hub 카드 안에서 어제 기록/오늘 상태 두 그룹으로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
     (() => {
       const iHub = app.indexOf('<div className="health-hub">');
-      const iGrid = app.indexOf('className="mv2-today-grid"');
-      return iHub !== -1 && iGrid !== -1 && iHub < iGrid && !app.includes('<div className="health-hub-divider"/>');
+      const iGroups = app.indexOf('className="health-daygroups"');
+      const iGrid = app.indexOf('className="health-daygroup-grid"');
+      return iHub !== -1 && iGroups !== -1 && iGrid !== -1 && iHub < iGroups && iGroups < iGrid && !app.includes('<div className="health-hub-divider"/>');
     })()
   ],
   ['건강 탭: 상단 요약이 체중/이번주 운동/유산소/동적 하이라이트 4종으로 개편, 목표 카드 제거',
@@ -6427,6 +6484,53 @@ const checks = [
     app.includes('{saveError?.key==="soreness"&&<p className="pw-error">{saveError.message}</p>}') &&
     app.includes('{saveError?.key==="memo"&&<p className="pw-error">{saveError.message}</p>}')
   ],
+
+  // ── 건강 탭 "어제 기록/오늘 상태" 날짜 규칙 + 분석 탭 D-1 매칭: 실제 실행 시나리오 검증 ──
+  healthDateScenario('건강 탭 날짜 규칙: 2026-08-19의 어제는 2026-08-18이다',
+    lib => lib.getKoreaYesterdayDateString(new Date('2026-08-19T12:00:00+09:00')) === '2026-08-18'
+  ),
+  healthDateScenario('건강 탭 날짜 규칙: 2026-09-01의 어제는 2026-08-31이다(월 경계)',
+    lib => lib.getKoreaYesterdayDateString(new Date('2026-09-01T12:00:00+09:00')) === '2026-08-31'
+  ),
+  healthDateScenario('건강 탭 날짜 규칙: 2027-01-01의 어제는 2026-12-31이다(연도 경계)',
+    lib => lib.getKoreaYesterdayDateString(new Date('2027-01-01T12:00:00+09:00')) === '2026-12-31'
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 전날 날짜 계산은 월 경계에서도 정확하다(2026-08-31의 전날=2026-08-30)',
+    lib => lib.prevCalendarDate('2026-08-31') === '2026-08-30'
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 전날 날짜 계산은 연도 경계에서도 정확하다(2026-01-01의 전날=2025-12-31)',
+    lib => lib.prevCalendarDate('2026-01-01') === '2025-12-31'
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 8/19 체중과 8/18 섭취칼로리가 하나의 row로 연결된다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows([{ date: '2026-08-19', weight: 64.2 }], [{ date: '2026-08-18', kcal: 1800 }], [], [], 7);
+      return rows.length === 1 && rows[0].date === '2026-08-19' && rows[0].prevDate === '2026-08-18' && rows[0].prevKcal === 1800;
+    }
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 8/19 체중과 8/18 걸음수가 하나의 row로 연결된다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows([{ date: '2026-08-19', weight: 64.2 }], [], [{ date: '2026-08-18', steps: 8200 }], [], 7);
+      return rows.length === 1 && rows[0].prevSteps === 8200;
+    }
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 8/19 체중과 8/18 유산소가 하나의 row로 연결된다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows([{ date: '2026-08-19', weight: 64.2 }], [], [], [{ date: '2026-08-18', activityType: '러닝', durationMinutes: 30 }], 7);
+      return rows.length === 1 && rows[0].prevCardioMinutes === 30 && rows[0].prevCardioTypes.includes('러닝');
+    }
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 같은 날짜(8/19) 칼로리는 무시되고 전날(8/18) 값만 연결된다 — 원본 날짜를 이동시키지 않는다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows([{ date: '2026-08-19', weight: 64.2 }], [{ date: '2026-08-19', kcal: 2000 }, { date: '2026-08-18', kcal: 1800 }], [], [], 7);
+      return rows[0].prevKcal === 1800;
+    }
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 전날 기록이 없으면 prevKcal/prevSteps/prevCardioMinutes는 null이고 0으로 채우지 않는다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows([{ date: '2026-08-19', weight: 64.2 }], [], [], [], 7);
+      return rows[0].prevKcal === null && rows[0].prevSteps === null && rows[0].prevCardioMinutes === null;
+    }
+  ),
 ];
 
 let failed = 0;

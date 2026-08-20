@@ -153,7 +153,7 @@ try {
   const sliceWeeks = app.slice(app.indexOf('function weeksUntilDate'), app.indexOf('function getGoalPace'));
   const slicePace = app.slice(app.indexOf('function getGoalPace'), app.indexOf('const STEP_RANGE_OPTIONS'));
   const sliceGoal2 = app.slice(app.indexOf('function getAnalysisPersona'), app.indexOf('function average(arr=[])'));
-  startWeightLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceWeeks}\n${slicePace}\n${sliceGoal2}\nreturn { getMemberStartWeight, getGoalPace, getWeightRemaining, getGoalWeightDirection, getAnalysisPersona, GOAL_PACE_LABELS };`)();
+  startWeightLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceWeeks}\n${slicePace}\n${sliceGoal2}\nreturn { getMemberStartWeight, getGoalPace, getWeightRemaining, getGoalWeightDirection, getAnalysisPersona, GOAL_PACE_LABELS, getWeightGoalProgress, goalToneColor };`)();
 } catch (e) {
   console.error('[regression] 시작 체중/목표 페이스 헬퍼 추출 실패:', e.message);
 }
@@ -7004,6 +7004,54 @@ const checks = [
       return direction === 'down' && intake.tone === 'warn';
     }
   ),
+
+  // ── 관리자앱 "목표 달성률" 2곳(체중 목표 진행률) ──
+  startWeightScenario('관리자 목표 달성률: 시작→목표 구간의 진행률(진짜 progress ratio)이며, 목표와 같은 방향으로 간 만큼만 올라간다',
+    lib => {
+      const p = lib.getWeightGoalProgress({ startWeight: 81, currentWeight: 78, targetWeight: 75 });
+      return p.pct === 50 && p.offTrack === false && p.tone === 'good' && p.moved === -3 && p.needed === -6;
+    }
+  ),
+  startWeightScenario('관리자 목표 달성률: 다이어트 회원이 81→85kg로 늘면 "67% 달성"이 아니라 진행률 0% + 목표와 반대 방향(warn)으로 판정된다',
+    lib => {
+      const p = lib.getWeightGoalProgress({ startWeight: 81, currentWeight: 85, targetWeight: 75 });
+      return p.pct === 0 && p.rawPct < 0 && p.offTrack === true && p.tone === 'warn' && p.moved === 4;
+    }
+  ),
+  startWeightScenario('관리자 목표 달성률: 증량 목표(81→87)에서 늘어나면 정상 진행으로 판정한다(목표 방향을 부호로 인식)',
+    lib => {
+      const p = lib.getWeightGoalProgress({ startWeight: 81, currentWeight: 83, targetWeight: 87 });
+      return p.offTrack === false && p.tone === 'good' && Math.round(p.pct) === 33;
+    }
+  ),
+  startWeightScenario('관리자 목표 달성률: 목표/시작/현재 체중이 없거나 시작=목표면 진행률을 만들지 않는다(0% 표시 금지)',
+    lib => lib.getWeightGoalProgress({ startWeight: 0, currentWeight: 85, targetWeight: 75 }) === null &&
+      lib.getWeightGoalProgress({ startWeight: 81, currentWeight: 85, targetWeight: null }) === null &&
+      lib.getWeightGoalProgress({ startWeight: 81, currentWeight: 85, targetWeight: 81 }) === null
+  ),
+  startWeightScenario('관리자 색상: 판정(tone)은 회원앱과 같은 값을 쓰고 색만 관리자 다크 팔레트로 매핑한다',
+    lib => lib.goalToneColor('warn', { admin: true }) === '#ffd166' && lib.goalToneColor('good', { admin: true }) === '#5EEAD4' &&
+      lib.goalToneColor('warn') === '#F97316' && lib.goalToneColor('good') === '#16A34A'
+  ),
+  ['관리자앱 체형/목표 화면: 목표 달성률이 절대값 계산을 쓰지 않고 방향 인식 공용 helper 하나만 사용한다',
+    app.includes('const goalProgress = getWeightGoalProgress({ startWeight: cw, currentWeight: latestWeight, targetWeight: tw });') &&
+    app.includes('const progressPct = goalProgress ? Math.round(goalProgress.pct) : null;') &&
+    !app.includes('Math.min(100,Math.round((Math.abs(cw-curW)/Math.abs(cw-tw))*100))') &&
+    !app.includes('Math.min(100, Math.max(0, ((cw - latestWeight) / (cw - tw)) * 100))')
+  ],
+  ['관리자앱: 목표와 반대로 움직인 회원에게는 진행률 옆에 방향을 함께 표시하고 색도 주의색으로 바꾼다(회원앱 warn과 결론 일치)',
+    app.includes('{goalProgress?.offTrack?"목표 달성률 · 목표와 반대 방향":"목표 달성률"}') &&
+    app.includes('목표 달성률{goalProgress.offTrack?" · 목표와 반대 방향":""}') &&
+    app.includes('goalToneColor(goalProgress.tone,{admin:true})')
+  ],
+  ['관리자앱: 목표 체중이 없으면 0%를 만들지 않고 "목표 미설정"으로 표시한다',
+    app.includes('{!goalProgress?"목표 미설정":')
+  ],
+  ['관리자앱: 목표 달성률은 체중 목표 진행률이므로 "달성률" 표현을 유지하고, 칼로리 섭취 비율에는 이 표현을 쓰지 않는다',
+    app.includes('<span>목표 대비 섭취</span>') &&
+    !app.includes('<span>목표 달성률</span>') &&
+    app.includes('function getWeightGoalProgress(')
+  ],
 ];
 
 let failed = 0;

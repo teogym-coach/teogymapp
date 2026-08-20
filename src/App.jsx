@@ -6942,7 +6942,9 @@ function goalDeltaTone(goalDirection,delta,flat=WEIGHT_FLAT_KG){
   return d>0?"good":"warn";
 }
 const GOAL_TONE_COLORS={good:"#16A34A",warn:"#F97316",neutral:"#66717C",unknown:"#94A3B8"};
-function goalToneColor(tone){return GOAL_TONE_COLORS[tone]||GOAL_TONE_COLORS.neutral;}
+// 관리자앱은 어두운 배경이라 회원앱 색을 그대로 쓰면 대비가 떨어진다 — 판정(tone)은 공용 로직 그대로 쓰고 색만 관리자 팔레트로 매핑한다.
+const GOAL_TONE_COLORS_ADMIN={good:"#5EEAD4",warn:"#ffd166",neutral:"#94a3b8",unknown:"#94a3b8"};
+function goalToneColor(tone,{admin=false}={}){const map=admin?GOAL_TONE_COLORS_ADMIN:GOAL_TONE_COLORS; return map[tone]||map.neutral;}
 // 목표까지 남은 체중 — 방향은 위 getGoalWeightDirection 결과를 그대로 쓴다(판단 로직 중복 금지).
 // 감량 목표는 현재-목표, 증량 목표는 목표-현재. 체중 유지·체중이 핵심이 아닌 목표(교정/체력)는 "남은 양" 개념이 없으므로 null.
 function getWeightRemaining(goalDirection,currentWeight,targetWeight){
@@ -6950,6 +6952,21 @@ function getWeightRemaining(goalDirection,currentWeight,targetWeight){
   if(!goalDirection||goalDirection==="stable"||!cw||!tw) return null;
   const diff=goalDirection==="up"?tw-cw:cw-tw;
   return Math.max(0,Math.round(diff*10)/10);
+}
+// 체중 목표 진행률 — "시작 체중 → 목표 체중" 구간을 실제로 얼마나 지나왔는지(진짜 progress ratio, 칼로리 비율과는 다른 값).
+// 방향은 부호로 판단한다: 목표와 같은 방향이면 양수, 반대로 움직였으면 rawPct가 음수가 되고 offTrack=true.
+// (절대값으로 계산하면 다이어트 회원이 오히려 늘었는데도 "67% 달성"으로 보인다 — 관리자앱 목표 관리 화면에서 실제로 나던 문제.)
+function getWeightGoalProgress({startWeight,currentWeight,targetWeight}={}){
+  const start=toPositiveNumber(startWeight), cur=toPositiveNumber(currentWeight), target=toPositiveNumber(targetWeight);
+  if(!start||!cur||!target||start===target) return null;
+  const rawPct=Math.round(((cur-start)/(target-start))*1000)/10;
+  return {
+    pct:Math.min(100,Math.max(0,rawPct)), rawPct,
+    offTrack:rawPct<0, reached:rawPct>=100,
+    moved:Math.round((cur-start)*10)/10, needed:Math.round((target-start)*10)/10,
+    start, current:cur, target,
+    tone:rawPct<0?"warn":"good",
+  };
 }
 // 목표 유형별 라벨 — 감량/증량/유지 문구를 화면마다 따로 쓰지 않도록 한 곳에서만 정의한다.
 const GOAL_PACE_LABELS={
@@ -27011,7 +27028,9 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
   const latestWeight = weightProgress.latestWeight ?? cw;
   // 감량이면 양수(▼), 증량이면 음수(▲) — 기존 표시 부호 방향은 그대로 유지, 기준만 첫 측정 기록으로 교체
   const lostSoFar    = weightProgress.hasEnoughData ? -weightProgress.change : 0;
-  const progressPct  = (cw && tw && cw !== tw) ? Math.min(100, Math.max(0, ((cw - latestWeight) / (cw - tw)) * 100)) : 0;
+  // 목표 달성률 = 시작 체중 → 목표 체중 구간의 진행률(진짜 progress ratio). 방향 판단은 공용 helper 한 곳에서만 한다.
+  const goalProgress = getWeightGoalProgress({ startWeight: cw, currentWeight: latestWeight, targetWeight: tw });
+  const progressPct  = goalProgress ? goalProgress.pct : 0;
 
   function getAssessment() {
     if (!weeklyLoss || weeklyLoss <= 0) return null;
@@ -27131,9 +27150,12 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                   </div>
                 </div>
                 <div style={{marginBottom:6}}>
+                  {/* 체중 목표 진행률(칼로리 비율이 아님). 목표와 반대로 움직인 회원에게 진행률만 보여주면 오해가 생기므로 방향을 함께 표시한다. */}
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <Mo c="#94a3b8" s={9}>목표 달성률</Mo>
-                    <Mo c="#5EEAD4" s={10}>{progressPct.toFixed(1)}%</Mo>
+                    <Mo c="#94a3b8" s={9}>{goalProgress?.offTrack?"목표 달성률 · 목표와 반대 방향":"목표 달성률"}</Mo>
+                    <Mo c={goalProgress?goalToneColor(goalProgress.tone,{admin:true}):"#94a3b8"} s={10}>
+                      {!goalProgress?"목표 미설정":`${progressPct.toFixed(1)}%${goalProgress.offTrack?` (${goalProgress.moved>0?"+":""}${goalProgress.moved}kg)`:""}`}
+                    </Mo>
                   </div>
                   <div style={{height:7,background:"rgba(255,255,255,0.08)",borderRadius:4}}>
                     <div style={{height:"100%",width:progressPct+"%",background:"linear-gradient(90deg,#5EEAD4,#7c6fff)",borderRadius:4,transition:"width .6s"}} />
@@ -29505,13 +29527,17 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
     return cards;
   }
 
-  const progressPct = (() => {
-    const cw=parseFloat(goal.currentWeight)||0, tw=parseFloat(goal.targetWeight)||0;
+  // 목표 달성률 — 예전에는 |시작-현재| / |시작-목표| 절대값이라, 목표와 반대로 움직인 회원도 "67% 달성"으로 보였다.
+  // 방향을 아는 공용 helper(getWeightGoalProgress) 하나만 사용해 회원앱 판단과 결론이 엇갈리지 않게 한다.
+  const goalProgress = (() => {
     const latestWeightRec = getLatestBodyWeight(bodyData);
-    const curW=latestWeightRec?.weight || cw;
-    if(!cw||!tw||cw===tw)return null;
-    return Math.min(100,Math.round((Math.abs(cw-curW)/Math.abs(cw-tw))*100));
+    return getWeightGoalProgress({
+      startWeight: goal.currentWeight,
+      currentWeight: latestWeightRec?.weight || goal.currentWeight,
+      targetWeight: goal.targetWeight,
+    });
   })();
+  const progressPct = goalProgress ? Math.round(goalProgress.pct) : null;
 
   const reportCards  = makeReportCards();
   const selectedType = GOAL_TYPES.find(g=>g.key===goal.goalType);
@@ -29578,14 +29604,18 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
               border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",gap:16}}>
               <svg width={64} height={64} viewBox="0 0 64 64">
                 <circle cx={32} cy={32} r={28} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6}/>
-                <circle cx={32} cy={32} r={28} fill="none" stroke="#5EEAD4" strokeWidth={6}
+                <circle cx={32} cy={32} r={28} fill="none" stroke={goalToneColor(goalProgress.tone,{admin:true})} strokeWidth={6}
                   strokeDasharray={`${(progressPct/100)*175.9} 175.9`}
                   strokeLinecap="round" transform="rotate(-90 32 32)"/>
-                <text x={32} y={36} textAnchor="middle" fontSize={14} fontWeight={800} fill="#5EEAD4">{progressPct}%</text>
+                <text x={32} y={36} textAnchor="middle" fontSize={14} fontWeight={800} fill={goalToneColor(goalProgress.tone,{admin:true})}>{progressPct}%</text>
               </svg>
               <div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#e2e8f0",marginBottom:3}}>목표 달성률</div>
-                <Mo c="#94a3b8" s={10}>{goal.targetDate?`D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음`:"목표일 미설정"}</Mo>
+                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#e2e8f0",marginBottom:3}}>목표 달성률{goalProgress.offTrack?" · 목표와 반대 방향":""}</div>
+                {/* 트레이너가 숫자의 근거를 바로 볼 수 있게 시작 → 현재(목표)를 한 줄로 함께 보여준다. */}
+                <Mo c={goalProgress.offTrack?"#ffd166":"#cbd5e1"} s={10} style={{display:"block"}}>
+                  {`시작 ${goalProgress.start}kg → 현재 ${goalProgress.current}kg (목표 ${goalProgress.target}kg${goalProgress.offTrack?` · ${goalProgress.moved>0?"+":""}${goalProgress.moved}kg`:""})`}
+                </Mo>
+                <Mo c="#94a3b8" s={10} style={{display:"block",marginTop:2}}>{goal.targetDate?`D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음`:"목표일 미설정"}</Mo>
               </div>
             </div>
           )}

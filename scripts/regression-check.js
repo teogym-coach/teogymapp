@@ -128,6 +128,24 @@ function prevDayScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 섭취 칼로리 "날짜당 총섭취량" 정규화: 실제 실행 시나리오 검증 ──
+// 전날 생활 매칭(D-1)을 도입해도 칼로리 원본 집계 의미(날짜당 1건 = 그날의 총섭취량)는 그대로여야 한다.
+let kcalLogsLib = null;
+try {
+  const sliceNum = app.slice(app.indexOf('function toPositiveNumber'), app.indexOf('function getBodyWeightRecords'));
+  const sliceKcal = app.slice(app.indexOf('function getKcalLogs'), app.indexOf('function getRecentKcalLogsByDays'));
+  kcalLogsLib = new Function(`${sliceNum}
+${sliceKcal}
+return { getKcalLogs };`)();
+} catch (e) {
+  console.error('[regression] 섭취 칼로리 집계 헬퍼 추출 실패:', e.message);
+}
+function kcalLogsScenario(name, fn) {
+  if (!kcalLogsLib) return [name, false];
+  try { return [name, !!fn(kcalLogsLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 2:1 회원별 개인화(종목 대상 only · 회원별 운동 부위 · 회원 한 명분 기록 변환): 실제 실행 시나리오 검증 ──
 // "나눠서 기록"이 실제로 쓰는 원본 함수를 그대로 슬라이스해 실행한다 — A 전용 종목이 B 기록/분석에 섞이는
 // 사고를 문자열 검사가 아니라 실행 결과로 막는다.
@@ -6531,6 +6549,110 @@ const checks = [
       return rows[0].prevKcal === null && rows[0].prevSteps === null && rows[0].prevCardioMinutes === null;
     }
   ),
+  prevDayScenario('분석 탭 D-1 매칭: 8/19 몸 상태(체중·컨디션·통증)와 8/18 생활(칼로리·걸음수·유산소)이 하나의 분석 단위로 연결된다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows(
+        [{ date: '2026-08-19', weight: 64.2 }],
+        [{ date: '2026-08-18', kcal: 1800 }],
+        [
+          { date: '2026-08-18', steps: 8200, condition: '보통', painPart: '없음' },
+          { date: '2026-08-19', condition: '좋음', painPart: '어깨', painVas: 1 },
+        ],
+        [{ date: '2026-08-18', activityType: '러닝', durationMinutes: 30 }],
+        7
+      );
+      const r = rows[0];
+      return rows.length === 1 && r.date === '2026-08-19' && r.prevDate === '2026-08-18' &&
+        r.weight === 64.2 && r.condition === '좋음' && r.painLabel === '어깨 · VAS 1' && r.hasActualPain === true &&
+        r.prevKcal === 1800 && r.prevSteps === 8200 && r.prevCardioMinutes === 30;
+    }
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 전날(8/18) 컨디션·통증은 당일(8/19) 상태로 끌어오지 않는다 — 상태는 그 날짜 기록만 사용',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows(
+        [{ date: '2026-08-19', weight: 64.2 }],
+        [],
+        [{ date: '2026-08-18', condition: '매우 피곤', painPart: '무릎', painVas: 5 }],
+        [],
+        7
+      );
+      return rows[0].condition === null && rows[0].painLabel === null && rows[0].hasActualPain === false;
+    }
+  ),
+  prevDayScenario('분석 탭 D-1 매칭: 통증 "없음"으로 기록한 날은 미입력(null)과 구분해서 표시한다',
+    lib => {
+      const rows = lib.buildPrevDayLifestyleRows(
+        [{ date: '2026-08-19', weight: 64.2 }],
+        [], [{ date: '2026-08-19', painPart: '없음' }], [], 7
+      );
+      return rows[0].painLabel === '없음' && rows[0].hasActualPain === false;
+    }
+  ),
+  kcalLogsScenario('섭취 칼로리 집계 보존: 같은 날짜에 로그가 여러 건이어도 그 날짜의 총섭취량 1건으로 정규화된다',
+    lib => {
+      const rows = lib.getKcalLogs({ logs: [{ date: '2026-08-18', kcal: 700 }, { date: '2026-08-18', kcal: 1800 }, { date: '2026-08-19', kcal: 2000 }] });
+      return rows.length === 2 && rows[0].date === '2026-08-18' && rows[0].kcal === 1800 && rows[1].kcal === 2000;
+    }
+  ),
+  kcalLogsScenario('섭취 칼로리 집계 보존: nutrition.dates의 총섭취량(totalKcal)도 같은 날짜 기준으로 통합된다',
+    lib => {
+      const rows = lib.getKcalLogs({ logs: [{ date: '2026-08-18', kcal: 700 }], dates: { '2026-08-18': { totalKcal: 1800 } } });
+      return rows.length === 1 && rows[0].kcal === 1800;
+    }
+  ),
+
+  // ── 분석 탭 "전날 생활 ↔ 오늘 상태" 카드 UI + 반응형(기존 breakpoint 재사용) ──
+  ['분석 탭: 전날 생활(칼로리·걸음수·유산소)과 오늘 몸 상태(체중·컨디션·통증)를 한 행에서 좌우로 비교하는 카드로 렌더한다',
+    app.includes('<MCard title="전날 생활 ↔ 오늘 상태">') &&
+    app.includes('<div className="apr-col prev">') &&
+    app.includes('<div className="apr-col today">') &&
+    app.includes('<span className="apr-chip main">체중 {r.weight}kg</span>') &&
+    app.includes('{r.condition && <span className="apr-chip">컨디션 {r.condition}</span>}') &&
+    app.includes('전날 {formatKoreanDateLabel(r.prevDate)} 생활')
+  ],
+  ['분석 탭: 전날 생활 비교는 인과를 단정하지 않고 참고용 비교로만 안내한다',
+    app.includes('인과가 아닌 참고용 비교예요')
+  ],
+  ['분석 탭 반응형: 전날↔오늘 비교 카드는 새 breakpoint 없이 기존 700px 기준만 사용하고, 모바일은 세로(↓)·와이드는 좌우(→) 배치로 레이아웃만 바뀐다',
+    app.includes('.anx-prevday-row .apr-arrow::before{content:"↓"}') &&
+    app.includes('@media(min-width:700px){.anx-prevday-row{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:14px;padding:14px 16px}.anx-prevday-row .apr-arrow::before{content:"→"}}')
+  ],
+  ['건강 탭 반응형: 어제/오늘 그룹 레이아웃도 새 breakpoint를 만들지 않고 기존 700px(회원앱 공용 max-width 전환 기준)만 재사용한다',
+    app.includes('@media(min-width:700px){.member-page{max-width:760px}') &&
+    (() => {
+      // 건강 그룹(.health-daygroup*) 규칙이 들어 있는 media query 조건을 전부 모아, 기존 700px 기준 외에는 없는지 확인한다.
+      const conditions = [];
+      let i = app.indexOf('@media(');
+      while (i !== -1) {
+        const cond = app.slice(i + 7, app.indexOf(')', i));
+        const open = app.indexOf('{', i);
+        let depth = 0, j = open;
+        for (; j < app.length; j++) { if (app[j] === '{') depth++; else if (app[j] === '}') { depth--; if (depth === 0) break; } }
+        if (app.slice(open, j + 1).includes('.health-daygroup')) conditions.push(cond);
+        i = app.indexOf('@media(', j);
+      }
+      return app.includes('.health-daygroups{display:grid') && conditions.length > 0 && conditions.every(c => c === 'min-width:700px');
+    })()
+  ],
+  ['건강 탭 반응형: 넓은 화면에서는 그룹 패널 안 카드를 가로형 1열로 배치한다(패널 폭 350px 안팎에서 3열로 나누면 라벨·값이 잘림)',
+    app.includes('.health-daygroup-grid{grid-template-columns:minmax(0,1fr);gap:9px}') &&
+    app.includes('.health-daygroup-grid .mv2-today-tile{flex-direction:row;align-items:center;gap:12px;min-height:68px;padding:13px 16px}') &&
+    app.includes('.mv2-today-tile b{display:block;font-size:min(19px,4.8vw)')
+  ],
+  ['건강 탭: 어제/오늘 데이터 모델은 viewport와 무관하게 하나 — 화면 폭으로 날짜·데이터를 분기하지 않는다(레이아웃만 CSS로 변경)',
+    (() => {
+      const block = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function CardioEntryForm'));
+      return !block.includes('innerWidth') && !block.includes('matchMedia') && !block.includes('isTablet') &&
+        block.includes('const yesterdayTiles=buildYesterdayHealthTiles(p,yesterday,open);') &&
+        block.includes('const todayTiles=buildTodayStatusTiles(p,today,open);');
+    })()
+  ],
+  ['건강 탭: 카드 저장 후 무거운 MemberApp 전체 재조회(reloadMemberApp)를 새로 호출하지 않는다(기존 저장 함수의 silent 재조회만 사용)',
+    (() => {
+      const block = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function CardioEntryForm'));
+      return !block.includes('reloadMemberApp');
+    })()
+  ],
 ];
 
 let failed = 0;

@@ -163,6 +163,23 @@ function startWeightScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── "목표 대비 섭취"(구 목표 달성률): 실제 실행 시나리오 검증 ──
+// 3,000 / 2,125 = 141%는 "목표를 141% 달성"이 아니라 "목표보다 41% 많이 먹었다"는 뜻이므로,
+// 라벨·색·설명이 그 의미와 회원 목표 방향에 맞는지 원본 함수로 확인한다.
+let calorieIntakeLib = null;
+try {
+  const sliceNum2 = app.slice(app.indexOf('function toPositiveNumber'), app.indexOf('function getBodyWeightRecords'));
+  const sliceGoal3 = app.slice(app.indexOf('function getAnalysisPersona'), app.indexOf('function average(arr=[])'));
+  calorieIntakeLib = new Function(`${sliceNum2}\n${sliceGoal3}\nreturn { buildCalorieIntakeSummary, getGoalWeightDirection, getAnalysisPersona, goalToneColor };`)();
+} catch (e) {
+  console.error('[regression] 목표 대비 섭취 헬퍼 추출 실패:', e.message);
+}
+function calorieIntakeScenario(name, fn) {
+  if (!calorieIntakeLib) return [name, false];
+  try { return [name, !!fn(calorieIntakeLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── "이번 기간 리포트" 인트로 문구: 실제 실행 시나리오 검증 ──
 let periodReportLib = null;
 try {
@@ -6825,10 +6842,9 @@ const checks = [
     app.includes('persona === "bulk" ? "#66717C"') &&
     !app.includes('color: wDiff <= 0 ? "#16A34A" : "#F97316"')
   ],
-  ['분석 탭: 기본 기간은 전체이고, 회원이 직접 고른 기간이 저장돼 있으면 그 값이 우선한다',
-    app.includes('teogym_analysis_period") || "all"') &&
-    app.includes('return "all"') &&
-    app.includes('localStorage.setItem("teogym_analysis_period", k)')
+  ['분석 탭: 분석 화면에 새로 들어오면 기간은 항상 "전체"에서 시작한다(이전 선택을 기억하지 않음)',
+    app.includes('const [period, setPeriod] = useState("all");') &&
+    !app.includes('localStorage.getItem("teogym_analysis_period")')
   ],
   ['섭취와 체중 변화 그래프: 회원앱 kcal Y축 라벨이 잘리지 않도록 축 폭을 명시하고 왼쪽 여백을 음수로 당기지 않는다(관리자앱 값 유지)',
     app.includes('left:admin?-18:0,bottom:0') &&
@@ -6910,6 +6926,84 @@ const checks = [
     !app.includes('Math.max(0, +(Number(curW) - targetW).toFixed(1))') &&
     !app.includes('const gain=Number.isFinite(f.cur)&&Number.isFinite(f.target)?Math.max(0,f.target-f.cur):0;')
   ],
+
+  // ── 한국어 단어 중간 줄바꿈 방지 ──
+  ['회원앱 줄바꿈: 화면 전체에 word-break:keep-all을 적용해 "보세요"가 "보세/요"로 갈라지지 않게 하고, 띄어쓰기 없는 긴 문자열만 넘칠 때 끊는다',
+    app.includes('animation:memberFadeIn .22s ease;word-break:keep-all;overflow-wrap:break-word}') &&
+    app.includes('.calorie-metric-block b{display:block;font-size:15px;font-weight:900;color:#20242A;word-break:keep-all;overflow-wrap:anywhere}') &&
+    !app.includes('.calorie-metric-block b{display:block;font-size:15px;font-weight:900;color:#20242A;word-break:break-all}')
+  ],
+  ['회원앱 줄바꿈: 설명 문구에 <br>을 하드코딩하지 않는다(폭에 따라 자연스럽게 여러 줄이 되도록 CSS로만 처리)',
+    app.includes('<b>건강 기록</b><span>어제의 생활과 오늘의 몸 상태를 함께 기록해 보세요.</span>') &&
+    !app.includes('함께 기록해<br')
+  ],
+
+  // ── 분석 탭 기간: 항상 전체로 시작 ──
+  ['분석 탭: 기간 기본값이 항상 "전체"이고, 이전 선택을 저장/복원하는 localStorage 로직이 남아 있지 않다',
+    app.includes('const [period, setPeriod] = useState("all");') &&
+    app.includes('const handleSetPeriod = k => setPeriod(k);') &&
+    !app.includes('teogym_analysis_period')
+  ],
+  ['분석 탭: 탭을 나갔다 다시 들어오면 컴포넌트가 새로 마운트되어 기간이 전체로 돌아온다(탭 전환 시 key 변경 + 조건부 렌더 유지)',
+    app.includes('<div key={tab} className="member-tab-fade">') &&
+    app.includes('tab==="analysis"&&<MemberAnalysis {...common}/>')
+  ],
+
+  // ── 목표 대비 섭취(구 "목표 달성률") ──
+  calorieIntakeScenario('목표 대비 섭취: 최근 7일 평균 3,000kcal / 목표 2,125kcal면 141%로 계산되고, 목표보다 41% 높다고 설명한다',
+    lib => {
+      const r = lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: 'down', recentCount: 5 });
+      return r.pct === 141 && r.display === '141%' && r.diff === 875 && r.note.includes('약 41% 높아요') && r.note.includes('참고');
+    }
+  ),
+  calorieIntakeScenario('목표 대비 섭취: 다이어트 회원이 목표보다 많이 먹은 상태를 초록색 성공으로 표시하지 않는다(주의색)',
+    lib => {
+      const r = lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: 'down', recentCount: 5 });
+      return r.tone === 'warn' && lib.goalToneColor(r.tone) !== '#16A34A';
+    }
+  ),
+  calorieIntakeScenario('목표 대비 섭취: 같은 141%라도 증량 목표 회원에게는 목표 방향과 맞는 상태로 판정한다(공통 목표 방향 재사용)',
+    lib => lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: 'up', recentCount: 5 }).tone === 'good' &&
+      lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: null, recentCount: 5 }).tone === 'neutral'
+  ),
+  calorieIntakeScenario('목표 대비 섭취: 목표 ±150kcal 안이면 목표 범위 안내로 표시한다',
+    lib => {
+      const r = lib.buildCalorieIntakeSummary({ avg7: 2200, targetKcal: 2125, goalDirection: 'down', recentCount: 5 });
+      return r.tone === 'good' && r.note.includes('목표 범위 안');
+    }
+  ),
+  calorieIntakeScenario('목표 대비 섭취: 목표 칼로리가 없거나 비정상이면 비율을 만들지 않고 중립 상태로 안내한다',
+    lib => {
+      const none = lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: null, goalDirection: 'down', recentCount: 5 });
+      const zero = lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 0, goalDirection: 'down', recentCount: 5 });
+      return none.pct === null && none.tone === 'unknown' && none.display === '목표 미설정' && zero.pct === null && zero.tone === 'unknown';
+    }
+  ),
+  calorieIntakeScenario('목표 대비 섭취: 최근 7일 기록이 없거나 1건뿐이면 0%·100% 같은 값을 만들지 않고 "기록 부족"으로 둔다',
+    lib => {
+      const empty = lib.buildCalorieIntakeSummary({ avg7: null, targetKcal: 2125, goalDirection: 'down', recentCount: 0 });
+      const one = lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: 'down', recentCount: 1 });
+      return empty.pct === null && empty.display === '기록 부족' && empty.tone === 'unknown' &&
+        one.pct === null && one.display === '기록 부족' && one.tone === 'unknown';
+    }
+  ),
+  ['섭취와 체중 변화 카드: "목표 달성률" 라벨을 쓰지 않고 "목표 대비 섭취"와 설명 문구를 함께 보여준다',
+    app.includes('<span>목표 대비 섭취</span>') &&
+    app.includes('<p className="calorie-intake-note">{calorieIntake.note}</p>') &&
+    !app.includes('<span>목표 달성률</span>')
+  ],
+  ['섭취와 체중 변화 카드: 최근 7일 평균·목표 대비 섭취 색이 같은 판정(goalDeltaTone 기반 tone)을 공유해 카드 안에서 결론이 엇갈리지 않는다',
+    app.includes('const calorieIntake = buildCalorieIntakeSummary({ avg7, targetKcal: target.value, goalDirection: weightState.goalDirection, recentCount: getRecentKcalLogsByDays(p.nutrition, 7).length });') &&
+    app.includes('<div className="calorie-metric-block"><span>최근 7일 평균</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>') &&
+    !app.includes('color: calorieDiff !== null && Math.abs(calorieDiff) <= 150 ? "#16A34A" : "#F97316"')
+  ],
+  calorieIntakeScenario('결론 일관성: 다이어트 회원(체중 +4kg / 섭취 목표 초과)이면 체중 판정과 섭취 판정이 모두 warn으로 같은 방향을 가리킨다',
+    lib => {
+      const direction = lib.getGoalWeightDirection(lib.getAnalysisPersona('다이어트'));
+      const intake = lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: direction, recentCount: 5 });
+      return direction === 'down' && intake.tone === 'warn';
+    }
+  ),
 ];
 
 let failed = 0;

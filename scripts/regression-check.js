@@ -144,6 +144,25 @@ function goalStateScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 시작 체중 단일 기준(getMemberStartWeight) + 목표 유형별 페이스(getGoalPace): 실제 실행 시나리오 검증 ──
+// 시작 체중이 화면마다 다르면 Before→After·목표까지·예상 기간이 서로 다른 값을 보여주게 되므로 원본 함수로 직접 확인한다.
+let startWeightLib = null;
+try {
+  const sliceNum = app.slice(app.indexOf('function toPositiveNumber'), app.indexOf('function getBodyWeightRecords'));
+  const sliceRec = app.slice(app.indexOf('function getBodyWeightRecords'), app.indexOf('// ── 체중 변화 단일 기준'));
+  const sliceWeeks = app.slice(app.indexOf('function weeksUntilDate'), app.indexOf('function getGoalPace'));
+  const slicePace = app.slice(app.indexOf('function getGoalPace'), app.indexOf('const STEP_RANGE_OPTIONS'));
+  const sliceGoal2 = app.slice(app.indexOf('function getAnalysisPersona'), app.indexOf('function average(arr=[])'));
+  startWeightLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceWeeks}\n${slicePace}\n${sliceGoal2}\nreturn { getMemberStartWeight, getGoalPace, getWeightRemaining, getGoalWeightDirection, getAnalysisPersona, GOAL_PACE_LABELS };`)();
+} catch (e) {
+  console.error('[regression] 시작 체중/목표 페이스 헬퍼 추출 실패:', e.message);
+}
+function startWeightScenario(name, fn) {
+  if (!startWeightLib) return [name, false];
+  try { return [name, !!fn(startWeightLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── "이번 기간 리포트" 인트로 문구: 실제 실행 시나리오 검증 ──
 let periodReportLib = null;
 try {
@@ -2955,7 +2974,7 @@ const checks = [
     app.includes('const progress = getWeightProgress(bodyData);   // 첫 측정 ↔ 최근 측정 단일 기준(회원목록 카드와 동일)') &&
     app.includes('startDiff: progress.change,') &&
     app.includes('const lostSoFar    = weightProgress.hasEnoughData ? -weightProgress.change : 0;') &&
-    app.includes('const start=weights[0]?.weight||toPositiveNumber(p.startW)||cur;')
+    app.includes('const start=getMemberStartWeight({records:weights,profile:p.profile||{},onboarding:p.onboarding||{}})||toPositiveNumber(p.startW)||cur;')
   ],
   ['체중 변화: 회원앱 분석 탭도 기간 내 실제 측정 기록 2회 이상일 때만 변화 계산(등록 체중과 혼용 없음)',
     app.includes('const wDiff = weights.length >= 2 ? +(weights.at(-1).weight - weights[0].weight).toFixed(1) : null;') &&
@@ -6815,6 +6834,81 @@ const checks = [
     app.includes('left:admin?-18:0,bottom:0') &&
     app.includes('<YAxis width={admin?60:64} tick={axisTick}') &&
     !app.includes('left:admin?-18:-14')
+  ],
+
+  // ── 시작 체중 단일 기준 ──
+  startWeightScenario('시작 체중: 실제 측정 기록이 있으면 등록 당시 값(profile.startWeight)이 달라도 가장 오래된 측정 기록을 쓴다',
+    lib => lib.getMemberStartWeight({
+      records: [{ date: '2026-06-01', weight: 70.0 }, { date: '2026-08-19', weight: 64.0 }],
+      profile: { startWeight: 75 }, onboarding: { startingWeightKg: 73 }, currentWeight: 64,
+    }) === 70
+  ),
+  startWeightScenario('시작 체중: 측정 기록이 없을 때만 등록 당시 값(profile.startWeight → onboarding.startingWeightKg) 순으로 보조 사용',
+    lib => lib.getMemberStartWeight({ records: [], profile: { startWeight: 75 }, onboarding: { startingWeightKg: 73 }, currentWeight: 64 }) === 75 &&
+      lib.getMemberStartWeight({ records: [], profile: {}, onboarding: { startingWeightKg: 73 }, currentWeight: 64 }) === 73 &&
+      lib.getMemberStartWeight({ records: [], profile: {}, onboarding: {}, currentWeight: 64 }) === 64 &&
+      lib.getMemberStartWeight({ records: [], profile: {}, onboarding: {} }) === null
+  ),
+  startWeightScenario('시작 체중: body 객체를 넘겨도 records를 넘긴 것과 같은 값을 돌려준다(화면마다 다른 경로로 불러도 결과 동일)',
+    lib => lib.getMemberStartWeight({ body: { records: [{ date: '2026-08-19', weight: 64.0 }, { date: '2026-06-01', weight: 70.0 }] }, profile: { startWeight: 75 } }) === 70
+  ),
+  ['시작 체중: 회원앱 startW·getWeightForecast가 각자 우선순위를 두지 않고 공통 helper(getMemberStartWeight) 하나만 사용한다',
+    app.includes('startW=getMemberStartWeight({records:weights,profile,onboarding:effectiveOnboarding,currentWeight:curW})||curW;') &&
+    app.includes('const start=getMemberStartWeight({records:weights,profile:p.profile||{},onboarding:p.onboarding||{}})||toPositiveNumber(p.startW)||cur;') &&
+    !app.includes('startW=toPositiveNumber(profile.startWeight)||toPositiveNumber(effectiveOnboarding.startingWeightKg)') &&
+    !app.includes('const start=weights[0]?.weight||toPositiveNumber(p.startW)||cur;')
+  ],
+  ['시작 체중: 프로필의 "시작 체중" 입력칸은 저장된 값(profile.startWeight)을 그대로 보여준다(계산 기준 통일이 저장값 표시를 덮어쓰지 않음)',
+    app.includes('startWeight:(p.profile.startWeight||(p.startW&&p.startW!=="-"?p.startW:""))||""')
+  ],
+
+  // ── 목표 유형별 페이스·라벨(감량 전제 제거) ──
+  startWeightScenario('목표 페이스: 다이어트는 필요 감량량(현재-목표), 벌크업은 필요 증량량(목표-현재)으로 계산된다',
+    lib => {
+      const diet = lib.getGoalPace(70, 64, '2026-12-31', lib.getGoalWeightDirection(lib.getAnalysisPersona('다이어트')));
+      const bulk = lib.getGoalPace(64, 70, '2026-12-31', lib.getGoalWeightDirection(lib.getAnalysisPersona('벌크업')));
+      return diet.mode === 'loss' && diet.need === 6 && bulk.mode === 'gain' && bulk.need === 6;
+    }
+  ),
+  startWeightScenario('목표 페이스: 체중 유지 목표는 감량/증량 필요량 대신 목표 유지 범위(±1kg)와 유지 여부를 돌려준다',
+    lib => {
+      const keep = lib.getGoalPace(63.4, 63, '2026-12-31', lib.getGoalWeightDirection(lib.getAnalysisPersona('건강관리')));
+      const off = lib.getGoalPace(66, 63, '2026-12-31', lib.getGoalWeightDirection(lib.getAnalysisPersona('건강관리')));
+      return keep.mode === 'stable' && keep.withinRange === true && keep.rangeLow === 62 && keep.rangeHigh === 64 &&
+        off.mode === 'stable' && off.withinRange === false && off.gap === 3;
+    }
+  ),
+  startWeightScenario('목표 페이스: 체형교정·체력향상처럼 체중이 핵심 목표가 아니면 감량/증량 페이스를 아예 만들지 않는다(라벨 미노출)',
+    lib => lib.getGoalPace(70, 64, '2026-12-31', lib.getGoalWeightDirection(lib.getAnalysisPersona('체형교정'))) === null &&
+      lib.getGoalPace(70, 64, '2026-12-31', lib.getGoalWeightDirection(lib.getAnalysisPersona('체력향상'))) === null
+  ),
+  startWeightScenario('목표까지 남은 체중: 감량은 현재-목표, 증량은 목표-현재, 유지·체중 무관 목표는 null(남은 양 개념 없음)',
+    lib => lib.getWeightRemaining('down', 70, 64) === 6 && lib.getWeightRemaining('up', 64, 70) === 6 &&
+      lib.getWeightRemaining('down', 62, 64) === 0 && lib.getWeightRemaining('stable', 70, 64) === null && lib.getWeightRemaining(null, 70, 64) === null
+  ),
+  startWeightScenario('목표 라벨: 감량/증량 문구를 화면마다 새로 쓰지 않고 GOAL_PACE_LABELS 한 곳에서 가져온다',
+    lib => lib.GOAL_PACE_LABELS.down.need === '필요 감량량' && lib.GOAL_PACE_LABELS.down.weekly === '주당 감량 필요량' &&
+      lib.GOAL_PACE_LABELS.up.need === '필요 증량량' && lib.GOAL_PACE_LABELS.up.weekly === '주당 증량 필요량' &&
+      lib.GOAL_PACE_LABELS.stable === undefined
+  ),
+  ['목표 기간 안내(GoalPeriodInfo): 목표 유형을 받아 라벨을 고르고, 감량 전제 문구를 하드코딩하지 않는다',
+    app.includes('function GoalPeriodInfo({currentWeight,targetWeight,period,customDate,goal=""}){') &&
+    app.includes('const goalDirection=getGoalWeightDirection(getAnalysisPersona(goal));') &&
+    app.includes('const labels=pace?GOAL_PACE_LABELS[goalDirection]:null;') &&
+    app.includes('goal={base.goal}') &&
+    !app.includes('`필요 감량량 ${pace.need.toFixed(1)}kg · 주당 감량 필요량 약 ${pace.weekly.toFixed(1)}kg`')
+  ],
+  ['홈 목표 카드: 목표까지 남은 체중·도달 예상이 목표 방향을 따른다(증량 목표 회원이 "목표 도달!"로 잘못 표시되지 않음)',
+    app.includes('const goalDirection=getGoalWeightDirection(getAnalysisPersona(p.onboarding?.goal||p.profile?.goal));') &&
+    app.includes('return {cur,start,target,goalDirection,remain:neededLoss,') &&
+    app.includes('f.goalDirection==="down"||f.goalDirection==="up"') &&
+    app.includes('{f.goalDirection==="stable"?"목표 범위 안에서 유지 중이에요":"목표 체중에 도달했어요"}')
+  ],
+  ['분석 탭·목표 전략: "목표까지"/"남은 증량"도 공통 helper 결과만 쓰고 카드마다 다시 계산하지 않는다',
+    app.includes('const remainW = getWeightRemaining(getGoalWeightDirection(persona), curW, targetW);') &&
+    app.includes('const gain=f.remain;') &&
+    !app.includes('Math.max(0, +(Number(curW) - targetW).toFixed(1))') &&
+    !app.includes('const gain=Number.isFinite(f.cur)&&Number.isFinite(f.target)?Math.max(0,f.target-f.cur):0;')
   ],
 ];
 

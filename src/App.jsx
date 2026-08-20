@@ -130,7 +130,9 @@ function getCalorieStatus({avg,target,goal}){if(avg==null)return {label:"기록 
 function formatSignedKcal(v){return v!=null&&Number.isFinite(Number(v))?`${Number(v)>0?"+":""}${Math.round(Number(v)).toLocaleString()} kcal`:"-";}
 function CalorieSummaryCard({avg7,target,goal,admin=false}){const status=getCalorieStatus({avg:avg7,target,goal}); const tone=status.tone==="range"?"#5EEAD4":status.tone==="low"?"#ffd166":status.tone==="high"?"#ff6b6b":"#94a3b8"; const shell=admin?{background:"linear-gradient(145deg,rgba(15,23,42,.96),rgba(8,13,26,.98))",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,padding:"14px 14px",marginBottom:12}:{background:"linear-gradient(135deg,#FFFFFF,#EEF5FF)",border:"1px solid #D9E7FF",borderRadius:22,padding:"16px",marginBottom:12}; return <div style={shell}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}><div><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:900}}>현재 섭취 상태</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:admin?25:28,color:tone,marginTop:5}}>{status.label}</div></div><div style={{textAlign:"right"}}><Mo c={admin?"#94a3b8":"#8B949E"} s={admin?8:11}>권장 대비</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:admin?20:22,color:tone,marginTop:4}}>{formatSignedKcal(status.diff)}</div></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8,marginBottom:12}}><div><Mo c={admin?"#94a3b8":"#8B949E"} s={admin?8:11}>최근 7일 평균</Mo><b style={{display:"block",color:admin?"#e2e8f0":"#20242A",fontSize:admin?15:17,marginTop:3}}>{formatKcal(avg7)}</b></div><div><Mo c={admin?"#94a3b8":"#8B949E"} s={admin?8:11}>권장 섭취</Mo><b style={{display:"block",color:admin?"#5EEAD4":"#16A34A",fontSize:admin?15:17,marginTop:3}}>{formatKcal(target)}</b></div></div><Mo c={admin?"#cbd5e1":"#334155"} s={admin?10:13} style={{display:"block",fontWeight:900,lineHeight:1.6}}>{status.headline}</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.6,marginTop:3}}>{status.message}</Mo></div>}
 function CalorieKpiGrid({items,admin=false}){return <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:admin?10:8,marginTop:admin?12:12}}>{items.map(item=>admin?<div key={item.label} style={{position:"relative",overflow:"hidden",background:"linear-gradient(145deg,#0B1120,#0f172a)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"11px 12px",minHeight:82}}><div style={{position:"absolute",right:-24,bottom:-30,width:78,height:78,borderRadius:"50%",background:(item.color||"#5EEAD4")+"18"}}/><Mo c="#94a3b8" s={8} style={{display:"block",fontWeight:800,marginBottom:6}}>{item.label}</Mo><div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,lineHeight:1,color:item.color||"#5EEAD4",letterSpacing:-.3}}>{item.value}</div>{item.sub&&<Mo c="#cbd5e1" s={8} style={{display:"block",marginTop:6,fontWeight:700}}>{item.sub}</Mo>}</div>:<div key={item.label} className="metric secondary-metrics" style={{minHeight:92,padding:14}}><span>{item.label}</span><b style={{fontSize:20,color:item.color||"#20242A",marginTop:8}}>{item.value}</b>{item.sub&&<small style={{display:"block",color:"#66717C",fontWeight:900,marginTop:6}}>{item.sub}</small>}</div>)}</div>}
-function CalorieTrendChart({rows,chartRows,admin=false}){const tooltipStyle=admin?{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#e2e8f0"}:{background:"#FFFFFF",border:"1px solid #E8ECF1",borderRadius:12,boxShadow:"0 10px 28px rgba(32,36,42,.08)",fontSize:12,color:"#20242A"}; const axisTick=admin?{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}:{fontSize:11,fill:"#8B949E",fontWeight:800}; if(!rows.length)return <div style={{minHeight:admin?190:180,display:"grid",placeItems:"center",textAlign:"center",padding:18,border:`1px dashed ${admin?"rgba(255,255,255,0.12)":"#D9E7FF"}`,borderRadius:admin?12:18,background:admin?"#0B1120":"#F6F7F9"}}><div><Mo c={admin?"#e2e8f0":"#20242A"} s={admin?11:14} style={{display:"block",fontWeight:900,marginBottom:8}}>섭취 칼로리 기록 수집 중입니다.</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.7}}>체중과 섭취 칼로리를 함께 기록하면<br/>개인에게 맞는 권장 섭취량이 더 정확해집니다.</Mo></div></div>; return <ResponsiveContainer width="100%" height={admin?190:190}><ComposedChart data={chartRows} margin={{top:8,right:admin?14:8,left:admin?-18:-14,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke={admin?"rgba(255,255,255,0.08)":"#EEF1F4"}/><XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}}/><YAxis tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}} unit="kcal"/><Tooltip contentStyle={tooltipStyle} formatter={(v,n)=>[formatKcal(v),n]}/><Legend wrapperStyle={{fontFamily:admin?"'DM Mono',monospace":undefined,fontSize:admin?8:11,color:admin?"#94a3b8":"#66717C",fontWeight:800}}/><Bar dataKey="kcal" name="일별 섭취" fill={admin?"#5EEAD4":"#93C5FD"} radius={[5,5,0,0]} opacity={admin?0.35:0.34}/><Line type="monotone" dataKey="target" name="권장 섭취" stroke={admin?"#ffd166":"#94A3B8"} strokeWidth={admin?1.7:2} strokeDasharray="5 5" dot={false}/></ComposedChart></ResponsiveContainer>}
+function CalorieTrendChart({rows,chartRows,admin=false}){const tooltipStyle=admin?{background:"#111827",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,fontFamily:"'DM Mono',monospace",fontSize:11,color:"#e2e8f0"}:{background:"#FFFFFF",border:"1px solid #E8ECF1",borderRadius:12,boxShadow:"0 10px 28px rgba(32,36,42,.08)",fontSize:12,color:"#20242A"}; const axisTick=admin?{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}:{fontSize:11,fill:"#8B949E",fontWeight:800}; if(!rows.length)return <div style={{minHeight:admin?190:180,display:"grid",placeItems:"center",textAlign:"center",padding:18,border:`1px dashed ${admin?"rgba(255,255,255,0.12)":"#D9E7FF"}`,borderRadius:admin?12:18,background:admin?"#0B1120":"#F6F7F9"}}><div><Mo c={admin?"#e2e8f0":"#20242A"} s={admin?11:14} style={{display:"block",fontWeight:900,marginBottom:8}}>섭취 칼로리 기록 수집 중입니다.</Mo><Mo c={admin?"#94a3b8":"#66717C"} s={admin?9:12} style={{display:"block",fontWeight:800,lineHeight:1.7}}>체중과 섭취 칼로리를 함께 기록하면<br/>개인에게 맞는 권장 섭취량이 더 정확해집니다.</Mo></div></div>; // 회원앱(모바일)에서는 왼쪽 여백을 음수로 당기지 않는다 — "2000kcal"처럼 4자리 눈금이 잘리기 때문에
+// 축 폭을 명시(64px)하고 margin.left는 0으로 둔다. 관리자앱(admin) 레이아웃은 기존 값 그대로 유지.
+return <ResponsiveContainer width="100%" height={admin?190:190}><ComposedChart data={chartRows} margin={{top:8,right:admin?14:8,left:admin?-18:0,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke={admin?"rgba(255,255,255,0.08)":"#EEF1F4"}/><XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}}/><YAxis width={admin?60:64} tick={axisTick} tickLine={false} axisLine={{stroke:admin?"rgba(255,255,255,0.08)":"#E8ECF1"}} unit="kcal"/><Tooltip contentStyle={tooltipStyle} formatter={(v,n)=>[formatKcal(v),n]}/><Legend wrapperStyle={{fontFamily:admin?"'DM Mono',monospace":undefined,fontSize:admin?8:11,color:admin?"#94a3b8":"#66717C",fontWeight:800}}/><Bar dataKey="kcal" name="일별 섭취" fill={admin?"#5EEAD4":"#93C5FD"} radius={[5,5,0,0]} opacity={admin?0.35:0.34}/><Line type="monotone" dataKey="target" name="권장 섭취" stroke={admin?"#ffd166":"#94A3B8"} strokeWidth={admin?1.7:2} strokeDasharray="5 5" dot={false}/></ComposedChart></ResponsiveContainer>}
 function CalorieTrendCard({profile,onboarding,body,nutrition,checkins,sessions,admin=false}){const a=estimateMaintenance(profile,onboarding,body,nutrition,checkins,sessions); const goal=onboarding?.goal||profile?.goal||nutrition?.goal; const target=getGoalCalorieRecommendation(a,goal); const rows=getRecentKcalLogsByDays(nutrition,30).map(x=>({date:x.date.slice(5),kcal:x.kcal,target:target.value})); const m7=averageKcalLogs(getRecentKcalLogsByDays(nutrition,7)),m30=averageKcalLogs(getRecentKcalLogsByDays(nutrition,30)); const diff=m7!=null&&Number.isFinite(Number(m7))&&Number.isFinite(Number(target.value))?m7-target.value:null; const chartRows=rows.map(r=>({...r,target:target.value})); const items=[{label:"최근 7일 평균",value:formatKcal(m7),color:admin?"#54a0ff":"#2F73F6"},{label:"최근 30일 평균",value:formatKcal(m30),color:admin?"#5EEAD4":"#14B8A6"},{label:"유지 칼로리",value:formatKcal(a.maintenance),color:admin?"#ffd166":"#20242A"},{label:"권장 섭취 칼로리",value:formatKcal(target.value),sub:target.shortLabel||target.label,color:admin?"#22c55e":"#16A34A"},{label:"권장 대비",value:formatSignedKcal(diff),color:diff>150?"#ff6b6b":diff<-150?"#ffd166":admin?"#5EEAD4":"#16A34A"}]; const content=<><CalorieSummaryCard avg7={m7} target={target.value} goal={goal} admin={admin}/><CalorieTrendChart rows={rows} chartRows={chartRows} admin={admin}/><CalorieKpiGrid items={items} admin={admin}/></>; return admin?<Card title="📈 섭취 칼로리 변화 그래프" style={{marginBottom:11}}>{content}</Card>:<MCard title="섭취 칼로리 변화 그래프"><CalorieTrendChart rows={rows} chartRows={chartRows} admin={admin}/></MCard>}
 function MemberCalorieAnalysisCard({profile,onboarding,body,nutrition,checkins,sessions}){const a=estimateMaintenance(profile,onboarding,body,nutrition,checkins,sessions); const goal=onboarding?.goal||profile?.goal||nutrition?.goal; const target=getGoalCalorieRecommendation(a,goal); const m7=averageKcalLogs(getRecentKcalLogsByDays(nutrition,7)); return <MCard title="섭취 칼로리 분석"><CalorieSummaryCard avg7={m7} target={target.value} goal={goal}/></MCard>}
 function AdminCalorieAnalysisSection({member,bodyData,nutritionData,sessions=[]}){return <div><CalorieAnalysisCard profile={member} onboarding={bodyData?.goal||{}} body={bodyData} nutrition={nutritionData} checkins={[]} sessions={sessions} admin /><CalorieTrendCard profile={member} onboarding={bodyData?.goal||{}} body={bodyData} nutrition={nutritionData} checkins={[]} sessions={sessions} admin /></div>}
@@ -6340,7 +6342,8 @@ function pickHighlightStat(p){
 function buildHealthMotivation(p){
   const msgs=[];
   const checkinList=p.checkins||[];
-  const lastCheck=checkinList[0]||{};
+  // 통증·컨디션 안내도 "현재 흐름/오늘 할 행동"과 같은 기준(최근 3일)만 근거로 삼는다 — 오래된 기록으로 오늘을 단정하지 않는다.
+  const lastCheck=checkinList.find(c=>String(c.date||c.id||"")>=dateStrDaysAgo(HEALTH_ACTION_RECENT_DAYS-1))||{};
   const prevPainCheck=checkinList.slice(1).find(c=>c.painPart&&c.painPart!=="없음");
   // 체중/식단/유산소 신호를 먼저 계산해두고, 통증·체중 메시지의 "이유" 설명에 서로 참조한다(교차 원인 설명).
   const last7Key=new Date(Date.now()-7*86400000).toISOString().slice(0,10), last14Key=new Date(Date.now()-14*86400000).toISOString().slice(0,10);
@@ -6363,9 +6366,14 @@ function buildHealthMotivation(p){
   }
   const recentWeightCount=getBodyWeightRecords(p.body).filter(r=>String(r.date||"")>=last7Key).length;
   const prevWeightCount=getBodyWeightRecords(p.body).filter(r=>{const d=String(r.date||""); return d>=last14Key&&d<last7Key;}).length;
+  // 체중 문장도 공통 판단 로직의 tone을 따른다 — 목표와 반대로 움직이는 변화에 "좋은 흐름"을 붙이지 않는다.
+  const motivationState=buildGoalWeightState(getAnalysisPersona(p.onboarding?.goal||p.profile?.goal),getBodyWeightRecords(p.body).filter(r=>String(r.date||"")>=dateStrDaysAgo(29)));
   if(w.delta!=null&&Math.abs(w.delta)>=0.5){
     const reason=recentKcalCount>=5&&zoneWeek.inZone>0?"최근 식단과 유산소 기록이 함께 이어진 것이 이런 변화로 연결되고 있어요.":recentKcalCount>=5?"최근 식단 기록을 꾸준히 남긴 것이 이런 변화로 연결되고 있어요.":"꾸준한 기록과 관리가 이런 변화로 이어지고 있어요.";
-    msgs.push(`현재 체중은 최근 30일간 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}하며 좋은 흐름을 보이고 있어요. ${reason} 지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다.`);
+    const closing=motivationState.tone==="warn"
+      ? "지금처럼 기록을 이어가면 원인을 함께 찾아 다음 수업에서 방향을 조정할 수 있습니다."
+      : "지금처럼 기록을 이어가면 다음 상담에서 변화가 더욱 뚜렷하게 나타날 가능성이 높습니다.";
+    msgs.push(`현재 체중은 최근 30일간 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}했어요. ${goalWeightHeadline(motivationState)} ${reason} ${closing}`);
   } else if(recentWeightCount>=3){
     const weightCompare=recentWeightCount>prevWeightCount?"지난주보다 체중 기록이 더 꾸준해졌어요. ":"";
     msgs.push(`${weightCompare}체중 기록을 꾸준히 남기고 있어요. 기록이 쌓일수록 변화 흐름과 원인을 더 정확하게 확인할 수 있으니 지금처럼 이어가 보세요.`);
@@ -6401,31 +6409,35 @@ function buildHealthMotivation(p){
 
 // 기록 분석 요약 — 기본 화면에는 "현재 흐름 / 오늘 할 행동 / 한 줄 응원" 3줄만 노출(각 1~2줄).
 // 판단은 전부 기존 계산 함수 재사용(신규 저장 없음). 데이터가 부족하면 확정 문장을 만들지 않고 enough:false로 안내만 보여준다.
+// 오늘 할 행동은 최근 3일 이내에 남긴 컨디션·통증 기록만 근거로 삼는다 —
+// 2주 전 통증 기록으로 "오늘은 강도를 낮추세요"를 안내하지 않기 위함(기록 자체는 그대로 보존).
+const HEALTH_ACTION_RECENT_DAYS=3;
 function buildHealthInsightSummary(p){
   const kcalLogs=getKcalLogs(p.nutrition);
   const weights=getBodyWeightRecords(p.body);
   const totalRecords=weights.length+kcalLogs.length+(p.checkins||[]).length+(p.cardioLogs||[]).length;
   if(totalRecords<3) return {enough:false};
-  const w=computeWeightCard(p.body);
   const weekCardio=summarizeCardioWeek(p.cardioLogs||[]);
   const weekly=computeWeeklyWorkoutCard(p.attendance,p.onboarding);
   const streak=computeEngagementStreak(p.checkins,p.attendance,p.cardioLogs);
   const last7Key=getKoreaDateString(new Date(Date.now()-6*86400000));
   const recentKcalCount=kcalLogs.filter(r=>String(r.date)>=last7Key).length;
-  const lastCheck=(p.checkins||[])[0]||{};
-  let flow;
-  if(w.delta!=null&&Math.abs(w.delta)>=0.5) flow=`최근 30일간 체중이 ${Math.abs(w.delta)}kg ${w.delta<0?"감소":"증가"}하며 ${w.delta<0?"좋은 흐름을 유지하고":"꾸준히 변화하고"} 있습니다.`;
-  else if(weights.length>=2) flow="최근 체중이 큰 변동 없이 안정적으로 유지되고 있습니다.";
-  else flow="기록이 차곡차곡 쌓이고 있어요. 체중을 함께 기록하면 흐름을 더 정확히 볼 수 있어요.";
+  // 현재 흐름 — 분석 탭과 똑같은 공통 판단 로직(목표 방향 × 변화 방향 × 데이터 충분성)을 최근 30일 기록에 적용한다.
+  // 기록이 부족하면 goalWeightHeadline이 "잘한다/못한다" 대신 기록을 더 쌓자는 안내만 돌려준다.
+  const persona=getAnalysisPersona(p.onboarding?.goal||p.profile?.goal);
+  const weightState=buildGoalWeightState(persona,weights.filter(w=>String(w.date)>=dateStrDaysAgo(29)));
+  const flow=goalWeightHeadline(weightState);
+  const actionSince=dateStrDaysAgo(HEALTH_ACTION_RECENT_DAYS-1);
+  const lastCheck=(p.checkins||[]).find(c=>String(c.date||c.id||"")>=actionSince)||{};
   let action;
   if(lastCheck.painPart&&lastCheck.painPart!=="없음") action="통증 부위는 무리하지 말고, 오늘은 강도를 살짝 낮춰 진행해보세요.";
   else if(["피곤","매우 피곤"].includes(lastCheck.condition)) action="컨디션이 낮은 날이에요. 오늘은 회복에 집중하고 가볍게만 움직여보세요.";
   else if(weekCardio.count===0) action="오늘은 유산소를 20분만 추가해보세요.";
-  else if(recentKcalCount<3) action="오늘 먹은 칼로리를 한 끼만이라도 기록해보세요.";
+  else if(recentKcalCount<3) action="어제 먹은 칼로리를 기록해두면 변화 흐름을 더 정확히 볼 수 있어요.";
   else if(weekly.target>0&&weekly.target-weekly.count>0) action=`이번 주 운동 목표까지 ${weekly.target-weekly.count}회 남았어요. 다음 수업 전까지 채워보세요.`;
   else action="지금 흐름이 좋아요. 오늘도 기록 하나로 하루를 마무리해보세요.";
   const cheer=streak>=3?`벌써 ${streak}일 연속 기록 중이에요. 이 흐름 그대로 이어가요!`:"작은 기록 하나가 꾸준한 변화를 만듭니다.";
-  return {enough:true,flow,action,cheer};
+  return {enough:true,flow,action,cheer,weightState};
 }
 const CONDITION_EMOJI={"좋음":"😊","보통":"😐","피곤":"😔","매우 피곤":"😩"};
 // 건강 탭 입력 카드 아이콘 — 인라인 Lucide 스타일 path(의존성 없음), 항목별 은은한 색만 사용
@@ -6848,6 +6860,67 @@ function getAnalysisPersona(goal=""){
   if(g.includes("체력")) return "fitness";
   return "general";
 }
+// ══════════ 공통 판단 로직 — "회원 목표 방향 × 최근 체중 변화 방향 × 데이터 충분성" ══════════
+// 이번 기간 리포트 / 목표 전략 / 건강 탭 기록 분석 / 건강 전문 분석이 전부 이 결과만 재사용한다.
+// (카드마다 임계값·판정을 따로 두면 같은 회원에게 "잘하고 있어요"와 "체중 4kg 증가"가 동시에 뜨는 모순이 생긴다.)
+// 원본 기록·저장 날짜·D-1 매칭(buildPrevDayLifestyleRows)·체중 추이 집계(buildWeightTrendBuckets)와는 무관하며 그쪽은 건드리지 않는다.
+const WEIGHT_FLAT_KG=0.5;              // 이보다 작은 변화는 방향 없이 "유지"로 본다(수분·측정 노이즈 범위)
+const WEIGHT_STATE_MIN_RECORDS=2;      // 기록 1건으로는 방향을 말하지 않는다
+const WEIGHT_STATE_MIN_SPAN_DAYS=7;    // 첫 기록과 마지막 기록이 최소 7일 떨어져야 "최근 흐름"으로 인정
+// 목표 → 체중이 움직여야 할 방향. 체형교정·체력향상은 체중으로 잘잘못을 판단하지 않으므로 null.
+function getGoalWeightDirection(persona){
+  if(persona==="diet") return "down";
+  if(persona==="bulk") return "up";
+  if(persona==="general") return "stable";
+  return null;
+}
+// weights: getBodyWeightRecords() 결과(기간 필터 여부는 호출부가 결정). 반환값만 보고 문구·색을 정한다.
+// tone: "good"(목표 방향과 일치) | "warn"(목표와 반대) | "neutral"(유지·목표 무관) | "unknown"(데이터 부족 → 긍정·부정 단정 금지)
+function buildGoalWeightState(persona,weights=[]){
+  const goalDirection=getGoalWeightDirection(persona);
+  const dayOf=v=>{const t=Date.parse(String(v).slice(0,10)+"T00:00:00Z"); return Number.isFinite(t)?Math.floor(t/86400000):null;};
+  const rows=[...(weights||[])].filter(w=>w&&w.date&&Number.isFinite(Number(w.weight)))
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const first=rows[0]||null, last=rows.length?rows[rows.length-1]:null;
+  const fd=first?dayOf(first.date):null, ld=last?dayOf(last.date):null;
+  const spanDays=fd!=null&&ld!=null?ld-fd:null;
+  const delta=rows.length>=WEIGHT_STATE_MIN_RECORDS?Math.round((Number(last.weight)-Number(first.weight))*10)/10:null;
+  const enough=rows.length>=WEIGHT_STATE_MIN_RECORDS&&spanDays!=null&&spanDays>=WEIGHT_STATE_MIN_SPAN_DAYS&&delta!=null;
+  const move=!enough?null:(delta<=-WEIGHT_FLAT_KG?"loss":delta>=WEIGHT_FLAT_KG?"gain":"flat");
+  let tone;
+  if(!enough) tone="unknown";
+  else if(!goalDirection) tone="neutral";
+  else if(goalDirection==="down") tone=move==="loss"?"good":move==="gain"?"warn":"neutral";
+  else if(goalDirection==="up") tone=move==="gain"?"good":move==="loss"?"warn":"neutral";
+  else tone=move==="flat"?"good":"warn"; // stable(체중 유지 목표) — 크게 움직이면 확인 필요
+  return {
+    persona:persona||null, goalDirection, move, delta, tone,
+    records:rows.length, spanDays, enough,
+    firstWeight:first?Number(first.weight):null, lastWeight:last?Number(last.weight):null,
+    aligned:tone==="unknown"?null:tone==="good",
+  };
+}
+// 목표 방향 기준으로 "이 변화가 좋은 방향인가"만 판단(수치 옆 색상용). 목표가 체중과 무관하거나 값이 없으면 중립.
+function goalDeltaTone(goalDirection,delta,flat=WEIGHT_FLAT_KG){
+  if(!goalDirection||delta==null||!Number.isFinite(Number(delta))) return "neutral";
+  const d=Number(delta);
+  if(Math.abs(d)<flat) return goalDirection==="stable"?"good":"neutral";
+  if(goalDirection==="stable") return "warn";
+  if(goalDirection==="down") return d<0?"good":"warn";
+  return d>0?"good":"warn";
+}
+const GOAL_TONE_COLORS={good:"#16A34A",warn:"#F97316",neutral:"#66717C",unknown:"#94A3B8"};
+function goalToneColor(tone){return GOAL_TONE_COLORS[tone]||GOAL_TONE_COLORS.neutral;}
+// 상태 → 한 줄 요약. 데이터가 부족하면(unknown) 잘한다/못한다를 말하지 않고 기록을 더 쌓자고만 안내한다.
+function goalWeightHeadline(state){
+  if(!state||state.tone==="unknown") return "기록이 조금 더 쌓이면 최근 체중 흐름을 정확히 확인할 수 있어요.";
+  const abs=Math.abs(state.delta||0).toFixed(1).replace(/\.0$/,"");
+  const moveText=state.move==="flat"?"큰 변동 없이 유지되고":abs+"kg "+(state.move==="loss"?"감소":"증가")+"하고";
+  if(!state.goalDirection) return "최근 체중은 "+moveText+" 있습니다.";
+  if(state.tone==="good") return "최근 체중이 "+moveText+" 있어 목표 방향과 잘 맞습니다.";
+  if(state.tone==="warn") return "최근 체중이 "+moveText+" 있어 목표 방향과는 다르게 움직이고 있습니다.";
+  return "최근 체중은 "+moveText+" 있습니다.";
+}
 function average(arr=[]){const v=arr.filter(n=>Number.isFinite(Number(n))).map(Number); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;}
 // ── 체중 추이 그래프 표시용 집계 ── 원본 체중/칼로리 기록(Firestore)은 절대 수정하지 않고,
 // 그래프에 넘길 배열만 기간에 맞춰 평균 집계한다. 기록이 없는 날짜를 0으로 채우지 않고,
@@ -7133,7 +7206,7 @@ function GoalHeroCard({ hero }) {
 }
 // "이번 기간 리포트" — 잘한 점 최대 2개 + 다음 목표 1개. 내용이 없으면 카드 자체를 숨긴다(빈 카드 금지).
 function buildPeriodReport(persona, ctx) {
-  const { wDiff, workoutCount = 0, kcalCount = 0, cardioCount = 0, cardioMinutes = 0, pain, mmDiff, volumePct, biggestGain, repEndurance = [], streak = 0, healthLogCount = 0 } = ctx;
+  const { wDiff, workoutCount = 0, kcalCount = 0, cardioCount = 0, cardioMinutes = 0, pain, mmDiff, volumePct, biggestGain, repEndurance = [], streak = 0, healthLogCount = 0, weightState = null } = ctx;
   const goods = [];
   let next = null;
   const steady = workoutCount > 0 ? { title: "꾸준한 기록", text: `운동을 ${workoutCount}회 진행했어요.` } : null;
@@ -7170,13 +7243,20 @@ function buildPeriodReport(persona, ctx) {
   }
   const trimmed = goods.slice(0, 2);
   if (!trimmed.length && !next) return null;
-  return { goods: trimmed, next };
+  // 인트로 문구는 공통 판단 로직(buildGoalWeightState)의 tone만 따른다 —
+  // 기록 개수만 보고 "잘하고 있어요"를 붙이면 목표와 반대로 움직이는 회원(예: 다이어트 +4kg)에게도 칭찬이 나간다.
+  const intro = !trimmed.length ? null
+    : !weightState || weightState.tone === "unknown" || !weightState.goalDirection ? "이번 기간 기록을 정리했어요."
+    : weightState.tone === "good" ? "이번 기간도 잘하고 있어요."
+    : weightState.tone === "warn" ? "이번 기간은 체중이 목표와 다른 방향으로 움직였어요. 아래 기록을 함께 확인해봐요."
+    : "이번 기간은 큰 변동 없이 유지되고 있어요.";
+  return { goods: trimmed, next, intro };
 }
 function PeriodReportCard({ report }) {
   if (!report || (!report.goods.length && !report.next)) return null;
   return (
     <MCard title="이번 기간 리포트">
-      {report.goods.length > 0 && <p className="anx-report-intro">이번 기간도 잘하고 있어요.</p>}
+      {report.intro && <p className="anx-report-intro">{report.intro}</p>}
       <div className="anx-report-rows">
         {report.goods.map((g, i) => (
           <div key={i} className="anx-report-row"><i>✓</i><div><b>{g.title}</b><span>{g.text}</span></div></div>
@@ -7243,7 +7323,9 @@ function BeforeAfterCard({ metricLabel, before, after, unit = "", periodText, go
   );
 }
 function MemberAnalysis(p) {
-  const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "1m"; } catch { return "1m"; } });
+  // 기본 기간은 "전체" — 처음 들어온 회원에게는 전체 흐름을 먼저 보여준다.
+  // 회원이 직접 고른 기간이 localStorage에 있으면 그 값이 우선(기존 구조 유지).
+  const [period, setPeriod] = useState(() => { try { return localStorage.getItem("teogym_analysis_period") || "all"; } catch { return "all"; } });
   const handleSetPeriod = k => { setPeriod(k); try { localStorage.setItem("teogym_analysis_period", k); } catch {} };
   const opt = ANALYSIS_PERIODS.find(x => x.key === period) || ANALYSIS_PERIODS[0];
   const since = opt.days ? new Date(Date.now() - opt.days * 86400000).toISOString().slice(0, 10) : "";
@@ -7395,7 +7477,12 @@ function MemberAnalysis(p) {
   const heroPeriodText = opt.days ? `최근 ${opt.label} 동안` : "전체 기간 동안";
   const heroCtx = { periodText: heroPeriodText, wDiff, curW, remainW, workoutCount: periodSessions.length, cardioMinutes, mmDiff, volumePct, biggestGain: biggestGainPeriod, pain, streak, healthLogCount };
   const hero = buildGoalHero(persona, heroCtx);
-  const periodReport = buildPeriodReport(persona, { wDiff, workoutCount: periodSessions.length, kcalCount: kcalRows.length, cardioCount: cardioInPeriod.length, cardioMinutes, pain, mmDiff, volumePct, biggestGain: biggestGainPeriod, repEndurance, streak, healthLogCount });
+  // 공통 판단 로직 — 이 화면의 모든 문구·색(기간 리포트·목표 전략·전문 분석 수치)이 이 상태 하나만 참조한다.
+  // 선택한 기간 안의 체중 기록으로 계산하므로, 기간을 바꾸면 판정도 같은 기준으로 함께 바뀐다.
+  const weightState = buildGoalWeightState(persona, weights);
+  // 체지방량 — 다이어트·체중 유지 목표는 감소가 좋은 방향, 증량(벌크업) 목표에서는 증가만으로 경고하지 않는다(중립).
+  const fatMassTone = persona === "bulk" ? "neutral" : goalDeltaTone("down", fatMassDiff, 0.1);
+  const periodReport = buildPeriodReport(persona, { wDiff, workoutCount: periodSessions.length, kcalCount: kcalRows.length, cardioCount: cardioInPeriod.length, cardioMinutes, pain, mmDiff, volumePct, biggestGain: biggestGainPeriod, repEndurance, streak, healthLogCount, weightState });
 
   // ── 재사용 가능한 그래프/카드 조각(기존 계산 그대로) — 목표별로 제목·순서만 다르게 배치한다 ──
   // 체중은 선 그래프, 섭취 칼로리는 기록이 있을 때만 막대·우측 축·범례를 함께 표시(없으면 노출 안 함).
@@ -7544,8 +7631,9 @@ function MemberAnalysis(p) {
             <div className="calorie-metric-block"><span>최근 7일 평균</span><b style={{ color: calorieDiff !== null && Math.abs(calorieDiff) <= 150 ? "#16A34A" : "#F97316" }}>{formatKcal(avg7)}</b></div>
             <div className="calorie-metric-block"><span>최근 14일 평균</span><b>{formatKcal(avg14)}</b></div>
             <div className="calorie-metric-block"><span>목표 달성률</span><b style={{ color: (caloriePct||0) >= 85 ? "#16A34A" : "#F97316" }}>{caloriePct !== null ? `${caloriePct}%` : "-"}</b></div>
-            {wDiff !== null && <div className="calorie-metric-block"><span>체중 변화</span><b style={{ color: wDiff <= 0 ? "#16A34A" : "#F97316" }}>{wDiff > 0 ? "+" : ""}{wDiff}kg</b></div>}
-            {fatMassDiff !== null && <div className="calorie-metric-block"><span>체지방량 변화</span><b style={{ color: fatMassDiff <= 0 ? "#16A34A" : "#F97316" }}>{fatMassDiff > 0 ? "+" : ""}{fatMassDiff}kg</b></div>}
+            {/* 수치·부호는 사실 그대로 두고 색(좋음/주의)만 공통 판단 로직에 맡긴다 — 벌크업 회원의 체중 증가가 경고색으로 보이지 않게 한다. */}
+            {wDiff !== null && <div className="calorie-metric-block"><span>체중 변화</span><b style={{ color: goalToneColor(weightState.enough ? goalDeltaTone(weightState.goalDirection, wDiff) : "unknown") }}>{wDiff > 0 ? "+" : ""}{wDiff}kg</b></div>}
+            {fatMassDiff !== null && <div className="calorie-metric-block"><span>체지방량 변화</span><b style={{ color: goalToneColor(fatMassTone) }}>{fatMassDiff > 0 ? "+" : ""}{fatMassDiff}kg</b></div>}
           </div>
           {calorieFeedback && <div className="change-feedback-item" style={{ marginTop: 10 }}>{calorieFeedback}</div>}
         </>
@@ -7650,7 +7738,7 @@ function MemberAnalysis(p) {
       <PeriodReportCard report={periodReport} />
 
       {/* ⑥ 목표 전략 — 핵심 수치 2개 + 한 줄 방향 */}
-      <WeightGoalStrategyCard {...p} persona={persona} painLast={pain?.last} periodCardioMinutes={cardioMinutes} periodWorkoutCount={periodSessions.length} />
+      <WeightGoalStrategyCard {...p} persona={persona} weightState={weightState} painLast={pain?.last} periodCardioMinutes={cardioMinutes} periodWorkoutCount={periodSessions.length} />
 
       {/* 추가 데이터 — 위에서 보여주지 않은 기존 카드(기본 접힘, 기능 유지) */}
       <CollapsibleSection label="추가 데이터" defaultOpen={false}>
@@ -7670,12 +7758,13 @@ function MemberAnalysis(p) {
       <CollapsibleSection label="건강 전문 분석" defaultOpen={false}>
         <section className="mcard">
           <div className="grid2" style={{ marginBottom: 14 }}>
+            {/* 증가/감소 표기는 사실 그대로, 색만 회원 목표 방향 기준(공통 판단 로직) — 증량 목표 회원에게 체지방 증가를 무조건 경고로 표시하지 않는다. */}
             <SummaryTile
               title="체지방량 변화"
               value={firstFatMass !== null && lastFatMass !== null ? `${firstFatMass.toFixed(1)} → ${lastFatMass.toFixed(1)}kg` : "기록 필요"}
               sub={fatMassDiff !== null ? `${fatMassDiff > 0 ? "+" : ""}${fatMassDiff}kg` : allInbody.length === 0 ? "인바디 없음" : "1개 기록"}
               delta={fatMassDiff !== null ? (fatMassDiff <= 0 ? "▼ 감소" : "▲ 증가") : ""}
-              color={fatMassDiff !== null ? (fatMassDiff <= 0 ? "#16A34A" : "#F97316") : "#94A3B8"}
+              color={fatMassDiff !== null ? goalToneColor(fatMassTone) : "#94A3B8"}
             />
             <SummaryTile
               title="골격근량 변화"
@@ -7688,7 +7777,7 @@ function MemberAnalysis(p) {
               title="BMI"
               value={lastBMI != null ? `${lastBMI}` : "기록 필요"}
               sub={lastBMI != null ? bmiLabel(lastBMI) : (heightCm ? "체중 기록 필요" : "키 정보 필요")}
-              color={lastBMI != null ? (lastBMI >= 18.5 && lastBMI < 23 ? "#16A34A" : "#F97316") : "#94A3B8"}
+              color={lastBMI != null ? (persona === "bulk" ? "#66717C" : (lastBMI >= 18.5 && lastBMI < 23 ? "#16A34A" : "#F97316")) : "#94A3B8"}
             />
             <SummaryTile
               title="BMR(기초대사량)"
@@ -7721,12 +7810,14 @@ function MemberAnalysis(p) {
 function StrengthChangeCard({sessions=[],allSessions}){const [showAll,setShowAll]=useState(false);const [query,setQuery]=useState('');const allRows=buildPerformanceChanges(sessions);const searchRows=buildPerformanceChanges(allSessions&&allSessions.length?allSessions:sessions);const hasRealData=allRows.length>0&&allRows[0].name!=='대표님과 함께한 수행 기록';const hasSearchData=searchRows.length>0&&searchRows[0].name!=='대표님과 함께한 수행 기록';const filtered=(hasRealData||hasSearchData)&&query?searchRows.filter(r=>matchSearch(r.name,query)):null;const visibleRows=filtered??(hasRealData&&!showAll?allRows.slice(0,3):allRows);const hasMore=hasRealData&&!query&&allRows.length>3;const positive=hasRealData?allRows.filter(r=>r.delta>0):[]; const comment=!hasRealData?"운동 기록이 더 쌓이면 변화 코멘트를 제공할 수 있습니다.":positive.length>=2?`${positive[0].name}, ${positive[1].name} 중량이 꾸준히 증가하고 있습니다.`:positive.length===1?`${positive[0].name} 중량이 향상되고 있습니다.`:"현재 기록을 유지하며 안정적으로 진행 중입니다."; return <MCard title="운동 수행 능력 변화"><p className="strength-comment">{comment}</p>{(hasRealData||hasSearchData)&&<div style={{position:'relative',marginBottom:8}}><input className="ex-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="운동 검색..."/>{query&&<button type="button" className="ex-search-clear" onClick={()=>setQuery('')}>✕</button>}</div>}<div className="strength-list">{visibleRows.length===0?<p style={{color:'#8B949E',fontWeight:800,padding:'8px 0'}}>검색 결과가 없습니다.</p>:visibleRows.map((r,i)=>{const b=Number(String(r.before).replace(/[^0-9.]/g,""));const a=Number(String(r.after).replace(/[^0-9.]/g,""));const pct=b&&a?Math.round((a-b)/b*100):null;return <div key={i} className="strength-row"><b>{r.name}</b><span>{r.before} → {r.after}</span>{pct!==null&&<em>{pct>=0?"▲":"▼"} {Math.abs(pct)}%</em>}</div>;})}</div>{hasMore&&<button type="button" className="linkbtn" onClick={()=>setShowAll(v=>!v)}>{showAll?"▲ 접기":"더보기 ▼"}</button>}</MCard>}
 // 목표 전략 — 2026-07 리디자인: 핵심 수치 2개 + 한 줄 방향만. "주당 0.xxkg"·"예상 달성률" 같은
 // 근거가 약한 정밀 수치는 노출하지 않고, 예상 기간은 기존 getWeightForecast 계산이 가능한 경우에만 표시한다.
-function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinutes=0,periodWorkoutCount=0,...p}){
+function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinutes=0,periodWorkoutCount=0,weightState=null,...p}){
   const f=getWeightForecast(p);
   const analysis=estimateMaintenance(p.profile,p.onboarding,p.body,p.nutrition,p.checkins,p.sessions);
   const gain=Number.isFinite(f.cur)&&Number.isFinite(f.target)?Math.max(0,f.target-f.cur):0;
   const maintainRange=Number.isFinite(f.target)?`${(f.target-1).toFixed(1)}~${(f.target+1).toFixed(1)}kg`:null;
   const emptyNote=<p className="anx-strategy-note">기록이 조금 더 쌓이면 목표 흐름을 확인할 수 있어요.</p>;
+  // 공통 판단 로직 결과 — 목표 방향과 최근 체중 변화 방향이 어긋나면(warn) 낙관적인 문구·예상 기간을 만들지 않는다.
+  const st=weightState||buildGoalWeightState(persona,getBodyWeightRecords(p.body));
   const Grid=({items})=>(
     <div className="anx-strategy-grid">
       {items.map(it=><div key={it.label}><span>{it.label}</span><b>{it.value}</b></div>)}
@@ -7742,25 +7833,43 @@ function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinute
   </MCard>;
   if(persona==="bulk"){
     if(!Number.isFinite(f.cur)) return <MCard title="다음 성장 목표">{emptyNote}</MCard>;
+    const bulkNote=st.tone==="warn"?`${goalWeightHeadline(st)} 식사량과 운동 볼륨을 함께 점검해봐요.`
+      :st.tone==="unknown"?"체중 기록이 조금 더 쌓이면 증량 흐름을 확인할 수 있어요."
+      :st.tone==="good"?`${goalWeightHeadline(st)} 현재 리듬을 유지하며 볼륨을 천천히 올려보세요.`
+      :"현재 운동 리듬을 유지하며 볼륨을 천천히 올려보세요.";
     return <MCard title="다음 성장 목표">
       <Grid items={[{label:"현재 체중",value:kgText(f.cur)},Number.isFinite(f.target)&&gain>0?{label:"남은 증량",value:`+${gain.toFixed(1)}kg`}:{label:"이번 기간 운동",value:`${periodWorkoutCount}회`}]}/>
-      <p className="anx-strategy-note">현재 운동 리듬을 유지하며 볼륨을 천천히 올려보세요.</p>
+      <p className="anx-strategy-note">{bulkNote}</p>
     </MCard>;
   }
   if(persona==="general"){
     if(!Number.isFinite(f.cur)&&!analysis.maintain) return <MCard title="목표 전략">{emptyNote}</MCard>;
+    const generalNote=st.tone==="warn"?`${goalWeightHeadline(st)} 주간 평균으로 흐름을 한 번 확인해봐요.`
+      :st.tone==="unknown"?"체중 기록이 조금 더 쌓이면 유지 흐름을 확인할 수 있어요."
+      :"주간 평균 체중만 가볍게 확인하며 현재 루틴을 유지하세요.";
     return <MCard title="목표 전략">
       <Grid items={[{label:"현재 체중",value:kgText(f.cur)},maintainRange?{label:"유지 범위",value:maintainRange}:{label:"유지 칼로리",value:formatKcal(analysis.maintain)}]}/>
-      <p className="anx-strategy-note">주간 평균 체중만 가볍게 확인하며 현재 루틴을 유지하세요.</p>
+      <p className="anx-strategy-note">{generalNote}</p>
     </MCard>;
   }
   // diet
   if(!Number.isFinite(f.target)||!Number.isFinite(f.cur)) return <MCard title="목표 전략">
     <p className="anx-strategy-note">{Number.isFinite(f.cur)?"목표 체중을 설정하면 남은 변화량과 예상 기간을 확인할 수 있어요.":"기록이 조금 더 쌓이면 목표 흐름을 확인할 수 있어요."}</p>
   </MCard>;
+  // "약 N주"는 감량이 실제로 진행 중일 때만 의미가 있다 — 최근 흐름이 목표와 반대(warn)이거나 판단할 기록이 부족(unknown)하면
+  // getWeightForecast의 기본 속도로 낙관적인 기간을 만들어내지 않고, 현재 흐름을 먼저 확인하도록 안내한다.
+  const dietPace=f.remain<=0?"유지 단계"
+    :st.tone==="warn"?"흐름 확인 필요"
+    :st.tone==="unknown"?"기록 더 필요"
+    :f.weeks>0?`약 ${f.weeks}주`:"유지 단계";
+  const dietNote=f.remain<=0?"목표 체중에 도달했어요. 지금 범위를 유지해보세요."
+    :st.tone==="warn"?`${goalWeightHeadline(st)} 최근 식사·활동 기록을 함께 확인해봐요.`
+    :st.tone==="unknown"?"체중 기록이 조금 더 쌓이면 목표까지 걸리는 기간을 더 정확히 안내할 수 있어요."
+    :st.tone==="good"?`${goalWeightHeadline(st)} 현재 흐름을 유지하면 목표에 가까워질 수 있어요.`
+    :"최근에는 체중 변동이 크지 않아요. 지금 리듬을 유지하며 기록을 이어가 보세요.";
   return <MCard title="목표 전략">
-    <Grid items={[{label:"목표까지",value:f.remain>0?`${f.remain.toFixed(1)}kg`:"달성"},{label:"예상 기간",value:f.remain>0&&f.weeks>0?`약 ${f.weeks}주`:"유지 단계"}]}/>
-    <p className="anx-strategy-note">{f.remain>0?"현재 흐름을 유지하면 목표에 가까워질 수 있어요.":"목표 체중에 도달했어요. 지금 범위를 유지해보세요."}</p>
+    <Grid items={[{label:"목표까지",value:f.remain>0?`${f.remain.toFixed(1)}kg`:"달성"},{label:"예상 기간",value:dietPace}]}/>
+    <p className="anx-strategy-note">{dietNote}</p>
   </MCard>;
 }
 // 구 "부위별 운동량" 카드(부위 선택 탭 + 단일 그래프)는 PartVolumeMultiCard(5개 부위 동시 비교)로 대체되었다.

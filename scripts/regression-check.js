@@ -128,6 +128,36 @@ function prevDayScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 공통 판단 로직(목표 방향 × 최근 체중 변화 방향 × 데이터 충분성): 실제 실행 시나리오 검증 ──
+// 기간 리포트·목표 전략·건강 탭 기록 분석·건강 전문 분석이 전부 이 결과를 재사용하므로,
+// 여기서 판정이 틀리면 네 화면이 동시에 틀린다. 원본 함수를 그대로 슬라이스해 실행 결과로 검증한다.
+let goalStateLib = null;
+try {
+  const sliceGoal = app.slice(app.indexOf('function getAnalysisPersona'), app.indexOf('function average(arr=[])'));
+  goalStateLib = new Function(`${sliceGoal}\nreturn { getAnalysisPersona, getGoalWeightDirection, buildGoalWeightState, goalDeltaTone, goalToneColor, goalWeightHeadline };`)();
+} catch (e) {
+  console.error('[regression] 공통 판단 로직 추출 실패:', e.message);
+}
+function goalStateScenario(name, fn) {
+  if (!goalStateLib) return [name, false];
+  try { return [name, !!fn(goalStateLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
+// ── "이번 기간 리포트" 인트로 문구: 실제 실행 시나리오 검증 ──
+let periodReportLib = null;
+try {
+  const sliceReport = app.slice(app.indexOf('function buildPeriodReport'), app.indexOf('function PeriodReportCard'));
+  periodReportLib = new Function(`${sliceReport}\nreturn { buildPeriodReport };`)();
+} catch (e) {
+  console.error('[regression] 기간 리포트 로직 추출 실패:', e.message);
+}
+function periodReportScenario(name, fn) {
+  if (!periodReportLib) return [name, false];
+  try { return [name, !!fn(periodReportLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 섭취 칼로리 "날짜당 총섭취량" 정규화: 실제 실행 시나리오 검증 ──
 // 전날 생활 매칭(D-1)을 도입해도 칼로리 원본 집계 의미(날짜당 1건 = 그날의 총섭취량)는 그대로여야 한다.
 let kcalLogsLib = null;
@@ -2096,7 +2126,7 @@ const checks = [
     })()
   ],
   ['변화분석: 목표 전략 — 핵심 수치 2개+한 줄 방향, "주당 0.xxkg"·달성 확률 미노출, 데이터 부족 시 안내 문구',
-    app.includes('function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinutes=0,periodWorkoutCount=0,...p}){') &&
+    app.includes('function WeightGoalStrategyCard({persona="diet",painLast=null,periodCardioMinutes=0,periodWorkoutCount=0,weightState=null,...p}){') &&
     app.includes('기록이 조금 더 쌓이면 목표 흐름을 확인할 수 있어요.') &&
     !app.includes('주당 {f.recommended.toFixed(2)}kg') &&
     !app.includes('목표 달성 가능성 {f.possibility}')
@@ -6652,6 +6682,139 @@ const checks = [
       const block = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function CardioEntryForm'));
       return !block.includes('reloadMemberApp');
     })()
+  ],
+
+  // ── 공통 판단 로직(목표 방향 × 최근 체중 변화 × 데이터 충분성) ──
+  goalStateScenario('공통 판단: 목표별 체중 방향 — 다이어트=down, 벌크업=up, 건강관리/유지=stable, 체형교정·체력향상은 체중으로 판단하지 않음(null)',
+    lib => lib.getGoalWeightDirection('diet') === 'down' && lib.getGoalWeightDirection('bulk') === 'up' &&
+      lib.getGoalWeightDirection('general') === 'stable' && lib.getGoalWeightDirection('correction') === null && lib.getGoalWeightDirection('fitness') === null
+  ),
+  goalStateScenario('공통 판단: 다이어트 회원이 최근 30일 +4kg이면 tone=warn(목표와 반대 방향) — 칭찬 문구가 나가면 안 되는 상태',
+    lib => {
+      const st = lib.buildGoalWeightState('diet', [{ date: '2026-07-20', weight: 60.0 }, { date: '2026-08-19', weight: 64.0 }]);
+      return st.tone === 'warn' && st.move === 'gain' && st.delta === 4 && st.enough === true && st.aligned === false;
+    }
+  ),
+  goalStateScenario('공통 판단: 다이어트 회원이 감량 중이면 tone=good',
+    lib => {
+      const st = lib.buildGoalWeightState('diet', [{ date: '2026-07-20', weight: 64.0 }, { date: '2026-08-19', weight: 62.8 }]);
+      return st.tone === 'good' && st.move === 'loss' && st.aligned === true;
+    }
+  ),
+  goalStateScenario('공통 판단: 벌크업 회원은 증가가 good, 감소가 warn (다이어트와 반대로 판정)',
+    lib => {
+      const up = lib.buildGoalWeightState('bulk', [{ date: '2026-07-20', weight: 62.0 }, { date: '2026-08-19', weight: 63.5 }]);
+      const down = lib.buildGoalWeightState('bulk', [{ date: '2026-07-20', weight: 63.5 }, { date: '2026-08-19', weight: 62.0 }]);
+      return up.tone === 'good' && down.tone === 'warn';
+    }
+  ),
+  goalStateScenario('공통 판단: 체중 유지 목표는 변동이 작으면 good, 크게 움직이면 warn',
+    lib => {
+      const flat = lib.buildGoalWeightState('general', [{ date: '2026-07-20', weight: 63.0 }, { date: '2026-08-19', weight: 63.2 }]);
+      const moved = lib.buildGoalWeightState('general', [{ date: '2026-07-20', weight: 63.0 }, { date: '2026-08-19', weight: 65.0 }]);
+      return flat.tone === 'good' && flat.move === 'flat' && moved.tone === 'warn';
+    }
+  ),
+  goalStateScenario('공통 판단: 체형교정·체력향상은 체중 변화에 좋다/나쁘다를 붙이지 않는다(tone=neutral)',
+    lib => {
+      const st = lib.buildGoalWeightState('correction', [{ date: '2026-07-20', weight: 63.0 }, { date: '2026-08-19', weight: 65.0 }]);
+      return st.goalDirection === null && st.tone === 'neutral' && st.aligned === false;
+    }
+  ),
+  goalStateScenario('공통 판단: 데이터 부족(기록 1건 / 기간 7일 미만)이면 tone=unknown — 긍정·부정 어느 쪽도 단정하지 않는다',
+    lib => {
+      const one = lib.buildGoalWeightState('diet', [{ date: '2026-08-19', weight: 64.0 }]);
+      const tooShort = lib.buildGoalWeightState('diet', [{ date: '2026-08-17', weight: 66.0 }, { date: '2026-08-19', weight: 64.0 }]);
+      return one.tone === 'unknown' && one.enough === false && one.move === null &&
+        tooShort.tone === 'unknown' && tooShort.enough === false && tooShort.aligned === null;
+    }
+  ),
+  goalStateScenario('공통 판단: 데이터가 부족하면 한 줄 요약도 평가 대신 기록을 더 쌓자는 안내만 한다',
+    lib => {
+      const line = lib.goalWeightHeadline(lib.buildGoalWeightState('diet', [{ date: '2026-08-19', weight: 64.0 }]));
+      return line.includes('기록이 조금 더 쌓이면') && !line.includes('잘 맞습니다') && !line.includes('다르게 움직이고');
+    }
+  ),
+  goalStateScenario('공통 판단: 같은 +1.0kg도 목표에 따라 색 판정이 달라진다(다이어트=warn, 벌크업=good, 교정=neutral)',
+    lib => lib.goalDeltaTone('down', 1.0) === 'warn' && lib.goalDeltaTone('up', 1.0) === 'good' &&
+      lib.goalDeltaTone(null, 1.0) === 'neutral' && lib.goalDeltaTone('stable', 0.2) === 'good' && lib.goalDeltaTone('down', null) === 'neutral'
+  ),
+  goalStateScenario('공통 판단: 색상도 데이터 충분성을 먼저 본다 — 기록이 부족하면(enough=false) 좋음/주의 색이 아니라 중립(unknown) 색을 쓴다',
+    lib => {
+      const st = lib.buildGoalWeightState('diet', [{ date: '2026-08-17', weight: 66.0 }, { date: '2026-08-19', weight: 64.0 }]);
+      const tone = st.enough ? lib.goalDeltaTone(st.goalDirection, st.delta) : 'unknown';
+      return st.enough === false && tone === 'unknown' && lib.goalToneColor(tone) === '#94A3B8';
+    }
+  ),
+
+  // ── 이번 기간 리포트 인트로: 목표 방향과 반대일 때 칭찬 문구 금지 ──
+  periodReportScenario('기간 리포트: 다이어트 회원이 +4kg인데 운동 기록이 있어도 칭찬 인트로가 나오지 않는다(기존 문제 재발 방지)',
+    lib => {
+      const report = lib.buildPeriodReport('diet', { wDiff: 4, workoutCount: 3, kcalCount: 6, cardioCount: 2, weightState: { tone: 'warn', goalDirection: 'down', enough: true } });
+      return report && report.goods.length > 0 && report.intro !== '이번 기간도 잘하고 있어요.' && report.intro.includes('목표와 다른 방향');
+    }
+  ),
+  periodReportScenario('기간 리포트: 감량이 실제로 진행 중이면 기존처럼 칭찬 인트로를 유지한다',
+    lib => {
+      const report = lib.buildPeriodReport('diet', { wDiff: -1.2, workoutCount: 3, kcalCount: 6, cardioCount: 2, weightState: { tone: 'good', goalDirection: 'down', enough: true } });
+      return report.intro === '이번 기간도 잘하고 있어요.';
+    }
+  ),
+  periodReportScenario('기간 리포트: 판단할 체중 기록이 부족하면 칭찬도 지적도 하지 않고 사실만 안내한다',
+    lib => {
+      const report = lib.buildPeriodReport('diet', { wDiff: null, workoutCount: 2, weightState: { tone: 'unknown', goalDirection: 'down', enough: false } });
+      return report.intro === '이번 기간 기록을 정리했어요.';
+    }
+  ),
+  ['기간 리포트 카드: 인트로 문구를 하드코딩하지 않고 공통 판단 결과(report.intro)만 렌더한다',
+    app.includes('{report.intro && <p className="anx-report-intro">{report.intro}</p>}') &&
+    !app.includes('anx-report-intro">이번 기간도 잘하고 있어요.')
+  ],
+  ['목표 전략: 분석 탭에서 계산한 공통 판단 결과(weightState)를 전달받아 사용한다(카드가 자체 기준을 새로 만들지 않음)',
+    app.includes('const weightState = buildGoalWeightState(persona, weights);') &&
+    app.includes('<WeightGoalStrategyCard {...p} persona={persona} weightState={weightState}') &&
+    app.includes('weightState=null,...p}){') &&
+    app.includes('const st=weightState||buildGoalWeightState(persona,getBodyWeightRecords(p.body));')
+  ],
+  ['목표 전략: 최근 흐름이 목표와 반대이거나 기록이 부족하면 낙관적인 예상 기간(약 N주)을 만들지 않는다',
+    app.includes('흐름 확인 필요') && app.includes('기록 더 필요') &&
+    !app.includes('{label:"예상 기간",value:f.remain>0&&f.weeks>0?')
+  ],
+  ['건강 탭 기록 분석: 현재 흐름 문구가 분석 탭과 같은 공통 판단 로직으로 생성된다',
+    (() => {
+      const block = app.slice(app.indexOf('function buildHealthInsightSummary(p){'), app.indexOf('const CONDITION_EMOJI='));
+      return block.includes('buildGoalWeightState(persona,weights.filter(w=>String(w.date)>=dateStrDaysAgo(29)))') &&
+        block.includes('const flow=goalWeightHeadline(weightState);') &&
+        !block.includes('좋은 흐름을 유지하고');
+    })()
+  ],
+  ['건강 탭 기록 분석: 칼로리 안내가 어제 기록 규칙과 맞고, 오늘 할 행동은 최근 3일 이내 기록만 근거로 삼는다',
+    app.includes('const HEALTH_ACTION_RECENT_DAYS=3;') &&
+    app.includes('어제 먹은 칼로리를 기록해두면') &&
+    app.includes('const lastCheck=(p.checkins||[]).find(c=>String(c.date||c.id||"")>=actionSince)||{};') &&
+    !app.includes('오늘 먹은 칼로리를 한 끼만이라도')
+  ],
+  ['건강 탭 상세(동기부여): 목표와 반대로 움직인 체중 변화에 좋은 흐름이라는 문구를 붙이지 않는다',
+    app.includes('const motivationState=buildGoalWeightState(getAnalysisPersona(') &&
+    app.includes('goalWeightHeadline(motivationState)') &&
+    !app.includes('하며 좋은 흐름을 보이고 있어요.')
+  ],
+  ['건강 전문 분석·섭취와 체중 변화: 체중/체지방/BMI 색상이 회원 목표 방향(공통 판단)을 따른다',
+    app.includes('const fatMassTone = persona === "bulk" ? "neutral" : goalDeltaTone("down", fatMassDiff, 0.1);') &&
+    app.includes('goalToneColor(weightState.enough ? goalDeltaTone(weightState.goalDirection, wDiff) : "unknown")') &&
+    app.includes('goalToneColor(fatMassTone)') &&
+    app.includes('persona === "bulk" ? "#66717C"') &&
+    !app.includes('color: wDiff <= 0 ? "#16A34A" : "#F97316"')
+  ],
+  ['분석 탭: 기본 기간은 전체이고, 회원이 직접 고른 기간이 저장돼 있으면 그 값이 우선한다',
+    app.includes('teogym_analysis_period") || "all"') &&
+    app.includes('return "all"') &&
+    app.includes('localStorage.setItem("teogym_analysis_period", k)')
+  ],
+  ['섭취와 체중 변화 그래프: 회원앱 kcal Y축 라벨이 잘리지 않도록 축 폭을 명시하고 왼쪽 여백을 음수로 당기지 않는다(관리자앱 값 유지)',
+    app.includes('left:admin?-18:0,bottom:0') &&
+    app.includes('<YAxis width={admin?60:64} tick={axisTick}') &&
+    !app.includes('left:admin?-18:-14')
   ],
 ];
 

@@ -11048,6 +11048,11 @@ export default function App() {
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "hub")} onSelectMember={goHub} />}
+        {/* 페르소나 분석 — members/{id}.persona만 읽는다(추가 조회 없음). 회원 클릭 시 기존 goHub 흐름 그대로 회원 상세로 이동 */}
+        {screen==="persona" && <PersonaAnalyticsScreen members={members.map(m => liveMembersById[m.id] ? {...m, ...liveMembersById[m.id]} : m)}
+          setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast}
+          onOpenMember={id=>{ const target = members.find(m=>m.id===id); if (target) goHub(target, {scrollTarget:"hub-sec-persona"}); }}
+          onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "home")} />}
         {screen==="analysis"   && member && <RoutineAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="assessment" && member && <AssessmentScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="bodycheck"  && member && (() => { console.log("[TEO GYM] BodyCheckScreen — memberId:", member.id, "bodyData:", !!bodyData); return true; })() && <BodyCheckScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} bodyData={bodyData} onSaveBodyData={async d => {
@@ -11760,7 +11765,8 @@ function TodayActionCard({ icon, count, unit, title, desc, doneDesc, cta, tone="
 
 // 홈 "오늘 해야 할 일" 인라인 리스트 카드 — 다음 예약 필요/수업일지 미전송/후기 미작성이 공유하는 카드 껍데기
 // (제목·카운트 뱃지·캡션·빈 상태·최대 5건+"외 N건" 접기). 행 내부 마크업만 renderRow로 상황별로 다르게 받는다.
-function TodayListCard({ id, isWide, title, count, unit="명", accentColor="#B45309", captionText, emptyText, rows, renderRow, marginBottom }) {
+// headerExtra: 캡션 아래에 들어가는 선택적 영역(필터 칩 등). 기존 호출부는 넘기지 않으므로 동작이 그대로다.
+function TodayListCard({ id, isWide, title, count, unit="명", accentColor="#B45309", captionText, headerExtra, emptyText, rows, renderRow, marginBottom }) {
   const [expanded, setExpanded] = useState(false);
   const hiddenCount = Math.max(rows.length - 5, 0);
   const visibleRows = expanded ? rows : rows.slice(0, 5);
@@ -11773,6 +11779,7 @@ function TodayListCard({ id, isWide, title, count, unit="명", accentColor="#B45
         </div>
       </div>
       {captionText && <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.faint,marginBottom:4}}>{captionText}</div>}
+      {headerExtra}
       {count===0 ? (
         <div style={{padding:"30px 0 22px",textAlign:"center"}}>
           <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(34,197,94,.12)",color:DB.success,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>
@@ -12019,6 +12026,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   // 이 로컬 오버레이로 즉시 목록에서 뺀다(새로고침하면 sessionsMap 자체가 최신값을 담아 오버레이 없이도 동일 결과).
   const [journalDeferOverrides, setJournalDeferOverrides] = useState({}); // {sessionId: true}
   const [journalDeferSavingId, setJournalDeferSavingId] = useState(null);
+  const [personaFilter, setPersonaFilter] = useState("all"); // 페르소나 질문 대상 필터: all|both|ptTrigger|selectionReason|done
   const searchWrapRef = useRef(null);
   const searchInputRef = useRef(null);
   useEffect(()=>{
@@ -12298,6 +12306,37 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const searchResultsShown = searchResults.slice(0, 6);
   const searchHasMore = searchResults.length > 6;
   const todayMemberIds = useMemo(() => new Set(todaySess.flatMap(x => x.isPair ? [x.m.id, x.mB.id] : [x.m.id])), [todaySess]);
+  // "페르소나 확인 필요" — members 문서의 persona 필드만 읽으므로 추가 Firestore read가 없다.
+  // 오늘 수업 우선 표시는 위에서 이미 만든 todayMemberIds(getTodaySessionStatus·2:1 그룹 포함)를 그대로 재사용한다.
+  // 저장은 회원 상세에서 members/{id}.persona만 갱신하고, 실시간 구독(liveMembersById)이 이 목록을 자동으로 갱신한다.
+  const personaPendingList = useMemo(
+    () => buildPersonaPendingList(regularHomeMembers, liveMembersById, todayMemberIds, todayKST),
+    [regularHomeMembers, liveMembersById, todayMemberIds, todayKST]
+  );
+  const personaCoverage = useMemo(
+    () => getPersonaCoverage(regularHomeMembers, liveMembersById),
+    [regularHomeMembers, liveMembersById]
+  );
+  const personaTodayRows = useMemo(() => personaPendingList.filter(r => r.isToday), [personaPendingList]);
+  // "완료 회원"은 기본 화면에서 숨기고 필터로만 확인한다(대상 판정 기준은 미완료 목록과 완전히 동일).
+  const personaDoneList = useMemo(() => {
+    const rows = [];
+    regularHomeMembers.forEach(m => {
+      const live = liveMembersById?.[m.id];
+      const lm = live ? { ...m, ...live } : m;
+      if (!isPersonaAskTargetMember(lm)) return;
+      const progress = getPersonaProgress(lm);
+      if (!progress.done) return;
+      rows.push({ member: lm, progress, isToday: todayMemberIds.has(lm.id), nextDate: "", status: lm.status || "active" });
+    });
+    return rows.sort((a, b) => String(a.member.name||"").localeCompare(String(b.member.name||""), "ko"));
+  }, [regularHomeMembers, liveMembersById, todayMemberIds]);
+  const personaVisibleRows = useMemo(() => {
+    if (personaFilter === "done") return personaDoneList;
+    if (personaFilter === "both") return personaPendingList.filter(r => r.progress.completed === 0);
+    if (personaFilter === "ptTrigger" || personaFilter === "selectionReason") return personaPendingList.filter(r => r.progress.missing.includes(personaFilter));
+    return personaPendingList;
+  }, [personaFilter, personaPendingList, personaDoneList]);
   const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
 
   // 검색 결과 드롭다운 — 데스크톱 검색창(768px 이상)과 모바일 인라인 검색창(768px 미만)이 완전히 동일한 JSX를
@@ -12637,6 +12676,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={appUsageCheckRows.length} unit="명" title="회원앱 확인 필요" desc="최근 이용 흔적이나 입력이 뜸해요" doneDesc="모든 회원이 앱을 꾸준히 이용하고 있어요" cta="확인하기" onClick={scrollToSection("home-appusage-check")} />
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={ptRenewalNoticeList.length} unit="명" title="재등록 안내 필요" desc="PT 잔여 횟수가 얼마 남지 않았어요" doneDesc="재등록 안내가 필요한 회원이 없어요" cta="확인하기" onClick={scrollToSection("home-pt-renewal")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="mint" count={personaPendingList.length} unit="명" title="페르소나 확인 필요" desc={personaTodayRows.length?`오늘 만나는 회원 ${personaTodayRows.length}명에게 물어볼 수 있어요`:"수업 중 자연스럽게 여쭤보세요"} doneDesc="모든 회원의 핵심 질문이 기록됐어요" cta="확인하기" onClick={scrollToSection("home-persona-pending")} />
             {onboardingPendingList.length > 0 && (
               <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
             )}
@@ -12935,6 +12975,58 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             </button>
           )} />
         )}
+
+        {/* ═══ 페르소나 확인 필요 — 아직 핵심 2문항을 못 물어본 회원. 오늘 만나는 회원이 항상 맨 위 ═══ */}
+        <TodayListCard id="home-persona-pending" isWide={isWide} accentColor={DB.mintSoft}
+          title="페르소나 확인 필요" count={personaVisibleRows.length} unit="명"
+          captionText={`핵심 질문 완료 ${personaCoverage.done} / ${personaCoverage.total}명${personaCoverage.total?` (${personaCoverage.pct}%)`:""} · 미완료 ${personaPendingList.length}명`}
+          emptyText={personaFilter==="done" ? "아직 핵심 질문을 모두 기록한 회원이 없습니다" : "모든 회원의 핵심 질문이 기록됐습니다"}
+          headerExtra={
+            <>
+              {personaTodayRows.length > 0 && (
+                <div style={{background:DB.mintTint,border:"1px solid rgba(57,199,184,.28)",borderRadius:14,padding:"10px 12px",margin:"8px 0 10px"}}>
+                  <div style={{fontFamily:DB.font,fontSize:11.5,fontWeight:800,color:DB.mintSoft,marginBottom:5}}>오늘 질문하면 좋은 회원 {personaTodayRows.length}명</div>
+                  <div style={{display:"grid",gap:3}}>
+                    {personaTodayRows.slice(0,4).map(r => (
+                      <div key={r.member.id} style={{fontFamily:DB.font,fontSize:12,color:DB.text,fontWeight:700}}>
+                        {r.member.name} <span style={{color:DB.sub,fontWeight:600}}>— {personaMissingLabel(r.progress.missing)}</span>
+                      </div>
+                    ))}
+                    {personaTodayRows.length > 4 && (
+                      <div style={{fontFamily:DB.font,fontSize:11.5,color:DB.faint,fontWeight:700}}>외 {personaTodayRows.length-4}명</div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"8px 0 2px"}}>
+                {[["all",`전체 미완료 ${personaPendingList.length}`],["both","둘 다 미입력"],["ptTrigger","PT 시작 계기"],["selectionReason","테오짐 선택 이유"],["done",`완료 ${personaDoneList.length}`]].map(([k,l]) => (
+                  <button key={k} type="button" onClick={()=>setPersonaFilter(k)} style={{
+                    padding:"5px 11px",borderRadius:999,cursor:"pointer",fontFamily:DB.font,fontSize:11.5,fontWeight:personaFilter===k?800:700,
+                    border:personaFilter===k?"1px solid transparent":`1px solid ${DB.border}`,
+                    background:personaFilter===k?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:DB.card,
+                    color:personaFilter===k?"#fff":DB.sub,whiteSpace:"nowrap",
+                  }}>{l}</button>
+                ))}
+              </div>
+            </>
+          }
+          rows={personaVisibleRows} renderRow={(row,i)=>(
+          <button key={row.member.id} onClick={()=>onSelectMember?.(row.member,{scrollTarget:"hub-sec-persona"})} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 2px",background:"none",border:"none",borderTop:i===0?"none":DB.hairline,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:row.progress.done?DB.mintTintStrong:"rgba(57,199,184,.13)",color:DB.mintSoft,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:DB.font,fontWeight:800,fontSize:14,flexShrink:0}}>{(row.member.name||"?").slice(0,1)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px",display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                {row.member.name} 회원
+                {row.isToday && <span style={{fontFamily:DB.font,fontWeight:800,fontSize:10,padding:"2px 8px",borderRadius:999,background:DB.mintTintStrong,color:DB.mintSoft}}>오늘 수업</span>}
+                <span style={{fontFamily:DB.font,fontWeight:700,fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(15,23,42,.05)",color:DB.sub}}>{MEMBER_STATUS_LABEL[row.status]||row.status}</span>
+              </div>
+              <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>
+                {row.progress.done ? `핵심 질문 완료 (${row.progress.completed}/${row.progress.total})` : `${row.progress.completed}/${row.progress.total} · 남은 질문: ${personaMissingLabel(row.progress.missing)}`}
+                {!row.isToday && row.nextDate ? ` · 다음 수업 ${formatMonthDayKo(row.nextDate)}` : ""}
+              </div>
+            </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={DB.faint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        )} />
 
         {/* ═══ 오늘 회원 상태 — Apple Health식 링으로 오늘 입력 흐름을 한눈에 (계산만, 저장 없음) ═══ */}
         <div style={{marginBottom:GAP}}>
@@ -13544,6 +13636,303 @@ function buildPtRenewalNoticeList(members, liveMembersById) {
     return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
   });
 }
+
+// ════════════════════════════════════════════════════════════════
+// TEO GYM PERSONA — 고객 페르소나 (관리자 전용)
+//
+// 목적: 기존 데이터로는 알 수 없는 두 가지 —"왜 PT를 사기로 했는가(ptTrigger)"와
+//      "여러 곳 중 왜 테오짐이었는가(selectionReason)"— 만 추가로 수집한다.
+//
+// 중복 저장 금지 원칙(이미 있는 데이터는 절대 복사하지 않는다):
+//   · 운동 목표      → members.goal / bodyCheck.goal / 온보딩 v2 goals   (그대로 참조만)
+//   · 유입 경로      → members.survey.visit* / consultations / 온보딩 v2 acquisition.firstTouch
+//                     (normalizeMemberAcquisitionData 공용 selector 재사용)
+//   · 상담 결정 접점 → 온보딩 v2 acquisition.decisionTouch (회원이 고른 "접점")
+//                     — 대표가 대화로 확인하는 "최종 등록 이유"(selectionReason)와는 질문·출처가 다르다.
+//                       두 값을 화면에서 나란히 보여주기만 하고 서로 복사하지 않는다.
+//   · 이전 PT 경험   → 온보딩 v2 experience.prevPT / prevPTSatisfaction (참조만)
+//   · 상담 메모      → consultations.consultMemo / result (참조만)
+//
+// 저장 위치: members/{memberId}.persona (신규 컬렉션 없음).
+//   회원은 memberProfileUpdateKeysAllowed() 화이트리스트 밖이라 이 필드를 수정할 수 없고,
+//   회원앱은 이 필드를 전혀 읽지 않는다(ptBalance* 캐시 필드와 동일한 취급).
+//   members 문서에 두는 이유: 홈 "페르소나 확인 필요" 카운트를 추가 Firestore read 0으로 계산하기 위함.
+//
+// 파생값(hasPersonaAnswer / getPersonaProgress)은 절대 저장하지 않는다 —
+// 답변 존재 여부만으로 매번 계산해 동기화 오류를 원천 차단한다.
+// ════════════════════════════════════════════════════════════════
+
+// 카테고리는 코드값으로 저장하고 라벨은 아래 표에서만 관리한다(온보딩 v2 acquisition과 같은 방식).
+// → 라벨 문구를 바꿔도 과거 데이터가 깨지지 않고, 새 항목 추가도 표에 한 줄 넣으면 끝난다.
+//   표에 없는 값이 들어와도 personaOptionLabel이 원본 문자열을 그대로 보여주므로 데이터가 사라지지 않는다.
+// 회원 상태 표시 라벨 — 페르소나 화면 3곳(회원 상세·홈 목록·분석)이 공유한다. 저장값(active/paused/ended/waiting)은 그대로다.
+const MEMBER_STATUS_LABEL = { active: "진행중", paused: "휴식중", ended: "종료", waiting: "수업 대기" };
+
+const PERSONA_TRIGGER_OPTIONS = [
+  { value: "solo_fail", label: "혼자 운동하다 실패" },
+  { value: "weight_gain", label: "체중 증가" },
+  { value: "fitness_drop", label: "체력 저하" },
+  { value: "pain", label: "통증 · 불편함" },
+  { value: "health", label: "건강 관리 필요" },
+  { value: "how_to", label: "운동 방법을 모름" },
+  { value: "habit", label: "운동 습관 필요" },
+  { value: "event", label: "특정 목표 발생" },
+  { value: "prev_pt_unsatisfied", label: "기존 PT 불만족" },
+  { value: "recommended", label: "가족 · 지인 권유" },
+  { value: "other", label: "기타" },
+];
+const PERSONA_SELECTION_OPTIONS = [
+  { value: "owner_class", label: "대표 직접 수업" },
+  { value: "trial_class", label: "체험수업" },
+  { value: "expertise", label: "전문성" },
+  { value: "record", label: "수업 기록 · 관리" },
+  { value: "facility", label: "시설" },
+  { value: "machine", label: "머신" },
+  { value: "clean", label: "쾌적한 환경" },
+  { value: "not_crowded", label: "사람이 붐비지 않음" },
+  { value: "location", label: "위치" },
+  { value: "parking", label: "주차" },
+  { value: "price", label: "가격" },
+  { value: "review", label: "후기" },
+  { value: "content", label: "블로그 · 콘텐츠 신뢰" },
+  { value: "referral", label: "소개" },
+  { value: "consult", label: "상담 경험" },
+  { value: "other", label: "기타" },
+];
+const PERSONA_BARRIER_OPTIONS = [
+  { value: "price", label: "가격" },
+  { value: "time", label: "시간" },
+  { value: "distance", label: "거리" },
+  { value: "effect_doubt", label: "PT 효과 불확실" },
+  { value: "trainer_trust", label: "트레이너 신뢰" },
+  { value: "continuity", label: "운동 지속 가능성" },
+  { value: "other", label: "기타" },
+];
+
+// 핵심 2문항 — 홈 카운트·회원 상세 진행 뱃지·분석 화면이 전부 이 정의 하나만 본다(항목을 늘리면 세 화면이 함께 바뀐다).
+const PERSONA_CORE_QUESTIONS = [
+  {
+    key: "ptTrigger", label: "PT 시작 계기", options: PERSONA_TRIGGER_OPTIONS,
+    question: "처음 어떤 계기로 PT를 받아봐야겠다고 생각하셨어요?",
+    hint: "운동 목표(다이어트 등)가 아니라 '왜 지금 PT를 결심했는가'를 그대로 적어주세요.",
+  },
+  {
+    key: "selectionReason", label: "테오짐 선택 이유", options: PERSONA_SELECTION_OPTIONS,
+    question: "여러 곳 중 최종적으로 테오짐을 선택하신 가장 큰 이유는 뭐였어요?",
+    hint: "어디서 알게 됐는지(유입 경로)가 아니라 '왜 여기로 결정했는지'를 적어주세요.",
+  },
+];
+// 선택 항목 — 핵심 2문항보다 우선순위가 낮다. 대표가 필요할 때만 입력한다.
+const PERSONA_EXTRA_QUESTIONS = [
+  { key: "satisfaction", label: "가장 만족하는 부분", question: "테오짐 다니면서 가장 만족하는 부분은?" },
+  { key: "mustKeep", label: "없어지면 아쉬운 것", question: "테오짐에서 하나가 없어지면 가장 아쉬운 것은?" },
+  { key: "improvement", label: "개선 희망", question: "딱 하나 더 좋아졌으면 하는 것은?" },
+  { key: "previousPtDiff", label: "이전 PT와의 차이", question: "이전에 받던 PT와 가장 다른 점은? (PT 경험이 있는 회원만)" },
+  { key: "barrier", label: "등록 망설임", question: "등록 전에 가장 망설였던 부분은?", options: PERSONA_BARRIER_OPTIONS },
+];
+const PERSONA_ALL_QUESTIONS = [...PERSONA_CORE_QUESTIONS, ...PERSONA_EXTRA_QUESTIONS];
+// 답변 출처 — 지금은 전부 대표 직접 입력이지만, 나중에 상담·온보딩에서 들어온 답변과 섞이지 않도록 항상 기록한다.
+const PERSONA_SOURCE_ADMIN = "admin_interview";
+
+function personaQuestionByKey(key) {
+  return PERSONA_ALL_QUESTIONS.find(q => q.key === key) || null;
+}
+// 표에 없는 값(과거 라벨·직접 입력)이 들어와도 원본을 그대로 보여준다 — 데이터가 화면에서 사라지지 않게.
+function personaOptionLabel(options, value) {
+  const v = String(value || "").trim();
+  if (!v) return "";
+  return (options || []).find(o => o.value === v)?.label || v;
+}
+function personaCategoryLabel(key, value) {
+  return personaOptionLabel(personaQuestionByKey(key)?.options, value);
+}
+
+// 저장된 답변 1건 정규화 — 카테고리도 원문도 없으면 "미입력"(null)으로 본다.
+function getPersonaEntry(member, key) {
+  const raw = member?.persona?.[key];
+  if (!raw || typeof raw !== "object") return null;
+  const category = String(raw.category || "").trim();
+  const secondaryCategory = String(raw.secondaryCategory || "").trim();
+  const rawText = String(raw.rawText || "").trim();
+  if (!category && !rawText) return null;
+  return {
+    category, secondaryCategory, rawText,
+    source: String(raw.source || "").trim() || PERSONA_SOURCE_ADMIN,
+    createdAt: raw.createdAt || "",
+    updatedAt: raw.updatedAt || raw.createdAt || "",
+    updatedBy: raw.updatedBy || "",
+  };
+}
+function hasPersonaAnswer(member, key) {
+  return !!getPersonaEntry(member, key);
+}
+// 핵심 질문 진행 상태 — 완료 여부를 Firestore에 따로 저장하지 않고 항상 답변 존재 여부로만 계산한다
+// (완료 플래그를 문서에 두면 답변 수정·삭제 때 값이 어긋나므로 파생 필드를 아예 만들지 않는다).
+function getPersonaProgress(member) {
+  const missing = PERSONA_CORE_QUESTIONS.filter(q => !hasPersonaAnswer(member, q.key)).map(q => q.key);
+  return {
+    completed: PERSONA_CORE_QUESTIONS.length - missing.length,
+    total: PERSONA_CORE_QUESTIONS.length,
+    missing,
+    done: missing.length === 0,
+  };
+}
+// "다음에 무엇을 물어봐야 하는가"를 회원 카드 한 줄로 — 목록·회원 상세가 같은 문구를 쓴다.
+function personaMissingLabel(missing) {
+  const list = missing || [];
+  if (!list.length) return "완료";
+  if (list.length >= PERSONA_CORE_QUESTIONS.length) return "두 질문 모두";
+  return PERSONA_CORE_QUESTIONS.find(q => q.key === list[0])?.label || "";
+}
+
+// 페르소나 수집 대상 — 대표 개인 운동기록 계정·테스트 계정은 기존 공용 판정(isRegularAdminMember)으로 제외한다.
+// members 컬렉션 자체가 PT 수업 관리 대상이라 "PT 회원 / 일반 회원권 회원"을 구분하는 기존 필드가 없다
+// (ticketInfo는 "3개월권" 같은 자유 입력 관리자 메모라 판별 기준으로 쓸 수 없다).
+// → 새 isPtMember 중복 필드를 만들지 않고 기존 회원 구분만 재사용한다.
+function isPersonaTargetMember(m) {
+  return !!m && isRegularAdminMember(m);
+}
+// 홈 질문 대상 — 분석(전체)과 달리 종료 회원은 뺀다. 대표가 지금 만나서 물어볼 수 있는 회원만 남긴다.
+function isPersonaAskTargetMember(m) {
+  return isPersonaTargetMember(m) && (m?.status || "active") !== "ended";
+}
+
+// 홈 "페르소나 확인 필요" 목록.
+// todayMemberIds는 홈이 이미 계산해 둔 "오늘 수업 회원"(getTodaySessionStatus 기반, 2:1 그룹 포함) Set을 그대로 받는다 —
+// 오늘 수업 판정 로직을 다시 구현하지 않고, 새 날짜 필드도 만들지 않는다.
+// 우선순위: ①오늘 수업 → ②다음 수업 예정일이 빠른 순 → ③진행중 회원 → ④휴식·대기 회원.
+function buildPersonaPendingList(members, liveMembersById, todayMemberIds, todayKST) {
+  const todaySet = todayMemberIds instanceof Set ? todayMemberIds : new Set(todayMemberIds || []);
+  const rows = [];
+  (members || []).forEach(m => {
+    const live = liveMembersById?.[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if (!isPersonaAskTargetMember(lm)) return;
+    const progress = getPersonaProgress(lm);
+    if (progress.done) return;
+    const nextDate = getMemberNextSessionInfo(lm).date;
+    rows.push({
+      member: lm,
+      progress,
+      isToday: todaySet.has(lm.id),
+      nextDate: nextDate && nextDate >= todayKST ? nextDate : "",
+      status: lm.status || "active",
+    });
+  });
+  const rank = (r) => r.isToday ? 0 : (r.nextDate ? 1 : (r.status === "active" ? 2 : 3));
+  return rows.sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 1 && a.nextDate !== b.nextDate) return a.nextDate.localeCompare(b.nextDate);
+    // 같은 그룹이면 1/2 완료 회원을 먼저 — 질문 하나만 더 하면 끝나는 회원부터 처리하도록.
+    if (a.progress.completed !== b.progress.completed) return b.progress.completed - a.progress.completed;
+    return String(a.member.name || "").localeCompare(String(b.member.name || ""), "ko");
+  });
+}
+
+// 홈 카드 캡션용 진행률 — 질문 대상(종료 회원 제외) 기준 "핵심 질문 완료 N / M명".
+function getPersonaCoverage(members, liveMembersById) {
+  let total = 0, done = 0;
+  (members || []).forEach(m => {
+    const live = liveMembersById?.[m.id];
+    const lm = live ? { ...m, ...live } : m;
+    if (!isPersonaAskTargetMember(lm)) return;
+    total += 1;
+    if (getPersonaProgress(lm).done) done += 1;
+  });
+  return { total, done, pct: total ? Math.round((done / total) * 100) : 0 };
+}
+
+// ── 페르소나 분석 집계 ────────────────────────────────────────
+// 분모를 절대 섞지 않는다: 수집 현황은 "대상 회원 수", 카테고리 비율은 "그 질문에 답한 회원 수"가 분모다.
+// null(미입력)은 어떤 집계에도 들어가지 않는다.
+function personaAgeBand(member) {
+  const y = Number(member?.birthYear);
+  if (!Number.isFinite(y) || y < 1900) return "";
+  const age = new Date().getFullYear() - y + 1;
+  if (age < 20) return "10대";
+  if (age >= 70) return "70대 이상";
+  return `${Math.floor(age / 10) * 10}대`;
+}
+function personaGender(member) {
+  return String(member?.gender || member?.survey?.gender || "").trim();
+}
+function personaCountRows(entries, options) {
+  const map = new Map();
+  entries.forEach(e => {
+    const v = e.category;
+    if (!v) return;
+    map.set(v, (map.get(v) || 0) + 1);
+  });
+  const responded = entries.filter(e => e.category).length;
+  return {
+    responded,
+    rows: [...map.entries()]
+      .map(([value, count]) => ({
+        value, label: personaOptionLabel(options, value), count,
+        pct: responded ? Math.round((count / responded) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko")),
+  };
+}
+function buildPersonaStats(members) {
+  const targets = (members || []).filter(isPersonaTargetMember);
+  const total = targets.length;
+  const collect = (key) => targets
+    .map(m => {
+      const e = getPersonaEntry(m, key);
+      return e ? { ...e, memberId: m.id, name: m.name || "", status: m.status || "active" } : null;
+    })
+    .filter(Boolean);
+  const triggerEntries = collect("ptTrigger");
+  const selectionEntries = collect("selectionReason");
+  const triggerIds = new Set(triggerEntries.map(e => e.memberId));
+  const selectionIds = new Set(selectionEntries.map(e => e.memberId));
+  const bothCount = targets.filter(m => triggerIds.has(m.id) && selectionIds.has(m.id)).length;
+  const noneCount = targets.filter(m => !triggerIds.has(m.id) && !selectionIds.has(m.id)).length;
+
+  // 교차 분석 — "PT 시작 계기 × 테오짐 선택 이유". 두 질문에 모두 답한 회원만 분모에 들어간다.
+  const selectionByMember = new Map(selectionEntries.map(e => [e.memberId, e]));
+  const crossMap = new Map();
+  triggerEntries.forEach(t => {
+    const s = selectionByMember.get(t.memberId);
+    if (!t.category || !s?.category) return;
+    if (!crossMap.has(t.category)) crossMap.set(t.category, []);
+    crossMap.get(t.category).push(s.category);
+  });
+  const cross = [...crossMap.entries()].map(([triggerValue, reasons]) => {
+    const rMap = new Map();
+    reasons.forEach(r => rMap.set(r, (rMap.get(r) || 0) + 1));
+    return {
+      value: triggerValue,
+      label: personaOptionLabel(PERSONA_TRIGGER_OPTIONS, triggerValue),
+      count: reasons.length,
+      reasons: [...rMap.entries()]
+        .map(([value, count]) => ({
+          value, label: personaOptionLabel(PERSONA_SELECTION_OPTIONS, value), count,
+          pct: Math.round((count / reasons.length) * 1000) / 10,
+        }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko")),
+    };
+  }).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko"));
+
+  return {
+    total,
+    triggerCount: triggerIds.size,
+    selectionCount: selectionIds.size,
+    bothCount,
+    noneCount,
+    trigger: personaCountRows(triggerEntries, PERSONA_TRIGGER_OPTIONS),
+    selection: personaCountRows(selectionEntries, PERSONA_SELECTION_OPTIONS),
+    cross,
+    quotes: {
+      ptTrigger: triggerEntries.filter(e => e.rawText),
+      selectionReason: selectionEntries.filter(e => e.rawText),
+    },
+  };
+}
+// 표본이 적을 때 과도한 결론을 내리지 않도록 하는 안내 기준(분석 화면에서만 사용).
+const PERSONA_SMALL_SAMPLE = 10;
 
 // 홈 "수업일지 미전송" — 예약(수업 기록 없이 날짜만 등록된 회원)은 절대 포함하지 않는다. "실제 수업 기록이
 // 저장돼 있는데 아직 회원에게 전송(isPublished)만 안 된 회원"만 대상 — 오늘 수업 기록이 저장됐지만 미전송,
@@ -17142,6 +17531,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const [showManage, setShowManage] = useState(false);
   const [showMemo, setShowMemo] = useState(false);
   const [showAllMsgs, setShowAllMsgs] = useState(false);
+  // ── 고객 페르소나(TEO GYM PERSONA) — 관리자 전용 입력 상태 ──
+  const [personaModal, setPersonaModal] = useState(null); // 입력 중인 질문 key(null이면 모달 닫힘)
+  const [personaForm, setPersonaForm] = useState({ category:"", secondaryCategory:"", rawText:"" });
+  const [personaSaving, setPersonaSaving] = useState(false);
+  const [showPersonaContext, setShowPersonaContext] = useState(false); // 기존 데이터 참고(성별·목표·유입 등) 접기
+  const [showPersonaExtra, setShowPersonaExtra] = useState(false);     // 선택 항목(만족·개선 등) 접기
   // 가로/세로 분기 — iPad 가로(>=1024px)는 2패널, 그 미만은 1열.
   // CSS order/display:contents 대신 JS 분기로 렌더링해 Safari 렌더링 편차를 없앤다 (HomeScreen의 winW 패턴 재사용)
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
@@ -17610,6 +18005,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
           .hub-sec-personal{padding:9px 12px 9px !important;}
           .hub-sec-today{padding:11px 14px !important;}
           .hub-sec-prep{padding:10px 13px 12px !important;}
+          .hub-sec-persona{padding:10px 13px 12px !important;}
           .hub-vitals>div{padding:5px 9px !important;}
           .hub-sec-analysis>button,.hub-sec-manage>button{padding:9px 14px !important;}
           /* 액션 버튼(min-height 인라인 스타일이 있는 CTA류)만 선택적으로 압축 — 칩·토글류는 그대로 둔다 */
@@ -18533,6 +18929,178 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             </div>
   );
 
+  // ═══ 고객 페르소나(TEO GYM PERSONA) — 관리자 전용 ═══
+  // member prop은 홈/회원목록에서 넘어온 그 시점의 스냅샷이라 방금 저장한 값이 빠져 있을 수 있다
+  // (goHub는 회원 문서를 다시 읽지 않는다). scheduleFollowupPending과 동일하게 liveMembersById(onSnapshot,
+  // 항상 최신)를 우선해 이 화면 안에서만 보정한다 — 저장 직후 홈 카운트도 같은 구독으로 자동 갱신된다.
+  const livePersona = liveMembersById[member.id]?.persona ?? member.persona;
+  const personaMember = { ...member, persona: livePersona || null };
+  const personaProgress = getPersonaProgress(personaMember);
+  // 기존 유입 데이터 — 유입 분석과 완전히 같은 공용 selector를 그대로 쓴다(복사 저장 금지, 읽기만).
+  const personaAcq = normalizeMemberAcquisitionData(member, ob);
+
+  const openPersonaModal = (key) => {
+    const cur = getPersonaEntry(personaMember, key);
+    setPersonaForm({ category: cur?.category || "", secondaryCategory: cur?.secondaryCategory || "", rawText: cur?.rawText || "" });
+    setPersonaModal(key);
+  };
+  // 저장 — members/{id}.persona 맵 하나만 갱신한다. 전체 회원 reload 없이
+  // onMemberPatch(로컬 state) + members 실시간 구독(홈 카운트)으로 즉시 반영된다.
+  const savePersonaAnswer = async () => {
+    if (personaSaving || !personaModal) return;
+    const key = personaModal;
+    const q = personaQuestionByKey(key);
+    const category = String(personaForm.category || "").trim();
+    const rawText = String(personaForm.rawText || "").trim();
+    if (!category && !rawText) { showToast?.("카테고리를 고르거나 회원 답변을 입력해주세요.", "err"); return; }
+    setPersonaSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const prev = getPersonaEntry(personaMember, key);
+      const entry = {
+        category,
+        secondaryCategory: String(personaForm.secondaryCategory || "").trim(),
+        rawText, // 회원이 실제로 한 말 — 카테고리로 요약해 버리지 않고 항상 원문 그대로 보존한다.
+        source: prev?.source || PERSONA_SOURCE_ADMIN,
+        createdAt: prev?.createdAt || now,
+        updatedAt: now,
+        updatedBy: auth.currentUser?.uid || "",
+      };
+      const nextPersona = { ...(livePersona || {}), [key]: entry, updatedAt: now };
+      await updateMember(member.id, { persona: nextPersona });
+      onMemberPatch({ persona: nextPersona });
+      setPersonaModal(null);
+      showToast?.(`${q?.label || "페르소나"} 기록을 저장했습니다.`);
+    } catch(e) {
+      console.error(e);
+      showToast?.("저장 실패: " + (e?.message || "오류"), "err");
+    } finally { setPersonaSaving(false); }
+  };
+  // 잘못 기록한 답변 되돌리기 — 해당 질문 key만 지운다(다른 답변·회원 데이터는 건드리지 않는다).
+  const clearPersonaAnswer = async () => {
+    if (personaSaving || !personaModal) return;
+    const key = personaModal;
+    if (!window.confirm(`${personaQuestionByKey(key)?.label || "이 항목"} 기록을 지울까요?`)) return;
+    setPersonaSaving(true);
+    try {
+      const nextPersona = { ...(livePersona || {}) };
+      delete nextPersona[key];
+      nextPersona.updatedAt = new Date().toISOString();
+      await updateMember(member.id, { persona: nextPersona });
+      onMemberPatch({ persona: nextPersona });
+      setPersonaModal(null);
+      showToast?.("기록을 지웠습니다.");
+    } catch(e) {
+      console.error(e);
+      showToast?.("삭제 실패: " + (e?.message || "오류"), "err");
+    } finally { setPersonaSaving(false); }
+  };
+
+  const personaChip = (label, active, onClick) => (
+    <button key={label} type="button" onClick={onClick} style={{
+      borderRadius:999, padding:"7px 13px", minHeight:36, fontSize:12.5, fontWeight:active?800:700, fontFamily:DB.font, cursor:"pointer",
+      border:active?"1px solid transparent":`1px solid ${DB.border}`,
+      background:active?`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`:DB.card,
+      color:active?"#fff":DB.sub, whiteSpace:"nowrap",
+    }}>{label}</button>
+  );
+  const personaCtxRow = (label, value) => (
+    <>
+      <span style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font}}>{label}</span>
+      <span style={{fontSize:12,fontWeight:700,color:DB.text,fontFamily:DB.font,wordBreak:"keep-all"}}>{value || "-"}</span>
+    </>
+  );
+  // 질문 1건 표시 — 답변이 없으면 "아직 기록되지 않았습니다 + 기록하기", 있으면 카테고리·원문·수정일.
+  const personaAnswerBlock = (q, { core = false } = {}) => {
+    const e = getPersonaEntry(personaMember, q.key);
+    return (
+      <div key={q.key} style={{border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"12px 13px",marginBottom:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:e?6:4}}>
+          <span style={{fontSize:12.5,fontWeight:800,color:DB.text,fontFamily:DB.font}}>{core ? `${q.label}` : q.label}</span>
+          {core && !e && <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.13)",color:"#B45309",fontFamily:DB.font}}>미기록</span>}
+          <button type="button" onClick={()=>openPersonaModal(q.key)} style={{marginLeft:"auto",border:e?`1px solid ${DB.border}`:"1px solid transparent",background:e?DB.card:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:e?DB.sub:"#fff",cursor:"pointer",fontFamily:DB.font,flexShrink:0}}>{e?"수정":"기록하기"}</button>
+        </div>
+        <div style={{fontSize:11,color:DB.faint,lineHeight:1.55,fontFamily:DB.font,marginBottom:e?8:0,wordBreak:"keep-all"}}>{q.question}</div>
+        {!e ? (
+          <div style={{fontSize:12,fontWeight:700,color:DB.faint,fontFamily:DB.font,marginTop:6}}>아직 기록되지 않았습니다</div>
+        ) : (
+          <>
+            {(e.category || e.secondaryCategory) && (
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:e.rawText?7:0}}>
+                {e.category && <span style={{fontSize:11,fontWeight:800,padding:"3px 10px",borderRadius:999,background:DB.mintTintStrong,color:DB.mintSoft,fontFamily:DB.font}}>{personaCategoryLabel(q.key, e.category)}</span>}
+                {e.secondaryCategory && <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:999,background:"rgba(15,23,42,.05)",color:DB.sub,fontFamily:DB.font}}>{personaCategoryLabel(q.key, e.secondaryCategory)} (보조)</span>}
+              </div>
+            )}
+            {e.rawText && (
+              <div style={{fontSize:12.5,lineHeight:1.7,color:DB.text,fontFamily:DB.font,whiteSpace:"pre-line",wordBreak:"keep-all"}}>“{e.rawText}”</div>
+            )}
+            <div style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font,marginTop:7}}>
+              기록 {formatCompactDate(e.createdAt)}{e.updatedAt && e.updatedAt !== e.createdAt ? ` · 수정 ${formatCompactDate(e.updatedAt)}` : ""} · 대표 직접 입력
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const secPersona = (
+          <section id="hub-sec-persona" className="hub-sec-persona" style={{...card, padding:"14px 16px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+              <span style={cardTitle}>고객 페르소나</span>
+              <span style={{fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,fontFamily:DB.font,
+                background:personaProgress.done?DB.mintTintStrong:"rgba(245,158,11,.13)",
+                color:personaProgress.done?DB.mintSoft:"#B45309"}}>
+                {personaProgress.done ? "핵심 질문 완료" : `핵심 질문 ${personaProgress.completed}/${personaProgress.total} 완료`}
+              </span>
+            </div>
+            <div style={{fontSize:11.5,color:DB.faint,lineHeight:1.6,marginBottom:10,fontFamily:DB.font,wordBreak:"keep-all"}}>
+              수업 중 자연스럽게 여쭤보고 기록하는 항목입니다. 회원앱에는 표시되지 않습니다.
+            </div>
+
+            {PERSONA_CORE_QUESTIONS.map(q => personaAnswerBlock(q, { core:true }))}
+
+            {/* 기존에 이미 가지고 있는 정보 — 페르소나로 복사 저장하지 않고 원본 데이터를 그대로 참조해 보여준다 */}
+            <button type="button" onClick={()=>setShowPersonaContext(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"9px 2px",display:"flex",alignItems:"center",gap:8,fontFamily:DB.font,textAlign:"left"}}>
+              <span style={{fontSize:11.5,fontWeight:800,color:DB.sub}}>이미 알고 있는 정보</span>
+              <span style={{fontSize:10.5,color:DB.faint,fontWeight:600}}>기본 정보 · 목표 · 유입 · 운동 경험</span>
+              <span style={{marginLeft:"auto",color:DB.faint,fontSize:11,transform:showPersonaContext?"rotate(180deg)":"none",transition:"transform .18s"}}>▼</span>
+            </button>
+            {showPersonaContext && (
+              <div style={{background:DB.bg,border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,padding:"12px 13px",marginBottom:8}}>
+                <div style={{display:"grid",gridTemplateColumns:"auto 1fr",columnGap:10,rowGap:5,alignItems:"baseline"}}>
+                  {personaCtxRow("성별 · 나이", obGenderAge)}
+                  {personaCtxRow("회원 상태", MEMBER_STATUS_LABEL[member.status||"active"] || "진행중")}
+                  {personaCtxRow("운동 목표", obGoal)}
+                  {personaCtxRow("집중 부위", obFocus)}
+                  {personaCtxRow("최초 유입 경로", personaAcq.sources.join(" · ") || personaAcq.otherSource || "미기재")}
+                  {personaCtxRow("상담 결정 접점", personaAcq.decisionTouch || "미기재")}
+                  {personaCtxRow("이전 PT 경험", [ob?.v2?.experience?.prevPT, ob?.v2?.experience?.prevPTSatisfaction].filter(Boolean).join(" · ") || "미기재")}
+                  {personaCtxRow("회원이 쓴 방문 계기", personaAcq.memberReason || "미기재")}
+                </div>
+                <div style={{fontSize:10.5,color:DB.faint,lineHeight:1.65,marginTop:9,fontFamily:DB.font,wordBreak:"keep-all"}}>
+                  회원 정보 · 사전 문진 · 유입 분석에 이미 저장된 값을 그대로 읽어온 것입니다(페르소나로 다시 저장하지 않습니다).
+                  “상담 결정 접점”은 회원이 온보딩에서 고른 접점이고, 위의 “테오짐 선택 이유”는 대표가 직접 확인한 최종 등록 이유입니다.
+                </div>
+              </div>
+            )}
+
+            {/* 선택 항목 — 핵심 2문항보다 우선순위가 낮다. 필요할 때만 펼쳐서 기록한다. */}
+            <button type="button" onClick={()=>setShowPersonaExtra(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"9px 2px",display:"flex",alignItems:"center",gap:8,fontFamily:DB.font,textAlign:"left"}}>
+              <span style={{fontSize:11.5,fontWeight:800,color:DB.sub}}>추가 기록 (선택)</span>
+              <span style={{fontSize:10.5,color:DB.faint,fontWeight:600}}>
+                만족 요소 · 개선 희망 · 등록 망설임
+                {(() => { const n = PERSONA_EXTRA_QUESTIONS.filter(q => hasPersonaAnswer(personaMember, q.key)).length; return n ? ` · ${n}건 기록됨` : ""; })()}
+              </span>
+              <span style={{marginLeft:"auto",color:DB.faint,fontSize:11,transform:showPersonaExtra?"rotate(180deg)":"none",transition:"transform .18s"}}>▼</span>
+            </button>
+            {showPersonaExtra && (
+              <div style={{marginTop:2}}>
+                {PERSONA_EXTRA_QUESTIONS.map(q => personaAnswerBlock(q))}
+              </div>
+            )}
+          </section>
+  );
+
   const secRegistration = (
           <section id="hub-sec-registration" className="hub-sec-registration" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
@@ -18696,12 +19264,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
            우측이 더 넓어야 할 콘텐츠(부위 버튼·전송 버튼·다음 수업 준비 그리드)가 많아 좌 0.8fr : 우 1.3fr 비율은 그대로 유지 */
         <div className="hub-2panel">
           <div className="hub-side">{secBrief}{secAnalysis}{secManage}{secRecent}{secPersonalWorkout}{secAppUsage}</div>
-          <div className="hub-main">{secToday}{secPrep}{secReview}{secRegistration}</div>
+          <div className="hub-main">{secToday}{secPrep}{secReview}{secRegistration}{secPersona}</div>
         </div>
       ) : (
         /* 세로(<1024px): 1열 전체 폭 — 오늘 수업 → 오늘 브리핑 → 최근 수업 → 다음 수업 준비 → 후기 관리 → 등록 관리 → 분석 → 회원관리 */
         <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",minWidth:0}}>
-          {secToday}{secBrief}{secRecent}{secPersonalWorkout}{secAppUsage}{secPrep}{secReview}{secRegistration}{secAnalysis}{secManage}
+          {secToday}{secBrief}{secRecent}{secPersonalWorkout}{secAppUsage}{secPrep}{secReview}{secRegistration}{secPersona}{secAnalysis}{secManage}
         </div>
       )}
 
@@ -18874,6 +19442,65 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
           </div>
         </div>
       )}
+
+      {/* ── 고객 페르소나 답변 기록 — 수업 중 아이폰·아이패드에서 빠르게 입력하는 최소 단계(카테고리 → 답변 → 저장) ── */}
+      {personaModal && (() => {
+        const q = personaQuestionByKey(personaModal);
+        if (!q) return null;
+        const existing = getPersonaEntry(personaMember, personaModal);
+        const opts = q.options || [];
+        return (
+          <div role="dialog" aria-modal="true" aria-label={`${q.label} 기록`} onClick={e=>{ if (e.target===e.currentTarget && !personaSaving) setPersonaModal(null); }}
+            style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:220,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+            <div style={{width:"100%",maxWidth:420,maxHeight:"90vh",overflowY:"auto",background:"#FFFFFF",borderRadius:20,border:"1px solid #D6DCE3",boxShadow:"0 20px 60px rgba(15,23,42,.25)",padding:"20px 20px 16px"}}>
+              <div style={{fontSize:14.5,fontWeight:800,color:DB.text,marginBottom:5,fontFamily:DB.font}}>{member.name} 회원 · {q.label}</div>
+              <div style={{fontSize:12.5,color:DB.sub,lineHeight:1.6,marginBottom:5,fontFamily:DB.font,wordBreak:"keep-all"}}>“{q.question}”</div>
+              {q.hint && <div style={{fontSize:11,color:DB.faint,lineHeight:1.6,marginBottom:14,fontFamily:DB.font,wordBreak:"keep-all"}}>{q.hint}</div>}
+
+              {opts.length > 0 && (
+                <>
+                  <div style={{fontSize:11,fontWeight:800,color:DB.sub,marginBottom:7,fontFamily:DB.font}}>대표 이유 (1개)</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                    {opts.map(o => personaChip(o.label, personaForm.category===o.value, ()=>setPersonaForm(f=>({
+                      ...f,
+                      category: f.category===o.value ? "" : o.value,
+                      // 대표 이유로 고른 항목이 보조에도 남아 있으면 같은 값이 두 번 세어지므로 자동으로 비운다.
+                      secondaryCategory: f.secondaryCategory===o.value ? "" : f.secondaryCategory,
+                    }))))}
+                  </div>
+                  {personaForm.category && (
+                    <>
+                      <div style={{fontSize:11,fontWeight:800,color:DB.sub,marginBottom:7,fontFamily:DB.font}}>보조 이유 (선택)</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                        {opts.filter(o=>o.value!==personaForm.category).map(o => personaChip(o.label, personaForm.secondaryCategory===o.value, ()=>setPersonaForm(f=>({...f, secondaryCategory: f.secondaryCategory===o.value ? "" : o.value}))))}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              <div style={{fontSize:11,fontWeight:800,color:DB.sub,marginBottom:7,fontFamily:DB.font}}>회원이 실제로 한 말 (원문)</div>
+              <textarea value={personaForm.rawText} onChange={e=>setPersonaForm(f=>({...f, rawText:e.target.value}))}
+                placeholder="들은 표현을 그대로 적어주세요. 예: 헬스장을 세 번 등록했는데 뭘 해야 할지 몰라서 계속 안 가게 됐어요."
+                style={{width:"100%",boxSizing:"border-box",minHeight:104,resize:"vertical",border:`1px solid ${DB.border}`,background:DB.bg,borderRadius:12,padding:"11px 12px",fontSize:13.5,lineHeight:1.65,fontFamily:DB.font,color:DB.text}}/>
+              <div style={{fontSize:10.5,color:DB.faint,lineHeight:1.6,margin:"7px 0 15px",fontFamily:DB.font,wordBreak:"keep-all"}}>
+                카테고리로 요약만 하지 말고 회원의 말 그대로 남겨주세요. 블로그·광고·상담에 그대로 쓰이는 자산입니다.
+              </div>
+
+              <div style={{display:"flex",gap:8}}>
+                {existing && (
+                  <button type="button" disabled={personaSaving} onClick={clearPersonaAnswer}
+                    style={{border:`1px solid ${DB.border}`,background:DB.card,color:DB.faint,borderRadius:12,padding:"11px 13px",fontSize:12.5,fontWeight:700,cursor:personaSaving?"default":"pointer",fontFamily:DB.font,opacity:personaSaving?0.5:1,flexShrink:0}}>지우기</button>
+                )}
+                <button type="button" disabled={personaSaving} onClick={()=>setPersonaModal(null)}
+                  style={{flex:1,border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,borderRadius:12,padding:"11px 10px",fontSize:12.5,fontWeight:700,cursor:personaSaving?"default":"pointer",fontFamily:DB.font,opacity:personaSaving?0.5:1}}>취소</button>
+                <button type="button" disabled={personaSaving} onClick={savePersonaAnswer}
+                  style={{flex:1,border:"none",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,color:"#fff",borderRadius:12,padding:"11px 10px",fontSize:12.5,fontWeight:800,cursor:personaSaving?"default":"pointer",fontFamily:DB.font,boxShadow:"0 6px 18px rgba(57,199,184,.32)",opacity:personaSaving?0.6:1}}>{personaSaving?"저장 중...":"저장"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -26082,6 +26709,7 @@ function MetabolismScreen({ member, sessions=[], nutritionData, bodyData, onBack
 const ANALYTICS_GYM_REPORTS = [
   { key: "referral", icon: "📊", title: "유입 분석", sub: "방문 경로와 마케팅 성과" },
   { key: "memberInputStatus", icon: "🗂️", title: "회원 입력 현황", sub: "회원앱 입력 참여도 한눈에 보기" },
+  { key: "persona", icon: "🧭", title: "페르소나 분석", sub: "왜 PT를 시작했고, 왜 테오짐이었는가" },
 ];
 
 function AnalyticsReportScreen({ setScreen, loadMembers, loadPairSessions, showToast, onBack, onOpenReport }) {
@@ -26217,6 +26845,264 @@ function AcqStatTile({ label, value, unit, sub, delta, strong }) {
 
 function AcqEmpty({ msg }) {
   return <div style={{ fontFamily: DB.font, fontSize: 12.5, color: DB.faint, fontWeight: 600, padding: "14px 2px", lineHeight: 1.6 }}>{msg}</div>;
+}
+
+// ════════════════════════════════════════════
+// 페르소나 분석 — "어떤 상황의 누가, 테오짐의 무엇 때문에 등록하는가"
+//
+// 진입점: 관리자 홈 > 분석 리포트 > 페르소나 분석.
+// 데이터는 전부 members/{id}.persona 하나에서만 나오고(추가 Firestore read 없음),
+// 집계는 buildPersonaStats() 공용 헬퍼 하나만 사용한다(회원 상세·홈 카운트와 같은 판정).
+// 분모 규칙: 수집 현황은 "대상 회원 수", 카테고리 비율은 "그 질문에 답한 회원 수"다 — 절대 섞지 않는다.
+// ════════════════════════════════════════════
+const PERSONA_STATUS_FILTERS = [
+  { key: "all", label: "전체" },
+  { key: "active", label: "진행중" },
+  { key: "paused", label: "휴식중" },
+  { key: "ended", label: "종료" },
+];
+
+// 가로 막대 1줄 — 건수와 비율을 함께 보여주고, 분모는 카드 캡션에 명시한다.
+function PersonaBarRow({ label, count, pct, total, onClick, active }) {
+  return (
+    <button type="button" onClick={onClick} disabled={!onClick}
+      style={{ width: "100%", background: active ? DB.mintTint : "none", border: "none", borderRadius: 10, padding: "7px 8px", cursor: onClick ? "pointer" : "default", textAlign: "left", fontFamily: DB.font, display: "block" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: DB.text, minWidth: 0, flex: 1, wordBreak: "keep-all" }}>{label}</span>
+        <span style={{ fontSize: 12, fontWeight: 800, color: DB.mintSoft, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{count}명</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: DB.faint, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{pct}%</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 999, background: "rgba(15,23,42,.05)", overflow: "hidden" }}>
+        <div style={{ width: `${total ? Math.min(100, (count / total) * 100) : 0}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg,${DB.mint},${DB.mintSoft})` }} />
+      </div>
+    </button>
+  );
+}
+
+function PersonaAnalyticsScreen({ members = [], onBack, onOpenMember, setScreen, loadMembers, loadPairSessions, showToast }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState("all");
+  const [ageFilter, setAgeFilter] = useState("all");
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
+  const [quoteKey, setQuoteKey] = useState("ptTrigger");
+  const [quoteAnonymous, setQuoteAnonymous] = useState(false);
+  const [crossOpen, setCrossOpen] = useState({});
+  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const h = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  const isWide = winW >= 1024;
+  // 분석 리포트에서 바로 들어와도 회원 목록이 비어 있지 않도록 기존 로더를 1회 재사용한다.
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    if (!members.length) loadMembers?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 대상 회원(대표 계정·테스트 계정 제외)에 화면 필터를 적용한 모집단.
+  // 종료 회원도 장기 페르소나 데이터라 기본(전체)에 포함한다 — 홈 질문 대상 목록과는 기준이 다르다(의도된 차이).
+  const filteredMembers = useMemo(() => (members || []).filter(m => {
+    if (!isPersonaTargetMember(m)) return false;
+    if (statusFilter !== "all" && (m.status || "active") !== statusFilter) return false;
+    if (genderFilter !== "all" && personaGender(m) !== genderFilter) return false;
+    if (ageFilter !== "all" && personaAgeBand(m) !== ageFilter) return false;
+    return true;
+  }), [members, statusFilter, genderFilter, ageFilter]);
+  const stats = useMemo(() => buildPersonaStats(filteredMembers), [filteredMembers]);
+  const ageBands = useMemo(() => {
+    const set = new Set((members || []).filter(isPersonaTargetMember).map(personaAgeBand).filter(Boolean));
+    return [...set].sort();
+  }, [members]);
+  const genders = useMemo(() => {
+    const set = new Set((members || []).filter(isPersonaTargetMember).map(personaGender).filter(Boolean));
+    return [...set];
+  }, [members]);
+  const filterActive = statusFilter !== "all" || genderFilter !== "all" || ageFilter !== "all";
+
+  const chipStyle = (active) => ({
+    padding: "6px 13px", borderRadius: 999, cursor: "pointer", fontFamily: DB.font, fontSize: 12, fontWeight: active ? 800 : 700,
+    border: `1px solid ${active ? "transparent" : DB.border}`,
+    background: active ? `linear-gradient(135deg,${DB.mint},${DB.mintSoft})` : "#fff",
+    color: active ? "#fff" : DB.sub, whiteSpace: "nowrap",
+  });
+  const sampleNote = (n) => n === 0 ? "" : n < PERSONA_SMALL_SAMPLE ? `현재 표본 ${n}명 — 참고용 데이터입니다` : `응답자 ${n}명 기준`;
+  const quotes = useMemo(() => stats.quotes[quoteKey] || [], [stats, quoteKey]);
+  const quoteQuestion = PERSONA_CORE_QUESTIONS.find(q => q.key === quoteKey);
+  // 카테고리별로 묶어서 보여준다 — "어떤 문제를 가진 사람들이 실제로 어떻게 말하는가"가 한눈에 보이도록.
+  const groupedQuotes = useMemo(() => {
+    const map = new Map();
+    quotes.forEach(q => {
+      const k = q.category || "__none__";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(q);
+    });
+    return [...map.entries()]
+      .map(([value, list]) => ({ value, label: value === "__none__" ? "카테고리 미선택" : personaCategoryLabel(quoteKey, value), list }))
+      .sort((a, b) => b.list.length - a.list.length || a.label.localeCompare(b.label, "ko"));
+  }, [quotes, quoteKey]);
+
+  const content = (
+    <div style={{ flex: 1, overflowY: isWide ? "auto" : "visible", overscrollBehaviorY: isWide ? "contain" : undefined, minHeight: 0, height: isWide ? "var(--admin-layout-height, 100dvh)" : undefined, background: DB.bg, fontFamily: DB.font }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(246,247,249,.90)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", borderBottom: DB.hairline }}>
+        <div style={{ maxWidth: isWide ? 1100 : 820, margin: "0 auto", padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top,0px))" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <button onClick={onBack} aria-label="뒤로" style={{ width: 34, height: 34, borderRadius: 11, border: `1px solid ${DB.border}`, background: "#fff", color: DB.sub, fontSize: 15, cursor: "pointer", boxShadow: DB.shadow, flexShrink: 0 }}>←</button>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap", rowGap: 2 }}>
+              <span style={{ fontWeight: 800, fontSize: isWide ? 20 : 17, color: DB.text, letterSpacing: "-.4px", whiteSpace: "nowrap" }}>페르소나 분석</span>
+              <span style={{ fontWeight: 700, fontSize: 12, color: DB.faint }}>왜 PT를 시작했고, 왜 테오짐이었는가</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", rowGap: 6, alignItems: "center" }}>
+            {PERSONA_STATUS_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setStatusFilter(f.key)} style={chipStyle(statusFilter === f.key)}>{f.label}</button>
+            ))}
+            {(genders.length > 0 || ageBands.length > 0) && (
+              <button onClick={() => setShowMoreFilters(v => !v)} style={{ ...chipStyle(false), color: DB.faint }}>{showMoreFilters ? "필터 접기" : "필터 더보기"}</button>
+            )}
+            <span style={{ fontSize: 11.5, color: DB.faint, fontWeight: 700, marginLeft: 2 }}>대상 {stats.total}명</span>
+          </div>
+          {showMoreFilters && (
+            <div style={{ display: "grid", gap: 6, marginTop: 8, paddingBottom: 4 }}>
+              {genders.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: DB.faint, minWidth: 34 }}>성별</span>
+                  <button onClick={() => setGenderFilter("all")} style={chipStyle(genderFilter === "all")}>전체</button>
+                  {genders.map(g => <button key={g} onClick={() => setGenderFilter(g)} style={chipStyle(genderFilter === g)}>{g}</button>)}
+                </div>
+              )}
+              {ageBands.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: DB.faint, minWidth: 34 }}>연령</span>
+                  <button onClick={() => setAgeFilter("all")} style={chipStyle(ageFilter === "all")}>전체</button>
+                  {ageBands.map(a => <button key={a} onClick={() => setAgeFilter(a)} style={chipStyle(ageFilter === a)}>{a}</button>)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ maxWidth: isWide ? 1100 : 820, margin: "0 auto", padding: isWide ? "18px 28px calc(48px + env(safe-area-inset-bottom,0px))" : "14px 16px calc(48px + env(safe-area-inset-bottom,0px))", display: "grid", gap: 12 }}>
+
+        {/* ═══ 1. 데이터 수집 현황 — 분모는 항상 "대상 회원 수" ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10 }}>
+          <AcqStatTile strong label="핵심 질문 모두 기록" value={stats.bothCount} unit={`/ ${stats.total}명`}
+            sub={stats.total ? `대상 회원의 ${Math.round((stats.bothCount / stats.total) * 100)}%` : "대상 회원이 없습니다"} />
+          <AcqStatTile label="PT 시작 계기 기록" value={stats.triggerCount} unit={`/ ${stats.total}명`} />
+          <AcqStatTile label="테오짐 선택 이유 기록" value={stats.selectionCount} unit={`/ ${stats.total}명`} />
+          <AcqStatTile label="둘 다 미기록" value={stats.noneCount} unit="명"
+            sub={stats.noneCount ? "관리자 홈 > 페르소나 확인 필요에서 대상을 확인할 수 있습니다" : "모든 대상 회원에게 최소 한 가지는 기록됐습니다"} />
+        </div>
+        <div style={{ fontSize: 11.5, color: DB.faint, fontWeight: 600, lineHeight: 1.7, padding: "0 2px", wordBreak: "keep-all" }}>
+          대표 개인 운동기록 계정과 테스트 계정은 집계에서 제외됩니다. 미기록(null)은 어떤 비율 계산에도 포함하지 않습니다.
+          {filterActive ? " 현재 필터가 적용된 모집단 기준입니다." : ""}
+        </div>
+
+        {/* ═══ 2·3. 카테고리 TOP — 분모는 "그 질문에 답한 회원 수" ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: isWide ? "1fr 1fr" : "1fr", gap: 12 }}>
+          <AcqCard title="PT 시작 계기 TOP" sub={sampleNote(stats.trigger.responded)}>
+            {stats.trigger.rows.length === 0 ? <AcqEmpty msg="아직 기록된 PT 시작 계기가 없습니다." /> : (
+              <div style={{ display: "grid", gap: 2 }}>
+                {stats.trigger.rows.map(r => <PersonaBarRow key={r.value} label={r.label} count={r.count} pct={r.pct} total={stats.trigger.responded} />)}
+              </div>
+            )}
+          </AcqCard>
+          <AcqCard title="테오짐 선택 이유 TOP" sub={sampleNote(stats.selection.responded)}>
+            {stats.selection.rows.length === 0 ? <AcqEmpty msg="아직 기록된 선택 이유가 없습니다." /> : (
+              <div style={{ display: "grid", gap: 2 }}>
+                {stats.selection.rows.map(r => <PersonaBarRow key={r.value} label={r.label} count={r.count} pct={r.pct} total={stats.selection.responded} />)}
+              </div>
+            )}
+          </AcqCard>
+        </div>
+
+        {/* ═══ 4. 교차 분석 — "어떤 문제를 가진 사람이 테오짐의 어떤 장점 때문에 등록하는가" ═══ */}
+        <AcqCard title="PT 시작 계기 × 테오짐 선택 이유" sub={stats.cross.length ? `두 질문에 모두 답한 회원 ${stats.bothCount}명 기준` : ""}>
+          {stats.cross.length === 0 ? (
+            <AcqEmpty msg="두 질문에 모두 답한 회원이 아직 없어 교차 분석을 만들 수 없습니다." />
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {stats.cross.map(c => (
+                <div key={c.value} style={{ border: `1px solid ${DB.border}`, borderRadius: 14, background: DB.bg, padding: "11px 12px" }}>
+                  <button type="button" onClick={() => setCrossOpen(p => ({ ...p, [c.value]: !p[c.value] }))}
+                    style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: DB.font, display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: DB.text, wordBreak: "keep-all" }}>{c.label}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: DB.faint }}>{c.count}명</span>
+                    <span style={{ marginLeft: "auto", color: DB.faint, fontSize: 11, transform: crossOpen[c.value] === false ? "none" : "rotate(180deg)" }}>▼</span>
+                  </button>
+                  {crossOpen[c.value] !== false && (
+                    <div style={{ display: "grid", gap: 2, marginTop: 7 }}>
+                      {c.reasons.map(r => <PersonaBarRow key={r.value} label={r.label} count={r.count} pct={r.pct} total={c.count} />)}
+                      {c.count < PERSONA_SMALL_SAMPLE && (
+                        <div style={{ fontSize: 10.5, color: DB.faint, fontWeight: 700, padding: "4px 8px 0" }}>표본 {c.count}명 — 참고용</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </AcqCard>
+
+        {/* ═══ 5. 실제 고객 문장 — 카테고리로 요약하지 않은 원문 그대로 ═══ */}
+        <AcqCard title="실제 회원이 한 말"
+          sub="블로그 · 광고 · 랜딩페이지 · 상담에 그대로 쓸 수 있는 원문"
+          right={
+            <button type="button" onClick={() => setQuoteAnonymous(v => !v)} style={{ ...chipStyle(quoteAnonymous), fontSize: 11 }}>
+              {quoteAnonymous ? "익명 보기 켜짐" : "익명으로 보기"}
+            </button>
+          }>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 11 }}>
+            {PERSONA_CORE_QUESTIONS.map(q => (
+              <button key={q.key} onClick={() => setQuoteKey(q.key)} style={chipStyle(quoteKey === q.key)}>{q.label}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: DB.faint, fontWeight: 600, marginBottom: 9, lineHeight: 1.6, wordBreak: "keep-all" }}>
+            “{quoteQuestion?.question}” · 원문이 기록된 {quotes.length}명
+          </div>
+          {groupedQuotes.length === 0 ? (
+            <AcqEmpty msg="아직 기록된 원문이 없습니다. 회원 상세 > 고객 페르소나에서 회원의 말을 그대로 남겨주세요." />
+          ) : (
+            <div style={{ display: "grid", gap: 11 }}>
+              {groupedQuotes.map(g => (
+                <div key={g.value}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 7, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, padding: "3px 10px", borderRadius: 999, background: DB.mintTintStrong, color: DB.mintSoft }}>{g.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: DB.faint }}>{g.list.length}명</span>
+                  </div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {g.list.map(q => (
+                      <div key={`${q.memberId}-${quoteKey}`} onClick={() => { if (!quoteAnonymous) onOpenMember?.(q.memberId); }}
+                        style={{ border: `1px solid ${DB.border}`, borderRadius: 12, background: DB.bg, padding: "10px 12px", cursor: quoteAnonymous ? "default" : "pointer" }}>
+                        <div style={{ fontSize: 12.5, lineHeight: 1.7, color: DB.text, whiteSpace: "pre-line", wordBreak: "keep-all" }}>“{q.rawText}”</div>
+                        <div style={{ fontSize: 10.5, color: DB.faint, marginTop: 5, fontWeight: 700 }}>
+                          {quoteAnonymous ? `회원 ${String(q.memberId).slice(0, 4)}` : `${q.name} 회원`} · {MEMBER_STATUS_LABEL[q.status] || q.status} · {formatCompactDate(q.updatedAt)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </AcqCard>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={isWide ? "admin-scroll-shell" : undefined}
+      style={{ display: "flex", height: isWide ? "var(--admin-layout-height, 100dvh)" : "auto", minHeight: isWide ? undefined : "100dvh", background: DB.bg, overflow: isWide ? "hidden" : "visible" }}>
+      {isWide && (
+        <AdminSidebar active="report" setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} goCs={() => showToast?.("아직 준비 중인 기능입니다.")} />
+      )}
+      {content}
+    </div>
+  );
 }
 
 function ReferralStatsScreen({

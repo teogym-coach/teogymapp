@@ -520,6 +520,35 @@ const unsentToday = daysAgoStr(0);
 // "1년 전"은 항상 cutoff 이전으로 취급해도 안전하다.
 const unsentPublishedAfterCutoff = new Date().toISOString();
 const unsentPublishedBeforeCutoff = new Date(Date.now() - 365 * 86400000).toISOString();
+// ── 고객 페르소나(TEO GYM PERSONA): 실제 실행 시나리오 검증 ──
+// 홈 카운트·회원 상세 진행 뱃지·분석 집계가 전부 같은 헬퍼 하나에서 나오는지 확인하기 위해,
+// 로직을 다시 옮겨 적지 않고 App.jsx 원본에서 순수 함수 구간만 그대로 슬라이스해 실행한다.
+let personaLib = null;
+try {
+  const sliceOwner = app.slice(app.indexOf('const OWNER_LEGACY_NAME'), app.indexOf('// 회원 상세(HubScreen)·수업일지 작성 화면의 "회원 연동 기능"'));
+  const sliceNext = app.slice(app.indexOf('function getMemberNextSessionInfo'), app.indexOf('// 오늘 완료 회원 카드에서'));
+  const slicePersona = app.slice(app.indexOf('const PERSONA_TRIGGER_OPTIONS = ['), app.indexOf('// 홈 "수업일지 미전송" — 예약'));
+  personaLib = new Function(`${sliceOwner}\n${sliceNext}\n${slicePersona}\nreturn { PERSONA_CORE_QUESTIONS, PERSONA_EXTRA_QUESTIONS, PERSONA_TRIGGER_OPTIONS, PERSONA_SELECTION_OPTIONS, getPersonaEntry, hasPersonaAnswer, getPersonaProgress, personaMissingLabel, personaCategoryLabel, isPersonaTargetMember, isPersonaAskTargetMember, buildPersonaPendingList, getPersonaCoverage, buildPersonaStats, personaAgeBand, personaGender };`)();
+} catch (e) {
+  console.error('[regression] 고객 페르소나 헬퍼 추출 실패:', e.message);
+}
+function personaScenario(name, fn) {
+  if (!personaLib) return [name, false];
+  try { return [name, !!fn(personaLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+// 시나리오 공용 픽스처 — 실제 members 문서 모양 그대로(persona는 members 문서의 필드 하나다)
+const personaMock = (id, over = {}) => ({ id, name: id, status: 'active', ...over });
+const personaEntry = (category, rawText) => ({ category, rawText, source: 'admin_interview', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z' });
+const personaFixture = () => [
+  personaMock('none'),                                                                     // 0/2
+  personaMock('trigOnly', { persona: { ptTrigger: personaEntry('solo_fail', '혼자 하면 계속 안 가게 돼서요') } }), // 1/2
+  personaMock('done', { persona: { ptTrigger: personaEntry('pain', '허리가 계속 아파서'), selectionReason: personaEntry('owner_class', '대표님이 직접 봐주셔서') } }),
+  personaMock('ended', { status: 'ended', persona: { ptTrigger: personaEntry('weight_gain', '체중이 확 늘어서') } }),
+  personaMock('테스트', { isTestMember: true }),
+  personaMock('대표', { isOwner: true }),
+];
+
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('addSession(member.id, { ...payload, createdAt: now })') && app.includes('updateSession(member.id, editSess.id, payload)') && app.includes('await withTimeout(writePromise')],
   ['수업일지 저장: 좁은 화면 무한 로딩 원인(SessionScreen 저장 버튼에 중복 클릭 가드·저장 중 표시가 전혀 없던 문제) 수정', (() => {
@@ -5797,8 +5826,10 @@ const checks = [
     app.includes('.reduce(acqPickNewerCandidate, null);') &&
     !app.includes('acqArr(sv.visitRoutes).forEach(pushSource);') // 예전 "전부 합산" 방식이 남아있지 않은지 확인
   ],
+  // 호출 개수를 정확히 2로 고정하면 같은 공용 selector를 쓰는 정당한 새 호출부(회원 상세 고객 페르소나 등)까지
+  // 회귀로 잡히므로, "공용 selector를 쓴다 + 옛 인라인 방식이 남아있지 않다"만 검증한다(원래 의도 그대로).
   ['유입 분석: 회원 상세(사전 문진 카드)도 같은 정규화 함수를 사용한다(표기 불일치 방지)',
-    (app.match(/normalizeMemberAcquisitionData\(member, ob\)/g) || []).length === 2 &&
+    (app.match(/normalizeMemberAcquisitionData\(member, ob\)/g) || []).length >= 2 &&
     !app.includes("const legacyRoutes = Array.isArray(member?.survey?.visitRoutes)")
   ],
   ['유입 분석: 온보딩 유입 응답은 기존 memberOnboarding/main을 읽기만 하고 새 컬렉션·필드를 만들지 않는다',
@@ -7052,6 +7083,150 @@ const checks = [
     !app.includes('<span>목표 달성률</span>') &&
     app.includes('function getWeightGoalProgress(')
   ],
+
+  // ── 고객 페르소나(TEO GYM PERSONA) ──────────────────────────────
+  ['페르소나: 저장 위치는 members/{id}.persona 필드 하나뿐 — 새 컬렉션·새 db 함수를 만들지 않고 기존 updateMember를 그대로 쓴다',
+    app.includes('await updateMember(member.id, { persona: nextPersona });') &&
+    !/persona/i.test(db.replace(/personal/gi, '').replace(/PERSONAL/g, ''))
+  ],
+  ['페르소나: 회원은 이 필드를 수정할 수 없다(memberProfileUpdateKeysAllowed 화이트리스트 밖) — Rules 변경 없이 관리자 전용이 유지된다',
+    !memberUpdateFn.includes('"persona"') && !memberUpdateFn.includes('persona')
+  ],
+  ['페르소나: 회원앱(MemberApp)은 persona 필드를 전혀 읽지 않는다',
+    (() => {
+      const s = app.slice(app.indexOf('function MemberApp({ onLogout }) {'), app.indexOf('function MemberAppError({message,details,logs,onRetry,onLogout}){'));
+      return !/\.persona\b/.test(s) && !s.includes('PERSONA_') && !s.includes('getPersonaProgress');
+    })()
+  ],
+  ['페르소나: 미입력 여부는 파생 계산만 사용하고 personaCompleted 같은 상태 필드를 저장하지 않는다',
+    !app.includes('personaCompleted') && !app.includes('needsPersonaQuestion') &&
+    !app.includes('missingPtTrigger') && !app.includes('missingSelectionReason') &&
+    app.includes('function getPersonaProgress(member)')
+  ],
+  ['페르소나: 홈 카드·목록은 이미 로드된 회원 목록만 쓰고 추가 Firestore 조회를 하지 않는다',
+    app.includes('buildPersonaPendingList(regularHomeMembers, liveMembersById, todayMemberIds, todayKST)') &&
+    app.includes('getPersonaCoverage(regularHomeMembers, liveMembersById)')
+  ],
+  ['페르소나: 오늘 수업 우선 표시는 홈이 이미 만든 todayMemberIds(getTodaySessionStatus·2:1 그룹 포함)를 재사용하고 새 날짜 필드를 만들지 않는다',
+    app.includes('const todayMemberIds = useMemo(() => new Set(todaySess.flatMap(x => x.isPair ? [x.m.id, x.mB.id] : [x.m.id])), [todaySess]);') &&
+    app.includes('const personaTodayRows = useMemo(() => personaPendingList.filter(r => r.isToday), [personaPendingList]);')
+  ],
+  ['페르소나: 회원 상세는 stale member prop 대신 실시간 구독값(liveMembersById)을 우선해 방금 저장한 답변을 즉시 반영한다',
+    app.includes('const livePersona = liveMembersById[member.id]?.persona ?? member.persona;')
+  ],
+  ['페르소나: 저장 후 전체 회원 reload 없이 로컬 state(onMemberPatch)만 갱신한다',
+    (() => {
+      const i = app.indexOf('const savePersonaAnswer = async () => {');
+      const j = app.indexOf('const clearPersonaAnswer = async () => {');
+      const s = app.slice(i, j);
+      return i > 0 && j > i && s.includes('onMemberPatch({ persona: nextPersona });') && !s.includes('loadMembers');
+    })()
+  ],
+  ['페르소나: 회원의 실제 답변 원문(rawText)을 카테고리와 함께 반드시 저장한다',
+    app.includes('rawText, // 회원이 실제로 한 말') &&
+    app.includes('category,') && app.includes('secondaryCategory: String(personaForm.secondaryCategory || "").trim(),')
+  ],
+  ['페르소나: 기존 데이터(운동 목표·유입 경로·상담 결정 접점)는 복사 저장하지 않고 공용 selector로 읽기만 한다',
+    app.includes('const personaAcq = normalizeMemberAcquisitionData(member, ob);') &&
+    app.includes('{personaCtxRow("상담 결정 접점", personaAcq.decisionTouch || "미기재")}')
+  ],
+  ['페르소나: 분석 화면은 분석 리포트에 등록되고 members/{id}.persona만 읽는다',
+    app.includes(`{ key: "persona", icon: "🧭", title: "페르소나 분석", sub: "왜 PT를 시작했고, 왜 테오짐이었는가" },`) &&
+    app.includes('{screen==="persona" && <PersonaAnalyticsScreen') &&
+    app.includes('const stats = useMemo(() => buildPersonaStats(filteredMembers), [filteredMembers]);')
+  ],
+  personaScenario('페르소나: 답변이 없으면 0/2, 하나 기록하면 1/2, 둘 다 기록하면 완료로 진행 상태가 바뀐다',
+    lib => {
+      const empty = lib.getPersonaProgress(personaMock('a'));
+      const one = lib.getPersonaProgress(personaFixture()[1]);
+      const two = lib.getPersonaProgress(personaFixture()[2]);
+      return empty.completed === 0 && empty.done === false && lib.personaMissingLabel(empty.missing) === '두 질문 모두'
+        && one.completed === 1 && one.done === false && lib.personaMissingLabel(one.missing) === '테오짐 선택 이유'
+        && two.completed === 2 && two.done === true && two.missing.length === 0;
+    }
+  ),
+  personaScenario('페르소나: 카테고리도 원문도 없는 빈 객체는 "기록됨"으로 세지 않는다(빈 저장으로 완료 처리 금지)',
+    lib => !lib.hasPersonaAnswer({ persona: { ptTrigger: { category: '', rawText: '   ' } } }, 'ptTrigger')
+      && lib.hasPersonaAnswer({ persona: { ptTrigger: { category: '', rawText: '메모만 남김' } } }, 'ptTrigger')
+  ),
+  personaScenario('페르소나 홈 목록: 완료 회원·종료 회원·테스트/대표 계정은 질문 대상에서 빠지고, 미완료 회원만 남는다',
+    lib => {
+      const rows = lib.buildPersonaPendingList(personaFixture(), {}, new Set(), '2026-08-24');
+      return rows.length === 2 && rows.every(r => ['none', 'trigOnly'].includes(r.member.id));
+    }
+  ),
+  personaScenario('페르소나 홈 목록: 오늘 수업 회원이 항상 맨 위, 그 다음은 다음 수업 예정일이 빠른 회원 순이다',
+    lib => {
+      const rows = lib.buildPersonaPendingList([
+        personaMock('가나중', { nextWorkoutDate: '2026-08-30' }),
+        personaMock('나오늘'),
+        personaMock('다내일', { nextWorkoutDate: '2026-08-25' }),
+        personaMock('라미정'),
+      ], {}, new Set(['나오늘']), '2026-08-24');
+      return rows.map(r => r.member.id).join(',') === '나오늘,다내일,가나중,라미정';
+    }
+  ),
+  personaScenario('페르소나 홈 목록: 지난 날짜의 다음 수업 예정일은 "오늘 회원"이나 임박 회원으로 잘못 잡히지 않는다',
+    lib => {
+      const rows = lib.buildPersonaPendingList([
+        personaMock('과거', { nextWorkoutDate: '2026-08-01' }),
+        personaMock('미래', { nextWorkoutDate: '2026-08-26' }),
+      ], {}, new Set(), '2026-08-24');
+      return rows[0].member.id === '미래' && rows[0].nextDate === '2026-08-26'
+        && rows[1].member.id === '과거' && rows[1].nextDate === '' && rows[1].isToday === false;
+    }
+  ),
+  personaScenario('페르소나 홈 목록: 실시간 구독(liveMembersById)에 방금 저장된 답변이 오면 members 스냅샷이 낡아도 목록에서 즉시 빠진다',
+    lib => {
+      const stale = [personaMock('m1')];
+      const live = { m1: { id: 'm1', name: 'm1', status: 'active', persona: { ptTrigger: personaEntry('pain', '허리'), selectionReason: personaEntry('trial_class', '체험수업이 좋아서') } } };
+      return lib.buildPersonaPendingList(stale, live, new Set(), '2026-08-24').length === 0
+        && lib.getPersonaCoverage(stale, live).done === 1;
+    }
+  ),
+  personaScenario('페르소나 진행률: 분모는 종료 회원·테스트 계정을 뺀 질문 대상 회원 수다',
+    lib => {
+      const c = lib.getPersonaCoverage(personaFixture(), {});
+      return c.total === 3 && c.done === 1 && c.pct === 33;
+    }
+  ),
+  personaScenario('페르소나 분석: 종료 회원은 분석에 포함하고(장기 데이터), 테스트/대표 계정만 제외한다',
+    lib => {
+      const s = lib.buildPersonaStats(personaFixture());
+      return s.total === 4 && s.triggerCount === 3 && s.selectionCount === 1 && s.bothCount === 1 && s.noneCount === 1;
+    }
+  ),
+  personaScenario('페르소나 분석: 카테고리 비율의 분모는 전체 대상이 아니라 "그 질문에 답한 회원 수"다(미입력 제외)',
+    lib => {
+      const s = lib.buildPersonaStats(personaFixture());
+      // 대상 4명 중 3명이 계기를 기록 → 각 카테고리 1명은 33.3%(1/3)이지 25%(1/4)가 아니다
+      return s.trigger.responded === 3 && s.trigger.rows.length === 3 && s.trigger.rows.every(r => r.count === 1 && r.pct === 33.3);
+    }
+  ),
+  personaScenario('페르소나 분석: 교차 분석은 두 질문에 모두 답한 회원만 분모로 쓴다',
+    lib => {
+      const s = lib.buildPersonaStats(personaFixture());
+      return s.cross.length === 1 && s.cross[0].value === 'pain' && s.cross[0].count === 1
+        && s.cross[0].reasons.length === 1 && s.cross[0].reasons[0].value === 'owner_class' && s.cross[0].reasons[0].pct === 100;
+    }
+  ),
+  personaScenario('페르소나 분석: 실제 회원 문장(원문)은 카테고리로 요약되지 않고 그대로 보존된다',
+    lib => {
+      const s = lib.buildPersonaStats(personaFixture());
+      return s.quotes.ptTrigger.length === 3
+        && s.quotes.ptTrigger.some(q => q.rawText === '혼자 하면 계속 안 가게 돼서요' && q.category === 'solo_fail');
+    }
+  ),
+  personaScenario('페르소나: 옵션 표에 없는 카테고리 값이 들어와도 원문 값을 그대로 보여준다(라벨 변경·확장 시 데이터 유실 금지)',
+    lib => lib.personaCategoryLabel('ptTrigger', 'brand_new_reason') === 'brand_new_reason'
+      && lib.personaCategoryLabel('ptTrigger', 'solo_fail') === '혼자 운동하다 실패'
+  ),
+  personaScenario('페르소나: 기존 회원의 운동 목표를 보고 시작 계기를 자동 추론해 채워 넣지 않는다(미입력은 미입력으로 남는다)',
+    lib => {
+      const m = personaMock('goalOnly', { goal: '다이어트' });
+      return lib.getPersonaEntry(m, 'ptTrigger') === null && lib.getPersonaProgress(m).completed === 0;
+    }
+  ),
 ];
 
 let failed = 0;

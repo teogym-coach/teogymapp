@@ -970,10 +970,10 @@ const checks = [
     db.includes('export async function getMemberPrivate') &&
     db.includes('saveMemberPrivateFields')
   ],
-  ['addMember: memo·ticketInfo 주문서 미포함',
+  ['addMember: memo·ticketInfo·persona 주문서 미포함(관리자 전용 필드는 private 서브컬렉션에만 저장)',
     (() => {
       const fn = db.slice(db.indexOf('export async function addMember'), db.indexOf('export async function updateMember'));
-      return fn.includes('const { memo, ticketInfo, ...publicData } = data') &&
+      return fn.includes('const { memo, ticketInfo, persona, ...publicData } = data') &&
              fn.includes('saveMemberPrivateFields') &&
              !fn.includes('"memo"') && !fn.includes("memo,\n");
     })()
@@ -7088,9 +7088,46 @@ const checks = [
   ],
 
   // ── 고객 페르소나(TEO GYM PERSONA) ──────────────────────────────
-  ['페르소나: 저장 위치는 members/{id}.persona 필드 하나뿐 — 새 컬렉션·새 db 함수를 만들지 않고 기존 updateMember를 그대로 쓴다',
-    app.includes('await updateMember(member.id, { persona: nextPersona });') &&
-    !/persona/i.test(db.replace(/personal/gi, '').replace(/PERSONAL/g, ''))
+  // ── 보안: 고객 페르소나는 회원에게 절대 내려가지 않는다 ──
+  // members/{id}에 두면 회원 본인이 자기 문서를 읽을 때(getMemberAppProfile이 문서 전체를 스프레드)
+  // 대표가 쓴 원문까지 클라이언트로 내려간다. Firestore 규칙은 문서 단위라 필드만 숨길 수 없으므로
+  // memo/ticketInfo와 같은 관리자 전용 서브컬렉션(members/{id}/private/admin)에만 저장한다.
+  ['페르소나 보안: 저장 위치는 members/{id}/private/admin.persona — members 문서(회원이 읽는 주문서)에는 절대 남기지 않는다',
+    (() => {
+      const upd = db.slice(db.indexOf('export async function updateMember'), db.indexOf('export async function cleanupMemberAppEmailIdentity'));
+      return upd.includes('const { memo, ticketInfo, persona, ...publicData } = data')      // public payload에서 제외
+        && upd.includes("hasPrivate = 'memo' in data || 'ticketInfo' in data || 'persona' in data")
+        && upd.includes("if ('persona' in data) privatePayload.persona = persona ?? {};")   // private 서브컬렉션에만 저장
+        && upd.includes("if ('persona' in before) mainUpdate.persona = deleteField();")     // 레거시 필드 삭제
+        && app.includes('await updateMember(member.id, { persona: nextPersona });');
+    })()
+  ],
+  ['페르소나 보안: 회원 목록·분석이 읽는 경로도 private 서브컬렉션 하나뿐(members 문서에서 읽지 않는다)',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function getMemberPersonaMap'), db.indexOf('// 1회성 마이그레이션'));
+      return fn.includes('doc(db, "members", id, "private", "admin")') && fn.includes('snap.data()?.persona');
+    })()
+  ],
+  ['페르소나 보안: private 저장은 맵 병합이 아니라 교체 — 지운 질문이 되살아나지 않는다',
+    (() => {
+      const fn = db.slice(db.indexOf('async function saveMemberPrivateFields'), db.indexOf('// ── 고객 페르소나(관리자 전용)'));
+      return fn.includes('const { persona, ...mergeable } = privatePayload;')
+        && fn.includes('await updateDoc(privateRef, { persona, updatedAt: serverTimestamp() });');
+    })()
+  ],
+  ['페르소나 보안: 초기 배포에서 members 문서에 저장된 레거시 값을 private으로 옮기고 원본을 삭제한다(값 손실 없이 1회 실행)',
+    db.includes('export async function migrateMemberPersonaToPrivate') &&
+    db.includes('await updateDoc(doc(db, "members", m.id), { persona: deleteField() });') &&
+    app.includes('const { moved } = await migrateMemberPersonaToPrivate(legacy);')
+  ],
+  ['페르소나 보안: 휴식·종료 회원이 관리자 URL로 들어와도 관리자 화면이 렌더링되지 않는다(회원앱으로 되돌림)',
+    (() => {
+      const guard = app.slice(app.indexOf('getMemberAppProfile().then(profile => {'), app.indexOf('// 관리자앱 전용 안정된 layout 높이'));
+      return guard.includes('if (!e?.isOwner && (code === "member/paused" || code === "member/ended" || code === "member/inactive"))')
+        && guard.includes('window.location.replace("/member");')
+        // 대표 본인 기록이 휴식·종료가 되어도 관리자앱에서 잠기면 안 된다(복구 화면이 관리자앱 안에 있음)
+        && db.includes('err.isOwner = data.isOwner === true || data.role === "owner";');
+    })()
   ],
   ['페르소나: 회원은 이 필드를 수정할 수 없다(memberProfileUpdateKeysAllowed 화이트리스트 밖) — Rules 변경 없이 관리자 전용이 유지된다',
     !memberUpdateFn.includes('"persona"') && !memberUpdateFn.includes('persona')
@@ -7114,8 +7151,10 @@ const checks = [
     app.includes('const todayMemberIds = useMemo(() => new Set(todaySess.flatMap(x => x.isPair ? [x.m.id, x.mB.id] : [x.m.id])), [todaySess]);') &&
     app.includes('const personaTodayRows = useMemo(() => personaPendingList.filter(r => r.isToday), [personaPendingList]);')
   ],
-  ['페르소나: 회원 상세는 stale member prop 대신 실시간 구독값(liveMembersById)을 우선해 방금 저장한 답변을 즉시 반영한다',
-    app.includes('const livePersona = liveMembersById[member.id]?.persona ?? member.persona;')
+  ['페르소나: 회원 상세는 private 서브컬렉션 값(member.persona)을 우선하고, 저장 직후에도 낡은 값이 덮어쓰지 않는다',
+    app.includes('const livePersona = member.persona ?? liveMembersById[member.id]?.persona ?? null;') &&
+    // onMemberPatch가 memberPrivateData까지 함께 갱신하지 않으면 저장 직후 이전 값이 다시 화면을 덮는다.
+    app.includes("if ('persona' in patch) setMemberPrivateData(prev=>({...(prev||{}), persona: patch.persona}));")
   ],
   ['페르소나: 저장 후 전체 회원 reload 없이 로컬 state(onMemberPatch)만 갱신한다',
     (() => {

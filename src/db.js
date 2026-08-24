@@ -401,10 +401,61 @@ export async function getMemberPrivate(memberId) {
   return snap.data();
 }
 
+// 주의: setDoc({merge:true})는 맵 값을 "깊은 병합"한다. persona처럼 맵 안의 키를 지워야 하는 필드는
+// 병합으로 저장하면 지운 질문이 그대로 살아남으므로, persona만 맵 전체를 교체하는 경로로 따로 쓴다.
+// (문서가 아직 없을 수 있으므로 먼저 merge로 만들고, 그 다음 updateDoc으로 persona 맵을 통째로 교체한다.)
 async function saveMemberPrivateFields(memberId, privatePayload) {
   if (Object.keys(privatePayload).length === 0) return;
   const privateRef = doc(db, "members", memberId, "private", "admin");
-  await setDoc(privateRef, { ...privatePayload, updatedAt: serverTimestamp() }, { merge: true });
+  const { persona, ...mergeable } = privatePayload;
+  await setDoc(privateRef, { ...mergeable, updatedAt: serverTimestamp() }, { merge: true });
+  if (persona !== undefined) {
+    await updateDoc(privateRef, { persona, updatedAt: serverTimestamp() });
+  }
+}
+
+// ── 고객 페르소나(관리자 전용) ─────────────────────────────
+// members/{id}/private/admin.persona 만 모아온다 — memo/ticketInfo까지 홈 화면 메모리에 올리지 않기 위해
+// getMemberPrivate 전체를 쓰지 않고 persona만 뽑는다. 이 경로는 Firestore catch-all 규칙
+// (members/{id}/{subCollection}/{docId} → isTrainerOfMember)으로 회원이 접근 자체를 할 수 없다.
+export async function getMemberPersonaMap(memberIds = []) {
+  const entries = await Promise.all((memberIds || []).map(async id => {
+    try {
+      const snap = await getDoc(doc(db, "members", id, "private", "admin"));
+      const persona = snap.exists() ? (snap.data()?.persona || null) : null;
+      return [id, persona && Object.keys(persona).length ? persona : null];
+    } catch (e) {
+      console.warn("[DB:getMemberPersonaMap] 조회 실패", { memberId: id, code: e?.code });
+      return [id, null];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+// 1회성 마이그레이션 — 초기 배포에서 members/{id}.persona(회원이 본인 문서를 읽을 때 함께 내려가던 위치)에
+// 저장된 값을 private 서브컬렉션으로 옮기고 원본 필드를 삭제한다. 관리자가 회원 목록을 열 때 자동 실행되며,
+// 옮길 데이터가 없으면 아무 write도 하지 않는다. 값은 절대 버리지 않는다(이전 후 삭제).
+export async function migrateMemberPersonaToPrivate(members = []) {
+  const targets = (members || []).filter(m => m?.id && m.persona && Object.keys(m.persona).length > 0);
+  if (targets.length === 0) return { moved: 0 };
+  let moved = 0;
+  for (const m of targets) {
+    try {
+      const privateRef = doc(db, "members", m.id, "private", "admin");
+      const existing = await getDoc(privateRef);
+      const already = existing.exists() ? existing.data()?.persona : null;
+      // private 쪽이 이미 채워져 있으면 그 값이 최신이다(관리자가 새 코드로 저장한 뒤 목록만 낡은 경우) — 덮어쓰지 않는다.
+      if (!already || Object.keys(already).length === 0) {
+        await saveMemberPrivateFields(m.id, { persona: m.persona });
+      }
+      await updateDoc(doc(db, "members", m.id), { persona: deleteField() });
+      moved += 1;
+    } catch (e) {
+      console.warn("[DB:migrateMemberPersonaToPrivate] 이전 실패", { memberId: m.id, code: e?.code, message: e?.message });
+    }
+  }
+  dbLog("migrateMemberPersonaToPrivate", `${moved}건 이전 완료 (members.persona → private/admin)`);
+  return { moved };
 }
 
 // 유입 분석이 "가장 최근 방문계기 기록"을 판단하려면 방문계기(survey.visit*)를 실제로 언제 고쳤는지가
@@ -431,8 +482,8 @@ function computeVisitUpdatedAt(prevSurvey, nextSurvey) {
 export async function addMember(data) {
   const uid = requireUid();
   dbLog("addMember", data.name);
-  // memo/ticketInfo → private 서브컬렉션으로 분리 (회원이 members 주문서에서 읽지 못하게)
-  const { memo, ticketInfo, ...publicData } = data;
+  // memo/ticketInfo/persona → private 서브컬렉션으로 분리 (회원이 members 주문서에서 읽지 못하게)
+  const { memo, ticketInfo, persona, ...publicData } = data;
   const payload = {
     ...clean(normalizeMemberData(publicData)),
     trainerUid: uid,
@@ -444,8 +495,8 @@ export async function addMember(data) {
     payload.survey = { ...payload.survey, visitUpdatedAt: serverTimestamp() };
   }
   const ref = await addDoc(collection(db, "members"), payload);
-  if (memo || ticketInfo) {
-    await saveMemberPrivateFields(ref.id, clean({ memo, ticketInfo }));
+  if (memo || ticketInfo || persona) {
+    await saveMemberPrivateFields(ref.id, clean({ memo, ticketInfo, persona }));
   }
   dbLog("addMember", `생성 완료: ${ref.id} (회원앱은 members.memberUid 직접 조회)`);
   return { id: ref.id, ...data, trainerUid: uid };
@@ -460,10 +511,13 @@ export async function updateMember(id, data) {
   const before = snap.data();
   if (before.trainerUid !== uid) throw new Error("권한이 없습니다.");
 
-  // memo/ticketInfo → private 서브컬렉션으로 분리
-  const { memo, ticketInfo, ...publicData } = data;
+  // memo/ticketInfo/persona → private 서브컬렉션으로 분리
+  // persona(고객 페르소나)는 대표가 회원에 대해 기록하는 관리자 전용 메모다. members 문서에 두면
+  // 회원 본인이 자기 문서를 읽을 때(getMemberAppProfile) 원문까지 그대로 클라이언트로 내려가므로
+  // memo/ticketInfo와 동일하게 private 서브컬렉션에만 저장한다(회원은 Rules catch-all로 접근 자체가 불가).
+  const { memo, ticketInfo, persona, ...publicData } = data;
   const normalized = clean(normalizeMemberData(publicData));
-  const hasPrivate = 'memo' in data || 'ticketInfo' in data;
+  const hasPrivate = 'memo' in data || 'ticketInfo' in data || 'persona' in data;
 
   // 방문계기 필드가 실제로 바뀐 경우에만 survey.visitUpdatedAt을 새로 찍는다(그 외엔 기존 값을 그대로 이어간다).
   if (normalized.survey) {
@@ -480,6 +534,7 @@ export async function updateMember(id, data) {
   // 기존에 주문서에 남아있는 민감 필드 제거 (1회성 마이그레이션)
   if ('memo' in before) mainUpdate.memo = deleteField();
   if ('ticketInfo' in before) mainUpdate.ticketInfo = deleteField();
+  if ('persona' in before) mainUpdate.persona = deleteField();
 
   await updateDoc(memberRef, mainUpdate);
 
@@ -488,6 +543,8 @@ export async function updateMember(id, data) {
     const privatePayload = {};
     if ('memo' in data) privatePayload.memo = memo ?? "";
     if ('ticketInfo' in data) privatePayload.ticketInfo = ticketInfo ?? "";
+    // persona는 맵 전체를 통째로 교체한다(질문 1건 삭제가 반영되어야 하므로 merge로 남기지 않는다).
+    if ('persona' in data) privatePayload.persona = persona ?? {};
     await saveMemberPrivateFields(id, privatePayload);
   }
   dbLog("updateMember", "완료");
@@ -1881,7 +1938,10 @@ export async function getMemberAppProfile() {
     debugMemberProfile("7) 실패 지점: db.js getMemberAppProfile status 차단 분기 (member/inactive) — rawStatus:", rawStatus, "statusIsActive:", statusIsActive, "isActive:", data.isActive);
     const err = new Error(friendly ? friendly.body : "현재 회원앱 이용이 제한된 상태입니다. 이용이 필요하시면 대표에게 문의해주세요.");
     err.code = isPausedStatus ? "member/paused" : isEndedStatus ? "member/ended" : "member/inactive";
-    err.memberAppDetails = { code: err.code, title: friendly?.title, matchedMemberId: memberDoc.id };
+    // 대표(owner) 본인 기록 문서의 상태가 실수로 휴식·종료가 되어도 관리자앱에서 잠기면 안 된다
+    // (그 상태를 되돌리는 화면이 관리자앱 안에 있다). 호출부가 owner 여부로 예외 처리할 수 있도록 함께 넘긴다.
+    err.isOwner = data.isOwner === true || data.role === "owner";
+    err.memberAppDetails = { code: err.code, title: friendly?.title, matchedMemberId: memberDoc.id, isOwner: err.isOwner };
     throw err;
   }
 

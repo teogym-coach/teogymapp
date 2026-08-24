@@ -1453,6 +1453,105 @@ describe("TEO GYM Firestore Rules v8", function () {
   });
 
   // ════════════════════════════════════════════════════
+  // 12-1. 고객 페르소나(TEO GYM PERSONA) — 관리자 전용
+  // 저장 위치: members/{id}/private/admin.persona (catch-all 규칙으로 회원 접근 차단)
+  // "UI에서 안 보인다"가 아니라 "회원 권한으로는 존재 자체에 접근할 수 없다"를 검증한다.
+  // ════════════════════════════════════════════════════
+  describe("12-1. 고객 페르소나 — 회원은 읽기·쓰기 모두 불가", () => {
+    const personaDoc = {
+      persona: {
+        ptTrigger: { category: "solo_fail", rawText: "헬스장을 세 번 등록했는데 뭘 해야 할지 몰랐어요.", source: "admin_interview" },
+        selectionReason: { category: "owner_class", rawText: "대표님이 직접 봐주셔서요.", source: "admin_interview" },
+      },
+      memo: "관리자 메모",
+    };
+    beforeEach(async () => {
+      await seedMembers({ "member_a": memberActive, "member_b": memberB, "member_p": memberPaused, "member_e": memberEnded });
+      await seedSubcollection("member_a", "private", "admin", personaDoc);
+      await seedSubcollection("member_b", "private", "admin", personaDoc);
+    });
+
+    it("[관리자] 본인 회원의 persona read 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      const snap = await assertSucceeds(db.collection("members").doc("member_a").collection("private").doc("admin").get());
+      assert.equal(snap.data().persona.ptTrigger.category, "solo_fail");
+    });
+
+    it("[관리자] persona write(생성·수정) 허용", async () => {
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(
+        db.collection("members").doc("member_a").collection("private").doc("admin")
+          .set({ persona: { ptTrigger: { category: "pain", rawText: "허리가 아파서요" } } }, { merge: true })
+      );
+    });
+
+    it("[진행중 회원] 자기 자신의 persona read 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_a").collection("private").doc("admin").get());
+    });
+
+    it("[진행중 회원] 자기 자신의 persona write 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").collection("private").doc("admin")
+          .set({ persona: { ptTrigger: { category: "other", rawText: "직접 넣기" } } }, { merge: true })
+      );
+    });
+
+    it("[진행중 회원] 다른 회원의 persona read 차단", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_b").collection("private").doc("admin").get());
+    });
+
+    it("[휴식중·종료 회원] persona read 차단", async () => {
+      await assertFails(asUser(testEnv, "paused_uid").collection("members").doc("member_a").collection("private").doc("admin").get());
+      await assertFails(asUser(testEnv, "ended_uid").collection("members").doc("member_a").collection("private").doc("admin").get());
+    });
+
+    it("[다른 헬스장 트레이너·비로그인] persona read 차단", async () => {
+      await assertFails(asUser(testEnv, STRANGER_UID).collection("members").doc("member_a").collection("private").doc("admin").get());
+      await assertFails(asAnon(testEnv).collection("members").doc("member_a").collection("private").doc("admin").get());
+    });
+
+    it("[종단 확인] 관리자가 persona를 저장한 뒤 회원이 자기 문서를 읽어도 persona가 존재하지 않는다", async () => {
+      const admin = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(
+        admin.collection("members").doc("member_a").collection("private").doc("admin")
+          .set({ persona: { ptTrigger: { category: "pain", rawText: "허리가 아파서요" } } }, { merge: true })
+      );
+      const memberDb = asUser(testEnv, MEMBER_A_UID);
+      const own = await assertSucceeds(memberDb.collection("members").doc("member_a").get());
+      assert.equal(own.data().persona, undefined);  // 회원 클라이언트로 원문이 내려가지 않는다
+    });
+
+    it("[진행중 회원] private 컬렉션 전체 list로도 우회 불가", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(db.collection("members").doc("member_a").collection("private").get());
+    });
+
+    it("[진행중 회원] members 문서에는 persona를 직접 써넣을 수 없다(화이트리스트 밖)", async () => {
+      const db = asUser(testEnv, MEMBER_A_UID);
+      await assertFails(
+        db.collection("members").doc("member_a").update({ persona: { ptTrigger: { category: "other", rawText: "우회 시도" } } })
+      );
+    });
+
+    it("[관리자] members 문서에 남아있던 레거시 persona 필드를 정리(update)할 수 있다 — 마이그레이션 경로", async () => {
+      await seedMembers({ "member_legacy": { ...memberActive, memberUid: "legacy_uid", persona: { ptTrigger: { category: "pain", rawText: "레거시" } } } });
+      const db = asUser(testEnv, TRAINER_UID);
+      await assertSucceeds(db.collection("members").doc("member_legacy").update({ persona: {} }));
+    });
+
+    it("[진행중 회원] members 문서에 레거시 persona가 남아 있으면 본인 문서 read로 함께 내려온다 — 그래서 private으로 옮겨야 한다(회귀 방지용 문서화)", async () => {
+      await seedMembers({ "member_legacy2": { ...memberActive, memberUid: "legacy2_uid", persona: { ptTrigger: { category: "pain", rawText: "레거시 원문" } } } });
+      const db = asUser(testEnv, "legacy2_uid");
+      const snap = await assertSucceeds(db.collection("members").doc("member_legacy2").get());
+      // Firestore 규칙은 문서 단위라 필드 단위 숨김이 불가능하다는 사실 자체를 고정한다.
+      assert.equal(snap.data().persona.ptTrigger.rawText, "레거시 원문");
+    });
+  });
+
+  // ════════════════════════════════════════════════════
   // 13. notices — 전체/개인 공지 접근
   // ════════════════════════════════════════════════════
   describe("13. notices", () => {

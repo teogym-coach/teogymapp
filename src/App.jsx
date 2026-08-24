@@ -40,6 +40,7 @@ import {
   subscribeToTrainerNotificationReads, markNotificationEventsRead, feedEventId,
   subscribeToExerciseClassifications, saveExerciseClassification,
   getCounselMemo, saveCounselMemo,
+  getMemberPersonaMap, migrateMemberPersonaToPrivate,
 } from "./db";
 
 // ─── 운동 분류 상수 ───
@@ -10018,8 +10019,18 @@ export default function App() {
         setVerifiedAdminUid(checkingUid);
         checkPrivateMigrationStatus().catch(() => {});
       }
-    }).catch(() => {
-      // getMemberAppProfile 실패(회원 문서 자체가 없는 순수 트레이너 계정 등) → 관리자로 간주
+    }).catch(e => {
+      // 회원 문서는 있는데 상태 때문에 차단된 계정(휴식·종료·비활성)은 "회원"이다 — 관리자로 간주하면 안 된다.
+      // (관리자 쿼리는 trainerUid 기준이라 데이터가 보이지는 않지만, 관리자 화면 자체가 열리지 않도록 막는다.)
+      // 단, 대표(owner) 본인 기록 문서가 휴식·종료 상태가 된 경우는 예외 — 그 상태를 되돌리는 화면이
+      // 관리자앱 안에 있으므로 여기서 막으면 대표가 스스로 복구할 수 없게 된다.
+      const code = e?.code || "";
+      if (!e?.isOwner && (code === "member/paused" || code === "member/ended" || code === "member/inactive")) {
+        try { localStorage.setItem("teogymAppMode", "member"); } catch {}
+        window.location.replace("/member");
+        return;
+      }
+      // 그 외 실패(회원 문서 자체가 없는 순수 트레이너 계정 등) → 관리자로 간주
       setVerifiedAdminUid(checkingUid);
       checkPrivateMigrationStatus().catch(() => {});
     });
@@ -10146,6 +10157,26 @@ export default function App() {
     );
     if (isStale()) return;
     setWeightBodyById(Object.fromEntries(bodyEntries));
+
+    // 홈 "페르소나 확인 필요" 집계용 — 고객 페르소나는 관리자 전용이라 members 문서가 아니라
+    // members/{id}/private/admin 에만 저장된다(회원이 자기 문서를 읽어도 절대 내려가지 않는다).
+    // 초기 배포에서 members 문서에 저장됐던 값이 남아 있으면 여기서 1회만 private으로 옮기고 원본을 지운다.
+    try {
+      const legacy = mbs.filter(m => m.persona && Object.keys(m.persona).length > 0);
+      if (legacy.length > 0) {
+        const { moved } = await migrateMemberPersonaToPrivate(legacy);
+        if (moved > 0) console.log("[TEO GYM] 고객 페르소나 — members 문서에 남아있던", moved, "건을 관리자 전용 저장소로 이전했습니다.");
+      }
+      const personaMap = await getMemberPersonaMap(mbs.map(m => m.id));
+      if (isStale()) return;
+      // members state의 각 회원 객체에 persona를 붙여둔다 — 홈·분석 화면의 기존 헬퍼가 그대로 동작한다.
+      setMembers(prev => prev.map(m => {
+        const persona = personaMap[m.id] ?? (legacy.find(x => x.id === m.id)?.persona || null);
+        return persona ? { ...m, persona } : (m.persona ? { ...m, persona: undefined } : m);
+      }));
+    } catch (e) {
+      console.warn("[TEO GYM] loadMembers — 고객 페르소나 조회 실패:", e?.message);
+    }
   }, []);
 
   const loadPairSessions = useCallback(async () => {
@@ -11022,7 +11053,7 @@ export default function App() {
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
         {screen==="consultationForm" && <ConsultationFormScreen initial={editConsultation} saving={consultSaving} onSave={handleSaveConsultation} onBack={()=>{ setEditConsultation(null); setScreen("consultations"); }} />}
         {screen==="editMember" && member && <MemberForm initial={{...member, ...(memberPrivateData || {})}} onBack={() => setScreen("hub")} onSave={handleUpdateMember} />}
-        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} onSyncPtBalance={syncPtBalanceCache} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} liveMembersById={liveMembersById} />}
+        {screen==="hub"        && member && (() => { console.log("[TEO GYM] HubScreen — memberId:", member.id, "sessions:", sessions.length, "bodyData:", !!bodyData); return true; })() && <HubScreen member={{...member, ...(memberPrivateData || {})}} allMembers={members} sessions={sessions} sessionReadsMap={sessionReadsMap} memberAppUsage={memberAppUsage} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} ptRegistrations={ptRegistrations} onPtRegistrationsChange={setPtRegistrations} onSyncPtBalance={syncPtBalanceCache} dataLoaded={memberDataLoaded} loading={loading} setScreen={setScreen} onEdit={() => setScreen("editMember")} onMemberPatch={patch=>{ setMember(prev=>({...prev,...patch})); setMembers(prev=>prev.map(m=>m.id===member.id?{...m,...patch}:m)); if ('persona' in patch) setMemberPrivateData(prev=>({...(prev||{}), persona: patch.persona})); }} onEditSession={s=>{setEditSess(s);setScreen("session");}} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onSendPair={handleSendPairSession} scrollTarget={hubScrollTarget} onScrollTargetDone={()=>setHubScrollTarget(null)} showToast={showToast} onOpenUnreadHistory={()=>{ setHistoryInitialReadFilter("unread"); setScreen("history"); }} liveMembersById={liveMembersById} />}
         {screen==="session"    && member && <SessionScreen member={member} sessions={sessions} editData={editSess} onSave={handleSaveSession} onBack={() => { setEditSess(null); goHubReload(); }} showToast={showToast} bodyData={bodyData} allMembers={members} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} personalWorkouts={memberPersonalWorkouts} personalSorenessMap={memberPersonalSorenessMap} />}
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
@@ -18933,10 +18964,11 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   );
 
   // ═══ 고객 페르소나(TEO GYM PERSONA) — 관리자 전용 ═══
-  // member prop은 홈/회원목록에서 넘어온 그 시점의 스냅샷이라 방금 저장한 값이 빠져 있을 수 있다
-  // (goHub는 회원 문서를 다시 읽지 않는다). scheduleFollowupPending과 동일하게 liveMembersById(onSnapshot,
-  // 항상 최신)를 우선해 이 화면 안에서만 보정한다 — 저장 직후 홈 카운트도 같은 구독으로 자동 갱신된다.
-  const livePersona = liveMembersById[member.id]?.persona ?? member.persona;
+  // persona의 원본은 members 문서가 아니라 관리자 전용 members/{id}/private/admin 이다(회원 노출 차단).
+  // member prop에는 App이 memberPrivateData를 합쳐서 넘겨주고, 저장 직후에는 onMemberPatch가 그 값까지 함께
+  // 갱신하므로 member.persona가 항상 최신이다. liveMembersById 폴백은 초기 배포에서 members 문서에 남아있던
+  // 레거시 값을 마이그레이션 전까지 놓치지 않기 위한 안전장치일 뿐이다.
+  const livePersona = member.persona ?? liveMembersById[member.id]?.persona ?? null;
   const personaMember = { ...member, persona: livePersona || null };
   const personaProgress = getPersonaProgress(personaMember);
   // 기존 유입 데이터 — 유입 분석과 완전히 같은 공용 selector를 그대로 쓴다(복사 저장 금지, 읽기만).

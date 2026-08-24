@@ -19016,7 +19016,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     return (
       <div key={q.key} style={{border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"12px 13px",marginBottom:8}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:e?6:4}}>
-          <span style={{fontSize:12.5,fontWeight:800,color:DB.text,fontFamily:DB.font}}>{core ? `${q.label}` : q.label}</span>
+          <span style={{fontSize:12.5,fontWeight:800,color:DB.text,fontFamily:DB.font}}>{q.label}</span>
           {core && !e && <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.13)",color:"#B45309",fontFamily:DB.font}}>미기록</span>}
           <button type="button" onClick={()=>openPersonaModal(q.key)} style={{marginLeft:"auto",border:e?`1px solid ${DB.border}`:"1px solid transparent",background:e?DB.card:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:e?DB.sub:"#fff",cursor:"pointer",fontFamily:DB.font,flexShrink:0}}>{e?"수정":"기록하기"}</button>
         </div>

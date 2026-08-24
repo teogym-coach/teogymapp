@@ -10948,7 +10948,7 @@ export default function App() {
   );
 
   return (
-    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub"||screen==="history"||screen==="report"||screen==="referral")?"#F6F7F9":"#0B1120"}}>
+    <div ref={adminAppRef} className="admin-app" style={{minHeight:"100vh",background:(screen==="session"||screen==="hub"||screen==="history"||screen==="report"||screen==="referral"||screen==="persona")?"#F6F7F9":"#0B1120"}}>
       <style>{CSS}</style>
 
       {toast && (
@@ -10963,7 +10963,7 @@ export default function App() {
       )}
 
       {/* NAV — 홈(사이드바)·회원 목록(자체 라이트 헤더)·수업 예정(집중 모드, 확보된 높이를 캘린더에 전부 배정)·회원 상세(오늘 브리핑·오늘 운동·최근 수업·다음 수업 준비 영역을 더 크게 보기 위해 자체 헤더만 사용)에서는 숨김 */}
-      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && screen !== "report" && screen !== "referral" && (() => {
+      {screen !== "home" && screen !== "members" && screen !== "upcoming" && screen !== "hub" && screen !== "report" && screen !== "referral" && screen !== "persona" && (() => {
         // 히스토리 화면만 관리자앱 라이트 톤 상단바 — 다른 화면(screen!=="history")은 기존 다크 스타일 그대로 유지
         const navLight = screen === "history";
         return (
@@ -11008,7 +11008,10 @@ export default function App() {
       })()}
 
       {/* SCREENS */}
-      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming"||screen==="consultations"||screen==="consultationForm"||screen==="report"||screen==="referral") ? {width:"100%"} : {
+      {/* AdminSidebar로 좌측 사이드바 + 본문을 스스로 그리는 화면(홈·회원목록·수업예정·상담·분석리포트·유입분석·페르소나 분석)은
+          이 래퍼가 폭을 제한하면 안 된다 — maxWidth:820이 사이드바까지 함께 감싸 관리자 화면 전체가 중앙에 축소돼 보인다.
+          새 전체폭 화면을 추가할 때는 이 목록 · 위의 배경색 분기 · nav 숨김 분기 3곳을 함께 갱신해야 한다. */}
+      <div className="noprint" style={(screen==="home"||screen==="members"||screen==="hub"||screen==="session"||screen==="upcoming"||screen==="consultations"||screen==="consultationForm"||screen==="report"||screen==="referral"||screen==="persona") ? {width:"100%"} : {
         maxWidth:820,margin:"0 auto",padding:"18px 14px",
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",

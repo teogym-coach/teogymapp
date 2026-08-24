@@ -6363,7 +6363,10 @@ const checks = [
     app.includes('<AdminSidebar active="report"') &&
     app.includes('gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))"') &&
     app.includes('gridTemplateColumns: isWide ? "repeat(auto-fill,minmax(330px,1fr))" : "1fr"') &&
-    app.includes('screen==="report"||screen==="referral") ? {width:"100%"}')
+    // 전체폭 예외 목록에 들어 있는지만 확인한다. 예전에는 ') ? {width:"100%"}'까지 붙여 "referral이 목록의 마지막"임을
+    // 전제했는데, 뒤에 화면(페르소나 분석)이 추가되면 실제 동작은 정상인데도 실패한다.
+    // 목록 전체의 화면별 실제 판정은 아래 "관리자 레이아웃" 검사가 조건식을 직접 실행해 확인한다.
+    app.includes('screen==="report"||screen==="referral"')
   ],
 
   // ── 회원 상태 "수업 대기"(waiting) 신설 + 삭제 확인 모달 ──
@@ -7227,6 +7230,34 @@ const checks = [
       return lib.getPersonaEntry(m, 'ptTrigger') === null && lib.getPersonaProgress(m).completed === 0;
     }
   ),
+
+  // ── 관리자 최상위 레이아웃 분기(화면 전체 축소 방지) ──────────────
+  // 문자열 포함 여부가 아니라 조건식 자체를 실제로 실행해 화면별 결과를 확인한다.
+  // AdminSidebar로 사이드바까지 스스로 그리는 화면이 이 목록에서 빠지면 maxWidth:820 래퍼가
+  // 사이드바까지 감싸 관리자 화면 전체가 중앙에 축소돼 보인다(페르소나 분석에서 실제로 발생했던 버그).
+  ...(() => {
+    const bgM = app.match(/background:(\(screen==="session".*?\))\?"#F6F7F9":"#0B1120"/);
+    const wrapM = app.match(/<div className="noprint" style=\{(\(screen==="home".*?\)) \? \{width:"100%"\}/);
+    const navM = app.match(/\{(screen !== "home" && screen !== "members".*?) && \(\(\) => \{/);
+    if (!bgM || !wrapM || !navM) return [['관리자 레이아웃: 최상위 분기 3곳(배경·nav 숨김·폭 예외) 추출', false]];
+    const ev = (expr, screen) => new Function('screen', `return (${expr});`)(screen);
+    // 라우터가 AdminSidebar 전체 shell로 렌더하는 화면 — 이 목록은 <AdminSidebar 사용처와 함께 유지한다.
+    const FULL_SHELL = ['home', 'members', 'upcoming', 'consultations', 'report', 'referral', 'persona'];
+    // 820px 중앙 래퍼를 그대로 써야 하는 화면(사이드바를 직접 그리지 않음) — 이번 수정으로 넓어지면 안 된다.
+    const BOXED = ['history', 'memberInputStatus', 'goal_manage', 'assessment', 'exerciseAnalysis'];
+    return [
+      ['관리자 레이아웃: 사이드바를 직접 그리는 화면은 최상위 래퍼의 maxWidth:820 제한을 받지 않는다(화면 전체 축소 방지)',
+        FULL_SHELL.every(s => ev(wrapM[1], s) === true)],
+      ['관리자 레이아웃: 사이드바를 직접 그리지 않는 화면은 기존 820px 중앙 래퍼를 그대로 유지한다(이번 수정이 다른 화면을 넓히지 않음)',
+        BOXED.every(s => ev(wrapM[1], s) === false)],
+      ['관리자 레이아웃: 페르소나 분석은 분석 리포트·유입 분석과 완전히 같은 분기 결과를 갖는다(폭·배경·nav 숨김 3가지 모두)',
+        ['report', 'referral'].every(ref =>
+          ev(wrapM[1], 'persona') === ev(wrapM[1], ref) &&
+          ev(bgM[1], 'persona') === ev(bgM[1], ref) &&
+          ev(navM[1], 'persona') === ev(navM[1], ref)
+        ) && ev(bgM[1], 'persona') === true && ev(navM[1], 'persona') === false],
+    ];
+  })(),
 ];
 
 let failed = 0;

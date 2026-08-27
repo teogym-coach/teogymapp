@@ -7297,6 +7297,49 @@ const checks = [
         ) && ev(bgM[1], 'persona') === true && ev(navM[1], 'persona') === false],
     ];
   })(),
+
+  // ── 루틴 추천 작성 화면 UX 개선(2026-08-27) ──
+  // 부위 다중선택 칩이 회원앱 전용 CSS(.part-pills, MEMBER_CSS)에 의존해 관리자 화면에서 스타일이
+  // 적용되지 않던 버그(선택돼도 시각적으로 표시 안 됨)를 인라인 스타일로 수정, 신규 운동 기본 1세트로 변경,
+  // 이전 기록은 자동 적용이 아니라 버튼 클릭 시에만 반영, 저장된 루틴을 목록에서 불러와 수정 가능하도록 개선.
+  ...(() => {
+    let lib = null;
+    try {
+      const sliceEmpty = app.slice(app.indexOf('function emptyRoutineExercise'), app.indexOf('function findLastExerciseEntry'));
+      const sliceEntry = app.slice(app.indexOf('function findLastExerciseEntry'), app.indexOf('function StatusBadge'));
+      lib = new Function(`${sliceEmpty}\n${sliceEntry}\nreturn { emptyRoutineExercise, findLastExerciseEntry };`)();
+    } catch (e) { console.error('[regression] 루틴 추천 헬퍼 추출 실패:', e.message); }
+    const screenSlice = app.slice(app.indexOf('function RoutineRecommendScreen'), app.indexOf('function DailyConditioningAdminScreen'));
+    const sessionsMock = [{ date: '2026-08-20', sessionNo: 1, exercises: [{ name: '원레그 데드리프트', sets: [{ weight: '40', reps: '12' }, { weight: '45', reps: '10' }] }] }];
+    return [
+      ['루틴 추천: 신규 운동 추가 시 기본 세트가 1개다(화면이 과도하게 길어지지 않도록)',
+        !!lib && lib.emptyRoutineExercise().sets.length === 1],
+      ['루틴 추천: 과거 세트 조회는 운동명으로 최근 수업 기록에서 찾는다(날짜·중량·횟수 값 유지)',
+        !!lib && (() => {
+          const rec = lib.findLastExerciseEntry(sessionsMock, '원레그 데드리프트');
+          return !!rec && rec.date === '2026-08-20' && rec.sets.length === 2 && rec.sets[0].weight === '40' && rec.sets[0].reps === '12';
+        })()],
+      ['루틴 추천: 기록이 없는 운동은 null을 반환한다(자동 덮어쓰기 방지의 기반)',
+        !!lib && lib.findLastExerciseEntry(sessionsMock, '없는운동') === null],
+      ['루틴 추천: 부위 선택 칩이 회원앱 전용 CSS(.part-pills)에 더 이상 의존하지 않는다(관리자 화면 스코프 버그 수정)',
+        !screenSlice.includes('className="part-pills"')],
+      ['루틴 추천: 운동명 입력 시 과거 기록으로 세트를 자동 덮어쓰지 않는다(불러오기 버튼 클릭 시에만 적용)',
+        screenSlice.includes('const setName=(i,name)=>setExercises(prev=>prev.map((ex,idx)=>idx===i?{...ex,name}:ex));') &&
+        !/setName=.*findLastExerciseEntry/.test(screenSlice)],
+      ['루틴 추천: "이전 기록 불러오기" 버튼과 최근 기록 안내 문구가 존재한다',
+        screenSlice.includes('이전 기록 불러오기') && screenSlice.includes('최근 기록')],
+      ['루틴 추천: 세트 추가/개별 삭제 함수가 존재하고 최소 1세트를 보장한다(운동 전체 삭제와 분리)',
+        screenSlice.includes('const addSet=ei=>setExercises') &&
+        screenSlice.includes('const removeSet=(ei,si)=>setExercises') &&
+        screenSlice.includes('(ex.sets||[]).length<=1?ex.sets:')],
+      ['루틴 추천: 저장된 루틴을 목록에서 다시 불러와 수정할 수 있다(recommendationId로 갱신 저장, 신규 문서 중복 생성 방지)',
+        screenSlice.includes('const loadForEdit=r=>{') &&
+        screenSlice.includes('saveRoutineRecommendation(member.id,editingId,')],
+      ['루틴 추천: 노출 상태는 관리자에게 "회원에게 공개 ON/OFF"로 표시하되 저장값(visible/hidden)은 그대로 유지한다',
+        screenSlice.includes('회원에게 공개') &&
+        screenSlice.includes('setVisibility(v=>v==="visible"?"hidden":"visible")')],
+    ];
+  })(),
 ];
 
 let failed = 0;

@@ -7312,8 +7312,8 @@ const checks = [
     const screenSlice = app.slice(app.indexOf('function RoutineRecommendScreen'), app.indexOf('function DailyConditioningAdminScreen'));
     const sessionsMock = [{ date: '2026-08-20', sessionNo: 1, exercises: [{ name: '원레그 데드리프트', sets: [{ weight: '40', reps: '12' }, { weight: '45', reps: '10' }] }] }];
     return [
-      ['루틴 추천: 신규 운동 추가 시 기본 세트가 1개다(화면이 과도하게 길어지지 않도록)',
-        !!lib && lib.emptyRoutineExercise().sets.length === 1],
+      ['루틴 추천: 신규 운동 추가 시 기본 세트가 0개다(세트를 추가하지 않아도 운동명만으로 저장 가능)',
+        !!lib && lib.emptyRoutineExercise().sets.length === 0],
       ['루틴 추천: 과거 세트 조회는 운동명으로 최근 수업 기록에서 찾는다(날짜·중량·횟수 값 유지)',
         !!lib && (() => {
           const rec = lib.findLastExerciseEntry(sessionsMock, '원레그 데드리프트');
@@ -7328,16 +7328,75 @@ const checks = [
         !/setName=.*findLastExerciseEntry/.test(screenSlice)],
       ['루틴 추천: "이전 기록 불러오기" 버튼과 최근 기록 안내 문구가 존재한다',
         screenSlice.includes('이전 기록 불러오기') && screenSlice.includes('최근 기록')],
-      ['루틴 추천: 세트 추가/개별 삭제 함수가 존재하고 최소 1세트를 보장한다(운동 전체 삭제와 분리)',
+      ['루틴 추천: 세트 추가/개별 삭제 함수가 존재하고 세트를 0개까지 지울 수 있다(2026-08-27 세트 선택 입력 개편으로 최소 1세트 강제 제거)',
         screenSlice.includes('const addSet=ei=>setExercises') &&
         screenSlice.includes('const removeSet=(ei,si)=>setExercises') &&
-        screenSlice.includes('(ex.sets||[]).length<=1?ex.sets:')],
+        !screenSlice.includes('(ex.sets||[]).length<=1?ex.sets:')],
       ['루틴 추천: 저장된 루틴을 목록에서 다시 불러와 수정할 수 있다(recommendationId로 갱신 저장, 신규 문서 중복 생성 방지)',
         screenSlice.includes('const loadForEdit=r=>{') &&
         screenSlice.includes('saveRoutineRecommendation(member.id,editingId,')],
       ['루틴 추천: 노출 상태는 관리자에게 "회원에게 공개 ON/OFF"로 표시하되 저장값(visible/hidden)은 그대로 유지한다',
         screenSlice.includes('회원에게 공개') &&
         screenSlice.includes('setVisibility(v=>v==="visible"?"hidden":"visible")')],
+    ];
+  })(),
+
+  // ── 루틴 추천 최종 UX 개선(2026-08-27, 2차) ──
+  // 버그: 관리자가 "하체"만 선택해 전송해도 회원앱(ReviewRoutine)에서는 자동 추천 엔진이 계산한
+  // "가슴 추천" 텍스트가 함께 노출됐다 — h3가 관리자 루틴 유무와 무관하게 자기-선택 상태(selected)/
+  // 추천엔진(recommended.part)을 그대로 썼기 때문. 관리자 루틴이 있으면 그 targetParts만 표시하도록
+  // 분기를 완전히 분리했다. 세트는 0개(운동명만)도 저장 가능하도록 완화했고, 회원앱은 세트가 없는
+  // 운동은 이름만, 있는 운동만 "N세트 20kg × 12회" 한 줄로 표시하며 중량/횟수 중 하나만 있어도
+  // "자유" 같은 placeholder를 만들지 않는다.
+  ...(() => {
+    let lib = null;
+    try {
+      const sliceEmpty = app.slice(app.indexOf('function emptyRoutineExercise'), app.indexOf('function findLastExerciseEntry'));
+      const sliceFormatParts = app.slice(app.indexOf('function formatParts(data = {}) {'), app.indexOf('function scrollMemberAppToTop'));
+      const sliceFormatSet = app.slice(app.indexOf('function formatRoutineSet(st,j)'), app.indexOf('function CoachRoutineCard'));
+      lib = new Function(`${sliceEmpty}\n${sliceFormatParts}\n${sliceFormatSet}\nreturn { emptyRoutineExercise, formatParts, formatPartsForMember, formatRoutineSet };`)();
+    } catch (e) { console.error('[regression] 루틴 추천 최종개편 헬퍼 추출 실패:', e.message); }
+
+    const reviewRoutineStart = app.indexOf('function ReviewRoutine(');
+    const reviewRoutineSlice = app.slice(reviewRoutineStart, app.indexOf('function ', reviewRoutineStart + 30));
+    const coachCardStart = app.indexOf('function CoachRoutineCard');
+    const coachCardSlice = app.slice(coachCardStart, app.indexOf('\nfunction ', coachCardStart));
+    const adminScreenSlice = app.slice(app.indexOf('function RoutineRecommendScreen'), app.indexOf('function DailyConditioningAdminScreen'));
+
+    return [
+      ['루틴 추천: 신규 운동은 sets 기본값이 빈 배열이라 운동명만으로도 저장 가능하다',
+        !!lib && Array.isArray(lib.emptyRoutineExercise().sets) && lib.emptyRoutineExercise().sets.length === 0],
+      ['루틴 추천(관리자): 세트를 마지막 1개까지 삭제해 0개로 되돌릴 수 있다(최소 세트 강제 없음)',
+        adminScreenSlice.includes('const removeSet=(ei,si)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).filter((_,j)=>j!==si)}:ex));') &&
+        !adminScreenSlice.includes('.length<=1?ex.sets:')],
+      ['루틴 추천(관리자): 세트 입력 UI(중량/횟수 헤더·행)는 세트가 1개 이상일 때만 렌더링된다(세트 0개 운동은 이름만 보이도록)',
+        adminScreenSlice.includes('(ex.sets||[]).length>0 && <div style={{display:"grid",gap:6}}>')],
+      ['루틴 추천(관리자): 기존 저장 루틴을 다시 불러올 때 세트가 없던 운동을 임의로 채우지 않는다(빈 세트는 빈 세트로 유지)',
+        adminScreenSlice.includes('sets:(ex.sets&&ex.sets.length)?ex.sets.map(st=>({weight:st.weight||"",reps:st.reps||""})):[]')],
+      ['회원앱: 세트가 0개인 운동은 CoachRoutineCard가 세트 목록(coach-set-list)을 렌더링하지 않고 운동명만 보여준다',
+        coachCardSlice.includes('sets.length>0&&<div className="coach-set-list">')],
+      ['회원앱: 중량·횟수 조합에 따라 "N세트 20kg × 12회"/"N세트 20kg"/"N세트 12회"/"N세트"로만 표시하고 "자유" placeholder는 만들지 않는다',
+        !!lib &&
+        lib.formatRoutineSet({weight:'20',reps:'12'},0)==='1세트 20kg × 12회' &&
+        lib.formatRoutineSet({weight:'20',reps:''},0)==='1세트 20kg' &&
+        lib.formatRoutineSet({weight:'',reps:'12'},0)==='1세트 12회' &&
+        lib.formatRoutineSet({weight:'',reps:''},0)==='1세트' &&
+        !lib.formatRoutineSet({weight:'',reps:''},0).includes('자유')],
+      ['회원앱: 복수 부위는 "·"로만 이어붙이고(하체 · 코어), 관리자가 선택하지 않은 부위 문자열은 섞이지 않는다',
+        !!lib &&
+        lib.formatPartsForMember({targetParts:['하체']})==='하체' &&
+        lib.formatPartsForMember({targetParts:['하체','코어']})==='하체 · 코어' &&
+        !lib.formatPartsForMember({targetParts:['하체']}).includes('가슴')],
+      ['회원앱: 관리자 직접 추천이 있으면 자동 추천 엔진의 selected/recommended.part 텍스트를 쓰지 않는다(가슴·하체 혼합 노출 버그 수정)',
+        /if\(hasCoachRoutine\)\{return[\s\S]*?<h3>\{formatPartsForMember\(publishedRoutine\)\}<\/h3>/.test(reviewRoutineSlice) &&
+        !/if\(hasCoachRoutine\)\{return[\s\S]{0,400}\{selected\}/.test(reviewRoutineSlice)],
+      ['회원앱: 관리자 직접 추천이 있을 때는 자동 추천 자기-선택 부위 칩(part-pills)이 함께 표시되지 않는다(두 추천 시스템 분리)',
+        !/if\(hasCoachRoutine\)\{return[\s\S]{0,400}part-pills/.test(reviewRoutineSlice)],
+      ['회원앱: 관리자 직접 추천이 없을 때는 기존 자동 추천(자기-선택 부위 칩 + selected 추천) 로직이 그대로 유지된다(자동 추천 기능 삭제 금지)',
+        reviewRoutineSlice.includes('<h3>{selected} 추천</h3>') && reviewRoutineSlice.includes('className="part-pills"')],
+      ['루틴 추천(관리자): "이전 기록 불러오기"는 여전히 버튼 클릭 시에만 세트를 적용하고, 운동명 입력만으로는 자동 반영되지 않는다',
+        adminScreenSlice.includes('const loadLastRecord=ei=>{') &&
+        !/setName=.*findLastExerciseEntry/.test(adminScreenSlice)],
     ];
   })(),
 ];

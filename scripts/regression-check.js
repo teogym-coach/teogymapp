@@ -1913,7 +1913,7 @@ const checks = [
     app.includes('const toggleSess=(s)=>{ const wasOpen=isExp(s); setOpenId(prev=>(wasOpen&&!lq)?"__none__":s.id);') &&
     (() => {
       const start = app.indexOf('const saveFeedback=async(sessionId,feedback)=>{');
-      const end = app.indexOf('const saveProfileInfo=async(data)=>{', start);
+      const end = app.indexOf('const saveProfileInfo=async(data,opts={})=>{', start);
       const body = start !== -1 && end !== -1 ? app.slice(start, end) : '';
       return !!body && !body.includes('setOpenId') && !body.includes('setExpandedFeedbackIds') && !body.includes('setFeedbackOpen');
     })() &&
@@ -2931,7 +2931,7 @@ const checks = [
   ],
   ['목표 관리: 저장은 기존 saveProfileInfo/saveMemberOnboarding을 재사용(중복 저장 로직 없음)',
     app.includes('const saveGoalUpdate=async(changes)=>{') &&
-    app.includes('if(Object.keys(profileFields).length) await saveProfileInfo(profileFields);') &&
+    app.includes('if(Object.keys(profileFields).length) await saveProfileInfo(profileFields,{skipActivity:true});') &&
     app.includes('if(Object.keys(onboardingOnlyFields).length) await saveMemberOnboarding(profile.id,onboardingOnlyFields);')
   ],
   ['목표 관리: 변경 이력은 recordGoalChange가 memberOnboarding/main.goalHistory(최근 30건)에 저장',
@@ -2947,13 +2947,13 @@ const checks = [
     app.includes('"goal_update"') && app.includes('TODAY_FEED_TYPES')
   ],
   ['목표 관리: 같은 배치에서 같은 type의 활동이 겹쳐도 feedEventId가 충돌하지 않도록 at을 1ms씩 offset',
-    db.includes('const newEntries = activities.map((a, i) => ({') &&
+    db.includes('const newEntries = activities.map((a, i) => clean({') &&
     db.includes('dateKey: a.dateKey || todayKey, at: now + i,')
   ],
   ['목표 관리 피드: goal_update는 항목별 문장(예: "운동 목적을 변경했습니다")을 위해 item.label/조사를 동적으로 계산',
     app.includes('const DYNAMIC_LABEL_TYPES = new Set(["goal_update"]);') &&
     app.includes('function koreanParticleEulReul(word)') &&
-    app.includes('ACTIVITY_VERB[item.type]||"입력했습니다"')
+    app.includes('item.verb || ACTIVITY_VERB[item.type] || "입력했습니다"')
   ],
   ['목표 관리 피드 이동: goal_update 클릭 시 회원 상세(hub)로 이동 — 전용 관리자 화면이 없어 최소 기준(상세 이동) 충족',
     app.includes('goal_update: { targetScreen: "hub" }')
@@ -7397,6 +7397,89 @@ const checks = [
       ['루틴 추천(관리자): "이전 기록 불러오기"는 여전히 버튼 클릭 시에만 세트를 적용하고, 운동명 입력만으로는 자동 반영되지 않는다',
         adminScreenSlice.includes('const loadLastRecord=ei=>{') &&
         !/setName=.*findLastExerciseEntry/.test(adminScreenSlice)],
+    ];
+  })(),
+
+  // ════════════════════════════════════════════════════
+  // 관리자 알림 누락 항목 보완 (2026-08-29) — 개인운동/걸음수/사전 문진/프로필 수정까지
+  // "오늘 회원 입력 피드"(TODAY_FEED_TYPES)에 포함시키고, verb 필드로 신규/수정 문장을 구분한다.
+  // ════════════════════════════════════════════════════
+  ...(() => {
+    const completeFn = db.slice(db.indexOf('export async function completePersonalWorkout'), db.indexOf('export async function deletePersonalWorkout'));
+    const editFn = db.slice(db.indexOf('export async function editCompletedPersonalWorkout'), db.indexOf('function clampSorenessLevel(v) {'));
+    const sorenessFn = db.slice(db.indexOf('export async function savePersonalWorkoutSoreness'), db.length);
+    const onboardingFn = db.slice(db.indexOf('export async function saveMemberOnboarding(memberId, data)'), db.indexOf('export async function recordGoalChange'));
+    const profileFn = db.slice(db.indexOf('export async function saveMemberProfileFields'), db.indexOf('export async function syncOnboardingToMemberProfile'));
+    const updateMemberFn = db.slice(db.indexOf('export async function updateMember(id, data)'), db.indexOf('export async function cleanupMemberAppEmailIdentity'));
+    return [
+      ['오늘 회원 입력 피드: 개인운동(기록/RPE/근육통)·걸음수·사전 문진·프로필 수정까지 TODAY_FEED_TYPES에 포함되어 더 이상 누락되지 않는다',
+        app.includes('const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps","personalWorkout","personalWorkoutRpe","personalWorkoutSoreness","onboarding","profile_update","goal_update"];')
+      ],
+      ['오늘 회원 입력 피드: item.verb가 있으면 타입 기본 동사 대신 그 값을 쓴다(신규 "기록했습니다"/"제출했습니다" vs 수정 "수정했습니다" 구분)',
+        app.includes('const verb = item.verb || ACTIVITY_VERB[item.type] || "입력했습니다";')
+      ],
+      ['touchMemberActivities: activities[].verb를 clean()으로 undefined 제거 후 recentActivityLog에 포함시킨다(verb 없는 기존 호출부는 그대로 동작)',
+        db.includes('const newEntries = activities.map((a, i) => clean({') &&
+        db.includes('type: a.type, label: a.label, value: a.value, verb: a.verb,')
+      ],
+      // 1) 개인운동 신규 기록/완료 → 관리자 알림 1건
+      ['개인운동 완료: completePersonalWorkout이 종목·세트 요약과 함께 type:"personalWorkout" 활동 1건을 touchMemberActivities로 남긴다(신규 기록과 완료는 같은 완료 호출이라 별도 이벤트를 만들지 않는다)',
+        completeFn.includes('type: "personalWorkout", label: "개인운동",') &&
+        (completeFn.match(/touchMemberActivities\(/g) || []).length === 1
+      ],
+      // 3) 개인운동 RPE 입력 → 관리자 알림
+      ['개인운동 RPE: 완료 시 rpe를 함께 저장하면 personalWorkoutRpe 활동이 같은 touchMemberActivities 호출에 묶여 저장된다(추가 Firestore 쓰기 없음)',
+        completeFn.includes('activities.push({ type: "personalWorkoutRpe", label: "개인운동 RPE", value: `RPE ${rpeValue}`, dateKey });')
+      ],
+      // 4) 개인운동 메모/완료 기록 수정 → 관리자 알림, 11) 중복 방지
+      ['개인운동 완료 기록 수정: 수정 전 값을 조회해 메모/운동내용이 실제로 바뀐 경우에만 활동을 남기고(재저장은 무시), rpe 수정과 내용 수정을 한 배열에 모아 touchMemberActivities를 1회만 호출한다(중복 알림 방지)',
+        editFn.includes('const existingSnap = await getDoc(ref);') &&
+        editFn.includes('const memoChanged = patch.memo !== undefined && String(existing.memo || "") !== body.memo;') &&
+        editFn.includes('const exercisesChanged = patch.exercises !== undefined && JSON.stringify(existing.exercises || []) !== JSON.stringify(body.exercises || []);') &&
+        editFn.includes('if (memoChanged || exercisesChanged || otherContentChanged) {') &&
+        editFn.includes('value: (memoChanged && !exercisesChanged && !otherContentChanged) ? "메모 수정" : "운동 내용 수정",') &&
+        (editFn.match(/await touchMemberActivities\(/g) || []).length === 1
+      ],
+      ['개인운동 RPE 수정: editCompletedPersonalWorkout에서 rpe만 고쳐도 verb:"수정했습니다"로 신규 완료 시("기록했습니다" 기본값)와 문장이 구분된다',
+        editFn.includes('type: "personalWorkoutRpe", label: "개인운동 RPE", verb: "수정했습니다",')
+      ],
+      // 5) 개인운동 근육통 입력/수정 → 관리자 알림, 신규/수정 구분
+      ['개인운동 근육통: savePersonalWorkoutSoreness가 최초 저장(undefined→기본 "기록했습니다")과 재저장(verb:"수정했습니다")을 구분한다',
+        sorenessFn.includes('verb: isFirstSave ? undefined : "수정했습니다",')
+      ],
+      // 온보딩/사전 문진 신규 제출·수정 → 관리자 알림 (배포 전 회귀 없이 신규 게이트)
+      ['사전 문진: saveMemberOnboarding은 온보딩 최종 제출(payload.completed===true)일 때만 활동을 남기고, restingHeartRate·목표관리 같은 부분 저장 호출은 건드리지 않는다(과도한 알림 방지)',
+        onboardingFn.includes('if (payload.completed === true) {') &&
+        onboardingFn.includes('const wasCompleted = !!(prevSnap.exists() && prevSnap.data()?.completed);') &&
+        onboardingFn.includes('verb: wasCompleted ? "수정했습니다" : "제출했습니다",')
+      ],
+      // 회원 프로필 직접 수정 → 관리자 알림 (10과 동일한 중복 방지 원칙: 목표관리 경유 시 skipActivity)
+      ['프로필 정보: saveMemberProfileFields는 실제로 값이 바뀐 필드(memberPayload)만 모아 활동 1건을 남기고, birthSource(내부 마커)만 있는 경우는 변경으로 치지 않는다',
+        db.includes('const PROFILE_FIELD_ACTIVITY_LABELS = {') &&
+        profileFn.includes('if (!opts.skipActivity) {') &&
+        profileFn.includes('.filter(k => k !== "birthSource")') &&
+        profileFn.includes('type: "profile_update", label: "프로필 정보", value: changedLabels.join(" · ")')
+      ],
+      // 11) 중복 방지 — 목표 관리는 saveProfileInfo(프로필 저장)와 recordGoalChange(goal_update 알림)를 함께 호출하므로
+      // saveProfileInfo 쪽 활동을 꺼서 같은 저장 행동이 profile_update+goal_update 2건으로 겹치지 않게 한다.
+      ['목표 수정 중복 방지: saveGoalUpdate는 saveProfileInfo를 skipActivity:true로 호출해, recordGoalChange의 goal_update 알림과 겹치는 profile_update 알림을 만들지 않는다',
+        app.includes('await saveProfileInfo(profileFields,{skipActivity:true});')
+      ],
+      // 12) 관리자 입력은 회원 입력 알림으로 잡히지 않음
+      ['관리자/회원 알림 분리: 관리자 전용 회원정보 저장 함수(updateMember)는 touchMemberActivities를 호출하지 않는다 — 회원 본인 저장 경로(saveMemberProfileFields/saveMemberOnboarding/개인운동 함수)에서만 호출된다',
+        !updateMemberFn.includes('touchMemberActivities')
+      ],
+      // 13) 기존 읽음 알림이 다시 미확인으로 바뀌지 않음 — trainerNotificationReads는 항상 기존 읽음 id에 합집합만 추가한다
+      ['읽음 처리 불변: markNotificationEventsRead는 새 이벤트 타입이 추가돼도 기존 readEventIds를 지우지 않고 합집합으로만 갱신한다(신규 타입 추가가 과거 읽음 상태를 되돌리지 않음)',
+        db.includes('const readEventIds = [...new Set([...prevIds, ...eventIds])];')
+      ],
+      // 14) 과거 데이터가 신규 알림으로 대량 생성되지 않음 — 오늘(KST) dateKey가 아니면 어떤 타입이든 피드에서 걸러진다
+      ['배포 직후 과거 데이터 대량 알림 방지: buildTodayFeedItems는 타입과 무관하게 오늘(KST) dateKey가 아닌 recentActivityLog 항목을 걸러내므로, 새로 추가된 타입(개인운동·걸음수·문진·프로필)도 배포 이전 과거 기록이 알림으로 쏟아지지 않는다',
+        app.includes('if (a.dateKey !== todayKST || !TODAY_FEED_TYPES.includes(a.type)) return;')
+      ],
+      ['알림 UX: 알림 Drawer 필터에 개인운동·걸음수가 추가되어 새 타입도 필터링해 확인할 수 있다',
+        app.includes('["steps","걸음수"],["personalWorkout","개인운동"],')
+      ],
     ];
   })(),
 ];

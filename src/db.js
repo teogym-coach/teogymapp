@@ -1128,8 +1128,19 @@ export async function saveBodyCheck(memberId, data) {
   }
 }
 
-export async function saveMemberProfileFields(memberId, data = {}) {
+// opts.skipActivity — saveGoalUpdate가 이 함수를 재사용할 때, recordGoalChange가 같은 저장 행동에 대해
+// 이미 goal_update 알림을 남기므로 여기서 "프로필 정보 수정" 알림을 중복으로 만들지 않기 위한 스위치.
+const PROFILE_FIELD_ACTIVITY_LABELS = {
+  height: "키", startWeight: "시작 체중", currentWeight: "현재 체중",
+  targetWeightKg: "목표 체중", targetWeight: "목표 체중",
+  birthYear: "생년월일", birthMonth: "생년월일", birthDay: "생년월일", birthYearMonth: "생년월일",
+  workoutFrequency: "운동 빈도", weeklyWorkoutCount: "운동 빈도", goal: "운동 목표",
+  goalPeriod: "목표 기간", goalPeriodType: "목표 기간", targetDate: "목표 기간",
+  goalDeadline: "목표 기간", customGoalDate: "목표 기간",
+};
+export async function saveMemberProfileFields(memberId, data = {}, opts = {}) {
   requireUid();
+  const memberPayload = {};
   const today = new Date().toISOString().slice(0, 10);
   const now = serverTimestamp();
   const hasInput = (key) => Object.prototype.hasOwnProperty.call(data, key);
@@ -1166,7 +1177,6 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     if (!memberSnap.exists()) throw new Error("회원 문서를 찾을 수 없습니다.");
 
     const currentMember = memberSnap.data() || {};
-    const memberPayload = {};
     if (height !== null && currentMember.height !== height) memberPayload.height = height;
     if (startWeight !== null && currentMember.startWeight !== startWeight) memberPayload.startWeight = startWeight;
     if (currentWeight !== null && currentMember.currentWeight !== currentWeight) memberPayload.currentWeight = currentWeight;
@@ -1254,6 +1264,17 @@ export async function saveMemberProfileFields(memberId, data = {}) {
     err.profileSaveResults = results;
     err.profileSaveFailures = failures;
     throw err;
+  }
+  // memberPayload는 "실제로 값이 바뀐 필드"만 담고 있어(위 각 if에서 currentMember와 비교) 재저장(값 동일)은 알림을 만들지 않는다.
+  // birthSource는 birthYearMonth를 쓸 때 항상 함께 찍히는 내부 마커라 변경 여부 판단에서 제외한다.
+  if (!opts.skipActivity) {
+    const changedLabels = [...new Set(Object.keys(memberPayload)
+      .filter(k => k !== "birthSource")
+      .map(k => PROFILE_FIELD_ACTIVITY_LABELS[k])
+      .filter(Boolean))];
+    if (changedLabels.length) {
+      await touchMemberActivities(memberId, [{ type: "profile_update", label: "프로필 정보", value: changedLabels.join(" · ") }]);
+    }
   }
   return { height, startWeight, currentWeight, targetWeightKg, workoutFrequency, weeklyWorkoutCount, messages: results };
 }
@@ -1512,8 +1533,10 @@ export async function touchMemberActivities(memberId, activities = []) {
     const now = Date.now();
     // 같은 배치에서 같은 type의 활동이 여러 건 저장될 수 있어(예: 목표 관리에서 여러 항목 동시 수정)
     // at을 1ms씩 밀어 feedEventId(memberId, at, type)가 서로 충돌하지 않게 한다.
-    const newEntries = activities.map((a, i) => ({
-      type: a.type, label: a.label, value: a.value,
+    // verb는 선택 필드 — "입력했습니다"(기본값) 대신 "수정했습니다"처럼 신규/수정을 구분해 문장을 만들 때만 넘긴다.
+    // clean()으로 undefined를 제거해야 verb를 안 넘긴 기존 호출부(체중/컨디션 등)에서 Firestore가 undefined 필드 에러를 내지 않는다.
+    const newEntries = activities.map((a, i) => clean({
+      type: a.type, label: a.label, value: a.value, verb: a.verb,
       dateKey: a.dateKey || todayKey, at: now + i,
     }));
     const recentActivityLog = [...newEntries, ...prevLog].slice(0, 15);
@@ -2115,6 +2138,19 @@ export async function saveMemberOnboarding(memberId, data) {
   requireUid();
   const ref = doc(db, "members", memberId, "memberOnboarding", "main");
   const payload = sanitizeMemberOnboardingPayload(data);
+  // completed:true는 온보딩 화면의 최종 제출(신규/수정)에서만 전달된다 — restingHeartRate·목표관리 등
+  // 다른 부분 저장 호출은 이 필드를 넘기지 않으므로 여기서만 "오늘 회원 입력 피드"에 남긴다.
+  if (payload.completed === true) {
+    const prevSnap = await getDoc(ref);
+    const wasCompleted = !!(prevSnap.exists() && prevSnap.data()?.completed);
+    await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+    await touchMemberActivities(memberId, [{
+      type: "onboarding", label: "사전 문진",
+      verb: wasCompleted ? "수정했습니다" : "제출했습니다",
+      value: wasCompleted ? "정보 수정" : "최초 제출",
+    }]);
+    return { id: "main", ...payload };
+  }
   await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
   return { id: "main", ...payload };
 }
@@ -3070,6 +3106,11 @@ export async function deletePersonalWorkout(memberId, workoutId) {
 // startedAt/endedAt/workoutDate도 화이트리스트에 포함해 함께 고칠 수 있게 한다(Rules와 합의된 범위).
 export async function editCompletedPersonalWorkout(memberId, workoutId, patch = {}) {
   requireUid();
+  const ref = doc(db, "members", memberId, "personalWorkouts", workoutId);
+  // 무엇이 바뀌었는지(메모/운동 내용 vs RPE만) 구분해 관리자 피드 문구를 정확히 만들기 위해 수정 전 값을 1회 조회한다.
+  // 완료된 기록을 회원이 직접 고치는 것은 드문 수동 조작이라 여기서 읽기 1건이 늘어도 실시간 구독 부담은 없다.
+  const existingSnap = await getDoc(ref);
+  const existing = existingSnap.exists() ? existingSnap.data() : {};
   const body = clean({
     workoutDate: patch.workoutDate !== undefined ? String(patch.workoutDate || "").slice(0, 10) : undefined,
     workoutParts: patch.workoutParts !== undefined ? patch.workoutParts.slice(0, PERSONAL_WORKOUT_LIMITS.maxParts) : undefined,
@@ -3091,19 +3132,32 @@ export async function editCompletedPersonalWorkout(memberId, workoutId, patch = 
     body.rpeUpdatedAt = serverTimestamp();
   }
   if (!Object.keys(body).length) return { id: workoutId };
-  await updateDoc(doc(db, "members", memberId, "personalWorkouts", workoutId), {
+  await updateDoc(ref, {
     ...body,
     updatedAt: serverTimestamp(),
   });
-  // rpe를 실제로 고쳤을 때만 회원 입력 변화 피드에 남긴다 — 내용만 고친 일반 수정은 여기서 기록하지 않는다
-  // (개인운동 자체의 최근 활동은 완료 시점에 이미 1건 기록돼 있어 중복 노출을 막는다).
+  const dateKey = body.workoutDate || String(patch.workoutDate || "").slice(0, 10) || existing.workoutDate || koreaDateKey();
+  const activities = [];
+  // rpe를 실제로 고쳤을 때만 회원 입력 변화 피드에 남긴다.
   if ("rpe" in body) {
-    const dateKey = body.workoutDate || String(patch.workoutDate || "").slice(0, 10) || koreaDateKey();
-    await touchMemberActivities(memberId, [{
-      type: "personalWorkoutRpe", label: "개인운동 RPE",
-      value: body.rpe != null ? `RPE ${body.rpe} (수정)` : "RPE 삭제", dateKey,
-    }]);
+    activities.push({
+      type: "personalWorkoutRpe", label: "개인운동 RPE", verb: "수정했습니다",
+      value: body.rpe != null ? `RPE ${body.rpe}` : "RPE 삭제", dateKey,
+    });
   }
+  // 완료된 기록의 내용(메모/운동/부위/날짜 등)이 실제로 바뀌었을 때만 별도로 남긴다
+  // (개인운동 자체의 최초 기록은 완료 시점에 이미 1건 남아 있어, 값이 같은 재저장까지 중복 알림으로 만들지 않는다).
+  const memoChanged = patch.memo !== undefined && String(existing.memo || "") !== body.memo;
+  const exercisesChanged = patch.exercises !== undefined && JSON.stringify(existing.exercises || []) !== JSON.stringify(body.exercises || []);
+  const otherContentChanged = ["workoutDate", "workoutParts", "durationMinutes"].some(k => body[k] !== undefined && JSON.stringify(existing[k] ?? null) !== JSON.stringify(body[k]));
+  if (memoChanged || exercisesChanged || otherContentChanged) {
+    activities.push({
+      type: "personalWorkout", label: "개인운동 기록 수정", verb: "수정했습니다",
+      value: (memoChanged && !exercisesChanged && !otherContentChanged) ? "메모 수정" : "운동 내용 수정",
+      dateKey,
+    });
+  }
+  if (activities.length) await touchMemberActivities(memberId, activities);
   return { id: workoutId, ...body };
 }
 
@@ -3170,6 +3224,7 @@ export async function savePersonalWorkoutSoreness(memberId, workoutId, data = {}
     : `${timingLabel} 근육통 없음`;
   await touchMemberActivities(memberId, [{
     type: "personalWorkoutSoreness", label: `개인운동 근육통 ${isFirstSave ? "입력" : "수정"}`,
+    verb: isFirstSave ? undefined : "수정했습니다",
     value, dateKey: body.workoutDate,
   }]);
   return { id: workoutId, ...body };

@@ -2335,7 +2335,7 @@ function MemberApp({ onLogout }) {
   // 완료 안내는 alert()이 아닌 MemberFeedbackForm 내부 비차단 토스트(sj-fb-saved-toast)로 표시한다.
   // alert()는 모바일에서 blur/뷰포트 재계산을 유발해 저장 직후 스크롤 위치가 튀는 원인이었다(회원 요청으로 제거).
   const saveFeedback=async(sessionId,feedback)=>{assertOwnMember(); try{ await saveSessionMemberFeedback(profile.id,sessionId,feedback); const memo=String(feedback?.memo||"").trim(); if(memo){const session=sessions.find(x=>x.id===sessionId)||{}; await addMemberMessage(profile.id,{date:session.date||today,sessionId,sessionTitle:`${session.date||today} · ${formatTypes(session.selectedTypes||session.type)||"운동"}`,message:memo,memberMessage:memo,source:"memberAppSessionFeedback"});} }catch(e){ logMemberSaveError("session-feedback-save",e); throw new Error(memberSaveErrorMessage(e,"수업 후 몸 상태 저장에 실패했습니다.")); } await load({silent:true});};
-  const saveProfileInfo=async(data)=>{assertOwnMember(); const result=await saveMemberProfileFields(profile.id,data); const nextData={...data}; setProfile(prev=>prev?{...prev,...nextData}:prev); setOnboarding(prev=>prev?{...prev,...nextData,targetWeightKg:nextData.targetWeightKg??prev.targetWeightKg,targetPeriod:nextData.targetPeriod??prev.targetPeriod,targetPeriodCustom:nextData.targetPeriodCustom??prev.targetPeriodCustom,goal:nextData.goal??prev.goal}:prev); const nextWeight=toPositiveNumber(nextData.currentWeight); if(nextWeight){const dateKey=today; setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`profile_${dateKey}`,date:dateKey,weight:nextWeight,note:"프로필 저장 반영"})}));} await load({silent:true}); return result;};
+  const saveProfileInfo=async(data,opts={})=>{assertOwnMember(); const result=await saveMemberProfileFields(profile.id,data,opts); const nextData={...data}; setProfile(prev=>prev?{...prev,...nextData}:prev); setOnboarding(prev=>prev?{...prev,...nextData,targetWeightKg:nextData.targetWeightKg??prev.targetWeightKg,targetPeriod:nextData.targetPeriod??prev.targetPeriod,targetPeriodCustom:nextData.targetPeriodCustom??prev.targetPeriodCustom,goal:nextData.goal??prev.goal}:prev); const nextWeight=toPositiveNumber(nextData.currentWeight); if(nextWeight){const dateKey=today; setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`profile_${dateKey}`,date:dateKey,weight:nextWeight,note:"프로필 저장 반영"})}));} await load({silent:true}); return result;};
   const markSessionsAsRead=async(ids)=>{if(!ids?.length||!profile?.id)return; try{assertOwnMember();}catch{return;} const newIds=ids.filter(id=>id&&!readSessionIds.has(id)); if(!newIds.length)return; setReadSessionIds(prev=>{const next=new Set(prev); newIds.forEach(id=>next.add(id)); return next;}); markSessionsRead(profile.id,newIds).catch(()=>{}); };
   // 수업일지 "회원 확인" — markSessionsAsRead(배지 전용, 목록 노출만으로도 호출)와는 완전히 별개의 저장.
   // 실제로 운동 내용이 렌더링되거나(최근 수업 자동펼침·이전 수업 카드 펼침) "수업 후 몸 상태" 펼치기 버튼을 눌렀을 때만
@@ -2418,7 +2418,7 @@ function MemberApp({ onLogout }) {
       else if(c.field==="focusAreas"||c.field==="averageWorkoutTime"){ onboardingOnlyFields[c.field]=c.value; }
       else { profileFields[c.field]=c.value; } // goal, targetWeightKg
     });
-    if(Object.keys(profileFields).length) await saveProfileInfo(profileFields);
+    if(Object.keys(profileFields).length) await saveProfileInfo(profileFields,{skipActivity:true});
     if(Object.keys(onboardingOnlyFields).length) await saveMemberOnboarding(profile.id,onboardingOnlyFields);
     await recordGoalChange(profile.id, changes.map(c=>({field:c.field,fieldLabel:c.fieldLabel,oldDisplay:c.oldDisplay,newDisplay:c.newDisplay})));
     await load({silent:true});
@@ -11919,13 +11919,17 @@ function TodaySummaryCard({ summary, onPickMember, plain }) {
 function feedSentence(item) {
   const label = DYNAMIC_LABEL_TYPES.has(item.type) ? item.label : (ACTIVITY_LABEL[item.type]||item.type);
   const particle = DYNAMIC_LABEL_TYPES.has(item.type) ? koreanParticleEulReul(item.label) : (ACTIVITY_PARTICLE[item.type]||"를");
-  return `${label}${particle} ${ACTIVITY_VERB[item.type]||"입력했습니다"}`;
+  // item.verb — 신규 저장과 이후 수정을 구분해야 하는 타입(개인운동 RPE/근육통 등)이 저장 시점에 직접 실어 보내는 동사.
+  // 없으면 타입별 기본 동사(ACTIVITY_VERB)로, 그마저 없으면 "입력했습니다"로 떨어진다.
+  const verb = item.verb || ACTIVITY_VERB[item.type] || "입력했습니다";
+  return `${label}${particle} ${verb}`;
 }
 
 // 알림 Drawer 필터 — 실제 피드에 존재하는 타입만 노출 (수면은 회원앱 입력 항목에 없어 제외)
 const DRAWER_FILTERS = [
   ["all","전체"],["rpe","RPE"],["soreness","근육통"],["pain","통증"],
   ["weight","체중"],["kcal","칼로리"],["condition","컨디션"],["cardio","유산소"],
+  ["steps","걸음수"],["personalWorkout","개인운동"],
 ];
 
 // 회원 입력 알림 Drawer — 우측 슬라이드. 데이터/삭제는 전부 기존 trainerNotificationReads 방식 재사용.
@@ -13225,9 +13229,9 @@ function findTestMemberDoc(preset, memberList) {
 
 // 회원 카드 "오늘 입력" 배지/최근 활동 표시 우선순위 (스펙: 메모>근육통>RPE>체중>유산소>칼로리>걸음수)
 // personalWorkout* 3종은 PT 수업의 soreness/rpe와 절대 같은 type을 쓰지 않는다(집계·문구가 섞이면 출처 구분이 깨짐).
-const ACTIVITY_PRIORITY = ["memo","pain","soreness","rpe","personalWorkoutSoreness","personalWorkoutRpe","condition","personalWorkout","weight","cardio","kcal","steps","goal_update"];
-const ACTIVITY_ICON = { memo:"📝", pain:"📍", soreness:"💪", rpe:"😊", condition:"🙂", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟", goal_update:"🎯", personalWorkout:"🏋️", personalWorkoutRpe:"🏋️", personalWorkoutSoreness:"🦵" };
-const ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통", rpe:"RPE", condition:"컨디션", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수", goal_update:"목표 변경", personalWorkout:"개인운동", personalWorkoutRpe:"개인운동 RPE", personalWorkoutSoreness:"개인운동 근육통" };
+const ACTIVITY_PRIORITY = ["memo","pain","soreness","rpe","personalWorkoutSoreness","personalWorkoutRpe","condition","personalWorkout","weight","cardio","kcal","steps","onboarding","profile_update","goal_update"];
+const ACTIVITY_ICON = { memo:"📝", pain:"📍", soreness:"💪", rpe:"😊", condition:"🙂", weight:"⚖️", cardio:"❤️", kcal:"🍚", steps:"👟", goal_update:"🎯", personalWorkout:"🏋️", personalWorkoutRpe:"🏋️", personalWorkoutSoreness:"🦵", onboarding:"📋", profile_update:"👤" };
+const ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통", rpe:"RPE", condition:"컨디션", weight:"체중", cardio:"유산소", kcal:"칼로리", steps:"걸음수", goal_update:"목표 변경", personalWorkout:"개인운동", personalWorkoutRpe:"개인운동 RPE", personalWorkoutSoreness:"개인운동 근육통", onboarding:"사전 문진", profile_update:"프로필 정보" };
 function sortByActivityPriority(types) {
   return [...types].sort((a,b) => ACTIVITY_PRIORITY.indexOf(a) - ACTIVITY_PRIORITY.indexOf(b));
 }
@@ -13237,13 +13241,16 @@ function formatActivityTime(at) {
   catch { return ""; }
 }
 
-// 오늘 회원 입력 피드에 포함할 활동 타입 — 걸음수는 기존 "오늘 활동" 필터와 동일하게 스펙에 없어 제외
-const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","goal_update"];
-const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를", goal_update:"을" };
+// 오늘 회원 입력 피드에 포함할 활동 타입 — 개인운동(기록/RPE/근육통)·걸음수·사전 문진·프로필 수정까지 포함해
+// 회원전용앱에서 회원이 직접 저장한 의미 있는 기록은 빠짐없이 관리자 알림에 반영한다.
+const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","cardio","kcal","steps","personalWorkout","personalWorkoutRpe","personalWorkoutSoreness","onboarding","profile_update","goal_update"];
+const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를", goal_update:"을", steps:"를", personalWorkout:"을", personalWorkoutRpe:"를", personalWorkoutSoreness:"을", onboarding:"을", profile_update:"를" };
 // goal_update는 회원이 "운동 목적"/"집중관리 부위" 등 서로 다른 항목을 바꿀 수 있어 타입 하나로는 문장에 항목명을 못 담는다 —
 // 이 타입만 ACTIVITY_LABEL 대신 이벤트별 item.label(예: "운동 목적")을 그대로 문장에 사용하고, 조사(을/를)도 그 라벨 기준으로 계산한다.
 const DYNAMIC_LABEL_TYPES = new Set(["goal_update"]);
-const ACTIVITY_VERB = { goal_update: "변경했습니다" };
+// 기본 동사(신규 저장 기준) — 개인운동 RPE/근육통 등 "수정" 케이스는 touchMemberActivities 호출부가
+// activity.verb를 직접 실어 보내 이 기본값을 덮어쓴다(feedSentence 참고).
+const ACTIVITY_VERB = { goal_update: "변경했습니다", personalWorkout: "기록했습니다", personalWorkoutRpe: "기록했습니다", personalWorkoutSoreness: "기록했습니다", onboarding: "제출했습니다", profile_update: "수정했습니다" };
 function koreanParticleEulReul(word) {
   const ch = String(word || "").trim().slice(-1);
   const code = ch.charCodeAt(0);
@@ -13263,7 +13270,14 @@ const FEED_TARGET_BY_TYPE = {
   soreness:    { targetScreen: "memberInputTrend" },
   rpe:         { targetScreen: "memberInputTrend" },
   memo:        { targetScreen: "memberInputTrend" },
+  steps:       { targetScreen: "memberInputTrend" },
   goal_update: { targetScreen: "hub" },
+  // 개인운동/사전 문진/프로필 수정은 memberInputTrend에 전용 섹션이 없어 회원 상세(허브)로 이동한다.
+  personalWorkout:         { targetScreen: "hub" },
+  personalWorkoutRpe:      { targetScreen: "hub" },
+  personalWorkoutSoreness: { targetScreen: "hub" },
+  onboarding:              { targetScreen: "hub" },
+  profile_update:          { targetScreen: "hub" },
 };
 function feedItemTarget(item) {
   return { ...(FEED_TARGET_BY_TYPE[item.type] || {}), initialDate: item.dateKey || null, initialType: item.type || null };

@@ -7401,6 +7401,74 @@ const checks = [
   })(),
 
   // ════════════════════════════════════════════════════
+  // 루틴 추천 순서 표시·변경 + 회원 화면 미리보기 (2026-08-31)
+  // 별도 order 필드는 신설하지 않는다 — exercises 배열의 저장/렌더 순서 자체가 이미 유일한 순서 기준이었고
+  // (관리자·회원앱 모두 배열을 그대로 map), ↑↓는 배열 요소(name+sets 전체)를 통째로 swap하는 방식으로 구현했다.
+  // 미리보기는 저장된 rows가 아니라 현재 편집 state로 만든 객체를 회원앱 실컴포넌트(CoachRoutineCard)에
+  // 그대로 넘겨 렌더링하며, Firestore write나 자동 추천 엔진 값(getRecommendedPart/selected)을 전혀 건드리지 않는다.
+  // ════════════════════════════════════════════════════
+  ...(() => {
+    const adminScreenSlice = app.slice(app.indexOf('function RoutineRecommendScreen'), app.indexOf('function DailyConditioningAdminScreen'));
+    const coachCardStart = app.indexOf('function CoachRoutineCard');
+    const coachCardSlice = app.slice(coachCardStart, app.indexOf('\nfunction ', coachCardStart));
+    const saveRoutineFn = db.slice(db.indexOf('export async function saveRoutineRecommendation'), db.indexOf('export async function deleteRoutineRecommendation'));
+    const previewBlock = adminScreenSlice.slice(adminScreenSlice.indexOf('{showPreview&&(()=>{'));
+
+    let moveExercise = null;
+    try {
+      const moveStart = adminScreenSlice.indexOf('const moveExercise=(ei,dir)=>setExercises(prev=>{');
+      const moveBody = adminScreenSlice.slice(moveStart, adminScreenSlice.indexOf('});', moveStart) + 3);
+      moveExercise = new Function(`
+        let result;
+        const setExercises = (updater) => { result = updater(result); };
+        ${moveBody}
+        return function(arr, ei, dir){
+          result = arr;
+          moveExercise(ei, dir);
+          return result;
+        };
+      `)();
+    } catch (e) { console.error('[regression] moveExercise 추출 실패:', e.message); }
+
+    return [
+      ['루틴 추천(관리자): 별도 order 필드를 신설하지 않고 exercises 배열 순서 자체를 그대로 저장한다(saveRoutineRecommendation에 order 필드 없음, 정렬도 하지 않음)',
+        !/\border\s*:/.test(saveRoutineFn) && !saveRoutineFn.includes('.sort(')],
+      ['루틴 추천(관리자): 각 운동 카드에 2자리 순서 배지가 렌더링 시점에 계산되어 표시된다(저장 필드 아님)',
+        adminScreenSlice.includes('{String(ei+1).padStart(2,"0")}')],
+      ['루틴 추천(관리자): 첫 운동은 ↑ 버튼이, 마지막 운동은 ↓ 버튼이 비활성화된다',
+        adminScreenSlice.includes('disabled={ei===0}') && adminScreenSlice.includes('disabled={ei===exercises.length-1}')],
+      ['루틴 추천(관리자): A/B/C 3개 운동에서 B(index 1)를 ↓ 하면 A/C/B가 되고, 이름과 세트가 함께(객체 통째로) 이동한다',
+        !!moveExercise &&
+        JSON.stringify(moveExercise([{name:'A',sets:[]},{name:'B',sets:[{weight:'10',reps:'10'}]},{name:'C',sets:[]}], 1, 1).map(e=>e.name)) === JSON.stringify(['A','C','B']) &&
+        moveExercise([{name:'A',sets:[]},{name:'B',sets:[{weight:'10',reps:'10'}]},{name:'C',sets:[]}], 1, 1)[2].sets[0].weight === '10'],
+      ['루틴 추천(관리자): 첫 번째 운동을 ↑ 하거나 마지막 운동을 ↓ 해도 배열이 바뀌지 않는다(경계 밖 이동 무시)',
+        !!moveExercise &&
+        moveExercise([{name:'A'},{name:'B'}], 0, -1)[0].name === 'A' &&
+        moveExercise([{name:'A'},{name:'B'}], 1, 1)[1].name === 'B'],
+      ['루틴 추천(관리자): 기존에 order 필드가 없던 저장 루틴을 불러올 때도 name/sets만으로 정상 매핑한다(r.order 참조 없음)',
+        !/\br\.order\b/.test(adminScreenSlice)],
+      ['회원앱: CoachRoutineCard는 routine.exercises 배열을 정렬하지 않고 저장된(=관리자가 배치한) 순서 그대로 map한다',
+        !coachCardSlice.includes('.sort(')],
+      ['회원앱: CoachRoutineCard가 운동 이름 앞에 순서 번호를 렌더링 시 계산해 붙이고, 저장되는 이름 데이터 자체는 건드리지 않는다',
+        coachCardSlice.includes('<b>{i+1}. {ex.name||"운동"}</b>')],
+      ['루틴 추천(관리자): "회원 화면 미리보기" 버튼이 존재하고 클릭 시 페이지 이동 없이 모달을 연다(showPreview state, 새 탭/창 없음)',
+        adminScreenSlice.includes('onClick={()=>setShowPreview(true)}>회원 화면 미리보기') &&
+        !adminScreenSlice.includes('window.open')],
+      ['미리보기: Firestore 쓰기 함수(saveRoutineRecommendation/setDoc)를 전혀 호출하지 않는다(읽기/렌더 전용)',
+        !previewBlock.includes('saveRoutineRecommendation(') && !previewBlock.includes('setDoc(')],
+      ['미리보기: 저장된 rows가 아니라 현재 편집 중인 state(exercises/date/targetParts 등)로 만든 객체를 그대로 렌더링해 저장 전 변경도 즉시 반영된다',
+        previewBlock.includes('exercises:exercises.filter(ex=>String(ex.name||"").trim())') &&
+        !/previewRoutine\s*=\s*rows/.test(previewBlock)],
+      ['미리보기: 회원앱 실제 컴포넌트(CoachRoutineCard)와 실제 CSS(MEMBER_CSS)를 재사용하고, 별도로 새로 만든 대체 렌더러를 쓰지 않는다',
+        previewBlock.includes('<CoachRoutineCard routine={previewRoutine}/>') && previewBlock.includes('<style>{MEMBER_CSS}</style>')],
+      ['미리보기: 자동 추천 엔진 값(getRecommendedPart/recommended.part/selected)을 참조하지 않아, 관리자 추천 부위와 다른 부위가 제목에 섞이는 재발이 구조적으로 불가능하다',
+        !previewBlock.includes('getRecommendedPart(') && !previewBlock.includes('recommended.part') && !previewBlock.includes('{selected}') && !previewBlock.includes('selectedParts')],
+      ['미리보기: 현재 "회원에게 공개" 상태를 표시만 하고, 모달 안에서 visibility를 변경하는 컨트롤은 없다',
+        previewBlock.includes('현재 상태:') && !/setVisibility/.test(previewBlock)],
+    ];
+  })(),
+
+  // ════════════════════════════════════════════════════
   // 관리자 알림 누락 항목 보완 (2026-08-29) — 개인운동/걸음수/사전 문진/프로필 수정까지
   // "오늘 회원 입력 피드"(TODAY_FEED_TYPES)에 포함시키고, verb 필드로 신규/수정 문장을 구분한다.
   // ════════════════════════════════════════════════════

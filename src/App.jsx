@@ -8640,7 +8640,7 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
 }
 
 function formatRoutineSet(st,j){const w=String(st.weight||"").trim(); const r=String(st.reps||"").trim(); const d=String(st.durationSec||"").trim(); let val=""; if(w&&r)val=`${w}kg × ${r}회`; else if(w)val=`${w}kg`; else if(r)val=`${r}회`; else if(d)val=`${d}초`; return `${j+1}세트${val?` ${val}`:""}`;}
-function CoachRoutineCard({routine}){if(!routine)return null; const exercises=(routine.exercises||[]).filter(ex=>String(ex.name||"").trim()); return <div className="coach-routine-card"><h3>대표 추천 루틴</h3><p>{String(routine.date||"").slice(5)} · {formatPartsForMember(routine)}</p>{exercises.length===0&&<p><b>추천 부위:</b> {formatPartsForMember(routine)}</p>}{exercises.map((ex,i)=>{const sets=ex.sets||[]; return <div className="routine-row coach" key={i}><b>{ex.name||"운동"}</b>{sets.length>0&&<div className="coach-set-list">{sets.map((st,j)=><span key={j}>{formatRoutineSet(st,j)}</span>)}</div>}</div>;})}{routine.coachComment&&<p className="coach-comment"><b>대표 메모:</b><br/>{routine.coachComment}</p>}</div>}
+function CoachRoutineCard({routine}){if(!routine)return null; const exercises=(routine.exercises||[]).filter(ex=>String(ex.name||"").trim()); return <div className="coach-routine-card"><h3>대표 추천 루틴</h3><p>{String(routine.date||"").slice(5)} · {formatPartsForMember(routine)}</p>{exercises.length===0&&<p><b>추천 부위:</b> {formatPartsForMember(routine)}</p>}{exercises.map((ex,i)=>{const sets=ex.sets||[]; return <div className="routine-row coach" key={i}><b>{i+1}. {ex.name||"운동"}</b>{sets.length>0&&<div className="coach-set-list">{sets.map((st,j)=><span key={j}>{formatRoutineSet(st,j)}</span>)}</div>}</div>;})}{routine.coachComment&&<p className="coach-comment"><b>대표 메모:</b><br/>{routine.coachComment}</p>}</div>}
 function DailyConditioningCard({items=[]}){const today=getKoreaDateString(); const item=(items||[]).find(x=>(x.date||x.id)===today&&isPublishedData(x)&&(x.exerciseName||x.title||x.description)); if(!item)return null; return <MCard title="오늘의 컨디셔닝"><div className="conditioning-card"><b>{item.exerciseName||item.title||"매일 컨디셔닝 추천"}</b><p>{[item.sets&&`${item.sets}세트`,item.reps&&`${item.reps}회`,item.duration].filter(Boolean).join(" × ")}</p>{item.description&&<p>{item.description}</p>}{item.caution&&<em>주의사항: {item.caution}</em>}</div></MCard>}
 
 // 명확한 통증/위험 신호만 감지 — 이 신호가 있으면 해당 운동을 오늘 추천 후보에서 제외한다.
@@ -16797,6 +16797,16 @@ function RoutineRecommendScreen({member,sessions,onBack,showToast}){
   const setSet=(ei,si,k,v)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).map((st,j)=>j===si?{...st,[k]:v}:st)}:ex));
   const addSet=ei=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:[...(ex.sets||[]),{weight:"",reps:""}]}:ex));
   const removeSet=(ei,si)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).filter((_,j)=>j!==si)}:ex));
+  // 배열 순서 자체가 회원앱 노출 순서(별도 order 필드 없음) — ei/target 위치의 운동 객체(name+sets 전체)를 통째로 맞바꿔
+  // 이름만 이동하거나 세트가 다른 운동에 남는 사고를 구조적으로 방지한다.
+  const moveExercise=(ei,dir)=>setExercises(prev=>{
+    const target=ei+dir;
+    if(target<0||target>=prev.length) return prev;
+    const next=[...prev];
+    [next[ei],next[target]]=[next[target],next[ei]];
+    return next;
+  });
+  const [showPreview,setShowPreview]=useState(false);
   const loadLastRecord=ei=>{
     const rec=findLastExerciseEntry(sessions,exercises[ei]?.name);
     if(!rec){showToast("불러올 이전 기록이 없습니다.","err"); return;}
@@ -16862,15 +16872,27 @@ function RoutineRecommendScreen({member,sessions,onBack,showToast}){
             {parts.map(x=><button key={x} type="button" style={chipStyle(targetParts.includes(x))} onClick={()=>togglePart(x)}>{x}</button>)}
           </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"10px 12px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"10px 12px",gap:8,flexWrap:"wrap"}}>
           <Mo c="#c9d1d9" s={11}>회원에게 공개</Mo>
-          <button type="button" onClick={()=>setVisibility(v=>v==="visible"?"hidden":"visible")} style={{border:"none",borderRadius:999,padding:"6px 16px",fontWeight:800,fontSize:11,cursor:"pointer",background:visibility==="visible"?"#5EEAD4":"rgba(255,255,255,.08)",color:visibility==="visible"?"#0B1120":"#94a3b8"}}>{visibility==="visible"?"ON":"OFF"}</button>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <Btn ghost sm onClick={()=>setShowPreview(true)}>회원 화면 미리보기</Btn>
+            <button type="button" onClick={()=>setVisibility(v=>v==="visible"?"hidden":"visible")} style={{border:"none",borderRadius:999,padding:"6px 16px",fontWeight:800,fontSize:11,cursor:"pointer",background:visibility==="visible"?"#5EEAD4":"rgba(255,255,255,.08)",color:visibility==="visible"?"#0B1120":"#94a3b8"}}>{visibility==="visible"?"ON":"OFF"}</button>
+          </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:10}}>
           {exercises.map((ex,ei)=>{
             const rec=String(ex.name||"").trim()?findLastExerciseEntry(sessions,ex.name):null;
             return (
               <div key={ei} style={{background:"#0B1120",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:12,display:"grid",gap:8,alignContent:"start"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                  <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",minWidth:32,height:24,padding:"0 7px",borderRadius:7,background:"rgba(94,234,212,.15)",color:"#5EEAD4",fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{String(ei+1).padStart(2,"0")}</span>
+                  <div style={{display:"flex",gap:6}}>
+                    <button type="button" disabled={ei===0} onClick={()=>moveExercise(ei,-1)} aria-label="위로 이동"
+                      style={{width:36,height:36,borderRadius:9,border:"1px solid rgba(255,255,255,.14)",background:ei===0?"rgba(255,255,255,.03)":"transparent",color:ei===0?"#3a4250":"#c9d1d9",fontSize:16,fontWeight:800,cursor:ei===0?"default":"pointer"}}>↑</button>
+                    <button type="button" disabled={ei===exercises.length-1} onClick={()=>moveExercise(ei,1)} aria-label="아래로 이동"
+                      style={{width:36,height:36,borderRadius:9,border:"1px solid rgba(255,255,255,.14)",background:ei===exercises.length-1?"rgba(255,255,255,.03)":"transparent",color:ei===exercises.length-1?"#3a4250":"#c9d1d9",fontSize:16,fontWeight:800,cursor:ei===exercises.length-1?"default":"pointer"}}>↓</button>
+                  </div>
+                </div>
                 <div>
                   <Mo c="#66717C" s={8.5} style={{display:"block",marginBottom:4}}>운동 종목(비워두면 부위만 전송)</Mo>
                   <input value={ex.name} onChange={e=>setName(ei,e.target.value)} placeholder="예: 덤벨 인클라인 벤치프레스" style={{fontWeight:800}}/>
@@ -16926,6 +16948,38 @@ function RoutineRecommendScreen({member,sessions,onBack,showToast}){
         </div>
       ):<Mo c="#94a3b8" s={9}>저장된 추천이 없습니다.</Mo>}
     </Card>
+    {showPreview&&(()=>{
+      // 미리보기 전용 객체 — Firestore에 저장된 rows가 아니라 지금 편집 중인 state를 그대로 사용한다(저장 없이도 즉시 반영).
+      // 자동 추천 엔진(getRecommendedPart/selected 등)은 전혀 참조하지 않고 관리자가 입력한 필드만으로 구성해
+      // "관리자 하체 추천 / 회원 화면 가슴 제목" 혼동 버그가 재발할 여지를 원천 차단한다.
+      const previewRoutine={date,targetParts,targetPart:targetParts.join(" + "),nextSessionPart,nextSessionDate,exercises:exercises.filter(ex=>String(ex.name||"").trim()),coachComment,visibility};
+      return (
+        <div role="dialog" aria-modal="true" aria-label="회원 화면 미리보기" onClick={e=>{if(e.target===e.currentTarget) setShowPreview(false);}}
+          style={{position:"fixed",inset:0,background:"rgba(15,23,42,.5)",zIndex:300,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"36px 16px",overflowY:"auto"}}>
+          <div style={{width:"100%",maxWidth:420,background:"#0B1120",borderRadius:26,overflow:"hidden",boxShadow:"0 30px 80px rgba(15,23,42,.45)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 18px",background:"#111827",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+              <b style={{fontSize:13,fontWeight:800,color:"#fff"}}>회원 화면 미리보기 — 저장 전 편집 내용 기준</b>
+              <button type="button" onClick={()=>setShowPreview(false)} style={{border:"1px solid rgba(255,255,255,.14)",background:"transparent",borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:"#c9d1d9",cursor:"pointer"}}>닫기</button>
+            </div>
+            <div style={{padding:"14px 14px 20px",background:"#F6F7F9"}}>
+              <div style={{fontSize:11,fontWeight:800,marginBottom:10,color:visibility==="visible"?"#16A34A":"#EA580C"}}>
+                현재 상태: {visibility==="visible"?"회원에게 공개됨":"비공개(회원에게 보이지 않음)"}
+              </div>
+              {/* 회원앱 실제 컴포넌트(CoachRoutineCard)와 CSS(MEMBER_CSS)를 그대로 재사용 — 별도 미리보기 전용 UI를 새로 만들지 않는다 */}
+              <style>{MEMBER_CSS}</style>
+              <div className="member-page" style={{maxWidth:"none",padding:0,animation:"none"}}>
+                <MCard title="오늘의 운동 가이드">
+                  <div className="workout-guide">
+                    <p>{member?.name}님 추천 루틴{nextSessionDate?<> · 다음 수업 {String(nextSessionDate).split("-").join(".")}</>:null}</p>
+                  </div>
+                  <CoachRoutineCard routine={previewRoutine}/>
+                </MCard>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
   </div>;
 }
 function DailyConditioningAdminScreen({member,onBack,showToast}){const today=getKoreaDateString(); const [form,setForm]=useState({date:today,exerciseName:"",description:"",sets:"2",reps:"10",duration:"",caution:"",visibility:"visible"}); const [scope,setScope]=useState("global"); const [saving,setSaving]=useState(false); const [rows,setRows]=useState([]); const set=(k,v)=>setForm(f=>({...f,[k]:v})); const refresh=useCallback(()=>getDailyConditioning({memberId:member.id}).then(setRows).catch(()=>setRows([])),[member.id]); useEffect(()=>{refresh();},[refresh]); const save=async(publish)=>{setSaving(true); try{if(publish&&!String(form.exerciseName||form.description||"").trim()) throw new Error("매일 컨디셔닝 추천 내용을 입력해야 전송할 수 있습니다."); const saved=await saveDailyConditioning(form,{memberId:scope==="member"?member.id:null,publish}); if(publish&&form.visibility!=="hidden"&&!isPublishedData(saved)) throw new Error("전송 실패: 저장 경로 또는 권한을 확인해주세요."); showToast(publish?"오늘의 컨디셔닝을 회원앱으로 전송했습니다.":"오늘의 컨디셔닝을 임시 저장했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"오늘의 컨디셔닝 저장에 실패했습니다.","err");}finally{setSaving(false);}}; const toggleVisibility=async(r)=>{try{await saveDailyConditioning({...r,visibility:isPublishedData(r)?"hidden":"visible"},{memberId:r.scope==="member"?member.id:null,publish:false}); showToast(isPublishedData(r)?"회원앱에서 숨김 처리했습니다.":"회원앱에 다시 노출했습니다."); refresh();}catch(e){console.error(e); showToast("노출 상태 변경에 실패했습니다.","err");}}; const deleteItem=async(r)=>{if(!window.confirm("이 오늘의 컨디셔닝을 삭제할까요? 삭제하면 관리자앱과 회원앱에서 모두 표시되지 않습니다."))return; try{await deleteDailyConditioning(r,{memberId:member.id}); showToast("오늘의 컨디셔닝을 삭제했습니다."); refresh();}catch(e){console.error(e); showToast(e.message||"삭제에 실패했습니다.","err");}}; return <div><SH title="🧘 오늘의 컨디셔닝" sub="매일 컨디셔닝 추천 관리" right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>}/><Card title="현재 회원앱 노출 컨디셔닝">{rows.filter(isPublishedData).length?rows.filter(isPublishedData).map(r=><div key={`${r.scope}-${r.id}`} style={{padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><Mo c="#5EEAD4" s={10}>{r.date||r.id} · {r.exerciseName||r.title}</Mo><Mo c="#94a3b8" s={9}>{r.scope==="member"?"개별 회원":"전체 회원"} · {r.description}</Mo></div>):<Mo c="#94a3b8" s={9}>현재 노출중인 오늘의 컨디셔닝이 없습니다.</Mo>}</Card><Card title="매일 컨디셔닝 추천 입력"><div style={{display:"grid",gap:10}}><SelectLine label="전송 대상" value={scope} opts={["global","member"]} onChange={setScope}/><Field label="날짜" type="date" value={form.date} onChange={v=>set("date",v)}/><Field label="운동명" value={form.exerciseName} onChange={v=>set("exerciseName",v)} placeholder="데드버그 밴드 Y레이즈"/><TextArea label="회원이 매일 따라 할 기능/교정운동 설명" value={form.description} onChange={v=>set("description",v)}/><Field label="세트" value={form.sets} onChange={v=>set("sets",v)}/><Field label="횟수" value={form.reps} onChange={v=>set("reps",v)}/><Field label="시간" value={form.duration} onChange={v=>set("duration",v)}/><TextArea label="주의사항" value={form.caution} onChange={v=>set("caution",v)}/><SelectLine label="노출 상태" value={form.visibility} opts={["visible","hidden"]} onChange={v=>set("visibility",v)}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Btn ghost disabled={saving} onClick={()=>save(false)}>임시 저장</Btn><Btn disabled={saving} onClick={()=>save(true)}>회원앱 전송</Btn></div></div></Card><Card title="오늘의 컨디셔닝 현황">{rows.length?rows.map(r=><div key={`${r.scope}-${r.id}`} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,.08)"}}><div><Mo c="#fff" s={10}>{r.date||r.id} · {r.exerciseName||r.title||"미입력"}</Mo><StatusBadge item={r}/><Mo c="#94a3b8" s={8}>{r.scope==="member"?"개별 회원":"전체 회원"}</Mo></div>{isSentData(r)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><Btn ghost sm onClick={()=>toggleVisibility(r)}>{isPublishedData(r)?"숨김":"노출"}</Btn><Btn ghost sm onClick={()=>deleteItem(r)} style={{color:"#f87171",borderColor:"rgba(248,113,113,.35)"}}>삭제</Btn></div>}</div>):<Mo c="#94a3b8" s={9}>저장된 컨디셔닝이 없습니다.</Mo>}</Card></div>}

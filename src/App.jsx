@@ -17183,6 +17183,42 @@ function buildRecentVsPrevAvg(pointsAsc, valueKey) {
   return { recentAvg, prevAvg, recentCount: recent.length, prevCount: prev.length, basisText, pct: memberChangePct(recentAvg, prevAvg) };
 }
 
+// ── "총 운동 볼륨 변화" 전용 — 세션 전체 볼륨이 아니라 "분석 대상 부위"와 동일한 부위 기록만 추려 비교한다.
+// 분할 운동 회원은 최근 N회 안에 특정 부위가 우연히 빠졌다는 이유만으로 총 볼륨이 급감한 것처럼 보일 수 있어서,
+// 세션 단위 합산 대신 이미 "운동 분석" 탭 부위별 집계에 쓰는 muscleTop·세트 volume(buildMuscleVolumeData)을
+// 그대로 재사용해 부위별로 나눠 비교한다. 부위가 여러 개인 세션(예: 가슴+이두)은 해당 부위 운동의 볼륨만 집계되므로
+// 별도 처리 없이 자연히 안전하게 걸러진다.
+// 분석 대상 부위 = 가장 최근 완료 수업(오늘 수업이 기록됐다면 그 수업)에서 볼륨이 가장 큰 부위.
+// 기능/기타는 실제 신체 부위가 아니므로 대상에서 제외하고, 그 세션에 유효한 부위가 없으면 한 회차씩 거슬러 올라간다.
+function buildMemberChangeTargetMuscle(sessionsAsc) {
+  for (let i = sessionsAsc.length - 1; i >= 0; i--) {
+    const row = buildMuscleVolumeData([sessionsAsc[i]])[0] || {};
+    const top = MUSCLE_LIST.filter(g => g !== "기능" && g !== "기타")
+      .map(g => ({ g, total: row[g] || 0 }))
+      .sort((a, b) => b.total - a.total)[0];
+    if (top && top.total > 0) return top.g;
+  }
+  return null;
+}
+function buildMemberChangeMuscleVolumeCompare(sessions) {
+  const sessionsAsc = (sessions || []).filter(s => s && s.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (!sessionsAsc.length) return null;
+  const targetGroup = buildMemberChangeTargetMuscle(sessionsAsc);
+  if (!targetGroup) return null; // 부위 정보가 있는 기록이 하나도 없음(레거시 등) — "기록 없음"으로 표시
+
+  const muscleRows = buildMuscleVolumeData(sessionsAsc);
+  const points = sessionsAsc
+    .map((s, i) => ({ date: s.date, vol: muscleRows[i][targetGroup] || 0 }))
+    .filter(p => p.vol > 0);
+
+  const base = { targetGroup, targetLabel: muscleTopBadgeLabel(targetGroup), totalCount: points.length };
+  if (points.length < 6) return { ...base, status: "insufficient" }; // 최근 3회·이전 3회를 모두 채울 수 없으면 억지 비교 금지
+  const recent = points.slice(-3), prev = points.slice(-6, -3);
+  const avg = arr => arr.reduce((a, b) => a + b.vol, 0) / arr.length;
+  const recentAvg = avg(recent), prevAvg = avg(prev);
+  return { ...base, status: "ok", recentAvg, prevAvg, recentCount: recent.length, prevCount: prev.length, pct: memberChangePct(recentAvg, prevAvg) };
+}
+
 // ── 벌크업 대표 운동 근력 변화 — 기존 buildStrengthData(추정 1RM) 재사용, 우선순위: 기록횟수 많은 운동 ──
 function buildMemberChangeStrength(sessions) {
   const data = buildStrengthData(sessions || []);
@@ -17301,17 +17337,20 @@ function buildMemberChangeMetrics(goalType, ctx) {
             { label: "기준 기록일", value: strength.bestDate || "-" },
           ] };
 
-    const volPoints = buildMemberChangeVolumePoints(sessions);
-    const volCmp = buildRecentVsPrevAvg(volPoints, "vol");
-    const m2 = !volCmp
-      ? emptyMetric("volume", "총 운동 볼륨 변화", "비교 가능한 수업 기록 부족", "최근 수업과 이전 수업 볼륨 비교")
+    const volCmp = buildMemberChangeMuscleVolumeCompare(sessions);
+    const m2 = (!volCmp || volCmp.status === "insufficient")
+      ? emptyMetric(
+          "volume", "총 운동 볼륨 변화",
+          !volCmp ? "부위 정보가 있는 수업 기록 없음" : `${volCmp.targetLabel} 기록 ${volCmp.totalCount}회 — 비교 데이터 부족(6회 이상 필요)`,
+          !volCmp ? "동일 부위 최근 수업과 이전 수업 볼륨 비교" : `${volCmp.targetLabel} 동일 부위 최근 수업과 이전 수업 볼륨 비교`)
       : { key: "volume", label: "총 운동 볼륨 변화", empty: false,
           display: volCmp.pct === null ? `${Math.round(volCmp.prevAvg).toLocaleString()}kg → ${Math.round(volCmp.recentAvg).toLocaleString()}kg` : `${volCmp.pct > 0 ? "+" : ""}${volCmp.pct}%`,
-          compareText: volCmp.basisText,
+          compareText: `${volCmp.targetLabel} · 최근 3회 vs 이전 3회`,
           detailRows: [
+            { label: "분석 대상 부위", value: volCmp.targetLabel },
             { label: "이전 평균 볼륨", value: `${Math.round(volCmp.prevAvg).toLocaleString()}kg` },
             { label: "최근 평균 볼륨", value: `${Math.round(volCmp.recentAvg).toLocaleString()}kg` },
-            { label: "비교에 포함된 수업 수", value: `이전 ${volCmp.prevCount}회 · 최근 ${volCmp.recentCount}회` },
+            { label: "비교 수업", value: `${volCmp.targetLabel} 이전 ${volCmp.prevCount}회 · 최근 ${volCmp.recentCount}회` },
           ] };
 
     const w = buildMemberChangeWeightInfo(bodyData);

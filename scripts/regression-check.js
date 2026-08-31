@@ -3002,6 +3002,32 @@ const checks = [
     app.includes('<HubWeightTrendSection key={member.id} records={wEntries} chartHeight={isWide ? 156 : 148} />')
   ],
 
+  // ── 회원 변화 "총 운동 볼륨 변화": 분할 운동 왜곡 방지 — 세션 전체가 아니라 동일 부위 기록만 비교 ──
+  ['총 운동 볼륨 변화: 세션 전체 최근/이전 3회가 아니라 동일 부위(muscleTop) 기록만 골라 비교 — 기존 부위별 집계 헬퍼(buildMuscleVolumeData) 재사용, 새 Firestore 필드 없음',
+    app.includes('function buildMemberChangeTargetMuscle(sessionsAsc) {') &&
+    app.includes('function buildMemberChangeMuscleVolumeCompare(sessions) {') &&
+    app.includes('const muscleRows = buildMuscleVolumeData(sessionsAsc);') &&
+    app.includes('const volCmp = buildMemberChangeMuscleVolumeCompare(sessions);')
+  ],
+  ['총 운동 볼륨 변화: 분석 대상 부위는 가장 최근 완료 수업(오늘 수업 포함) 기준으로 결정, 기능/기타는 대상에서 제외',
+    app.includes("MUSCLE_LIST.filter(g => g !== \"기능\" && g !== \"기타\")") &&
+    app.includes('for (let i = sessionsAsc.length - 1; i >= 0; i--) {')
+  ],
+  ['총 운동 볼륨 변화: 동일 부위 기록이 6회 미만이면(4~5회·1~3회 모두) 억지 비교 없이 데이터 부족으로 표시, 0회면 기록 없음으로 표시 — 0kg·-100% 같은 왜곡된 값 생성 안 함',
+    app.includes('if (points.length < 6) return { ...base, status: "insufficient" };') &&
+    app.includes('!volCmp ? "부위 정보가 있는 수업 기록 없음"') &&
+    app.includes('비교 데이터 부족(6회 이상 필요)')
+  ],
+  ['총 운동 볼륨 변화: 카드 문구·상세 내역에 분석 대상 부위명이 표시됨(어떤 부위를 비교했는지 알 수 있어야 함)',
+    app.includes('compareText: `${volCmp.targetLabel} · 최근 3회 vs 이전 3회`') &&
+    app.includes('{ label: "분석 대상 부위", value: volCmp.targetLabel }') &&
+    app.includes('{ label: "비교 수업", value: `${volCmp.targetLabel} 이전 ${volCmp.prevCount}회 · 최근 ${volCmp.recentCount}회` }')
+  ],
+  ['총 운동 볼륨 변화: 근력 변화(buildMemberChangeStrength)·체중 변화 로직은 이번 수정과 분리되어 그대로 유지',
+    app.includes('function buildMemberChangeStrength(sessions) {') &&
+    app.includes('{ key: "strength", label: "근력 변화", empty: false,')
+  ],
+
   // ── 체중 변화 기준 통일(회원목록 ↔ 회원 상세 ↔ 분석 도구) ──────────────────────────
   ['체중 변화: 공용 헬퍼 getWeightProgress/formatWeightChange 존재 + 등록 체중(startWeight)을 기준으로 쓰지 않음',
     app.includes('function getWeightProgress(bodyData, liveEntry = null) {') &&

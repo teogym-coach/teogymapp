@@ -8640,7 +8640,7 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
 }
 
 function formatRoutineSet(st,j){const w=String(st.weight||"").trim(); const r=String(st.reps||"").trim(); const d=String(st.durationSec||"").trim(); let val=""; if(w&&r)val=`${w}kg × ${r}회`; else if(w)val=`${w}kg`; else if(r)val=`${r}회`; else if(d)val=`${d}초`; return `${j+1}세트${val?` ${val}`:""}`;}
-function CoachRoutineCard({routine}){if(!routine)return null; const exercises=(routine.exercises||[]).filter(ex=>String(ex.name||"").trim()); return <div className="coach-routine-card"><h3>대표 추천 루틴</h3><p>{String(routine.date||"").slice(5)} · {formatPartsForMember(routine)}</p>{exercises.length===0&&<p><b>추천 부위:</b> {formatPartsForMember(routine)}</p>}{exercises.map((ex,i)=>{const sets=ex.sets||[]; return <div className="routine-row coach" key={i}><b>{i+1}. {ex.name||"운동"}</b>{sets.length>0&&<div className="coach-set-list">{sets.map((st,j)=><span key={j}>{formatRoutineSet(st,j)}</span>)}</div>}</div>;})}{routine.coachComment&&<p className="coach-comment"><b>대표 메모:</b><br/>{routine.coachComment}</p>}</div>}
+function CoachRoutineCard({routine}){if(!routine)return null; const exercises=(routine.exercises||[]).filter(ex=>String(ex.name||"").trim()); return <div className="coach-routine-card"><h3>대표 추천 루틴</h3><p>{String(routine.date||"").slice(5)} · {formatPartsForMember(routine)}</p>{exercises.length===0&&<p><b>추천 부위:</b> {formatPartsForMember(routine)}</p>}{exercises.map((ex,i)=>{const sets=ex.sets||[]; const hasSetValue=sets.some(st=>String(st.weight||"").trim()||String(st.reps||"").trim()); return <div className="routine-row coach" key={i}><b>{i+1}. {ex.name||"운동"}</b>{sets.length>0&&<div className="coach-set-list">{hasSetValue?sets.map((st,j)=><span key={j}>{formatRoutineSet(st,j)}</span>):<span>{sets.length}세트</span>}</div>}</div>;})}{routine.coachComment&&<p className="coach-comment"><b>대표 메모:</b><br/>{routine.coachComment}</p>}</div>}
 function DailyConditioningCard({items=[]}){const today=getKoreaDateString(); const item=(items||[]).find(x=>(x.date||x.id)===today&&isPublishedData(x)&&(x.exerciseName||x.title||x.description)); if(!item)return null; return <MCard title="오늘의 컨디셔닝"><div className="conditioning-card"><b>{item.exerciseName||item.title||"매일 컨디셔닝 추천"}</b><p>{[item.sets&&`${item.sets}세트`,item.reps&&`${item.reps}회`,item.duration].filter(Boolean).join(" × ")}</p>{item.description&&<p>{item.description}</p>}{item.caution&&<em>주의사항: {item.caution}</em>}</div></MCard>}
 
 // 명확한 통증/위험 신호만 감지 — 이 신호가 있으면 해당 운동을 오늘 추천 후보에서 제외한다.
@@ -16794,7 +16794,14 @@ function RoutineRecommendScreen({member,sessions,onBack,showToast}){
 
   const togglePart=x=>setTargetParts(prev=>prev.includes(x)?prev.filter(v=>v!==x):[...prev,x]);
   const setName=(i,name)=>setExercises(prev=>prev.map((ex,idx)=>idx===i?{...ex,name}:ex));
-  const setSet=(ei,si,k,v)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).map((st,j)=>j===si?{...st,[k]:v}:st)}:ex));
+  // 중량은 소수 1자리까지, 횟수는 정수만 허용 — 음수·문자·NaN 유발 입력은 입력 단계에서 제거한다(1:1 수업일지 editSet과 동일한 규칙 재사용).
+  // 빈 문자열은 그대로 빈 문자열로 남아 "세트 수만 추천" 상태를 유지한다(0으로 자동 치환하지 않음).
+  const setSet=(ei,si,k,v)=>{
+    const cleaned=k==="weight"
+      ? String(v).replace(/[^0-9.]/g,"").replace(/(\..*)\./g,"$1").slice(0,6)
+      : String(v).replace(/[^0-9]/g,"").slice(0,3);
+    setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).map((st,j)=>j===si?{...st,[k]:cleaned}:st)}:ex));
+  };
   const addSet=ei=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:[...(ex.sets||[]),{weight:"",reps:""}]}:ex));
   const removeSet=(ei,si)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).filter((_,j)=>j!==si)}:ex));
   // 배열 순서 자체가 회원앱 노출 순서(별도 order 필드 없음) — ei/target 위치의 운동 객체(name+sets 전체)를 통째로 맞바꿔

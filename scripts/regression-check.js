@@ -7469,6 +7469,106 @@ const checks = [
   })(),
 
   // ════════════════════════════════════════════════════
+  // 루틴 추천 세트별 상세 수준 자유 조절 (2026-08-31, 2차)
+  // exercises[].sets는 원래부터 {weight,reps} 배열이라 별도 recommendationMode/detailLevel 필드를 신설하지
+  // 않았다 — "종목만/세트수만/횟수만/중량만/중량+횟수" 모두 이미 있던 formatRoutineSet 분기(값 조합에 따라
+  // "Nkg × M회"/"Nkg"/"M회"/빈 값)로 표현 가능했다. 이번에 추가한 것은 (1) 세트가 있지만 전부 빈 값일 때
+  // "N세트 N세트 N세트..." 대신 "N세트" 한 줄로 요약하는 hasSetValue 분기, (2) 관리자 세트 입력에 음수/NaN
+  // 유발 문자를 걸러내는 sanitize(1:1 수업일지 editSet과 동일 규칙) 두 가지뿐이다.
+  // ════════════════════════════════════════════════════
+  ...(() => {
+    const adminScreenSlice = app.slice(app.indexOf('function RoutineRecommendScreen'), app.indexOf('function DailyConditioningAdminScreen'));
+    const coachCardStart = app.indexOf('function CoachRoutineCard');
+    const coachCardSlice = app.slice(coachCardStart, app.indexOf('\nfunction ', coachCardStart));
+    const previewBlock = adminScreenSlice.slice(adminScreenSlice.indexOf('{showPreview&&(()=>{'));
+
+    let formatRoutineSet = null, hasSetValueFn = null, computeCleaned = null, moveExercise = null;
+    try {
+      const sliceFormatSet = app.slice(app.indexOf('function formatRoutineSet(st,j)'), app.indexOf('function CoachRoutineCard'));
+      formatRoutineSet = new Function(`${sliceFormatSet}\nreturn formatRoutineSet;`)();
+    } catch (e) { console.error('[regression] formatRoutineSet 추출 실패:', e.message); }
+    try {
+      const hvStart = coachCardSlice.indexOf('const hasSetValue=sets.some(');
+      const hvCode = coachCardSlice.slice(hvStart, coachCardSlice.indexOf(';', hvStart) + 1);
+      hasSetValueFn = new Function('sets', `${hvCode}\nreturn hasSetValue;`);
+    } catch (e) { console.error('[regression] hasSetValue 추출 실패:', e.message); }
+    try {
+      const cleanedStart = adminScreenSlice.indexOf('const cleaned=k==="weight"');
+      const cleanedEnd = adminScreenSlice.indexOf('.slice(0,3);', cleanedStart) + '.slice(0,3);'.length;
+      const cleanedStmt = adminScreenSlice.slice(cleanedStart, cleanedEnd);
+      computeCleaned = new Function('k', 'v', `${cleanedStmt}\nreturn cleaned;`);
+    } catch (e) { console.error('[regression] setSet cleaned 추출 실패:', e.message); }
+    try {
+      const moveStart = adminScreenSlice.indexOf('const moveExercise=(ei,dir)=>setExercises(prev=>{');
+      const moveBody = adminScreenSlice.slice(moveStart, adminScreenSlice.indexOf('});', moveStart) + 3);
+      moveExercise = new Function(`
+        let result;
+        const setExercises = (updater) => { result = updater(result); };
+        ${moveBody}
+        return function(arr, ei, dir){
+          result = arr;
+          moveExercise(ei, dir);
+          return result;
+        };
+      `)();
+    } catch (e) { console.error('[regression] moveExercise 추출 실패(2차):', e.message); }
+
+    return [
+      ['세트별 상세 수준: exercises[].sets는 기존 {weight,reps} 배열 구조 그대로이고, 이번 기능을 위한 recommendationMode/detailLevel/showWeight 같은 신규 필드는 없다',
+        !adminScreenSlice.includes('recommendationMode') && !adminScreenSlice.includes('detailLevel') && !adminScreenSlice.includes('showWeight') && !adminScreenSlice.includes('showReps')],
+      ['세트별 상세 수준: 운동명만 추천(sets.length===0)일 때 CoachRoutineCard는 coach-set-list 자체를 렌더링하지 않는다',
+        coachCardSlice.includes('sets.length>0&&<div className="coach-set-list">')],
+      ['세트별 상세 수준: 세트 3개가 있지만 weight/reps가 모두 공백이면(=세트 수만 추천) 세트별 반복 대신 "3세트" 한 줄로 요약한다',
+        !!hasSetValueFn && hasSetValueFn([{weight:"",reps:""},{weight:"",reps:""},{weight:"",reps:""}]) === false &&
+        coachCardSlice.includes('<span>{sets.length}세트</span>')],
+      ['세트별 상세 수준: 세트 중 하나라도 값이 있으면 요약하지 않고 세트별 formatRoutineSet 렌더링으로 되돌아간다',
+        !!hasSetValueFn && hasSetValueFn([{weight:"",reps:""},{weight:"20",reps:""},{weight:"",reps:""}]) === true],
+      ['세트별 상세 수준: reps만 입력하면 "N세트 15회"만 표시하고 kg를 붙이지 않는다(0kg 등 이상 표기 없음)',
+        !!formatRoutineSet && formatRoutineSet({weight:"",reps:"15"},0) === "1세트 15회"],
+      ['세트별 상세 수준: weight만 입력하면 "N세트 20kg"만 표시하고 회를 붙이지 않는다',
+        !!formatRoutineSet && formatRoutineSet({weight:"20",reps:""},0) === "1세트 20kg"],
+      ['세트별 상세 수준: weight+reps가 모두 있으면 "N세트 20kg × 15회"로 표시된다',
+        !!formatRoutineSet && formatRoutineSet({weight:"20",reps:"15"},0) === "1세트 20kg × 15회"],
+      ['세트별 상세 수준: 세트마다 값이 다르면(20×15 / 25×12 / 30×10) 각 줄이 자기 세트 값만 반영해 서로 다르게 표시된다(첫 세트 값으로 전체를 대표 요약하지 않음)',
+        !!formatRoutineSet &&
+        formatRoutineSet({weight:"20",reps:"15"},0) === "1세트 20kg × 15회" &&
+        formatRoutineSet({weight:"25",reps:"12"},1) === "2세트 25kg × 12회" &&
+        formatRoutineSet({weight:"30",reps:"10"},2) === "3세트 30kg × 10회"],
+      ['세트별 상세 수준: 빈 값은 "0kg"/"0회"/"NaN"/"undefined" 같은 비정상 텍스트를 만들지 않는다',
+        !!formatRoutineSet &&
+        formatRoutineSet({weight:"",reps:""},0) === "1세트" &&
+        !formatRoutineSet({},0).includes("NaN") && !formatRoutineSet({},0).includes("undefined") &&
+        !formatRoutineSet({weight:"",reps:""},0).includes("0kg") && !formatRoutineSet({weight:"",reps:""},0).includes("0회")],
+      ['루틴 추천(관리자): 세트 입력(setSet)은 해당 세트 인덱스만 갱신해 2세트를 고쳐도 1/3세트 값이 바뀌지 않는다',
+        adminScreenSlice.includes('setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).map((st,j)=>j===si?{...st,[k]:cleaned}:st)}:ex));')],
+      ['루틴 추천(관리자): 세트 삭제(removeSet)는 해당 인덱스만 제거하고 나머지 세트 객체는 그대로 유지한다',
+        adminScreenSlice.includes('const removeSet=(ei,si)=>setExercises(prev=>prev.map((ex,i)=>i===ei?{...ex,sets:(ex.sets||[]).filter((_,j)=>j!==si)}:ex));')],
+      ['루틴 추천(관리자): 중량 입력은 숫자·소수점만 남기고 음수 기호·문자를 제거하며, 빈 값은 0으로 바뀌지 않고 빈 문자열로 유지된다',
+        !!computeCleaned &&
+        computeCleaned('weight','-20') === '20' &&
+        computeCleaned('weight','abc12.5abc') === '12.5' &&
+        computeCleaned('weight','') === ''],
+      ['루틴 추천(관리자): 횟수 입력은 정수만 남기고(소수점 제거) 음수 기호를 제거하며, 빈 값은 그대로 빈 문자열로 유지된다',
+        !!computeCleaned &&
+        computeCleaned('reps','-15') === '15' &&
+        computeCleaned('reps','12.5') === '125' &&
+        computeCleaned('reps','') === ''],
+      ['루틴 추천(관리자): "이전 기록 불러오기"는 최근 수업의 세트별 weight/reps를 각각 그대로(대표값 하나로 뭉치지 않고) 복원한다',
+        app.includes('function findLastExerciseEntry(sessions,name){const key=String(name||"").trim().toLowerCase(); if(!key)return null; const sorted=[...(sessions||[])].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||((b.sessionNo||0)-(a.sessionNo||0))); for(const s of sorted){const ex=(s.exercises||[]).find(e=>String(e.name||"").trim().toLowerCase()===key); if(ex) return {date:s.date||"",sets:(ex.sets||[]).map(st=>({weight:st.weight||"",reps:st.reps||"",durationSec:st.durationSec||""}))};} return null;}') &&
+        adminScreenSlice.includes('setExercises(prev=>prev.map((e,i)=>i===ei?{...e,sets:rec.sets.map(st=>({weight:st.weight,reps:st.reps}))}:e));')],
+      ['루틴 추천(관리자): 운동 순서 ↑↓ 이동 시 그 운동의 세트 배열도(중량이 서로 다른 세트 포함) 이름과 함께 통째로 이동한다',
+        !!moveExercise &&
+        moveExercise([{name:'A',sets:[]},{name:'B',sets:[{weight:'20',reps:'15'},{weight:'25',reps:'12'}]},{name:'C',sets:[]}], 1, 1)[2].sets[0].weight === '20' &&
+        moveExercise([{name:'A',sets:[]},{name:'B',sets:[{weight:'20',reps:'15'},{weight:'25',reps:'12'}]},{name:'C',sets:[]}], 1, 1)[2].sets[1].reps === '12'],
+      ['루틴 추천(관리자): 세트 없이 저장된 기존 루틴을 불러올 때도 sets를 빈 배열로 정상 매핑한다(recordType 등 이 화면에 없는 필드를 참조하지 않음)',
+        adminScreenSlice.includes('sets:(ex.sets&&ex.sets.length)?ex.sets.map(st=>({weight:st.weight||"",reps:st.reps||""})):[]') &&
+        !adminScreenSlice.includes('recordType') && !coachCardSlice.includes('recordType')],
+      ['미리보기: exercises를 filter만 하고 map으로 필드를 재구성하지 않아, 세트별 서로 다른 weight/reps를 포함한 전체 운동 객체가 그대로 CoachRoutineCard에 전달된다',
+        previewBlock.includes('exercises:exercises.filter(ex=>String(ex.name||"").trim())')],
+    ];
+  })(),
+
+  // ════════════════════════════════════════════════════
   // 관리자 알림 누락 항목 보완 (2026-08-29) — 개인운동/걸음수/사전 문진/프로필 수정까지
   // "오늘 회원 입력 피드"(TODAY_FEED_TYPES)에 포함시키고, verb 필드로 신규/수정 문장을 구분한다.
   // ════════════════════════════════════════════════════

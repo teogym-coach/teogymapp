@@ -13721,19 +13721,29 @@ function buildPtRenewalNoticeList(members, liveMembersById) {
 // 회원 상태 표시 라벨 — 페르소나 화면 3곳(회원 상세·홈 목록·분석)이 공유한다. 저장값(active/paused/ended/waiting)은 그대로다.
 const MEMBER_STATUS_LABEL = { active: "진행중", paused: "휴식중", ended: "종료", waiting: "수업 대기" };
 
+// 목표/목적(goal)과 PT를 찾게 된 계기(cause) 두 그룹으로 나눠 보여준다(값·구조는 그대로, group만 표시용으로 추가).
+// weight_gain은 기존 라벨이 "체중 증가"였다 — 값(weight_gain)은 그대로 두고 라벨만 "다이어트·체중감량"으로
+// 바꿨다(과거 저장값과 100% 호환, 화면 표시만 더 명확해짐). fitness_drop은 신규 taxonomy에 없지만
+// 과거 선택값이라 삭제하지 않고 goal 그룹에 그대로 남긴다(선택 가능한 칩으로도 유지 — 데이터·선택지 모두 보존).
 const PERSONA_TRIGGER_OPTIONS = [
-  { value: "solo_fail", label: "혼자 운동하다 실패" },
-  { value: "weight_gain", label: "체중 증가" },
-  { value: "fitness_drop", label: "체력 저하" },
-  { value: "pain", label: "통증 · 불편함" },
-  { value: "health", label: "건강 관리 필요" },
-  { value: "how_to", label: "운동 방법을 모름" },
-  { value: "habit", label: "운동 습관 필요" },
-  { value: "event", label: "특정 목표 발생" },
-  { value: "prev_pt_unsatisfied", label: "기존 PT 불만족" },
-  { value: "recommended", label: "가족 · 지인 권유" },
-  { value: "other", label: "기타" },
+  { value: "weight_gain", label: "다이어트·체중감량", group: "goal" },
+  { value: "muscle_gain", label: "근육 증가·벌크업", group: "goal" },
+  { value: "body_correction", label: "체형 교정", group: "goal" },
+  { value: "health", label: "건강 유지·체력 관리", group: "goal" },
+  { value: "fitness_drop", label: "체력 저하", group: "goal" },
+  { value: "pain", label: "통증·불편함 개선", group: "goal" },
+  { value: "event", label: "바디프로필·대회 등 특정 목표", group: "goal" },
+  { value: "solo_fail", label: "혼자 운동하다 실패", group: "cause" },
+  { value: "how_to", label: "운동 방법을 모름", group: "cause" },
+  { value: "habit", label: "운동 습관을 만들고 싶음", group: "cause" },
+  { value: "checkup_recommend", label: "건강검진·의사 권유", group: "cause" },
+  { value: "recommended", label: "가족·지인 권유", group: "cause" },
+  { value: "prev_pt_unsatisfied", label: "기존 PT 불만족", group: "cause" },
+  { value: "other", label: "기타", group: "cause" },
 ];
+const PERSONA_OPTION_GROUP_LABELS = { goal: "목표 · 목적", cause: "PT를 찾게 된 계기" };
+// location은 "위치"와 "집·직장과 가까워서"가 분석상 같은 신호라 값을 나누지 않고 라벨만 "위치·접근성"으로
+// 넓혔다(과거 location 저장값 그대로 호환). 나머지 기존 선택지는 라벨·값 모두 그대로 유지하고 끝에 3개만 추가.
 const PERSONA_SELECTION_OPTIONS = [
   { value: "owner_class", label: "대표 직접 수업" },
   { value: "trial_class", label: "체험수업" },
@@ -13743,13 +13753,16 @@ const PERSONA_SELECTION_OPTIONS = [
   { value: "machine", label: "머신" },
   { value: "clean", label: "쾌적한 환경" },
   { value: "not_crowded", label: "사람이 붐비지 않음" },
-  { value: "location", label: "위치" },
+  { value: "location", label: "위치·접근성" },
   { value: "parking", label: "주차" },
   { value: "price", label: "가격" },
   { value: "review", label: "후기" },
   { value: "content", label: "블로그 · 콘텐츠 신뢰" },
   { value: "referral", label: "소개" },
   { value: "consult", label: "상담 경험" },
+  { value: "personal_care", label: "1:1 집중 관리" },
+  { value: "beginner_friendly", label: "초보자도 편할 것 같아서" },
+  { value: "flexible_time", label: "운동하기 편한 시간" },
   { value: "other", label: "기타" },
 ];
 const PERSONA_BARRIER_OPTIONS = [
@@ -13767,7 +13780,7 @@ const PERSONA_CORE_QUESTIONS = [
   {
     key: "ptTrigger", label: "PT 시작 계기", options: PERSONA_TRIGGER_OPTIONS,
     question: "처음 어떤 계기로 PT를 받아봐야겠다고 생각하셨어요?",
-    hint: "운동 목표(다이어트 등)가 아니라 '왜 지금 PT를 결심했는가'를 그대로 적어주세요.",
+    hint: "다이어트 같은 목적이든 혼자 하다 실패 같은 계기든, 회원이 실제로 말한 이유를 그대로 골라주세요.",
   },
   {
     key: "selectionReason", label: "테오짐 선택 이유", options: PERSONA_SELECTION_OPTIONS,
@@ -13795,6 +13808,18 @@ function personaOptionLabel(options, value) {
   const v = String(value || "").trim();
   if (!v) return "";
   return (options || []).find(o => o.value === v)?.label || v;
+}
+// 옵션을 group 순서(먼저 등장한 순서) 그대로 묶는다 — group이 없는 질문(선택 이유·등록 망설임)은
+// 그룹 1개(라벨 없음)로 묶여 기존과 똑같이 평평한 칩 목록으로 보인다.
+function personaOptionGroups(opts) {
+  const order = [];
+  const map = new Map();
+  (opts || []).forEach(o => {
+    const g = o.group || "";
+    if (!map.has(g)) { map.set(g, []); order.push(g); }
+    map.get(g).push(o);
+  });
+  return order.map(g => ({ group: g, items: map.get(g) }));
 }
 function personaCategoryLabel(key, value) {
   return personaOptionLabel(personaQuestionByKey(key)?.options, value);
@@ -19400,6 +19425,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             </button>
             {showPersonaExtra && (
               <div style={{marginTop:2}}>
+                <div style={{fontSize:10.5,color:DB.faint,lineHeight:1.6,margin:"0 2px 9px",fontFamily:DB.font,wordBreak:"keep-all"}}>
+                  수업 중 회원이 실제로 한 말을 하나씩 기록합니다. 모든 항목을 채울 필요는 없습니다.
+                </div>
                 {PERSONA_EXTRA_QUESTIONS.map(q => personaAnswerBlock(q))}
               </div>
             )}
@@ -19765,19 +19793,37 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               {opts.length > 0 && (
                 <>
                   <div style={{fontSize:11,fontWeight:800,color:DB.sub,marginBottom:7,fontFamily:DB.font}}>대표 이유 (1개)</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-                    {opts.map(o => personaChip(o.label, personaForm.category===o.value, ()=>setPersonaForm(f=>({
-                      ...f,
-                      category: f.category===o.value ? "" : o.value,
-                      // 대표 이유로 고른 항목이 보조에도 남아 있으면 같은 값이 두 번 세어지므로 자동으로 비운다.
-                      secondaryCategory: f.secondaryCategory===o.value ? "" : f.secondaryCategory,
-                    }))))}
+                  <div style={{marginBottom:4}}>
+                    {personaOptionGroups(opts).map(g => (
+                      <div key={g.group||"_"} style={{marginBottom:8}}>
+                        {g.group && PERSONA_OPTION_GROUP_LABELS[g.group] && (
+                          <div style={{fontSize:10,fontWeight:800,color:DB.faint,marginBottom:5,fontFamily:DB.font}}>{PERSONA_OPTION_GROUP_LABELS[g.group]}</div>
+                        )}
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                          {g.items.map(o => personaChip(o.label, personaForm.category===o.value, ()=>setPersonaForm(f=>({
+                            ...f,
+                            category: f.category===o.value ? "" : o.value,
+                            // 대표 이유로 고른 항목이 보조에도 남아 있으면 같은 값이 두 번 세어지므로 자동으로 비운다.
+                            secondaryCategory: f.secondaryCategory===o.value ? "" : f.secondaryCategory,
+                          }))))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   {personaForm.category && (
                     <>
                       <div style={{fontSize:11,fontWeight:800,color:DB.sub,marginBottom:7,fontFamily:DB.font}}>보조 이유 (선택)</div>
-                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-                        {opts.filter(o=>o.value!==personaForm.category).map(o => personaChip(o.label, personaForm.secondaryCategory===o.value, ()=>setPersonaForm(f=>({...f, secondaryCategory: f.secondaryCategory===o.value ? "" : o.value}))))}
+                      <div style={{marginBottom:4}}>
+                        {personaOptionGroups(opts.filter(o=>o.value!==personaForm.category)).map(g => (
+                          <div key={g.group||"_"} style={{marginBottom:8}}>
+                            {g.group && PERSONA_OPTION_GROUP_LABELS[g.group] && (
+                              <div style={{fontSize:10,fontWeight:800,color:DB.faint,marginBottom:5,fontFamily:DB.font}}>{PERSONA_OPTION_GROUP_LABELS[g.group]}</div>
+                            )}
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                              {g.items.map(o => personaChip(o.label, personaForm.secondaryCategory===o.value, ()=>setPersonaForm(f=>({...f, secondaryCategory: f.secondaryCategory===o.value ? "" : o.value}))))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </>
                   )}

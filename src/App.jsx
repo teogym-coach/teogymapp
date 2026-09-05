@@ -20,7 +20,7 @@ import {
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition,
   getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
-  migrateAddTrainerUid, getPublishedSessions, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
+  migrateAddTrainerUid, getPublishedSessions, toMemberVisibleSession, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, getMemberAcquisitionOnboardingMap, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, recordGoalChange, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead, republishNotice, getNoticeReads,
   checkPrivateMigrationStatus, getRecentSessions, sendPairSession,
   getPairSessions, savePairSession, deletePairSession, splitPairSession, updatePairSessionStatus,
@@ -8636,7 +8636,9 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
   }
   if(!reason)reason=inferred?`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:isPaired?"2:1 수업 기록이 아직 충분하지 않아 기본 3분할을 적용했습니다.":"기본 분할 기준을 따른 추천입니다.";
 
-  return {part, reason, cycle, info, isPaired};
+  // inferred/baseCycle/sequence/lastPart는 관리자앱 "회원앱 자동 추천 미리보기"에서 추천 근거를 그대로 보여주기 위한 추가 반환값이다.
+  // 회원앱 화면(ReviewRoutine)은 part/reason/info만 사용하므로 추천 결과 자체는 전혀 달라지지 않는다.
+  return {part, reason, cycle, info, isPaired, inferred, baseCycle, sequence, lastPart};
 }
 
 function formatRoutineSet(st,j){const w=String(st.weight||"").trim(); const r=String(st.reps||"").trim(); const d=String(st.durationSec||"").trim(); let val=""; if(w&&r)val=`${w}kg × ${r}회`; else if(w)val=`${w}kg`; else if(r)val=`${r}회`; else if(d)val=`${d}초`; return `${j+1}세트${val?` ${val}`:""}`;}
@@ -8707,7 +8709,10 @@ function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){
   const armBalanced=wantsArm?[...sorted.filter(isBicep).slice(0,2),...sorted.filter(isTricep).slice(0,2)]:[];
   const routineList=armBalanced.length?armBalanced:sorted.slice(0,4);
   routineList.sort(bySequence); // 최종 선발된 종목만 실제 수업 순서대로 재배치
-  return {selectedPart,hasClassSessions:classSessions.length>0,hasData:list.length>0,goodStim:sorted.filter(e=>e.stim>0).slice(0,2),painFree:sorted.filter(e=>e.painFree>0).slice(0,2),practice:sorted.filter(e=>e.count<3||!e.recent).slice(0,2),routine:routineList.map(itemFor),comment:lower?'오늘은 컨디션을 고려해 세트 수와 강도를 낮췄어요.':'수업 기록에서 자극이 좋고 불편감이 없었던 운동 위주로 추천합니다.'};}
+  // 관리자 미리보기 전용 진단 정보 — 추천 결과(routine)는 그대로 두고 "왜 이 운동이 빠졌나/후보는 몇 개인가"만 추가로 노출한다.
+  const excluded=list.filter(x=>x.history[0]&&x.history[0].isPainRisk).map(x=>({name:x.name,latestDate:x.latestDate}));
+  const ranked=sorted.map(x=>({name:x.name,muscleTop:x.muscleTop,count:x.count,stim:x.stim,marked:x.marked,latestDate:x.latestDate}));
+  return {selectedPart,excluded,ranked,hasClassSessions:classSessions.length>0,hasData:list.length>0,goodStim:sorted.filter(e=>e.stim>0).slice(0,2),painFree:sorted.filter(e=>e.painFree>0).slice(0,2),practice:sorted.filter(e=>e.count<3||!e.recent).slice(0,2),routine:routineList.map(itemFor),comment:lower?'오늘은 컨디션을 고려해 세트 수와 강도를 낮췄어요.':'수업 기록에서 자극이 좋고 불편감이 없었던 운동 위주로 추천합니다.'};}
 function ReviewRoutine({profile,sessions,onboarding,checkins,attendance=[],routineRecommendations=[],initialOpen=false}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions,onboarding); const recommendedParts=recommended.part.split(" · "); const [selected,setSelected]=useState(recommended.part); const [open,setOpen]=useState(!!initialOpen); const selectedParts=selected.split(" · "); const rec=buildReviewRoutine(sessions,onboarding,checkins,selectedParts); const weekly=computeWeeklyWorkoutCard(attendance,onboarding); const soloLine=weekly.count>=3?"개인 운동도 꾸준히 이어가고 계셔서 그 흐름을 함께 반영했어요.":weekly.count===0?"수업 기록을 중심으로 추천했어요.":""; const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} const recentTopEx=buildTopExercisesByFrequency(sessions,3); const recentBiggestGain=[...recentTopEx].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0]; const praiseLine=recentBiggestGain?`이전 기록보다 ${recentBiggestGain.name} 중량이 ${recentBiggestGain.before} → ${recentBiggestGain.after}로 늘었어요.`:rec.goodStim.length?`최근 ${rec.goodStim[0].name} 운동에서 자극이 좋았어요.`:(sessions.length>0?"수업을 꾸준히 이어가고 있어요.":""); const upcomingBlock=upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatPartsForMember(r)}</span></p>)}</div>; if(hasCoachRoutine){return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b></p></div>{upcomingBlock}<div className="routine-summary"><div><h3>{formatPartsForMember(publishedRoutine)}</h3><p>{coachExerciseCount?`추천 운동 ${coachExerciseCount}개`:"추천 부위"}</p></div><button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button></div>{open&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은 <b>{recommended.part} 운동</b>을 추천합니다.</p></div><div className="part-pills">{["가슴","등","하체","어깨","팔"].map(x=><button key={x} className={selectedParts.includes(x)?"active":recommendedParts.includes(x)?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingBlock}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다."}</p></div>{rec.hasData&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div>{x.reason&&<p style={{fontSize:11,color:"#8B949E",marginTop:6,lineHeight:1.5}}>{x.reason}</p>}</div>)}</div><div className="rec-group"><b>추천 이유</b><span>{rec.comment}</span><span>{rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`:rec.practice.length?`${rec.practice[0].name} 등은 기록이 조금 더 쌓이면 추천이 더 정교해져요.`:"수업 기록이 쌓이면 추천이 더 정교해집니다."}</span>{soloLine&&<span>{soloLine}</span>}</div></>}</MCard>;}
 function buildPartVolumeChange(sessions=[]){const parts=['가슴','등','하체','어깨','팔','코어']; const sorted=[...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')); const first=sorted.slice(0,Math.min(3,sorted.length)); const recent=sorted.slice(-Math.min(3,sorted.length)); const sum=(list,part)=>list.reduce((a,s)=>a+(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0),0); return parts.map(part=>{const f=first.length?sum(first,part)/first.length:0; const r=recent.length?sum(recent,part)/recent.length:0; return {part,first:f,recent:r,delta:r-f};});}
 // 부위별 "최근 운동할 때마다의 볼륨"(누적이 아님) — 최근 5회까지 표시해 회원이 "지난번보다 늘었다"를 바로 느끼게 함
@@ -9883,6 +9888,15 @@ export default function App() {
   // 선택한 회원의 상세 데이터(sessions·ptRegistrations 등)를 실제로 다 읽었는지 여부.
   // PT 잔여 캐시를 "아직 안 읽은 빈 배열" 상태에서 잘못 계산해 저장하지 않기 위한 가드다.
   const [memberDataLoaded, setMemberDataLoaded] = useState(false);
+  // 회원 상세(loadMemberData) 전용 로딩/오류 상태 — 전역 loading과 분리한다.
+  // 전역 loading은 저장·삭제 등 회원 상세 조회와 무관한 작업에서만 토글되므로, 회원 상세 진입 직후
+  // 아직 sessions를 읽는 중인데도 loading=false + sessions=[] 상태가 되어 히스토리가
+  // "수업 기록이 없습니다."로 보이는 문제가 있었다(간헐적 빈 화면의 직접 원인).
+  const [memberDataLoading, setMemberDataLoading] = useState(false);
+  // 수업일지 조회 실패를 "기록 없음"과 구분하기 위한 오류 상태({code,message}) — 성공 시 null
+  const [memberSessionsError, setMemberSessionsError] = useState(null);
+  // 최신 회원 상세 요청만 화면에 반영(회원 A→B 빠른 전환 시 늦게 도착한 A 응답이 B 화면을 덮어쓰지 않도록)
+  const memberDataReqIdRef = useRef(0);
   const [memberPersonalSorenessMap, setMemberPersonalSorenessMap] = useState({}); // workoutId → 근육통(위와 같은 카드에서 조회만)
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
@@ -9993,7 +10007,8 @@ export default function App() {
     }
     if (lastMs > lastSyncedInputAtRef.current) {
       lastSyncedInputAtRef.current = lastMs;
-      loadMemberData(member.id);
+      // 백그라운드 갱신 — 이미 보고 있는 히스토리/회원 상세를 스켈레톤으로 되돌리지 않는다
+      loadMemberData(member.id, { silent: true });
     }
   }, [liveMembersById, member?.id]);
 
@@ -10194,11 +10209,18 @@ export default function App() {
   }, []);
 
   // 회원별 데이터 전체 로드 (memberId 기준)
-  async function loadMemberData(memberId) {
-    console.log("[TEO GYM] loadMemberData:", memberId);
+  // opts.silent: 회원앱 입력 감지(liveMembersById) 같은 백그라운드 갱신 — 스켈레톤을 띄우지 않고 기존 화면을 유지한다.
+  async function loadMemberData(memberId, opts = {}) {
+    const silent = !!opts.silent;
+    console.log("[TEO GYM] loadMemberData:", memberId, silent ? "(silent)" : "");
+    const reqId = ++memberDataReqIdRef.current;
+    const isStale = () => memberDataReqIdRef.current !== reqId || !isMountedRef.current;
+    if (!silent) { setMemberDataLoading(true); setMemberSessionsError(null); }
+    let sessionsError = null;
     try {
       const [ss, bc, nt, priv, cl, srm, au, pw, ptr] = await Promise.all([
-        getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); return []; }),
+        // 수업일지만은 실패를 빈 배열로 감추지 않는다 — null이면 "조회 실패", []면 "진짜 기록 없음"이다.
+        getSessions(memberId).catch(e => { console.error("[TEO GYM] getSessions error:", e); sessionsError = e; return null; }),
         getBodyCheck(memberId).catch(e => { console.error("[TEO GYM] getBodyCheck error:", e); return null; }),
         getNutrition(memberId).catch(e => { console.error("[TEO GYM] getNutrition error:", e); return null; }),
         getMemberPrivate(memberId).catch(() => ({})),
@@ -10210,8 +10232,11 @@ export default function App() {
         // PT 재등록·잔여 보정 이력(관리자 전용) — 읽기에 실패해도 회원 상세 나머지 화면은 그대로 열려야 한다.
         getPtRegistrations(memberId).catch(e => { console.error("[TEO GYM] getPtRegistrations error:", e); return []; }),
       ]);
-      console.log("[TEO GYM] loaded sessions:", ss.length, "bodyData:", !!bc, "nutrition:", !!nt);
-      setSessions(ss);
+      if (isStale()) return; // 더 최근 회원 요청이 시작됨 — 이전 회원 응답으로 화면을 덮어쓰지 않는다
+      console.log("[TEO GYM] loaded sessions:", ss ? ss.length : "실패", "bodyData:", !!bc, "nutrition:", !!nt);
+      // 조회 실패 시(ss===null) 백그라운드 갱신이면 기존 목록을 그대로 유지한다
+      if (ss) setSessions(ss); else if (!silent) setSessions([]);
+      setMemberSessionsError(sessionsError ? { code: sessionsError?.code || "unknown", message: sessionsError?.message || String(sessionsError) } : null);
       setBodyData(bc);
       setNutritionData(nt);
       setMemberPrivateData(priv);
@@ -10222,15 +10247,20 @@ export default function App() {
       setPtRegistrations(ptr || []);
       const completedIds = (pw || []).filter(w => w?.status === "completed").map(w => w.id);
       if (completedIds.length) {
-        try { setMemberPersonalSorenessMap(await getPersonalWorkoutSorenessMap(memberId, completedIds)); }
-        catch (e) { console.error("[TEO GYM] getPersonalWorkoutSorenessMap error:", e); setMemberPersonalSorenessMap({}); }
+        try { const sm = await getPersonalWorkoutSorenessMap(memberId, completedIds); if (!isStale()) setMemberPersonalSorenessMap(sm); }
+        catch (e) { console.error("[TEO GYM] getPersonalWorkoutSorenessMap error:", e); if (!isStale()) setMemberPersonalSorenessMap({}); }
       } else {
         setMemberPersonalSorenessMap({});
       }
+      if (isStale()) return;
       // sessions·ptRegistrations를 모두 읽은 뒤에만 PT 잔여 캐시 동기화를 허용한다.
-      setMemberDataLoaded(true);
+      // 수업일지 조회가 실패했다면 "빈 배열"을 정상 데이터로 오해해 잔여를 다시 계산하지 않도록 열지 않는다.
+      if (!sessionsError) setMemberDataLoaded(true);
     } catch(e) {
       console.error("[TEO GYM] loadMemberData error:", e);
+      if (!isStale() && !silent) setMemberSessionsError({ code: e?.code || "unknown", message: e?.message || String(e) });
+    } finally {
+      if (!isStale() && !silent) setMemberDataLoading(false);
     }
   }
 
@@ -11063,9 +11093,9 @@ export default function App() {
 
         {screen==="pair21"     && <PairSessionListScreen pairSessions={pairSessions} members={members} loading={loading} onBack={()=>{ if(!members.length) loadMembers(); setScreen("members"); }} onAdd={()=>{ setEditPairSession(null); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onEdit={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); setScreen("pair21Form"); }} onDelete={handleDeletePairSession} onSplit={handleSplitPairSession} onRefresh={loadPairSessions} showToast={showToast} onStatusChange={handlePairStatusChange} />}
         {screen==="pair21Form" && <PairSessionFormScreen key={editPairSession?.id||"new"} editData={editPairSession} initialDate={pairFormInitialDate} members={members} pairSessions={pairSessions} onSelectExistingTeam={ps=>{ setEditPairSession(ps); setPairFormInitialDate(getKoreaDateString()); }} onSave={async(data)=>{ const saved=await handleSavePairSession(data,editPairSession?.id); if(saved){ setEditPairSession(saved); } }} onSaveNextSession={handleSaveNextPairSession} onBack={()=>setScreen("pair21")} onSplit={handleSplitPairSession} showToast={showToast} loading={loading} classifications={exerciseClassifications} onLearnExercise={recordExerciseClassification} />}
-        {screen==="history"    && <HistoryScreen sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onToggleJournalDefer={handleToggleJournalDefer} onSendPair={handleSendPairSession} initialReadFilter={historyInitialReadFilter} onInitialReadFilterConsumed={()=>setHistoryInitialReadFilter(null)} />}
-        {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
-        {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading} onBack={() => setScreen("hub")} />}
+        {screen==="history"    && <HistoryScreen sessions={sessions} sessionReadsMap={sessionReadsMap} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading||memberDataLoading} error={memberSessionsError} onRetry={()=>member&&loadMemberData(member.id)} member={member} onBack={() => setScreen("hub")} onEdit={s => { setEditSess(s); setScreen("session"); }} onDelete={handleDeleteSession} onPublish={handlePublishSession} onUnpublish={handleUnpublishSession} onToggleJournalDefer={handleToggleJournalDefer} onSendPair={handleSendPairSession} initialReadFilter={historyInitialReadFilter} onInitialReadFilterConsumed={()=>setHistoryInitialReadFilter(null)} />}
+        {screen==="library"    && <LibraryScreen sessions={sessions} loading={loading||memberDataLoading} onBack={() => setScreen("hub")} />}
+        {screen==="feedback"   && <TrainingFeedbackScreen sessions={sessions} member={member} loading={loading||memberDataLoading} onBack={() => setScreen("hub")} />}
         {screen==="counselReport" && member && <CounselReportScreen member={member} sessions={sessions} bodyData={bodyData} loading={loading} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="consultReport" && member && (
           <div>
@@ -11077,12 +11107,14 @@ export default function App() {
         {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="routine_recommend" && member && <RoutineRecommendScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
+        {/* 관리자 추천 루틴(routine_recommend)과 이름·화면 모두 분리 — 이쪽은 회원앱이 자동 생성하는 루틴을 그대로 보여주는 조회 전용 화면이다 */}
+        {screen==="member_auto_routine" && member && <MemberAutoRoutinePreviewScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="upcoming" && <UpcomingSessionsScreen members={members} pairSessions={pairSessions} onBack={()=>setScreen("home")} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} onOpenPairSession={goPairSession} />}
         {screen==="notices" && <NoticeAdminScreen members={members} sessionsMap={sessionsMap} onBack={()=>setScreen("home")} showToast={showToast} onOpenMember={goHub}/>}
         {screen==="daily_conditioning" && member && <DailyConditioningAdminScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="exerciseAnalysis" && member && <ExerciseAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
-        {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading} onBack={() => setScreen("hub")} />}
+        {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading||memberDataLoading} onBack={() => setScreen("hub")} />}
         {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} initialTab={healthHubInitialTab} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -18899,7 +18931,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               <span style={cardTitle}>다음 수업 준비</span>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <span style={{fontSize:10.5,color:DB.faint}}>오늘 수업 기록과 별개로 저장됩니다</span>
-                <button onClick={()=>setScreen("routine_recommend")} style={{border:"none",background:DB.mintTint,color:DB.mintSoft,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>루틴 추천 전송 →</button>
+                <button onClick={()=>setScreen("routine_recommend")} style={{border:"none",background:DB.mintTint,color:DB.mintSoft,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>관리자 추천 루틴 전송 →</button>
+                {/* 회원앱이 자동으로 만드는 루틴을 그대로 확인하는 조회 전용 화면 — 위 "관리자 추천 루틴"과 다른 기능이다 */}
+                <button onClick={()=>setScreen("member_auto_routine")} style={{border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub,borderRadius:8,padding:"4px 10px",fontSize:10.5,fontWeight:700,fontFamily:DB.font,cursor:"pointer"}}>회원앱 자동 추천 미리보기 →</button>
               </div>
             </div>
             {/* 관리자가 홈에서 "일정 미정"으로 보류한 회원만 노출 — 일정 미정이 아니면 이 블록 자체가 렌더링되지 않는다 */}
@@ -19492,6 +19526,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                   {menuBtn("📚","운동 라이브러리","부위별 운동 기록","library")}
                   {menuBtn("🧘","컨디셔닝","매일 기능 운동","daily_conditioning")}
                   {menuBtn("🤖","AI 루틴 추천",t("수업기록 기반","운동기록 기반"),"ai_routine")}
+                  {menuBtn("📱","회원앱 자동 추천","회원앱이 자동 생성하는 루틴 검수","member_auto_routine")}
                   {menuBtn("📊","유입 분석","방문 경로와 마케팅 성과","referral")}
                 </div>
                 {member.survey?.surveyDone&&(
@@ -24130,7 +24165,263 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
   );
 }
 
-function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, onBack, onEdit, onDelete, onPublish, onUnpublish, onToggleJournalDefer, onSendPair, member, initialReadFilter=null, onInitialReadFilterConsumed }) {
+// ── 회원앱 자동 추천 미리보기 (관리자 전용 · 읽기 전용) ──────────────────────────────
+// 관리자앱에서 추천 알고리즘을 다시 구현하지 않는다. 회원앱 홈 "오늘의 운동 가이드"(ReviewRoutine)가
+// 쓰는 것과 완전히 같은 함수(getRecommendedPart / buildReviewRoutine / recommendExerciseDose)를 그대로 호출하고,
+// 입력 데이터도 회원앱이 실제로 받는 값으로 맞춘다:
+//   · 세션 — 공개(isPublished) 수업만 + toMemberVisibleSession(회원앱 publicSession과 동일 투영).
+//     관리자 전용 필드(rpe·sessionType·memo 등)는 회원앱에 내려가지 않으므로 미리보기에서도 똑같이 제거해야 결과가 일치한다.
+//   · 컨디션 — memberCheckins(최근 30건, 회원앱 load()와 동일)
+//   · 대표 추천 루틴 — routineRecommendations(published): 이게 있으면 회원앱은 자동 추천 대신 대표 루틴을 보여준다.
+// 저장·수정은 일절 하지 않는다(조회 전용).
+const AUTO_PREVIEW_PARTS = ["가슴","등","하체","어깨","팔"];
+function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
+  const [checkins, setCheckins] = useState(null);        // null = 조회 중
+  const [coachRoutines, setCoachRoutines] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [pickedPart, setPickedPart] = useState(null);    // null = 엔진이 고른 부위 그대로
+  const [showDiag, setShowDiag] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setCheckins(null); setCoachRoutines(null); setLoadError(null);
+    Promise.all([
+      getMemberCheckins(member.id, 30),
+      getRoutineRecommendations(member.id, { publishedOnly: true }),
+    ]).then(([ci, rr]) => { if (!alive) return; setCheckins(ci || []); setCoachRoutines(rr || []); })
+      .catch(e => { if (!alive) return; console.error("[TEO GYM] 자동 추천 미리보기 조회 실패:", e); setLoadError({ code: e?.code || "unknown", message: e?.message || String(e) }); });
+    return () => { alive = false; };
+  }, [member.id, reloadKey]);
+
+  // 회원앱이 실제로 받는 세션만 남긴다(공개 + 공개 필드 투영 + 회원앱과 동일 정렬)
+  const memberSessions = useMemo(() => (sessions || [])
+    .filter(s => s?.isPublished === true || s?.status === "published")
+    .map(toMemberVisibleSession)
+    .sort((a, b) => ((Number(a.sessionNo) || 0) - (Number(b.sessionNo) || 0)) || String(a.date || "").localeCompare(String(b.date || ""))),
+    [sessions]);
+
+  const recommended = useMemo(() => getRecommendedPart(member, memberSessions, {}), [member, memberSessions]);
+  const activePart = pickedPart || recommended.part;
+  const activeParts = activePart.split(" · ");
+  const rec = useMemo(
+    () => buildReviewRoutine(memberSessions, {}, checkins || [], activeParts),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [memberSessions, checkins, activePart]
+  );
+
+  const today = getKoreaDateString();
+  const visibleCoachRoutines = (coachRoutines || []).filter(r => isPublishedData(r) && String(r.date || "") >= today)
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+  const publishedRoutine = visibleCoachRoutines.find(r => r.date === today) || visibleCoachRoutines[0] || null;
+  const info = recommended.info;
+  // 회원앱 ReviewRoutine의 분기와 동일한 순서로 "회원이 지금 실제로 보는 화면"을 판정한다.
+  const memberViewState = info.daysUntil === 0 ? "pt" : publishedRoutine ? "coach" : "auto";
+
+  // 부위별 마지막 운동일 + 회복 판정 — 추천 엔진이 쓰는 getPartRecoveryHours / exerciseMatchesPart를 그대로 재사용한다
+  const partStatus = useMemo(() => AUTO_PREVIEW_PARTS.map(p => {
+    let last = "";
+    memberSessions.forEach(s => {
+      if (!s.date) return;
+      if ((s.exercises || []).some(e => exerciseMatchesPart(e, p)) && String(s.date) > last) last = String(s.date);
+    });
+    const { hoursSince, requiredHours } = getPartRecoveryHours(p, memberSessions);
+    const daysAgo = last ? Math.max(0, Math.floor((Date.now() - new Date(last + "T00:00:00").getTime()) / 86400000)) : null;
+    return { part: p, last, daysAgo, hoursSince, requiredHours, recovering: hoursSince < requiredHours };
+  }), [memberSessions]);
+  const recentPartCounts = useMemo(() => getRecentPartCounts(memberSessions), [memberSessions]);
+
+  const box = { background: DB.card, border: "1px solid " + DB.border, borderRadius: 16, padding: "16px 18px", marginBottom: 12, boxShadow: DB.shadow };
+  const label = { fontFamily: DB.font, fontSize: 11, fontWeight: 800, color: DB.sub, display: "block", marginBottom: 8 };
+  const body = { fontFamily: DB.font, fontSize: 12.5, color: DB.text, lineHeight: 1.75 };
+  const faint = { fontFamily: DB.font, fontSize: 11.5, color: DB.faint, lineHeight: 1.7 };
+
+  const previewLoading = checkins === null && !loadError;
+
+  return (
+    <div>
+      <SH title="🤖 회원앱 자동 추천 미리보기" sub={member.name + " · 회원앱 홈 오늘의 운동 가이드와 동일한 추천 엔진"}
+        titleColor={DB.text} subColor={DB.sub}
+        right={<Btn ghost sm onClick={onBack} style={{border:"1px solid "+DB.border,color:DB.sub,background:DB.card}}>← 뒤로</Btn>} />
+
+      {/* 관리자 추천 루틴과의 구분 안내 — 이름부터 헷갈리지 않게 명시한다 */}
+      <div style={{...box, background:"rgba(57,199,184,.06)", border:"1px solid rgba(57,199,184,.28)"}}>
+        <span style={label}>이 화면은 무엇인가요?</span>
+        <div style={body}>
+          <b>회원앱 자동 추천</b>은 회원앱이 공개된 수업 기록만 보고 <b>자동으로</b> 만드는 루틴입니다(대표가 입력하지 않습니다).<br/>
+          대표가 직접 작성해 회원앱으로 보내는 <b>관리자 추천 루틴</b>은 <b>다음 수업 준비 → 루틴 추천 전송</b> 화면에서 관리합니다.
+        </div>
+        <div style={{...faint, marginTop:8}}>이 화면은 조회 전용입니다 — 여기서 저장되거나 회원에게 전송되는 값은 없습니다.</div>
+      </div>
+
+      {loadError && (
+        <div style={{...box, border:"1px solid rgba(245,158,11,.35)", background:"rgba(245,158,11,.06)"}}>
+          <span style={{...label, color:"#B45309"}}>컨디션 · 대표 루틴 조회 실패</span>
+          <div style={{...faint, color:"#B45309", marginBottom:10}}>{loadError.code}{loadError.message ? " · " + loadError.message : ""}</div>
+          <button onClick={()=>setReloadKey(k=>k+1)} style={{border:"none",borderRadius:10,padding:"8px 16px",fontSize:12.5,fontWeight:800,fontFamily:DB.font,color:"#fff",background:"#B45309",cursor:"pointer"}}>다시 불러오기</button>
+        </div>
+      )}
+
+      {previewLoading ? (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{textAlign:"center",fontFamily:DB.font,fontSize:12.5,color:DB.sub,fontWeight:700}}>회원앱과 동일한 조건으로 추천을 계산하는 중입니다...</div>
+          {Array.from({length:3},(_,i)=><div key={i} style={{height:110,background:DB.card,border:"1px solid "+DB.border,borderRadius:16}}/>)}
+        </div>
+      ) : (
+      <>
+      {/* 회원이 지금 실제로 보는 화면 */}
+      <div style={box}>
+        <span style={label}>회원앱에서 지금 보이는 화면</span>
+        {memberViewState === "pt" && (
+          <div style={body}>오늘이 <b>{info.part} 수업 당일</b>이라 회원앱은 자동 추천 루틴 대신 <b>수업 전 준비 루틴</b>을 보여줍니다.<br/>
+            <span style={faint}>준비 루틴: {getPreSessionWarmup(info.part).join(" · ")}</span></div>
+        )}
+        {memberViewState === "coach" && (
+          <div style={body}>대표 추천 루틴(<b>{String(publishedRoutine.date||"").slice(5)} · {formatPartsForMember(publishedRoutine)}</b>)이 노출 중이라
+            회원앱은 <b>자동 추천 대신 대표 추천 루틴</b>을 보여줍니다.<br/>
+            <span style={faint}>아래 자동 추천 내용은 "대표 루틴이 없을 때 회원이 보게 될 결과"입니다.</span></div>
+        )}
+        {memberViewState === "auto" && (
+          <div style={body}>회원앱은 지금 <b>자동 추천 루틴</b>을 보여주고 있습니다. 아래 내용이 회원 화면과 동일합니다.</div>
+        )}
+      </div>
+
+      {/* 자동 추천 부위 */}
+      <div style={box}>
+        <span style={label}>자동 추천 부위</span>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:DB.text,marginBottom:8}}>{recommended.part}</div>
+        <div style={body}>{recommended.reason}</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:12}}>
+          <span style={{fontSize:11,fontWeight:800,padding:"4px 11px",borderRadius:999,background:DB.mintTint,color:DB.mintSoft}}>
+            {recommended.cycle.length===1?"단일 부위":recommended.cycle.length+"분할"}
+          </span>
+          <span style={{fontSize:11,fontWeight:800,padding:"4px 11px",borderRadius:999,background:recommended.inferred?"rgba(34,197,94,.10)":"rgba(148,163,184,.14)",color:recommended.inferred?"#15803D":DB.sub}}>
+            {recommended.inferred?"실제 기록 패턴 감지":"기본 분할(폴백)"}
+          </span>
+          <span style={{fontSize:11,fontWeight:800,padding:"4px 11px",borderRadius:999,background:"rgba(148,163,184,.14)",color:DB.sub}}>
+            {recommended.isPaired?"2:1 수업 기준":"1:1 수업 기준"}
+          </span>
+        </div>
+        <div style={{...faint, marginTop:10}}>순환 순서: {recommended.cycle.join(" → ")}</div>
+      </div>
+
+      {/* 추천 근거 — 실제 엔진이 사용하는 값만 표시한다 */}
+      <div style={box}>
+        <span style={label}>추천 근거 (엔진이 실제로 사용한 값)</span>
+        <div style={{...body, marginBottom:10}}>
+          최근 수업 부위 순서: <b>{recommended.sequence.length ? recommended.sequence.slice(0,5).join(" ← ") : "최근 4주 공개 수업 기록 없음"}</b>
+          {recommended.sequence.length>0 && <span style={faint}> (왼쪽이 가장 최근)</span>}
+        </div>
+        <div style={{...body, marginBottom:10}}>
+          다음 PT 예정: <b>{info.part||"미정"}</b>
+          {info.daysUntil!=null ? " · " + info.dateText + " (" + info.dDay + ")" : " · 날짜 미정"}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {partStatus.map(p => (
+            <div key={p.part} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontFamily:DB.font,fontSize:12}}>
+              <span style={{minWidth:34,fontWeight:800,color:DB.text}}>{p.part}</span>
+              <span style={{color:DB.sub}}>{p.last ? "마지막 " + (p.daysAgo===0?"오늘":p.daysAgo+"일 전") + " (" + p.last + ")" : "공개 기록 없음"}</span>
+              {p.recovering && <span style={{fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309"}}>회복 중 {p.hoursSince}h / {p.requiredHours}h</span>}
+              <span style={{marginLeft:"auto",fontSize:11,color:DB.faint}}>최근 3주 {recentPartCounts[normalizeWorkoutPart(p.part)]||0}회 등장</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 부위 전환 — 회원앱과 동일하게 회원이 직접 다른 부위를 눌렀을 때의 결과도 확인할 수 있다 */}
+      <div style={box}>
+        <span style={label}>부위별 추천 확인 (회원앱 부위 버튼과 동일)</span>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {AUTO_PREVIEW_PARTS.map(p => {
+            const on = activeParts.includes(p);
+            const isRec = recommended.part.split(" · ").includes(p);
+            return (
+              <button key={p} onClick={()=>setPickedPart(p===activePart?null:p)}
+                style={{padding:"7px 15px",borderRadius:999,cursor:"pointer",fontFamily:DB.font,fontSize:12.5,fontWeight:700,
+                  border:"1px solid " + (on?"rgba(57,199,184,.4)":isRec?"rgba(57,199,184,.22)":DB.border),
+                  background:on?DB.mintTint:DB.card, color:on||isRec?DB.mintSoft:DB.sub}}>
+                {p}{isRec?" ★":""}
+              </button>
+            );
+          })}
+          {pickedPart && <button onClick={()=>setPickedPart(null)} style={{padding:"7px 15px",borderRadius:999,cursor:"pointer",fontFamily:DB.font,fontSize:12.5,fontWeight:700,border:"1px solid "+DB.border,background:DB.card,color:DB.sub}}>자동 추천으로</button>}
+        </div>
+        <div style={{...faint, marginTop:8}}>★ = 엔진이 자동으로 고른 부위</div>
+      </div>
+
+      {/* 추천 운동 목록 */}
+      <div style={box}>
+        <span style={label}>{activePart} 추천 운동 {rec.routine.length>0 ? "(" + rec.routine.length + "개 · 회원앱 표시 순서)" : ""}</span>
+        {!rec.hasData ? (
+          <div style={faint}>
+            {rec.hasClassSessions
+              ? "공개된 수업 기록에 " + activePart + " 운동이 없어 추천 운동이 만들어지지 않았습니다. 회원앱에는 \"수업 기록이 쌓이면 추천 루틴이 표시됩니다.\"로 보입니다."
+              : "회원앱에 공개된 수업 기록이 없어 추천 운동이 만들어지지 않았습니다. 수업일지를 회원앱으로 전송하면 추천이 생성됩니다."}
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {rec.routine.map((x,i) => (
+              <div key={x.name + "-" + i} style={{border:"1px solid "+DB.border,borderRadius:12,padding:"12px 14px",background:DB.bg}}>
+                <div style={{fontFamily:DB.font,fontWeight:800,fontSize:14,color:DB.text,marginBottom:8}}>{i+1}. {x.name}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  {x.sets.map((st,j) => (
+                    <div key={j} style={{display:"flex",gap:10,flexWrap:"wrap",fontFamily:DB.font,fontSize:12.5,color:DB.sub}}>
+                      <span style={{minWidth:46,fontWeight:700,color:DB.text}}>{st.label}</span>
+                      <span style={{minWidth:92}}>{st.weight}</span>
+                      <span>{st.reps}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{...faint, marginTop:8}}>{x.reason}</div>
+                <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,marginTop:4}}>분석한 과거 기록 {x.analyzedCount}회</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{...faint, marginTop:10}}>{rec.comment}</div>
+      </div>
+
+      {/* 검수용 진단 */}
+      <div style={{...box, padding:0}}>
+        <button onClick={()=>setShowDiag(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"14px 18px",display:"flex",alignItems:"center",gap:10,textAlign:"left",fontFamily:DB.font}}>
+          <span style={{...label, marginBottom:0}}>검수용 상세 (후보 · 제외 운동)</span>
+          <span style={{marginLeft:"auto",color:DB.faint,fontSize:11,transform:showDiag?"rotate(180deg)":"none",transition:"transform .18s"}}>▼</span>
+        </button>
+        {showDiag && (
+          <div style={{padding:"0 18px 18px"}}>
+            <div style={{...body, marginBottom:10}}>
+              {activePart} 후보 운동 {rec.ranked.length}개 중 상위 {rec.routine.length}개가 선택되었습니다.
+            </div>
+            {rec.excluded.length>0 ? (
+              <div style={{marginBottom:10}}>
+                <span style={label}>통증 · 불편 신호로 제외된 운동</span>
+                {rec.excluded.map((x,i)=><div key={x.name + "-" + i} style={faint}>· {x.name} (최근 기록 {x.latestDate||"-"})</div>)}
+              </div>
+            ) : <div style={{...faint, marginBottom:10}}>통증 · 불편 신호로 제외된 운동은 없습니다.</div>}
+            <span style={label}>후보 순위 (선발 기준: 트레이너 표시 → 자극 → 무통증 → 세트기록 → 최근일 → 횟수)</span>
+            {rec.ranked.length===0 ? <div style={faint}>후보 운동이 없습니다.</div> : rec.ranked.slice(0,12).map((x,i)=>(
+              <div key={x.name + "-" + i} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",fontFamily:DB.font,fontSize:11.5,color:DB.sub,padding:"3px 0"}}>
+                <span style={{minWidth:18,color:DB.faint}}>{i+1}</span>
+                <span style={{fontWeight:700,color:DB.text}}>{x.name}</span>
+                <span style={{color:DB.faint}}>{x.muscleTop||"-"}</span>
+                <span style={{marginLeft:"auto",color:DB.faint}}>{x.count}회 · 최근 {x.latestDate||"-"}{x.marked?" · 트레이너 표시":""}{x.stim>0?" · 자극 좋음":""}</span>
+              </div>
+            ))}
+            <div style={{...faint, marginTop:10}}>
+              기준 데이터: 회원앱 공개 수업 {memberSessions.length}건 · 컨디션 체크인 {(checkins||[]).length}건
+            </div>
+          </div>
+        )}
+      </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+// loading / error / (기록 없음)은 서로 다른 상태다 — 셋을 같은 빈 화면으로 보여주면
+// 조회 중이거나 실패했을 때도 "수업 기록이 없습니다."로 보인다(간헐적 빈 화면 신고의 원인).
+function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutritionData, cardioLogs=[], loading, error=null, onRetry, onBack, onEdit, onDelete, onPublish, onUnpublish, onToggleJournalDefer, onSendPair, member, initialReadFilter=null, onInitialReadFilterConsumed }) {
   const sessions = Array.isArray(rawSessions) ? rawSessions : [];
   // 세션 날짜(YYYY-MM-DD) 기준으로 그날 회원이 입력한 체중/칼로리/유산소를 매칭 — 새 저장 경로 없이 기존 기록만 조회
   const weightByDate = useMemo(() => {
@@ -24346,9 +24637,17 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
       <div style={{fontFamily:DB.font,fontSize:12,color:DB.faint,marginBottom:12}}>카드를 터치하면 {isOwner(member)?"운동":"수업"} 리포트가 열립니다</div>
       {loading ? (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{textAlign:"center",fontFamily:DB.font,fontSize:12.5,color:DB.sub,fontWeight:700}}>{isOwner(member)?"운동":"수업"} 기록을 불러오는 중입니다...</div>
           {Array.from({length:5},(_,i)=>(
             <div key={i} style={{height:96,background:DB.card,border:`1px solid ${DB.border}`,borderRadius:16}}/>
           ))}
+        </div>
+      ) : error ? (
+        <div style={{textAlign:"center",padding:"40px 16px",fontFamily:DB.font,background:DB.card,border:`1px solid ${DB.border}`,borderRadius:16}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#B45309",marginBottom:6}}>기록을 불러오지 못했습니다</div>
+          <div style={{fontSize:12,color:DB.sub,marginBottom:4}}>기록이 없는 것이 아니라 조회에 실패한 상태입니다. 네트워크를 확인한 뒤 다시 시도해주세요.</div>
+          <div style={{fontSize:10.5,color:DB.faint,marginBottom:16}}>{error.code||"unknown"}{error.message?` · ${error.message}`:""}</div>
+          {onRetry && <button onClick={onRetry} style={{border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,fontWeight:800,fontFamily:DB.font,color:"#fff",background:DB.mintSoft,cursor:"pointer"}}>다시 불러오기</button>}
         </div>
       ) : readFilteredSessions.length===0 ? (
         <div style={{textAlign:"center",padding:"48px 16px",fontFamily:DB.font,fontSize:13,color:DB.faint}}>

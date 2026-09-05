@@ -859,6 +859,15 @@ export async function getPublishedSessions(memberId) {
   }
 }
 
+// 관리자앱 "회원앱 자동 추천 미리보기" 전용 — 관리자가 읽은 세션(getSessions, 전체 필드)을
+// 회원앱이 실제로 받는 공개 필드(publicSession)로 똑같이 깎아준다.
+// 회원앱은 getPublishedSessions → publicSession 결과만 보고 추천을 계산하므로, 관리자 미리보기가
+// 관리자 전용 필드(rpe·sessionType·memo 등)를 그대로 쓰면 회원 화면과 다른 결과가 나온다.
+// 새 저장 경로·새 필드 없이 기존 정규화 함수를 그대로 재사용하는 읽기 전용 변환이다.
+export function toMemberVisibleSession(session = {}) {
+  return publicSession({ ...normalizeSessionForRead(session), id: session.id });
+}
+
 export async function addSession(memberId, data) {
   await verifyMemberOwnership(memberId);
   dbLog("addSession", `memberId=${memberId} sessionNo=${data.sessionNo}`);

@@ -7676,9 +7676,141 @@ const checks = [
       ],
     ];
   })(),
+  // ════════════════════════════════════════════════════════════════════
+  // 회원 상세 데이터 로딩 상태 분리 (수업일지 히스토리 간헐적 빈 화면)
+  // ════════════════════════════════════════════════════════════════════
+  ...(() => {
+    const loadMemberDataFn = app.slice(
+      app.indexOf('async function loadMemberData(memberId, opts = {})'),
+      app.indexOf('  // opts.targetScreen — 오늘 입력 피드에서')
+    );
+    const historyFn = app.slice(
+      app.indexOf('function HistoryScreen({ sessions: rawSessions'),
+      app.indexOf('// ── 수업 리포트 모달 ─')
+    );
+    return [
+      ['회원 상세 로딩 분리: loadMemberData는 전역 loading과 별개인 memberDataLoading을 켜고 끈다(조회 중에 loading=false + sessions=[]이 되어 "기록 없음"으로 보이던 원인 제거)',
+        loadMemberDataFn.includes('setMemberDataLoading(true)') && loadMemberDataFn.includes('setMemberDataLoading(false)')
+      ],
+      ['회원 전환 경합 방지: loadMemberData는 요청마다 memberDataReqIdRef로 번호를 매기고 isStale()로 늦게 도착한 이전 회원 응답을 버린다',
+        loadMemberDataFn.includes('const reqId = ++memberDataReqIdRef.current;') &&
+        loadMemberDataFn.includes('const isStale = () => memberDataReqIdRef.current !== reqId || !isMountedRef.current;') &&
+        (loadMemberDataFn.match(/if \(isStale\(\)\) return/g) || []).length >= 2
+      ],
+      ['조회 실패와 기록 없음 구분: getSessions 실패는 빈 배열이 아니라 null을 돌려주고 memberSessionsError로 보고된다',
+        loadMemberDataFn.includes('sessionsError = e; return null;') &&
+        loadMemberDataFn.includes('setMemberSessionsError(sessionsError ?')
+      ],
+      ['조회 실패 시 PT 잔여 캐시 가드 유지: 수업일지 읽기에 실패하면 memberDataLoaded를 열지 않는다(빈 배열을 정상 데이터로 오해한 재계산 방지)',
+        loadMemberDataFn.includes('if (!sessionsError) setMemberDataLoaded(true);')
+      ],
+      ['백그라운드 갱신은 화면을 되돌리지 않음: 회원 입력 감지(liveMembersById)로 인한 재조회는 silent:true로 호출돼 보고 있던 목록이 스켈레톤으로 바뀌지 않는다',
+        app.includes('loadMemberData(member.id, { silent: true });')
+      ],
+      ['히스토리 3상태 분리: HistoryScreen은 loading / error / 기록 없음을 각각 다른 화면으로 렌더한다',
+        historyFn.includes('{loading ? (') &&
+        historyFn.includes(') : error ? (') &&
+        historyFn.includes(') : readFilteredSessions.length===0 ? (') &&
+        historyFn.includes('기록을 불러오지 못했습니다')
+      ],
+      ['히스토리 조회 실패 복구: 오류 상태에서 "다시 불러오기" 버튼으로 재조회할 수 있다',
+        historyFn.includes('{onRetry && <button onClick={onRetry}')
+      ],
+      ['히스토리 진입 배선: HistoryScreen에 memberDataLoading·memberSessionsError·재조회 콜백이 전달된다',
+        app.includes('loading={loading||memberDataLoading} error={memberSessionsError} onRetry={()=>member&&loadMemberData(member.id)}')
+      ],
+      ['회원 상세 하위 화면 동일 적용: 운동 라이브러리·훈련 피드백·교정 화면도 회원 데이터 조회 중에는 스켈레톤을 표시한다',
+        app.includes('<LibraryScreen sessions={sessions} loading={loading||memberDataLoading}') &&
+        app.includes('<TrainingFeedbackScreen sessions={sessions} member={member} loading={loading||memberDataLoading}') &&
+        app.includes('<CorrectionScreen sessions={sessions} loading={loading||memberDataLoading}')
+      ],
+    ];
+  })(),
+
+  // ════════════════════════════════════════════════════════════════════
+  // 회원앱 자동 추천 미리보기 (관리자 전용 · 조회 전용)
+  // ════════════════════════════════════════════════════════════════════
+  ...(() => {
+    const previewFn = app.slice(
+      app.indexOf('const AUTO_PREVIEW_PARTS'),
+      app.indexOf('// loading / error / (기록 없음)은 서로 다른 상태다')
+    );
+    return [
+      ['자동 추천 미리보기: 관리자 화면이 회원앱과 같은 추천 엔진(getRecommendedPart/buildReviewRoutine)을 그대로 호출한다(알고리즘 복제 금지)',
+        previewFn.includes('getRecommendedPart(member, memberSessions, {})') &&
+        previewFn.includes('buildReviewRoutine(memberSessions, {}, checkins || [], activeParts)')
+      ],
+      ['자동 추천 미리보기: 입력 세션을 회원앱과 동일하게 맞춘다(공개 수업만 + toMemberVisibleSession 공개 필드 투영)',
+        previewFn.includes(".filter(s => s?.isPublished === true || s?.status === \"published\")") &&
+        previewFn.includes('.map(toMemberVisibleSession)')
+      ],
+      ['자동 추천 미리보기: 회원앱과 동일한 컨디션·대표 루틴 입력을 읽는다(memberCheckins 30건 + published 루틴 추천)',
+        previewFn.includes('getMemberCheckins(member.id, 30)') &&
+        previewFn.includes('getRoutineRecommendations(member.id, { publishedOnly: true })')
+      ],
+      ['자동 추천 미리보기: 회원이 지금 실제로 보는 화면(PT 당일 준비 루틴 / 대표 추천 루틴 / 자동 추천)을 회원앱과 같은 우선순위로 판정한다',
+        previewFn.includes('const memberViewState = info.daysUntil === 0 ? "pt" : publishedRoutine ? "coach" : "auto";')
+      ],
+      ['자동 추천 미리보기: 조회 전용 — 저장·수정·삭제 호출이 없다',
+        !/save[A-Z]|update[A-Z]|delete[A-Z]|addDoc|setDoc/.test(previewFn)
+      ],
+      ['자동 추천 미리보기: 추천 근거로 실제 엔진 값만 쓴다(부위 순서·회복시간·최근 부위 횟수)',
+        previewFn.includes('recommended.sequence') &&
+        previewFn.includes('getPartRecoveryHours(p, memberSessions)') &&
+        previewFn.includes('getRecentPartCounts(memberSessions)')
+      ],
+      ['관리자 추천 루틴과 이름·화면 분리: 회원 상세에 "관리자 추천 루틴 전송"과 "회원앱 자동 추천 미리보기" 두 진입점이 서로 다른 screen으로 나뉜다',
+        app.includes('>관리자 추천 루틴 전송 →</button>') &&
+        app.includes('>회원앱 자동 추천 미리보기 →</button>') &&
+        app.includes('setScreen("routine_recommend")') &&
+        app.includes('setScreen("member_auto_routine")') &&
+        app.includes('{screen==="member_auto_routine" && member && <MemberAutoRoutinePreviewScreen')
+      ],
+      ['추천 엔진 반환값 확장은 추가만: getRecommendedPart는 기존 part/reason/cycle/info/isPaired를 유지한 채 미리보기용 근거만 덧붙인다',
+        app.includes('return {part, reason, cycle, info, isPaired, inferred, baseCycle, sequence, lastPart};')
+      ],
+      ['추천 결과 불변: buildReviewRoutine은 기존 routine/goodStim/practice 반환을 유지하고 검수용 excluded·ranked만 추가한다',
+        app.includes('return {selectedPart,excluded,ranked,hasClassSessions:classSessions.length>0,hasData:list.length>0,') &&
+        app.includes('routine:routineList.map(itemFor)')
+      ],
+      ['db.js: toMemberVisibleSession은 회원앱 getPublishedSessions와 같은 publicSession 투영을 재사용한다(새 투영 규칙을 따로 만들지 않음)',
+        db.includes('export function toMemberVisibleSession(session = {}) {') &&
+        db.includes('return publicSession({ ...normalizeSessionForRead(session), id: session.id });')
+      ],
+    ];
+  })(),
 ];
 
-let failed = 0;
+// ── 렌더 회귀 테스트 ──────────────────────────────────────────────────────
+// 소스 문자열 검사만으로는 "조회 중/실패/기록 없음"이 실제 화면에서 갈라지는지 보장할 수 없으므로,
+// App.jsx 원본을 슬라이스해 실제로 렌더/실행하는 테스트를 함께 돌린다(tests/render/*.test.js).
+// babel/jsdom을 못 찾는 환경에서는 실패가 아니라 SKIP으로 알린다.
+function runRenderTests() {
+  const { spawnSync } = require('child_process');
+  const files = [
+    ['수업일지 히스토리 상태 분리', path.join(root, 'tests', 'render', 'history-screen-states.test.js')],
+    ['회원앱 자동 추천 미리보기 일치', path.join(root, 'tests', 'render', 'member-auto-routine-parity.test.js')],
+    ['회원앱 자동 추천 미리보기 화면', path.join(root, 'tests', 'render', 'member-auto-routine-screen.test.js')],
+  ];
+  let bad = 0;
+  for (const [label, file] of files) {
+    if (!fs.existsSync(file)) { console.error(`FAIL 렌더 테스트 파일 없음: ${file}`); bad += 1; continue; }
+    const r = spawnSync(process.execPath, [file], { cwd: root, encoding: 'utf8' });
+    const out = (r.stdout || '') + (r.stderr || '');
+    if (r.status === 0) {
+      out.split(String.fromCharCode(10)).filter(l => l.startsWith('PASS ')).forEach(l => console.log(l));
+    } else if (/Cannot find module/.test(out)) {
+      console.log(`SKIP 렌더 테스트(${label}) — 실행 의존성 없음`);
+    } else {
+      console.error(`FAIL 렌더 테스트(${label})`);
+      console.error(out.trim());
+      bad += 1;
+    }
+  }
+  return bad;
+}
+
+let failed = runRenderTests();
 for (const [name, ok] of checks) {
   if (ok) console.log(`PASS ${name}`);
   else { console.error(`FAIL ${name}`); failed += 1; }

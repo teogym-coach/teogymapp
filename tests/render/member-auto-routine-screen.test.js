@@ -44,7 +44,7 @@ const stubs = {
   Btn: ({ children, onClick }) => React.createElement('button', { onClick }, children),
   getMemberCheckins: () => { calls.checkins += 1; return Promise.resolve([{ date: today, soreness: '보통', condition: '좋음' }]); },
   getRoutineRecommendations: () => { calls.routines += 1; return Promise.resolve(routineRows); },
-  toMemberVisibleSession: (s) => ({ ...s, sessionType: undefined, trainerUid: undefined }),
+  toMemberVisibleSession: (s) => ({ ...s, trainerUid: undefined }), // sessionType은 실제 publicSession처럼 보존된다
   getRecommendedPart: () => ({
     part: '하체',
     reason: '최근 4주 기록상 3분할 패턴으로 운동하고 있습니다.',
@@ -56,7 +56,10 @@ const stubs = {
   buildReviewRoutine: () => ({
     selectedPart: ['하체'], hasClassSessions: true, hasData: true,
     routine: [{ name: '브이스쿼트', analyzedCount: 4, reason: '최근 기록 4회를 분석했습니다.',
-      sets: [{ label: '1세트', weight: '40kg', reps: '12회' }, { label: '2세트', weight: '50kg', reps: '10회' }] }],
+      sets: [{ label: '1세트', weight: '40kg', reps: '12회' }, { label: '2세트', weight: '50kg', reps: '10회' }],
+      progression: { mode: 'reps_or_weight', rpeSource: 'session', exerciseRpe: null, sessionRpe: 6,
+        allCompleted: true, painRisk: false, highEffort: false, longBreak: false, lowerByCheckin: false,
+        weightBumped: true, volumeDeltaPct: 5.2 } }],
     goodStim: [], painFree: [], practice: [], comment: '자극이 좋았던 운동 위주로 추천합니다.',
     excluded: [{ name: '레그익스텐션', latestDate: '2026-08-20' }],
     ranked: [{ name: '브이스쿼트', muscleTop: '하체', count: 4, stim: 1, marked: false, latestDate: '2026-09-01' }],
@@ -66,7 +69,10 @@ const stubs = {
   getPreSessionWarmup: () => ['고관절 가동성', '둔근 활성화'],
   formatPartsForMember: (r) => (r?.targetParts || []).join(' + '),
   exerciseMatchesPart: (e, p) => e?.muscleTop === p,
-  getPartRecoveryHours: () => ({ hoursSince: 24, requiredHours: 60 }),
+  getPartRecoveryHours: () => ({ hoursSince: 24, requiredHours: 72, basisRpe: 9, basisVolume: 3200, basisDate: '2026-09-01' }),
+  getSessionMemberRpe: (s) => (s?.memberFeedback?.rpe ?? null),
+  DOSE_MODE_LABEL: { reps_or_weight: '반복수 증가 + 조건부 중량 증가', reps: '반복수 증가', weight: '중량 증가', hold: '유지' },
+  DOSE_RPE_SOURCE_LABEL: { exercise: '운동별 RPE(과거 기록)', session: '수업 전체 RPE(회원 입력)', none: 'RPE 없음' },
   getRecentPartCounts: () => ({ 하체: 3, 등: 2 }),
   normalizeWorkoutPart: (p) => p,
 };
@@ -76,7 +82,8 @@ new dom.window.Function(...names, out)(...names.map(n => stubs[n]));
 const Preview = dom.window.__Preview;
 
 const sessions = [
-  { id: 's1', sessionNo: 1, date: '2026-09-01', isPublished: true, sessionType: '1:1', selectedTypes: ['하체'],
+  { id: 's1', sessionNo: 1, date: '2026-09-01', isPublished: true, sessionType: '2:1', selectedTypes: ['하체'],
+    memberFeedback: { source: 'memberApp', rpe: 9 },
     exercises: [{ name: '브이스쿼트', muscleTop: '하체', sets: [{ weight: '40', reps: '12' }] }] },
   { id: 's2', sessionNo: 2, date: '2026-09-03', isPublished: false, sessionType: '1:1', selectedTypes: ['등'], exercises: [] },
 ];
@@ -105,6 +112,12 @@ const check = (name, ok, extra) => { results.push([name, ok]); if (!ok && extra 
     t.includes('관리자 추천 루틴') && t.includes('루틴 추천 전송'), t.slice(0, 400));
   check('대표 추천 루틴이 없으면 "자동 추천 루틴"을 보여주고 있다고 안내한다', t.includes('자동 추천 루틴을 보여주고 있습니다'), t.slice(0, 600));
   check('회원앱과 동일한 입력을 실제로 읽는다(체크인 · 대표 추천 루틴 각 1회)', calls.checkins === 1 && calls.routines === 1, JSON.stringify(calls));
+  check('검수 정보: 엔진이 실제로 읽는 최근 수업 RPE(회원 입력)와 수업 형태가 표시된다',
+    t.includes('최근 수업 RPE(회원 입력)') && t.includes('RPE 9') && t.includes('최근 수업 형태') && t.includes('2:1 수업'), t.slice(0, 900));
+  check('검수 정보: 부위별 회복 판정 근거(필요 시간 · 기준 RPE)가 표시된다',
+    t.includes('필요 72h') && t.includes('기준 RPE 9'), t.slice(0, 900));
+  check('검수 정보: 운동별 progression 판정과 RPE 출처 · 중량 증가 적용 여부가 표시된다',
+    t.includes('반복수 증가 + 조건부 중량 증가') && t.includes('수업 전체 RPE(회원 입력) 6') && t.includes('중량 증가 적용'), t.slice(0, 1600));
 
   // 대표 추천 루틴이 노출 중이면 회원앱은 자동 추천 대신 대표 루틴을 보여준다 → 안내가 바뀐다
   routineRows = [{ id: 'r1', date: today, status: 'published', visibility: 'visible', targetParts: ['가슴'] }];

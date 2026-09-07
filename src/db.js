@@ -757,6 +757,10 @@ function publicSession(data = {}) {
     date: data.date || "",
     sessionNo: data.sessionNo || "",
     type: data.type || "",
+    // 수업 형태 — 회원앱 자동 추천(getLatestSessionType)이 2:1 회원에게 2:1 전용 분할을 적용하려면 이 값이 필요하다.
+    // 여기서 빠져 있어 실제 2:1 수업도 전부 1:1로 판정되던 문제를 바로잡는다.
+    // 노출은 "1:1" | "2:1" 두 분류값으로만 정규화하고, 2:1 관련 관리자 전용 상세(memberBId·pairStatus·pairSourceId·상대 회원 정보)는 계속 공개하지 않는다.
+    sessionType: data.sessionType === "2:1" ? "2:1" : "1:1",
     selectedTypes: data.selectedTypes || [],
     intensity: data.intensity || "",
     condition: data.condition || "",
@@ -862,7 +866,7 @@ export async function getPublishedSessions(memberId) {
 // 관리자앱 "회원앱 자동 추천 미리보기" 전용 — 관리자가 읽은 세션(getSessions, 전체 필드)을
 // 회원앱이 실제로 받는 공개 필드(publicSession)로 똑같이 깎아준다.
 // 회원앱은 getPublishedSessions → publicSession 결과만 보고 추천을 계산하므로, 관리자 미리보기가
-// 관리자 전용 필드(rpe·sessionType·memo 등)를 그대로 쓰면 회원 화면과 다른 결과가 나온다.
+// 관리자 전용 필드(운동별 rpe·memo·2:1 상대 회원 정보 등)를 그대로 쓰면 회원 화면과 다른 결과가 나온다.
 // 새 저장 경로·새 필드 없이 기존 정규화 함수를 그대로 재사용하는 읽기 전용 변환이다.
 export function toMemberVisibleSession(session = {}) {
   return publicSession({ ...normalizeSessionForRead(session), id: session.id });

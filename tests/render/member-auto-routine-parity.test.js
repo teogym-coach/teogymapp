@@ -83,9 +83,15 @@ check('관리자 미리보기 입력 = 회원앱이 실제로 받는 세션(공�
   JSON.stringify(previewSessions) === JSON.stringify(memberAppSessions));
 
 // 2) 관리자 전용 필드는 미리보기 입력에서도 제거된다
-check('관리자 전용 필드(sessionType/trainerUid/rpe)는 미리보기 입력에서 제거된다',
-  previewSessions.every(s => s.sessionType === undefined && s.trainerUid === undefined)
-  && previewSessions.every(s => (s.exercises || []).every(e => e.rpe === undefined)));
+// sessionType은 추천에 반드시 필요한 단순 분류값이라 의도적으로 공개하지만, 2:1 상대 회원 정보 같은 관리자 전용 상세는 계속 차단한다.
+check('관리자 전용 필드(trainerUid/memberBId/pairStatus/운동별 rpe·memo)는 미리보기 입력에서 제거된다',
+  previewSessions.every(s => s.trainerUid === undefined && s.memberBId === undefined && s.pairStatus === undefined && s.pairSourceId === undefined)
+  && previewSessions.every(s => (s.exercises || []).every(e => e.rpe === undefined && e.memo === undefined)));
+check('회원앱 공개 세션이 노출하는 필드는 publicSession 화이트리스트 그대로다(새 필드는 sessionType 하나뿐)',
+  (() => {
+    const expected = ['id','memberName','memberId','trainerName','gymName','date','sessionNo','type','sessionType','selectedTypes','intensity','condition','totalVolume','exercises','trainerComment','stretchingNotes','cardio','sorenessReport','sorenessUpdatedAt','memberFeedback','isPublished','status','publishedAt'];
+    return previewSessions.every(s => JSON.stringify(Object.keys(s).sort()) === JSON.stringify([...expected].sort()));
+  })(), Object.keys(previewSessions[0] || {}));
 
 // 3) 미전송(초안) 수업은 미리보기에 포함되지 않는다 — 회원앱도 못 보기 때문
 check('회원앱에 전송하지 않은 초안 수업은 미리보기 계산에서도 제외된다',
@@ -105,13 +111,19 @@ check('추천 운동 목록·순서·세트/중량/횟수가 회원앱과 완전
   JSON.stringify(routinePreview.routine) === JSON.stringify(routineMember.routine),
   { preview: routinePreview.routine, member: routineMember.routine });
 
-// 6) 투영을 건너뛰면(관리자 원본 그대로 쓰면) 결과가 달라질 수 있다 — 투영이 반드시 필요한 이유
+// 6) sessionType은 투영 후에도 보존된다 — 회원앱이 2:1 회원을 2:1로 인식하기 위한 최소 공개 값
 const rawPublished = adminSessions.filter(s => s.isPublished === true);
-check('관리자 원본(투영 없음)은 회원앱과 판정이 달라진다 — 2:1 여부',
-  E.getLatestSessionType(rawPublished) === '2:1' && E.getLatestSessionType(memberAppSessions) === '1:1');
+check('sessionType이 공개 필드로 전달되어 회원앱도 관리자와 동일하게 2:1로 판정한다',
+  E.getLatestSessionType(rawPublished) === '2:1' && E.getLatestSessionType(memberAppSessions) === '2:1',
+  { raw: E.getLatestSessionType(rawPublished), member: E.getLatestSessionType(memberAppSessions) });
+check('sessionType은 "1:1"/"2:1" 두 값으로만 정규화되어 내려간다',
+  previewSessions.every(s => s.sessionType === '1:1' || s.sessionType === '2:1')
+  && E.toMemberVisibleSession({ id: 'x', sessionType: undefined }).sessionType === '1:1'
+  && E.toMemberVisibleSession({ id: 'x', sessionType: '2:1' }).sessionType === '2:1');
+// 투영이 여전히 필요한 이유 — 운동별 rpe(과거 데이터)는 계속 회원앱에 내려가지 않는다
 const routineRaw = E.buildReviewRoutine(rawPublished, {}, [], ['하체']);
 const routineProjected = E.buildReviewRoutine(memberAppSessions, {}, [], ['하체']);
-check('관리자 원본(투영 없음)은 rpe가 남아 추천 세트값이 회원앱과 달라진다',
+check('관리자 원본(투영 없음)은 운동별 rpe가 남아 추천 세트값이 회원앱과 달라진다',
   JSON.stringify(routineRaw.routine) !== JSON.stringify(routineProjected.routine),
   { raw: routineRaw.routine, projected: routineProjected.routine });
 

@@ -7773,6 +7773,79 @@ const checks = [
         app.includes('return {selectedPart,excluded,ranked,hasClassSessions:classSessions.length>0,hasData:list.length>0,') &&
         app.includes('routine:routineList.map(itemFor)')
       ],
+      // ── RPE / sessionType 데이터 구조 정상화 (2026-09-07) ──────────────────
+      ['공개 필드: publicSession이 sessionType을 "1:1"/"2:1" 두 값으로만 정규화해 전달한다(2:1 회원이 1:1로 오인되던 원인 제거)',
+        db.includes('sessionType: data.sessionType === "2:1" ? "2:1" : "1:1",')
+      ],
+      ['공개 필드 최소화: 2:1 관리자 전용 상세(memberBId/pairStatus/pairSourceId)와 운동별 rpe는 계속 공개하지 않는다',
+        !/SESSION_PUBLIC_FIELDS[^;]*"rpe"/.test(db) &&
+        (() => {
+          // publicSession 본문만 확인한다 — savePairSession 등 다른 함수의 memberBId 저장과 혼동하지 않기 위함
+          // 주석에 적힌 필드명(공개하지 않는 이유 설명)은 제외하고 실제 코드 줄만 본다
+          const body = db.slice(db.indexOf('function publicSession(data = {})'), db.indexOf('async function attachSessionMemberFeedback'))
+            .split(String.fromCharCode(10)).filter(l => !l.trim().startsWith('//')).join(String.fromCharCode(10));
+          return !['memberBId', 'memberBName', 'pairStatus', 'pairSourceId', 'trainerUid', 'memberAId'].some(k => body.includes(k));
+        })()
+      ],
+      ['RPE 읽기 분리: 운동별 RPE(getExerciseRpe · 과거 데이터)와 세션 전체 RPE(getSessionMemberRpe · 현재 입력 경로)를 별도 함수로 읽는다',
+        app.includes('function getExerciseRpe(e={}){') &&
+        app.includes('function getSessionMemberRpe(s={}){') &&
+        app.includes('const v=s?.memberFeedback?.rpe;')
+      ],
+      ['RPE 빈 문자열 방어: 과거 기록의 rpe:""를 Number("")===0(=매우 쉬움)으로 오인해 증량 판정이 켜지지 않는다',
+        app.includes('if(v===null||v===undefined||String(v).trim()==="")continue;')
+      ],
+      ['progression: 세션 전체 RPE는 운동별 RPE가 하나도 없을 때만 보조 입력으로 쓰고, 그때는 판정을 한 단계 보수적으로 내린다(전 세트 일괄 증량 weight로 가지 않음)',
+        app.includes('const sessionRpeSamples=rpeSamples.length?[]:history.slice(0,3).map(h=>h.sessionRpe).filter(Number.isFinite);') &&
+        app.includes('else if(weightedSessionRpe!=null&&weightedSessionRpe<=6) mode="reps_or_weight";')
+      ],
+      ['progression: 기존 RPE 임계값(6/8 증량 분기, 9 고강도, 7 안정성 게이트)을 새로 만들지 않고 그대로 유지한다',
+        app.includes('else if(weightedRpe!=null&&weightedRpe<=6) mode="weight";') &&
+        app.includes('else if(weightedRpe!=null&&weightedRpe<=8) mode="reps_or_weight";') &&
+        app.includes('const rpeOk=rpe==null||rpe<=7;') &&
+        app.includes('return (rpe!=null&&rpe>=9)||/힘들|무리|피로/i.test(feedback);')
+      ],
+      ['progression: 통증(reduce)·장기공백(hold_low)·고강도(hold_effort)·세트 미완료(hold) 안전장치가 증량 분기보다 먼저 판정된다',
+        (() => {
+          const start = app.indexOf('let mode;');
+          if (start < 0) return false;
+          const block = app.slice(start, start + 1600);
+          const order = ['hold_low', 'reduce', 'hold_effort', '!allCompleted||lower', 'weightedRpe<=6'];
+          let at = -1;
+          return order.every(k => { const i = block.indexOf(k); if (i <= at) return false; at = i; return true; });
+        })()
+      ],
+      ['stimRating은 RPE로 치환되지 않는다: 후보 선정 우선순위(stim)에만 쓰이고 recommendExerciseDose progression 분기에는 들어가지 않는다',
+        app.includes('const stim=!painRisk&&(rating>=4||') &&
+        !app.slice(app.indexOf('function recommendExerciseDose'), app.indexOf('function getRecentPartCounts')).includes('stimRating')
+      ],
+      ['회복시간: 운동별 RPE가 없으면 세션 전체 RPE로 대신 판단하고, 기존 48/72h 임계값은 그대로 둔다',
+        app.includes('const rpes=exs.map(e=>{const n=getExerciseRpe(e); return n!=null?n:sessionRpe;}).filter(n=>Number.isFinite(n));') &&
+        app.includes('if(best.rpe<=6)requiredHours=48;') &&
+        app.includes('else if(best.rpe>=9)requiredHours=72;')
+      ],
+      ['buildReviewRoutine: 세션 전체 RPE를 세션 단위로 한 번 읽어 그 세션 운동 기록에 sessionRpe로 실어 보낸다',
+        app.includes('const sessionRpe=getSessionMemberRpe(s);') &&
+        app.includes('const highEffort=hasHighEffortSignal(e,sessionRpe);') &&
+        app.includes('prev.history.push({date:String(s.date||""),sets:filled,rpe,sessionRpe,')
+      ],
+      ['관리자 미리보기 전용: progression 판단 근거는 recommendExerciseDose의 추가 반환값이고, 회원앱 화면(ReviewRoutine)은 sets/reason만 렌더해 회원에게 노출되지 않는다',
+        app.includes('progression:{') && app.includes('rpeSource:rpeSamples.length?"exercise":(sessionRpeSamples.length?"session":"none"),') &&
+        !app.slice(app.indexOf('function ReviewRoutine({profile,sessions'), app.indexOf('function buildPartVolumeChange')).includes('progression')
+      ],
+      ['관리자 미리보기: 엔진이 실제로 읽는 RPE 입력(session.memberFeedback.rpe)과 수업 형태를 검수용으로 표시한다',
+        app.includes('const recentSessionRpes = useMemo(() => [...memberSessions]') &&
+        app.includes('.map(s => ({ date: String(s.date), rpe: getSessionMemberRpe(s), sessionType: s.sessionType === "2:1" ? "2:1" : "1:1" }))') &&
+        app.includes('최근 수업 RPE(회원 입력): <b>')
+      ],
+      ['관리자 미리보기: 운동별 progression 판정(유지/반복수 증가/중량 증가/강도 감소)과 판단 근거 배지를 표시한다',
+        app.includes('const DOSE_MODE_LABEL={') && app.includes('const DOSE_RPE_SOURCE_LABEL={') &&
+        app.includes('{DOSE_MODE_LABEL[x.progression.mode]||x.progression.mode}')
+      ],
+      ['관리자 미리보기: 부위별 회복 판정 근거(어떤 RPE로 필요 회복시간이 정해졌는지)를 함께 보여준다',
+        app.includes('return {hoursSince:daysSince*24, requiredHours, basisRpe:best.rpe, basisVolume:Math.round(best.volume), basisDate:best.date};') &&
+        app.includes('필요 {p.requiredHours}h · 기준 ')
+      ],
       ['db.js: toMemberVisibleSession은 회원앱 getPublishedSessions와 같은 publicSession 투영을 재사용한다(새 투영 규칙을 따로 만들지 않음)',
         db.includes('export function toMemberVisibleSession(session = {}) {') &&
         db.includes('return publicSession({ ...normalizeSessionForRead(session), id: session.id });')
@@ -7791,6 +7864,7 @@ function runRenderTests() {
     ['수업일지 히스토리 상태 분리', path.join(root, 'tests', 'render', 'history-screen-states.test.js')],
     ['회원앱 자동 추천 미리보기 일치', path.join(root, 'tests', 'render', 'member-auto-routine-parity.test.js')],
     ['회원앱 자동 추천 미리보기 화면', path.join(root, 'tests', 'render', 'member-auto-routine-screen.test.js')],
+    ['회원앱 자동 추천 RPE·sessionType 데이터 경로', path.join(root, 'tests', 'render', 'member-auto-routine-rpe.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

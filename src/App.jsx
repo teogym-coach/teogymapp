@@ -8189,6 +8189,35 @@ function exerciseMatchesPart(e,part){const memberTop=getMemberFacingMuscleTop(e)
 function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume));}
 function isTrainerMarkedExercise(e){return !!(e.isFavorite||e.favorite||e.isRecommended||e.recommended||e.memberAppRecommended);}
 
+// ── RPE 읽기 — "운동별 RPE"와 "세션 전체 RPE"는 저장 위치도 의미도 다르므로 함수를 분리해 둔다 ──────────
+// 1) 운동별 RPE(exercise.rpe / feedbackRpe / memberRpe) — 과거 데이터 전용.
+//    현재 관리자 UI에는 운동별 RPE 입력창이 없고(2:1 "나눠서 기록"도 메모만 받는다), 회원앱 공개 필드
+//    (SESSION_PUBLIC_FIELDS)에도 포함되지 않는다. 따라서 신규 기록에서는 생성되지 않으며 과거 기록 호환용으로만 읽는다.
+//    빈 문자열("")은 "값 없음"으로 본다 — Number("")===0 이라 그대로 두면 "RPE 0"(=매우 쉬움)으로 오인돼 증량 판정이 잘못 켜진다.
+// 2) 세션 전체 RPE(session.memberFeedback.rpe) — 회원이 회원앱 "수업 후 몸 상태"에서 직접 입력하는 현재 유일한 실제 입력 경로.
+//    publicSession이 memberFeedback을 그대로 내려주므로 회원앱·관리자 미리보기 양쪽에서 동일하게 읽을 수 있다.
+function getExerciseRpe(e={}){
+  for(const v of [e?.rpe,e?.feedbackRpe,e?.memberRpe]){
+    if(v===null||v===undefined||String(v).trim()==="")continue;
+    const n=Number(v);
+    if(Number.isFinite(n))return n;
+  }
+  return null;
+}
+function getSessionMemberRpe(s={}){
+  const v=s?.memberFeedback?.rpe;
+  if(v===null||v===undefined||String(v).trim()==="")return null;
+  const n=Number(v);
+  return Number.isFinite(n)?n:null;
+}
+// 최근 3회 RPE 가중 평균(최신 기록에 더 큰 가중치) — 운동별 RPE와 세션 전체 RPE가 같은 계산식을 공유한다(임계값은 새로 만들지 않는다).
+const RPE_RECENCY_WEIGHTS=[3,2,1];
+function weightedRpeAverage(samples=[]){
+  if(!samples.length)return null;
+  const wsum=samples.reduce((sum,_,i)=>sum+(RPE_RECENCY_WEIGHTS[i]||1),0);
+  return samples.reduce((sum,r,i)=>sum+r*(RPE_RECENCY_WEIGHTS[i]||1),0)/wsum;
+}
+
 // ── 운동명 정규화 — 표기만 다른 동일 운동("시티드 케이블 로우" vs "시티드 케이블로우")을 하나로 묶기 위한 비교 전용 키.
 // 화면에는 항상 원본 표기를 그대로 보여주고, 추천/기록조회/통계 등 내부 그룹핑에서만 이 키를 사용한다.
 // 추천(buildReviewRoutine)·수행 변화 통계(buildPerformanceChanges/buildTopExercisesByFrequency)가 모두 이 함수 하나만 공유한다.
@@ -8202,6 +8231,24 @@ function normalizeExerciseName(name){
 
 // 신규 회원/기록 없는 운동의 기본 추천 세트 — 4세트, 20·15·12·10회.
 const DOSE_REP_SCHEME=[20,15,12,10];
+
+// ── recommendExerciseDose progression 판정 라벨 — 관리자 미리보기 검수 표시에만 쓴다(회원 화면에는 노출하지 않는다) ──
+const DOSE_MODE_LABEL={
+  hold_low:"강도 감소(장기 공백)",
+  reduce:"강도 감소(통증 신호)",
+  hold_effort:"중량 보류(고강도)",
+  hold:"유지",
+  weight:"중량 증가",
+  reps_or_weight:"반복수 증가 + 조건부 중량 증가",
+  reps:"반복수 증가",
+  none:"판정 없음",
+};
+const DOSE_RPE_SOURCE_LABEL={ exercise:"운동별 RPE(과거 기록)", session:"수업 전체 RPE(회원 입력)", none:"RPE 없음" };
+// 볼륨 공식을 적용하지 않는 분기(기록 없음/맨몸·시간 운동)도 같은 형태의 진단 객체를 돌려줘 미리보기에서 undefined 접근이 생기지 않게 한다.
+function emptyDoseProgression(mode){
+  return {mode:mode||"none",rpeSource:"none",exerciseRpe:null,sessionRpe:null,allCompleted:null,
+    painRisk:false,highEffort:false,longBreak:false,lowerByCheckin:false,weightBumped:false,volumeDeltaPct:null};
+}
 
 // ── 테오짐 실제 보유 장비 중량 — 여러 함수에 중복 정의하지 않고 여기 한 곳만 기준으로 쓴다 ──
 const BARBELL_PLATE_WEIGHTS=[2.5,5,10,20]; // 편측(한쪽) 원판. 좌우 대칭 장착 전제 → 실제 만들 수 있는 총중량 간격은 2.5×2=5kg
@@ -8257,7 +8304,10 @@ function hasStableRecentPerformance(history, count=2){
   if(recent.length<count)return false;
   return recent.every(h=>{
     const allDone=h.sets.length>0&&h.sets.every(s=>toPositiveNumber(s.weight)&&toPositiveNumber(s.reps));
-    const rpeOk=!Number.isFinite(h.rpe)||h.rpe<=7;
+    // 운동별 RPE가 없으면 세션 전체 RPE로 확인한다 — 큰 폭의 증량(예: 덤벨 14→20)을 허용할지 가르는 "제한" 게이트이므로
+    // 확인할 수 있는 RPE가 있으면 반드시 보고, 둘 다 없을 때만 기존처럼 통과시킨다(기존 임계값 7 유지).
+    const rpe=Number.isFinite(h.rpe)?h.rpe:(Number.isFinite(h.sessionRpe)?h.sessionRpe:null);
+    const rpeOk=rpe==null||rpe<=7;
     return allDone&&rpeOk&&!h.isPainRisk&&!h.isHighEffort;
   });
 }
@@ -8336,7 +8386,7 @@ function recommendExerciseDose(history=[], opts={}){
   // 기록 없음 — 회원 경험·부상 이력 등 아무 근거가 없으므로 특정 중량(빈 바 무게 포함)을 자동 생성하지 않는다.
   if(!analyzedCount){
     const sets=DOSE_REP_SCHEME.map((reps,i)=>({label:`${i+1}세트`,weight:i===0?"빈 바 또는 가벼운 중량부터 시작":"1세트 수행 후 조정",reps:`${reps}회`}));
-    return {sets,reason:"이전 기록이 없어 빈 바 또는 수행 가능한 가벼운 중량부터 시작하도록 안내했습니다. 첫 세트를 수행한 뒤 목표 RPE 7~8에 맞춰 다음 세트 중량을 조정해보세요."};
+    return {sets,reason:"이전 기록이 없어 빈 바 또는 수행 가능한 가벼운 중량부터 시작하도록 안내했습니다. 첫 세트를 수행한 뒤 목표 RPE 7~8에 맞춰 다음 세트 중량을 조정해보세요.",progression:emptyDoseProgression("no_history")};
   }
 
   const last=history[0];
@@ -8351,7 +8401,7 @@ function recommendExerciseDose(history=[], opts={}){
       const dur=toPositiveNumber(st.durationSec);
       return {label:`${i+1}세트`,weight:dur?`${dur}초`:"맨몸 동작",reps:`${reps}회`};
     });
-    return {sets,reason:`동작·시간 기반 운동이라 중량 볼륨 계산 없이 최근 ${analyzedCount}회 수행을 기준으로 구성했습니다.`};
+    return {sets,reason:`동작·시간 기반 운동이라 중량 볼륨 계산 없이 최근 ${analyzedCount}회 수행을 기준으로 구성했습니다.`,progression:emptyDoseProgression("func")};
   }
 
   // 장비 종류 — 이 값에 따라 중량 후보 자체가 달라진다(바벨=5kg 그리드, 덤벨=구비 목록, 머신/케이블/불명=실제 간격 확인될 때만)
@@ -8365,9 +8415,12 @@ function recommendExerciseDose(history=[], opts={}){
   const recentPainRisk=!!last.isPainRisk;
   const recentHighEffort=!!last.isHighEffort||(Number.isFinite(last.rpe)&&last.rpe>=9);
   const recentFailure=recentPainRisk||recentHighEffort;
-  const rpeWeights=[3,2,1];
   const rpeSamples=history.slice(0,3).map(h=>h.rpe).filter(Number.isFinite);
-  const weightedRpe=rpeSamples.length?rpeSamples.reduce((sum,r,i)=>sum+r*(rpeWeights[i]||1),0)/rpeSamples.reduce((sum,_,i)=>sum+(rpeWeights[i]||1),0):null;
+  const weightedRpe=weightedRpeAverage(rpeSamples);
+  // 세션 전체 RPE(회원앱 수업 피드백) — 운동별 RPE가 단 하나도 없을 때만 progression 판단의 보조 입력으로 쓴다.
+  // 운동별 RPE가 하나라도 있으면 그쪽이 이 운동의 강도를 직접 말해주므로 기존 판정을 그대로 유지한다.
+  const sessionRpeSamples=rpeSamples.length?[]:history.slice(0,3).map(h=>h.sessionRpe).filter(Number.isFinite);
+  const weightedSessionRpe=weightedRpeAverage(sessionRpeSamples);
 
   const daysSinceLast=last.date?Math.max(0,Math.floor((Date.now()-new Date(`${last.date}T00:00:00`).getTime())/86400000)):null;
   const longBreak=daysSinceLast!=null&&daysSinceLast>=21;
@@ -8383,7 +8436,12 @@ function recommendExerciseDose(history=[], opts={}){
   else if(!allCompleted||lower) mode="hold";
   else if(weightedRpe!=null&&weightedRpe<=6) mode="weight";
   else if(weightedRpe!=null&&weightedRpe<=8) mode="reps_or_weight";
-  else mode="reps"; // RPE 정보가 없으면 보수적으로 반복수만 소폭 증가
+  // 운동별 RPE가 전혀 없고 세션 전체 RPE만 있는 경우 — 임계값은 기존 기준(6/8)을 그대로 쓰되 판정을 한 단계 보수적으로 내린다.
+  // 세션 RPE는 "그날 수업 전체"의 주관적 강도라서 이 운동 하나가 쉬웠다는 근거가 되지 못한다.
+  // 그래서 전 세트 일괄 증량(weight)까지는 가지 않고, "목표 반복수를 이미 채운 세트만" 올리는 reps_or_weight가 상한이 된다.
+  // 반대로 고강도(RPE 9 이상)·통증 같은 "제한 방향" 신호는 위 분기에서 그대로 적용되므로 약해지지 않는다.
+  else if(weightedSessionRpe!=null&&weightedSessionRpe<=6) mode="reps_or_weight";
+  else mode="reps"; // RPE 정보가 없거나(세션 RPE 포함) 세션 RPE가 7 이상이면 보수적으로 반복수만 소폭 증가
 
   // 세트 수는 4세트 강제가 아니라 실제 최근 기록의 세트 구성을 우선한다("과거 기록에 다른 세트 구성이 반복되면 실제 기록 우선") — 기록이 없을 때만(위의 analyzedCount===0 분기) 4세트가 적용된다.
   const setCount=lastSets.length||4;
@@ -8455,7 +8513,21 @@ function recommendExerciseDose(history=[], opts={}){
   else reasonParts.push("최근 기록을 안정적으로 완료해 반복수를 소폭 높였습니다.");
   if(volumeNote)reasonParts.push(`이전 기록보다 총볼륨이 약 ${volumeNote}% 증가하도록 구성했습니다.`);
 
-  return {sets,reason:reasonParts.join(" ")};
+  // progression은 관리자 "회원앱 자동 추천 미리보기" 검수 전용 판단 근거다.
+  // 회원앱 화면(ReviewRoutine)은 sets/reason만 렌더하므로 이 값은 회원에게 노출되지 않는다(추천 결과 자체도 바뀌지 않는다).
+  return {sets,reason:reasonParts.join(" "),progression:{
+    mode,
+    rpeSource:rpeSamples.length?"exercise":(sessionRpeSamples.length?"session":"none"),
+    exerciseRpe:weightedRpe!=null?Math.round(weightedRpe*10)/10:null,
+    sessionRpe:weightedSessionRpe!=null?Math.round(weightedSessionRpe*10)/10:null,
+    allCompleted,
+    painRisk:recentPainRisk,
+    highEffort:recentHighEffort,
+    longBreak,
+    lowerByCheckin:!!lower,
+    weightBumped:weightWasBumped,
+    volumeDeltaPct:volumeNote,
+  }};
 }
 function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; sessions.filter(s=>String(s.date||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(getMemberFacingMuscleTop(e)||e.type); if(part)counts[part]=(counts[part]||0)+1;})); return counts;}
 function getWorkoutFrequencyNumber(profile={}){const raw=String(profile.workoutFrequency||profile.weeklyWorkoutCount||""); const n=Number(raw.match(/\d+/)?.[0]); return Number.isFinite(n)&&n>0?n:3;}
@@ -8543,7 +8615,10 @@ function getPartRecoveryHours(part, sessions=[]){
     const exs=(s.exercises||[]).filter(e=>exerciseMatchesPart(e,part));
     if(!exs.length) return;
     if(best && String(s.date)<=best.date) return;
-    const rpes=exs.map(e=>Number(e.rpe??e.feedbackRpe??e.memberRpe)).filter(Number.isFinite);
+    // 운동별 RPE는 과거 기록에만 남아 있으므로, 없으면 그 세션에 회원이 직접 입력한 세션 전체 RPE로 대신한다.
+    // 회복시간 판단은 원래 "그 세션이 얼마나 힘들었나"를 보는 용도라 세션 전체 RPE가 오히려 본래 의도에 더 가깝다(임계값 48/72h는 기존 그대로).
+    const sessionRpe=getSessionMemberRpe(s);
+    const rpes=exs.map(e=>{const n=getExerciseRpe(e); return n!=null?n:sessionRpe;}).filter(n=>Number.isFinite(n));
     const rpe=rpes.length?rpes.reduce((a,b)=>a+b,0)/rpes.length:null;
     const volume=exs.reduce((sum,e)=>sum+(isFuncEx(e)?0:(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0)),0);
     best={date:String(s.date),rpe,volume};
@@ -8556,7 +8631,9 @@ function getPartRecoveryHours(part, sessions=[]){
     else if(best.rpe>=9)requiredHours=72;
   }
   if(best.volume>=6000)requiredHours=Math.min(72,requiredHours+6);
-  return {hoursSince:daysSince*24, requiredHours};
+  // basisRpe/basisVolume/basisDate는 관리자 미리보기에서 "왜 이 회복시간이 나왔는지"만 보여주기 위한 추가 반환값이다.
+  // 기존 호출부(getRecommendedPart)는 hoursSince/requiredHours만 구조분해하므로 판정 결과는 전혀 달라지지 않는다.
+  return {hoursSince:daysSince*24, requiredHours, basisRpe:best.rpe, basisVolume:Math.round(best.volume), basisDate:best.date};
 }
 
 function getRecommendedPart(profile,sessions=[],onboarding={}){
@@ -8650,7 +8727,9 @@ function DailyConditioningCard({items=[]}){const today=getKoreaDateString(); con
 function hasRoutineCautionText(value){return /통증|찌릿|저림|관절\s*(불편|통증)|동작\s*중단|부상|수행\s*불가|아픔/i.test(String(value||""));}
 function isNegativeExerciseRecord(e={},session={}){const texts=[e.feedback,e.memo,e.note,e.comment,e.trainerComment,e.representativeComment,e.coachComment,session.trainerComment,session.representativeComment].join(" "); return hasRoutineCautionText(texts);}
 // 높은 운동강도 신호 — 운동 자체는 후보에서 제외하지 않고, 중량은 올리지 않고 반복수만 보수적으로 조정하는 근거로 쓴다.
-function hasHighEffortSignal(e={}){const feedback=String(e.feedback||""); const rpe=Number(e.rpe??e.feedbackRpe??e.memberRpe); return (Number.isFinite(rpe)&&rpe>=9)||/힘들|무리|피로/i.test(feedback);}
+// sessionRpe: 그 운동이 속한 세션에 회원이 직접 입력한 세션 전체 RPE(session.memberFeedback.rpe).
+// 운동별 RPE는 과거 기록에만 존재하므로, 없을 때만 세션 전체 RPE로 확인한다. 임계값 9는 기존 기준 그대로다(제한 방향 신호라 약화하지 않는다).
+function hasHighEffortSignal(e={},sessionRpe=null){const feedback=String(e.feedback||""); const exRpe=getExerciseRpe(e); const rpe=exRpe!=null?exRpe:(Number.isFinite(sessionRpe)?sessionRpe:null); return (rpe!=null&&rpe>=9)||/힘들|무리|피로/i.test(feedback);}
 function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){
   // 최신순 정렬 — 동일 운동 최근 최대 8회 분석(최신 기록에 더 높은 가중치)의 전제.
   const classSessions=[...(sessions||[])].filter(s=>s?.isPublished===true||s.status==="published").sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
@@ -8661,6 +8740,9 @@ function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){
   classSessions.forEach(s=>{
     // 이 부위와 매칭되는 운동만 뽑아 세션 내 등장 순서(orderIdx)를 따로 매긴다 — 실제 수업 순서 재현(스펙 7번)의 기초 데이터.
     const partExercises=(s.exercises||[]).filter(e=>e?.name&&exerciseMatchesPart(e,selectedPart));
+    // 세션 전체 RPE — 회원이 회원앱 "수업 후 몸 상태"에서 입력하는 현재 유일한 실제 RPE 입력 경로(운동별 RPE는 과거 기록에만 존재).
+    // 세션 단위 값이므로 여기서 한 번만 읽어 그 세션의 모든 운동 기록에 같은 값으로 실어 보낸다.
+    const sessionRpe=getSessionMemberRpe(s);
     partExercises.forEach((e,orderIdx)=>{
       const filled=getFilledSets(e);
       // 후보 자격 — 세트 3개 이상 요구는 자극도/RPE처럼 "추천 가능 여부"가 아니라 "우선순위" 요소여야 하므로,
@@ -8669,12 +8751,12 @@ function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){
       const key=normalizeExerciseName(e.name);
       if(!key)return;
       const painRisk=isNegativeExerciseRecord(e,s); // 명확한 통증/위험 신호(이때만 후보 제외)
-      const highEffort=hasHighEffortSignal(e); // RPE 9~10/힘듦 등 — 후보 제외 아님, 강도 조절 근거로만 사용
+      const highEffort=hasHighEffortSignal(e,sessionRpe); // RPE 9~10/힘듦 등 — 후보 제외 아님, 강도 조절 근거로만 사용
       const prev=map.get(key)||{name:e.name,muscleTop:e.muscleTop,count:0,recent:false,stim:0,painFree:0,hasSets:0,latestDate:"",marked:false,history:[]};
       const feedback=String(e.feedback||e.stimMemo||"");
       const rating=Number(e.stimRating||0);
       const stim=!painRisk&&(rating>=4||(/자극|좋|잘|우수|높/.test(feedback)&&!/안 좋|안좋|별로|없/.test(feedback)))?1:0;
-      const rpe=Number(e.rpe??e.feedbackRpe??e.memberRpe);
+      const rpe=getExerciseRpe(e); // 과거 기록에만 존재(현재 입력 경로 없음) — 있으면 그대로 존중하고, 없으면 아래 sessionRpe가 보조 입력이 된다
       const equipment=resolveEquipmentKind(e);
       const barbellKind=equipment==="바벨"?resolveBarbellKind(e):null;
       if(!prev.latestDate||(s.date||"")>prev.latestDate){prev.latestDate=String(s.date||prev.latestDate); prev.name=e.name||prev.name; prev.muscleTop=e.muscleTop||prev.muscleTop;}
@@ -8684,7 +8766,7 @@ function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){
       prev.painFree+=painRisk?0:1;
       prev.hasSets+=(filled.length?1:0);
       prev.marked=prev.marked||isTrainerMarkedExercise(e);
-      if(prev.history.length<8)prev.history.push({date:String(s.date||""),sets:filled,rpe:Number.isFinite(rpe)?rpe:null,isPainRisk:painRisk,isHighEffort:highEffort,isFunc:isFuncEx(e),equipment,barbellKind,orderIdx});
+      if(prev.history.length<8)prev.history.push({date:String(s.date||""),sets:filled,rpe,sessionRpe,isPainRisk:painRisk,isHighEffort:highEffort,isFunc:isFuncEx(e),equipment,barbellKind,orderIdx});
       map.set(key,prev);
     });
   });
@@ -24170,7 +24252,8 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
 // 쓰는 것과 완전히 같은 함수(getRecommendedPart / buildReviewRoutine / recommendExerciseDose)를 그대로 호출하고,
 // 입력 데이터도 회원앱이 실제로 받는 값으로 맞춘다:
 //   · 세션 — 공개(isPublished) 수업만 + toMemberVisibleSession(회원앱 publicSession과 동일 투영).
-//     관리자 전용 필드(rpe·sessionType·memo 등)는 회원앱에 내려가지 않으므로 미리보기에서도 똑같이 제거해야 결과가 일치한다.
+//     관리자 전용 필드(운동별 rpe·memo·2:1 상대 회원 정보 등)는 회원앱에 내려가지 않으므로 미리보기에서도 똑같이 제거해야 결과가 일치한다.
+//     반대로 추천에 실제로 필요한 값(수업 형태 sessionType, 회원이 입력한 세션 전체 RPE memberFeedback.rpe)은 publicSession이 그대로 내려주므로 양쪽이 같은 값을 본다.
 //   · 컨디션 — memberCheckins(최근 30건, 회원앱 load()와 동일)
 //   · 대표 추천 루틴 — routineRecommendations(published): 이게 있으면 회원앱은 자동 추천 대신 대표 루틴을 보여준다.
 // 저장·수정은 일절 하지 않는다(조회 전용).
@@ -24225,11 +24308,19 @@ function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
       if (!s.date) return;
       if ((s.exercises || []).some(e => exerciseMatchesPart(e, p)) && String(s.date) > last) last = String(s.date);
     });
-    const { hoursSince, requiredHours } = getPartRecoveryHours(p, memberSessions);
+    const { hoursSince, requiredHours, basisRpe, basisVolume } = getPartRecoveryHours(p, memberSessions);
     const daysAgo = last ? Math.max(0, Math.floor((Date.now() - new Date(last + "T00:00:00").getTime()) / 86400000)) : null;
-    return { part: p, last, daysAgo, hoursSince, requiredHours, recovering: hoursSince < requiredHours };
+    return { part: p, last, daysAgo, hoursSince, requiredHours, basisRpe, basisVolume, recovering: hoursSince < requiredHours };
   }), [memberSessions]);
   const recentPartCounts = useMemo(() => getRecentPartCounts(memberSessions), [memberSessions]);
+  // 검수용 — 추천 엔진이 실제로 읽는 RPE 입력(session.memberFeedback.rpe)을 최신순으로 그대로 보여준다.
+  // 운동별 RPE 입력창은 관리자앱에 없으므로(과거 기록 전용) 여기 표시되는 값이 곧 엔진의 유일한 RPE 입력이다.
+  const recentSessionRpes = useMemo(() => [...memberSessions]
+    .filter(s => s?.date)
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .map(s => ({ date: String(s.date), rpe: getSessionMemberRpe(s), sessionType: s.sessionType === "2:1" ? "2:1" : "1:1" }))
+    .slice(0, 5), [memberSessions]);
+  const latestRpeEntry = recentSessionRpes.find(r => r.rpe != null) || null;
 
   const box = { background: DB.card, border: "1px solid " + DB.border, borderRadius: 16, padding: "16px 18px", marginBottom: 12, boxShadow: DB.shadow };
   const label = { fontFamily: DB.font, fontSize: 11, fontWeight: 800, color: DB.sub, display: "block", marginBottom: 8 };
@@ -24316,12 +24407,26 @@ function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
           다음 PT 예정: <b>{info.part||"미정"}</b>
           {info.daysUntil!=null ? " · " + info.dateText + " (" + info.dDay + ")" : " · 날짜 미정"}
         </div>
+        {/* 엔진이 실제로 읽는 RPE 입력 — 운동별 RPE 입력창은 관리자앱에 없으므로(과거 기록 전용) 이 값이 유일한 RPE 입력이다 */}
+        <div style={{...body, marginBottom:4}}>
+          최근 수업 형태: <b>{recentSessionRpes[0] ? recentSessionRpes[0].sessionType + " 수업 (" + recentSessionRpes[0].date + ")" : "공개 수업 없음"}</b>
+          <span style={faint}> — 이 값으로 2:1 여부를 판정합니다</span>
+        </div>
+        <div style={{...body, marginBottom:4}}>
+          최근 수업 RPE(회원 입력): <b>{latestRpeEntry ? "RPE " + latestRpeEntry.rpe + " (" + latestRpeEntry.date + ")" : "미입력"}</b>
+        </div>
+        <div style={{...faint, marginBottom:10}}>
+          최근 5회: {recentSessionRpes.length
+            ? recentSessionRpes.map(r => r.date.slice(5) + " " + (r.rpe != null ? "RPE " + r.rpe : "미입력") + " · " + r.sessionType).join(" / ")
+            : "공개 수업 기록 없음"}
+        </div>
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {partStatus.map(p => (
             <div key={p.part} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontFamily:DB.font,fontSize:12}}>
               <span style={{minWidth:34,fontWeight:800,color:DB.text}}>{p.part}</span>
               <span style={{color:DB.sub}}>{p.last ? "마지막 " + (p.daysAgo===0?"오늘":p.daysAgo+"일 전") + " (" + p.last + ")" : "공개 기록 없음"}</span>
               {p.recovering && <span style={{fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309"}}>회복 중 {p.hoursSince}h / {p.requiredHours}h</span>}
+              {p.last && <span style={{fontSize:10.5,color:DB.faint}}>필요 {p.requiredHours}h · 기준 {p.basisRpe!=null?"RPE "+(Math.round(p.basisRpe*10)/10):"RPE 미입력"}{p.basisVolume>=6000?" · 고볼륨":""}</span>}
               <span style={{marginLeft:"auto",fontSize:11,color:DB.faint}}>최근 3주 {recentPartCounts[normalizeWorkoutPart(p.part)]||0}회 등장</span>
             </div>
           ))}
@@ -24373,6 +24478,27 @@ function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
                   ))}
                 </div>
                 <div style={{...faint, marginTop:8}}>{x.reason}</div>
+                {/* progression 판단 근거 — 관리자 검수 전용이며 회원앱 화면에는 표시되지 않는다 */}
+                {x.progression && (
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                    <span style={{fontSize:10.5,fontWeight:800,padding:"3px 9px",borderRadius:999,
+                      background:["weight","reps_or_weight"].includes(x.progression.mode)?"rgba(34,197,94,.12)":["reduce","hold_low","hold_effort"].includes(x.progression.mode)?"rgba(245,158,11,.12)":"rgba(148,163,184,.16)",
+                      color:["weight","reps_or_weight"].includes(x.progression.mode)?"#15803D":["reduce","hold_low","hold_effort"].includes(x.progression.mode)?"#B45309":DB.sub}}>
+                      {DOSE_MODE_LABEL[x.progression.mode]||x.progression.mode}
+                    </span>
+                    <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:999,background:"rgba(148,163,184,.14)",color:DB.sub}}>
+                      {DOSE_RPE_SOURCE_LABEL[x.progression.rpeSource]||x.progression.rpeSource}
+                      {x.progression.rpeSource==="exercise"&&x.progression.exerciseRpe!=null?" "+x.progression.exerciseRpe:""}
+                      {x.progression.rpeSource==="session"&&x.progression.sessionRpe!=null?" "+x.progression.sessionRpe:""}
+                    </span>
+                    {x.progression.painRisk && <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:999,background:"rgba(239,68,68,.12)",color:"#B91C1C"}}>통증 신호</span>}
+                    {x.progression.highEffort && <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309"}}>고강도 신호</span>}
+                    {x.progression.longBreak && <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309"}}>장기 공백</span>}
+                    {x.progression.lowerByCheckin && <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#B45309"}}>컨디션 저하</span>}
+                    {x.progression.allCompleted===false && <span style={{fontSize:10.5,fontWeight:700,padding:"3px 9px",borderRadius:999,background:"rgba(148,163,184,.14)",color:DB.sub}}>세트 미완료</span>}
+                    {x.progression.weightBumped && <span style={{fontSize:10.5,fontWeight:800,padding:"3px 9px",borderRadius:999,background:"rgba(34,197,94,.12)",color:"#15803D"}}>중량 증가 적용{x.progression.volumeDeltaPct!=null?" · 볼륨 +"+x.progression.volumeDeltaPct+"%":""}</span>}
+                  </div>
+                )}
                 <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,marginTop:4}}>분석한 과거 기록 {x.analyzedCount}회</div>
               </div>
             ))}

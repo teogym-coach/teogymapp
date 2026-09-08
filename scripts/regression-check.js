@@ -1854,9 +1854,47 @@ const checks = [
   ],
   ["회원앱 식단 기록: 자동 예상 → 회원 확인·수정 → 저장 흐름(추정값 자동 확정 저장 금지)",
     app.includes("function MemberDietSheet(") &&
-    app.includes("예상 칼로리 계산하기") &&
+    app.includes("칼로리 확인하기") &&
     app.includes("확인하고 저장") &&
-    app.includes('{f.pending ? (f.matched ? "예상값" : "직접 입력") : "저장됨"}')
+    app.includes("표시된 값은 <b>예상값</b>입니다. 확인 후 저장해 주세요.")
+  ],
+  // 계산 버튼과 저장 버튼이 따로 있으면 회원이 계산을 건너뛰고 저장을 눌러 입력이 사라진다 —
+  // CTA 하나가 상태에 따라 "칼로리 확인하기" ↔ "확인하고 저장"으로 바뀌는 구조를 고정한다.
+  ["회원앱 식단 기록: 하단 CTA는 하나뿐이고, 계산이 필요한 상태에서는 저장으로 넘어가지 않는다",
+    app.includes("const handleCta = async () => {") &&
+    app.includes("if (needsCalc) { runCalc(); return; }") &&
+    app.includes(': needsCalc ? "칼로리 확인하기"') &&
+    !app.includes("diet-estimate-btn")
+  ],
+  ["회원앱 식단 기록: 자동 계산 직후 자동 저장하지 않는다(runCalc는 저장을 호출하지 않음)",
+    (() => {
+      const from = app.indexOf("  const runCalc = () => {");
+      if (from < 0) return false;
+      const body = app.slice(from, app.indexOf("  const patchIdentity", from));
+      return body.length > 0 && !body.includes("saveDietMeal") && !body.includes("submit(");
+    })()
+  ],
+  ["회원앱 식단 기록: 이름·양·단위를 고치면 재계산 대상이 되고, 낡은 계산값이 저장되지 않는다",
+    app.includes("f.id === id ? { ...f, ...next, stale: !f.manual } : f") &&
+    app.includes("const needsCalc = hasText || staleItems.length > 0;")
+  ],
+  ["회원앱 식단 기록: 칼로리·탄단지를 직접 고치면 manual override — 자동 계산이 덮어쓰지 않는다",
+    app.includes("manual: true, stale: false, sourceKind: \"manual\"") &&
+    app.includes("if (f.manual) return { ...f, stale: false };")
+  ],
+  ["회원앱 식단 기록: 검색 결과가 여러 개면 첫 결과를 확정하지 않고 회원이 고를 수 있게 한다",
+    app.includes("const applyCandidate = (id, dbItem) =>") &&
+    app.includes('<div className="diet-cands">') &&
+    app.includes("다른 후보")
+  ],
+  ["회원앱 식단 기록: 출처를 배지로 구분한다(식약처 / TEO GYM DB / 직접 입력)",
+    app.includes('const FOOD_SOURCE_LABEL = { official: "식약처", local: "TEO GYM DB", manual: "직접 입력" };') &&
+    app.includes("function foodSourceKind(f = {})") &&
+    app.includes("diet-badge kind-")
+  ],
+  ["회원앱 식단 기록: 출처 구분(sourceKind)이 Firestore에 저장되고, 과거 기록은 source에서 역산한다",
+    db.includes('sourceKind: f.sourceKind || (f.source === "음식 DB" ? "local" : "manual"),') &&
+    app.includes('return f.source === "음식 DB" ? "local" : "manual";')
   ],
   ["회원앱 식단 기록: 아침·점심·저녁·간식 단위로 기록하고 하루 섭취/권장 kcal을 함께 보여준다",
     app.includes('const MEMBER_MEAL_TYPES = ["아침", "점심", "저녁", "간식"];') &&
@@ -1871,12 +1909,33 @@ const checks = [
   // 따라서 로컬 FOOD_DB + 회원 직접 입력만 쓰고, 결과는 항상 "예상값"으로 표시해야 한다.
   ["음식 칼로리: 외부 API/AI 호출 없이 로컬 FOOD_DB와 직접 입력만 사용한다",
     app.includes("const FOOD_DB = [") &&
-    app.includes("function estimateFoodLine(raw)") &&
+    app.includes("function estimateFoodLine(raw, keepId = null)") &&
     !/fetch\(\s*['"`]https:\/\/(?!identitytoolkit)/.test(app)
   ],
   ["음식 칼로리: 매칭 실패 시 칼로리를 지어내지 않고 0으로 두어 회원이 직접 입력하게 한다",
     app.includes("cal: 0, carb: 0, protein: 0, fat: 0,") &&
-    app.includes("음식 DB에 없는 항목입니다. 칼로리를 직접 입력해 주세요.")
+    app.includes("등록된 영양정보를 찾지 못했습니다. 제품 영양정보나 알고 있는 칼로리를 직접 입력해 주세요.")
+  ],
+  // "오이무침"이 "오이"로, "계란찜"이 "계란"으로 조용히 바뀌어 다른 음식의 칼로리가 표시되던 오탐을 막는다.
+  // 검색어가 DB 이름을 포함하는 역방향 매칭은 금지하고, DB 이름이 검색어를 포함하는 방향만 허용한다.
+  ["음식 검색: 역방향 부분일치(검색어가 DB 이름을 포함)를 쓰지 않는다 — 다른 음식으로 조용히 바뀌는 오탐 방지",
+    app.includes("function searchFoodItems(name, { unitHint = \"\", limit = 5 } = {})") &&
+    !app.includes("n.includes(key) || key.includes(n)")
+  ],
+  ["음식 검색: 이름이 정확히 일치한 후보는 단위 보너스로도 밀려나지 않는다",
+    app.includes("const rank = e => (e.score === 0 ? -100 : e.score - (u && e.item.unit === u ? 2.5 : 0));")
+  ],
+  ["음식 데이터: 공식 API 미연동 사유와 연동 조건을 코드에 남긴다(FOOD_SOURCE_NOTE)",
+    app.includes("FOOD_SOURCE_NOTE") &&
+    app.includes("인증키") &&
+    app.includes('sourceKind: "official"')
+  ],
+  ["음식 데이터: 출처 표기를 실제와 다르게 쓰지 않는다(식약처 DB 대조 검증 주장 금지)",
+    !app.includes("출처: 식품의약품안전처 식품영양성분DB의 대표값") &&
+    app.includes("공식 DB와 대조 검증된 적이 없다")
+  ],
+  ["음식 데이터: 필수 요청 음식(거봉·오이무침)이 로컬 DB에 등록되어 있다",
+    app.includes('{name:"거봉",') && app.includes('{name:"오이무침",')
   ],
   ["음식 칼로리: 기존 FOOD_DB 36개 항목의 값·이름·단위는 그대로 두고 추가만 했다",
     app.includes('{name:"현미밥",        unit:"g",   per:100, cal:111, carb:23.0, protein:2.6,  fat:0.9},') &&

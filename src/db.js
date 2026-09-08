@@ -1910,6 +1910,10 @@ export async function saveMemberDietMeal(memberId, dateKey, mealType, items = []
     fat: Number(f.fat) || 0,
     // 추정값 표시용 메타 — 확정 데이터가 아니라 "회원이 확인한 예상값"임을 기록에 남긴다.
     estimated: f.estimated !== false,
+    // source는 화면 표시용 기존 문자열("음식 DB"/"직접 입력"/"manual")이라 그대로 두고,
+    // 기계가 읽는 출처 구분은 sourceKind(official/local/manual)로만 한다.
+    // 과거 기록에는 sourceKind가 없으므로 읽는 쪽(foodSourceKind)이 source에서 역산한다.
+    sourceKind: f.sourceKind || (f.source === "음식 DB" ? "local" : "manual"),
     source: f.source || "manual",
     accuracy: f.accuracy || "낮음",
     memo: f.memo || null,

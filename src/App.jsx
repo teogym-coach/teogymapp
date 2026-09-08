@@ -6595,60 +6595,124 @@ function MemberDietSection({ p }) {
   </div>;
 }
 
+// 식단 입력 시트 — 버튼은 하단 CTA 하나뿐이다.
+//
+// 예전에는 "예상 칼로리 계산하기"와 "확인하고 저장" 두 버튼이 따로 있어서, 회원이 계산을 누르지 않고
+// 저장부터 누르면 입력한 음식이 조용히 사라졌다(저장은 계산된 항목만 보고 입력창의 글자는 버렸다).
+// 이제는 CTA 하나가 상태에 따라 역할을 바꾼다.
+//   · 계산이 필요한 상태(입력창에 글이 있거나 재계산 필요 항목이 있음) → "칼로리 확인하기" (계산만 하고 저장하지 않는다)
+//   · 계산이 끝난 상태 → "확인하고 저장"
+// 즉 회원이 무엇을 누르든 계산 → 확인 → 저장 순서를 반드시 거치게 되고, 계산 직후 자동 저장은 하지 않는다.
 function MemberDietSheet({ p, date, mealType, onClose }) {
   const saved = p.nutrition?.dates?.[date]?.meals?.[mealType] || [];
-  const [items, setItems] = useState(() => saved.map(f => ({ ...f, pending: false })));
+  const [items, setItems] = useState(() => saved.map(f => ({
+    ...f, pending: false, stale: false,
+    // 과거 기록은 sourceKind가 없을 수 있어 기존 source에서 역산한다(레거시 호환).
+    sourceKind: foodSourceKind(f),
+    manual: foodSourceKind(f) === "manual",
+  })));
   const [text, setText] = useState("");
+  const [justCalced, setJustCalced] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const totals = sumFoodItems(items);
-  const pendingCount = items.filter(f => f.pending).length;
-  const checkCount = items.filter(f => f.needsCheck && f.pending).length;
-  const estimate = () => {
-    const rows = estimateFoodLines(text);
-    if (!rows.length) { alert("음식과 섭취량을 입력해 주세요.\n예) 현미밥 200g"); return; }
-    setItems(prev => [...prev, ...rows.map(r => ({ ...r, pending: true }))]);
+
+  const hasText = String(text).trim().length > 0;
+  const staleItems = items.filter(f => f.stale);
+  const needsCalc = hasText || staleItems.length > 0;
+  const unmatched = items.filter(f => !f.matched && !f.manual && Number(f.cal) <= 0);
+
+  // 계산만 수행한다 — 여기서 저장을 호출하지 않는 것이 이 화면의 핵심 규칙이다.
+  const runCalc = () => {
+    const added = hasText ? estimateFoodLines(text) : [];
+    setItems(prev => {
+      const recalced = prev.map(f => {
+        if (!f.stale) return f;
+        // 회원이 칼로리·탄단지를 직접 고친 항목은 자동 계산으로 덮어쓰지 않는다(manual override).
+        if (f.manual) return { ...f, stale: false };
+        const line = `${f.name || ""} ${f.amount || ""}${f.unit || ""}`.trim();
+        const re = estimateFoodLine(line, f.id);
+        return re ? { ...re, pending: true, stale: false, manual: false } : { ...f, stale: false };
+      });
+      return [...recalced, ...added.map(r => ({ ...r, pending: true, stale: false, manual: false }))];
+    });
     setText("");
+    setJustCalced(true);
+    setTimeout(() => setJustCalced(false), 1400);
   };
-  const patch = (id, next) => setItems(prev => prev.map(f => (f.id === id ? { ...f, ...next } : f)));
+
+  const patchIdentity = (id, next) => setItems(prev => prev.map(f => (
+    // 음식명·양·단위를 바꾸면 기존 계산값이 낡은 값이 되므로 재계산 대상으로 표시한다.
+    // 직접 입력한 항목은 값 보존이 우선이라 재계산 대상으로 만들지 않는다.
+    f.id === id ? { ...f, ...next, stale: !f.manual } : f
+  )));
+  const patchNutrition = (id, next) => setItems(prev => prev.map(f => (
+    // 영양값을 직접 고치면 그 순간부터 manual override — 이후 자동 계산이 덮어쓰지 않는다.
+    f.id === id ? { ...f, ...next, manual: true, stale: false, sourceKind: "manual", source: "직접 입력", needsCheck: false } : f
+  )));
+  const applyCandidate = (id, dbItem) => setItems(prev => prev.map(f => (
+    f.id === id
+      ? { ...buildFoodItemFromDb(dbItem, { amount: Number(f.amount) || null, unit: f.unit, keepId: f.id }),
+          candidates: f.candidates, searchKey: f.searchKey, pending: true, stale: false, manual: false }
+      : f
+  )));
   const remove = id => setItems(prev => prev.filter(f => f.id !== id));
+
   const submit = async () => {
     const cleaned = items.filter(f => String(f.name || "").trim());
     if (cleaned.some(f => !(Number(f.cal) > 0))) {
       if (!window.confirm("칼로리가 0인 항목이 있습니다. 그대로 저장할까요?")) return;
     }
     try {
-      await p.saveDietMeal(date, mealType, cleaned.map(({ pending, raw, ...f }) => f));
+      await p.saveDietMeal(date, mealType, cleaned.map(
+        ({ pending, stale, manual, raw, candidates, searchKey, matched, needsCheck, ...f }) => f
+      ));
       setJustSaved(true); setTimeout(() => setJustSaved(false), 700);
       onClose();
     } catch (e) { /* 저장 실패 안내는 saveDietMeal 내부에서 처리한다 */ }
   };
+
+  // CTA 하나로 계산과 저장을 모두 처리한다. 계산이 필요한 상태에서는 절대 저장으로 넘어가지 않는다.
+  const handleCta = async () => {
+    if (needsCalc) { runCalc(); return; }
+    await submit();
+  };
+  const ctaLabel = p.dietSaving ? "저장 중..."
+    : justSaved ? "저장 완료 ✓"
+    : needsCalc ? "칼로리 확인하기"
+    : items.length ? "확인하고 저장" : "저장";
+
   const numField = (f, key, label, color) => <label className="diet-num">
     <span>{label}</span>
     <input type="number" inputMode="decimal" value={f[key] ?? ""} style={{ color }}
-      onChange={e => patch(f.id, { [key]: e.target.value === "" ? 0 : Number(e.target.value) })} />
+      onChange={e => patchNutrition(f.id, { [key]: e.target.value === "" ? 0 : Number(e.target.value) })} />
   </label>;
+
   return <div className="diet-sheet">
     <p className="mv2-sheet-hint">{date} · {mealType}<span>음식과 양을 한 줄에 하나씩 적어주세요.</span></p>
     <div className="form-line">
       <label>음식 · 섭취량 입력</label>
-      <textarea className="diet-input" rows={4} value={text} onChange={e => setText(e.target.value)}
+      <textarea className="diet-input" rows={3} value={text} onChange={e => setText(e.target.value)}
         placeholder={"현미밥 200g\n닭가슴살 100g\n계란 2개"} />
     </div>
-    <button type="button" className="ghost diet-estimate-btn" onClick={estimate}>예상 칼로리 계산하기</button>
-    {items.length === 0 && <p className="notice soft" style={{ marginTop: 10 }}>아직 기록이 없어요. 위에 음식을 적고 계산해 보세요.</p>}
-    {items.length > 0 && <>
-      <div className="diet-list">
-        {items.map(f => <div key={f.id} className={`diet-item${f.pending ? " pending" : ""}`}>
+
+    {items.length === 0 && !hasText && <p className="notice soft">아직 기록이 없어요. 위에 음식을 적고 아래 버튼을 눌러주세요.</p>}
+
+    {items.length > 0 && <div className="diet-list">
+      {items.map(f => {
+        const kind = f.manual ? "manual" : foodSourceKind(f);
+        const others = (f.candidates || []).filter(c => c.name !== f.name).slice(0, 4);
+        return <div key={f.id} className={`diet-item${f.pending ? " pending" : ""}${f.stale ? " stale" : ""}`}>
           <div className="diet-item-head">
-            <input className="diet-item-name" value={f.name || ""} onChange={e => patch(f.id, { name: e.target.value })} />
+            <input className="diet-item-name" value={f.name || ""}
+              onChange={e => patchIdentity(f.id, { name: e.target.value })} />
             <button type="button" className="diet-item-del" onClick={() => remove(f.id)} aria-label="삭제">✕</button>
           </div>
           <div className="diet-item-meta">
             <input className="diet-item-amount" value={f.amount ?? ""} placeholder="섭취량"
-              onChange={e => patch(f.id, { amount: e.target.value })} />
+              onChange={e => patchIdentity(f.id, { amount: e.target.value })} />
             <input className="diet-item-unit" value={f.unit || ""} placeholder="단위"
-              onChange={e => patch(f.id, { unit: e.target.value })} />
-            <em className={`diet-badge${f.matched ? "" : " manual"}`}>{f.pending ? (f.matched ? "예상값" : "직접 입력") : "저장됨"}</em>
+              onChange={e => patchIdentity(f.id, { unit: e.target.value })} />
+            <em className={`diet-badge kind-${kind}`}>{FOOD_SOURCE_LABEL[kind] || "직접 입력"}</em>
           </div>
           <div className="diet-item-nums">
             {numField(f, "cal", "kcal", "#20242A")}
@@ -6656,21 +6720,39 @@ function MemberDietSheet({ p, date, mealType, onClose }) {
             {numField(f, "protein", "단(g)", "#0F9488")}
             {numField(f, "fat", "지(g)", "#B45309")}
           </div>
-          {f.pending && f.needsCheck && <p className="diet-item-warn">{f.matched ? "섭취량을 확인해 주세요(기본 1회 제공량으로 계산됨)." : "음식 DB에 없는 항목입니다. 칼로리를 직접 입력해 주세요."}</p>}
-        </div>)}
-      </div>
-      <div className="diet-sheet-total">
-        <b>{formatKcalNumber(totals.cal)} kcal</b>
-        <span>탄 {totals.carb}g · 단 {totals.protein}g · 지 {totals.fat}g</span>
-      </div>
-      {pendingCount > 0 && <p className="notice soft">{checkCount > 0 ? `확인이 필요한 항목이 ${checkCount}개 있습니다. 값을 수정한 뒤 저장해 주세요.` : "계산된 값은 예상값입니다. 확인 후 저장해 주세요."}</p>}
-    </>}
-    <button className={`primary${justSaved ? " save-success" : ""}`} onClick={submit} disabled={p.dietSaving}>
-      {p.dietSaving ? "저장 중..." : justSaved ? "저장 완료 ✓" : items.length ? "확인하고 저장" : "저장"}
-    </button>
+          {f.stale && <p className="diet-item-warn stale">내용을 수정했어요. 아래 <b>칼로리 확인하기</b>를 누르면 다시 계산합니다.</p>}
+          {!f.stale && f.manual && <p className="diet-item-note">직접 입력한 값이라 자동 계산으로 바뀌지 않아요.</p>}
+          {!f.stale && !f.manual && !f.matched && Number(f.cal) <= 0 && (
+            <p className="diet-item-warn">등록된 영양정보를 찾지 못했습니다. 제품 영양정보나 알고 있는 칼로리를 직접 입력해 주세요.</p>
+          )}
+          {!f.stale && !f.manual && f.matched && f.needsCheck && (
+            <p className="diet-item-warn">섭취량을 확인해 주세요(기본 1회 제공량으로 계산됨).</p>
+          )}
+          {/* 검색 결과가 여러 개면 첫 결과를 확정하지 않고 회원이 눌러 바꿀 수 있게 한다. */}
+          {others.length > 0 && <div className="diet-cands">
+            <span>다른 후보</span>
+            {others.map(c => <button type="button" key={c.name} onClick={() => applyCandidate(f.id, c)}>{c.name}</button>)}
+          </div>}
+        </div>;
+      })}
+    </div>}
+
+    {items.length > 0 && <div className="diet-sheet-total">
+      <b>{formatKcalNumber(totals.cal)} kcal</b>
+      <span>탄 {totals.carb}g · 단 {totals.protein}g · 지 {totals.fat}g</span>
+    </div>}
+
+    {needsCalc && <p className="notice soft">{hasText
+      ? "입력한 음식의 칼로리를 먼저 계산합니다. 결과를 확인한 뒤 저장할 수 있어요."
+      : "수정한 항목이 있어요. 다시 계산한 뒤 저장할 수 있어요."}</p>}
+    {!needsCalc && justCalced && <p className="notice soft">계산했어요. 값을 확인하고 필요하면 고친 뒤 저장해 주세요.</p>}
+    {!needsCalc && unmatched.length > 0 && <p className="notice soft">칼로리를 찾지 못한 항목이 {unmatched.length}개 있어요. 값을 직접 입력해 주세요.</p>}
+    {!needsCalc && items.length > 0 && <p className="notice soft">표시된 값은 <b>예상값</b>입니다. 확인 후 저장해 주세요.</p>}
+
+    <button className={`primary diet-cta${justSaved ? " save-success" : ""}`} onClick={handleCta}
+      disabled={p.dietSaving || (!needsCalc && items.length === 0)}>{ctaLabel}</button>
   </div>;
 }
-
 function MemberHealth(p){
   const today=getKoreaDateString();
   const yesterday=getKoreaYesterdayDateString(); // 월/연도 경계·자정 전후에도 안전한 KST 달력일 기준(기존 공용 헬퍼)
@@ -9272,7 +9354,6 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .member-diet .diet-meal-kcal{font-family:'Syne',sans-serif;font-size:17px;font-weight:900;color:#0F9488}
 .member-diet .diet-meal-sub{font-size:11px;font-weight:700;color:#8B949E;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .diet-sheet .diet-input{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:14px;padding:12px;font-size:14px;font-family:inherit;color:#20242A;background:#fff;line-height:1.6;resize:vertical}
-.diet-sheet .diet-estimate-btn{margin-top:4px}
 .diet-sheet .diet-list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
 .diet-sheet .diet-item{border:1px solid #E8ECF1;border-radius:16px;padding:12px;background:#fff}
 .diet-sheet .diet-item.pending{border-color:#D9E7FF;background:#F8FBFF}
@@ -9280,19 +9361,32 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .diet-sheet .diet-item-name{flex:1;min-width:0;border:none;border-bottom:1px solid #EEF1F4;padding:4px 0;font-size:14.5px;font-weight:900;color:#20242A;background:transparent;font-family:inherit}
 .diet-sheet .diet-item-del{border:none;background:#F6F7F9;color:#8B949E;border-radius:10px;width:28px;height:28px;flex-shrink:0;cursor:pointer;font-size:13px}
 .diet-sheet .diet-item-meta{display:flex;gap:6px;align-items:center;margin-top:8px}
-.diet-sheet .diet-item-amount{width:78px;border:1px solid #E8ECF1;border-radius:10px;padding:6px 8px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit}
-.diet-sheet .diet-item-unit{width:62px;border:1px solid #E8ECF1;border-radius:10px;padding:6px 8px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit}
+.diet-sheet .diet-item-amount{width:78px;border:1px solid #E8ECF1;border-radius:10px;padding:9px 8px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit;min-height:40px}
+.diet-sheet .diet-item-unit{width:62px;border:1px solid #E8ECF1;border-radius:10px;padding:9px 8px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit;min-height:40px}
 .diet-sheet .diet-badge{margin-left:auto;font-style:normal;font-size:10.5px;font-weight:900;color:#0F9488;background:#E6F6F4;border-radius:999px;padding:4px 9px}
 .diet-sheet .diet-badge.manual{color:#B45309;background:#FEF3C7}
 .diet-sheet .diet-item-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}
 .diet-sheet .diet-num{display:flex;flex-direction:column;gap:3px}
 .diet-sheet .diet-num span{font-size:10.5px;font-weight:900;color:#8B949E}
-.diet-sheet .diet-num input{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:10px;padding:7px 6px;font-size:13px;font-weight:900;text-align:center;background:#fff;font-family:inherit}
+.diet-sheet .diet-num input{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:10px;padding:10px 6px;font-size:13.5px;font-weight:900;text-align:center;background:#fff;font-family:inherit;min-height:42px}
 .diet-sheet .diet-item-warn{margin:8px 0 0;font-size:11.5px;font-weight:800;color:#B45309;line-height:1.5}
 .diet-sheet .diet-sheet-total{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:12px;padding:12px 14px;border-radius:14px;background:#F6F7F9}
 .diet-sheet .diet-sheet-total b{font-family:'Syne',sans-serif;font-size:20px;font-weight:900;color:#20242A}
 .diet-sheet .diet-sheet-total span{font-size:11.5px;font-weight:800;color:#66717C}
 @media (max-width:400px){.member-diet .diet-meals{grid-template-columns:1fr}}
+/* 식단 시트 — 출처 배지 / 재계산 안내 / 후보 선택 / 하단 CTA */
+.diet-sheet .diet-item.stale{border-color:#FDBA74;background:#FFFBF5}
+.diet-sheet .diet-badge.kind-local{color:#0F9488;background:#E6F6F4}
+.diet-sheet .diet-badge.kind-manual{color:#B45309;background:#FEF3C7}
+.diet-sheet .diet-badge.kind-official{color:#2F73F6;background:#E7F0FF}
+.diet-sheet .diet-item-warn.stale{color:#C2410C}
+.diet-sheet .diet-item-note{margin:8px 0 0;font-size:11.5px;font-weight:800;color:#66717C;line-height:1.5}
+.diet-sheet .diet-cands{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:9px}
+.diet-sheet .diet-cands>span{font-size:11px;font-weight:900;color:#8B949E}
+.diet-sheet .diet-cands button{border:1px solid #D9E7FF;background:#F4F8FF;color:#2F73F6;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit}
+/* 하단 CTA는 항상 손에 닿는 위치에 고정 — iOS에서 키보드가 올라와도 시트 안에서 따라온다.
+   (bottom 여백은 MemberBottomSheet의 safe-area 처리와 겹치지 않게 최소로만 준다) */
+.diet-sheet .diet-cta{position:sticky;bottom:0;z-index:2;margin-top:14px;box-shadow:0 -10px 18px rgba(255,255,255,.9)}
 /* ── 건강 탭 최종 개편 — 오늘 건강 기록 최상단 + 기록 히스토리 버튼 + 기록 분석(3줄 요약/접힘식 상세) ── */
 .health-block-icon.mint{background:#E6F7F4;color:#0F9488}
 .health-history-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:14px;height:50px;border:1px solid #CBEAE3;border-radius:16px;background:#F2FBF9;color:#0F9488;font-size:14px;font-weight:900;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .15s ease,background-color .15s ease}
@@ -30083,7 +30177,11 @@ const FOOD_DB = [
   {name:"된장찌개",      unit:"그릇",per:1,   cal:150, carb:10.0, protein:12.0, fat:5.0},
   // ── 아래는 회원앱 "식단 기록"(텍스트 입력 → 예상 계산)을 위해 추가한 항목이다.
   // 위 기존 36개 항목은 값·이름·단위를 그대로 두었다(기존에 저장된 음식 기록과 계속 같은 기준으로 계산되어야 하므로).
-  // 출처: 식품의약품안전처 식품영양성분DB의 대표값을 100g/1인분 기준으로 반올림한 근사치 — 모두 "예상값"으로만 사용한다.
+  //
+  // ⚠ 출처 표기 정정(2026-09-08): 이 항목들은 식품의약품안전처 식품영양성분DB를 실제로 조회해 옮긴 값이 아니다.
+  // 일반적으로 통용되는 성분표 대표값을 100g / 1회 제공량 기준으로 반올림한 "근사 예상값"이며,
+  // 공식 DB와 대조 검증된 적이 없다. 그래서 화면에서는 항상 "예상값"으로만 표시하고,
+  // 회원이 확인·수정한 값만 저장한다. 공식 데이터로 대체하는 방법은 아래 FOOD_SOURCE_NOTE 주석 참고.
   {name:"보리밥",        unit:"g",   per:100, cal:123, carb:26.0, protein:2.8,  fat:0.5},
   {name:"귀리밥",        unit:"g",   per:100, cal:129, carb:25.0, protein:3.5,  fat:1.4},
   {name:"공기밥",        unit:"공기",per:1,   cal:300, carb:66.0, protein:5.6,  fat:0.6},
@@ -30153,6 +30251,52 @@ const FOOD_DB = [
   {name:"아이스크림",    unit:"개",  per:1,   cal:200, carb:24.0, protein:3.5,  fat:10.0},
   {name:"과자",          unit:"g",   per:100, cal:490, carb:62.0, protein:6.0,  fat:24.0},
   {name:"에너지바",      unit:"개",  per:1,   cal:180, carb:24.0, protein:6.0,  fat:6.0},
+  // ── 2차 추가(회원 실사용 식단 커버리지) — 과일·나물/무침·국/반찬·분식 ──
+  // 위 항목들과 마찬가지로 100g 또는 1회 제공량 기준 "예상값"이다.
+  {name:"거봉",          unit:"g",   per:100, cal:69,  carb:17.0, protein:0.6,  fat:0.2},
+  {name:"청포도",        unit:"g",   per:100, cal:69,  carb:18.0, protein:0.7,  fat:0.2},
+  {name:"샤인머스캣",    unit:"g",   per:100, cal:70,  carb:18.0, protein:0.6,  fat:0.2},
+  {name:"배",            unit:"g",   per:100, cal:51,  carb:13.0, protein:0.3,  fat:0.1},
+  {name:"감",            unit:"개",  per:1,   cal:110, carb:29.0, protein:0.8,  fat:0.3},
+  {name:"귤",            unit:"개",  per:1,   cal:44,  carb:11.0, protein:0.7,  fat:0.1},
+  {name:"자두",          unit:"개",  per:1,   cal:30,  carb:7.5,  protein:0.5,  fat:0.2},
+  {name:"복숭아",        unit:"개",  per:1,   cal:59,  carb:14.0, protein:1.4,  fat:0.4},
+  {name:"참외",          unit:"개",  per:1,   cal:88,  carb:21.0, protein:1.6,  fat:0.3},
+  {name:"키위",          unit:"개",  per:1,   cal:54,  carb:13.0, protein:1.0,  fat:0.4},
+  {name:"파인애플",      unit:"g",   per:100, cal:50,  carb:13.0, protein:0.5,  fat:0.1},
+  {name:"망고",          unit:"g",   per:100, cal:60,  carb:15.0, protein:0.8,  fat:0.4},
+  {name:"오이무침",      unit:"g",   per:100, cal:45,  carb:7.0,  protein:1.2,  fat:1.3},
+  {name:"콩나물무침",    unit:"g",   per:100, cal:60,  carb:4.5,  protein:4.5,  fat:3.0},
+  {name:"시금치나물",    unit:"g",   per:100, cal:65,  carb:4.0,  protein:3.5,  fat:4.0},
+  {name:"무생채",        unit:"g",   per:100, cal:45,  carb:7.5,  protein:1.0,  fat:1.2},
+  {name:"미역줄기볶음",  unit:"g",   per:100, cal:75,  carb:6.0,  protein:1.5,  fat:5.0},
+  {name:"멸치볶음",      unit:"g",   per:100, cal:230, carb:14.0, protein:24.0, fat:8.5},
+  {name:"진미채볶음",    unit:"g",   per:100, cal:280, carb:22.0, protein:28.0, fat:9.0},
+  {name:"어묵볶음",      unit:"g",   per:100, cal:150, carb:14.0, protein:8.0,  fat:6.5},
+  {name:"계란말이",      unit:"g",   per:100, cal:160, carb:2.5,  protein:11.0, fat:11.5},
+  {name:"계란찜",        unit:"g",   per:100, cal:95,  carb:2.0,  protein:8.0,  fat:6.0},
+  {name:"감자조림",      unit:"g",   per:100, cal:120, carb:20.0, protein:2.0,  fat:3.5},
+  {name:"두부조림",      unit:"g",   per:100, cal:130, carb:5.0,  protein:9.0,  fat:8.0},
+  {name:"장조림",        unit:"g",   per:100, cal:170, carb:6.0,  protein:22.0, fat:6.0},
+  {name:"깻잎지",        unit:"g",   per:100, cal:70,  carb:6.0,  protein:3.0,  fat:3.5},
+  {name:"오징어볶음",    unit:"인분",per:1,   cal:330, carb:25.0, protein:28.0, fat:12.0},
+  {name:"북어국",        unit:"그릇",per:1,   cal:110, carb:5.0,  protein:14.0, fat:3.5},
+  {name:"콩나물국",      unit:"그릇",per:1,   cal:60,  carb:5.0,  protein:4.0,  fat:2.0},
+  {name:"김치찌개백반",  unit:"인분",per:1,   cal:650, carb:80.0, protein:26.0, fat:22.0},
+  {name:"순대국",        unit:"그릇",per:1,   cal:500, carb:35.0, protein:30.0, fat:25.0},
+  {name:"육개장",        unit:"그릇",per:1,   cal:320, carb:16.0, protein:26.0, fat:17.0},
+  {name:"갈비탕",        unit:"그릇",per:1,   cal:480, carb:20.0, protein:38.0, fat:26.0},
+  {name:"쌀국수",        unit:"그릇",per:1,   cal:450, carb:70.0, protein:20.0, fat:8.0},
+  {name:"우동",          unit:"그릇",per:1,   cal:480, carb:85.0, protein:14.0, fat:6.0},
+  {name:"만두",          unit:"개",  per:1,   cal:45,  carb:5.5,  protein:2.0,  fat:1.8},
+  {name:"순대",          unit:"g",   per:100, cal:170, carb:24.0, protein:7.0,  fat:5.0},
+  {name:"튀김",          unit:"개",  per:1,   cal:110, carb:11.0, protein:2.5,  fat:6.5},
+  {name:"토스트",        unit:"개",  per:1,   cal:320, carb:36.0, protein:11.0, fat:14.0},
+  {name:"샌드위치",      unit:"개",  per:1,   cal:350, carb:38.0, protein:14.0, fat:15.0},
+  {name:"주먹밥",        unit:"개",  per:1,   cal:220, carb:40.0, protein:5.0,  fat:4.0},
+  {name:"떡국",          unit:"그릇",per:1,   cal:480, carb:82.0, protein:16.0, fat:8.0},
+  {name:"카레라이스",    unit:"인분",per:1,   cal:620, carb:95.0, protein:16.0, fat:18.0},
+  {name:"짜장밥",        unit:"인분",per:1,   cal:680, carb:100.0,protein:18.0, fat:22.0},
 ];
 
 // 목표별 탄단지 비율 (칼로리 %)
@@ -30181,13 +30325,31 @@ const ACC_COLOR = {"높음":"#5EEAD4","중간":"#ffd166","낮음":"#ff9f43"};
 // ════════════════════════════════════════════
 // 음식명 + 섭취량 텍스트 → 예상 영양성분
 // ════════════════════════════════════════════
-// 이 프로젝트에는 외부 음식 API도, AI 호출 경로도 없다(Firebase Spark 요금제 · Cloud Functions 미사용).
-// 따라서 계산은 위 FOOD_DB(로컬 표준 음식 데이터)와 회원이 직접 입력한 값만 사용하고,
-// 매칭된 결과는 전부 "예상값"으로 표시한 뒤 회원이 확인·수정한 값만 저장한다(자동 확정 저장 금지).
-// 사진 분석은 이번 범위가 아니지만, estimateFoodLines()가 돌려주는 항목 형태(estimated/source/needsCheck)를
-// 그대로 쓰면 나중에 다른 추정 소스(사진·AI)를 source 값만 바꿔 끼울 수 있다.
+// FOOD_SOURCE_NOTE — 음식 데이터 소스 현황과 공식 DB 연동 조건(2026-09-08 조사 결과)
+//
+// 지금 쓰는 소스는 위 FOOD_DB(로컬) + 회원 직접 입력 두 가지뿐이다. 공식 DB는 아직 붙이지 않았다.
+// 조사 결과(직접 호출해 확인):
+//   · 식품안전나라 OpenAPI(openapi.foodsafetykorea.go.kr)는 HTTPS를 지원하고
+//     Access-Control-Allow-Origin: * 를 내려준다 → 브라우저에서 직접 호출 자체는 가능하다.
+//   · 공공데이터포털(apis.data.go.kr)도 요청 Origin을 그대로 허용한다.
+//   · 그런데 두 곳 모두 "인증키"가 필수이고, 식품안전나라는 키가 URL 경로에 들어간다.
+//     클라이언트에서 직접 부르면 키가 번들에 그대로 노출된다(키는 1인 1개 발급·양도 금지).
+//   · 키를 감추려면 서버가 필요한데, 이 프로젝트는 Firebase Spark(Cloud Functions 미사용)이고
+//     vercel.json이 /(.*) 를 전부 index.html로 rewrite하고 있어 서버리스 함수 도입은 구조 변경에 해당한다.
+//   · 조리식품 레시피 DB(COOKRCP01)는 sample 키로 열리지만 "레시피"라 대표 영양값이 아니고
+//     100g 기준 정규화(INFO_WGT)가 비어 있어 그대로 쓸 수 없다.
+// → 결론: 지금은 공식 API를 붙이지 않는다. 대신 아래 searchFoodItems()를 소스 어댑터 자리로 두고,
+//   나중에 대표 명의 인증키가 준비되면 sourceKind: "official" 결과를 이 함수에 합치기만 하면 되게 해 둔다.
+//   (저장 데이터에는 이미 sourceKind로 local/manual/official을 구분해 두었다)
 const FOOD_AMOUNT_UNITS = ["g", "kg", "ml", "l", "cc", "그램", "리터"];
 const FOOD_QTY_WORDS = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "반": 0.5 };
+// 저장되는 출처 구분값. 기존 기록의 source 문자열("음식 DB"/"manual"/"직접 입력")은 그대로 두고,
+// 기계가 읽는 구분은 sourceKind로만 한다(과거 기록은 foodSourceKind()가 source에서 역산한다).
+const FOOD_SOURCE_LABEL = { official: "식약처", local: "TEO GYM DB", manual: "직접 입력" };
+function foodSourceKind(f = {}) {
+  if (f.sourceKind) return f.sourceKind;
+  return f.source === "음식 DB" ? "local" : "manual";
+}
 // 자주 쓰는 다른 이름 → FOOD_DB의 정식 이름. FOOD_DB 자체는 건드리지 않고 검색만 넓힌다.
 const FOOD_ALIASES = {
   "밥": "흰쌀밥", "쌀밥": "흰쌀밥", "백미밥": "흰쌀밥", "햇반": "공기밥",
@@ -30200,6 +30362,8 @@ const FOOD_ALIASES = {
   "삼겹": "삼겹살", "목살": "돼지목살", "등심": "소고기(등심)", "안심": "소고기(안심)",
   "참치": "참치캔(물)", "닭꼬치": "닭안심", "치킨": "치킨(후라이드)",
   "샐러드팩": "샐러드", "방토": "방울토마토", "브로컬리": "브로콜리",
+  "오이무침무침": "오이무침", "포도알": "포도", "머스캣": "샤인머스캣",
+  "계란후라이2": "계란", "달걀말이": "계란말이", "계란찜기": "계란찜",
 };
 function normalizeFoodName(v) { return String(v || "").toLowerCase().replace(/[\s()（）[\]{}\-_.,·・/]/g, ""); }
 function foodUnitGroup(unit) { return FOOD_AMOUNT_UNITS.includes(String(unit || "").toLowerCase()) ? "amount" : "count"; }
@@ -30226,70 +30390,84 @@ function parseFoodInputLine(raw) {
   const norm = normalizeFoodAmount(qty, rawUnit);
   return { raw: line, name, amount: norm.amount, unit: norm.unit, directKcal: null };
 }
-// FOOD_DB에서 음식 찾기 — 정확 일치 → 별칭 → 부분 일치(가장 짧은 이름 우선) 순서.
-function findFoodItem(name) {
+// 음식 후보 검색 — 정확 일치 → 별칭 → "DB 이름이 검색어를 포함"(닭가 → 닭가슴살) 순으로만 찾는다.
+//
+// 예전에는 반대 방향(검색어가 DB 이름을 포함)도 허용했는데, 그 규칙 때문에 "오이무침"이 "오이"로,
+// "계란찜"이 "계란"으로 조용히 바뀌어 전혀 다른 음식의 칼로리가 표시됐다(이름까지 바뀌어 회원이 알아채기 어려웠다).
+// 잘못된 값을 보여주느니 못 찾은 것으로 두고 후보를 제시하는 편이 안전하므로 역방향 매칭은 제거했다.
+// unitHint가 있으면("밥 한공기") 같은 단위를 쓰는 음식을 앞으로 올린다.
+function searchFoodItems(name, { unitHint = "", limit = 5 } = {}) {
   const key = normalizeFoodName(name);
-  if (!key) return null;
-  const exact = FOOD_DB.find(f => normalizeFoodName(f.name) === key);
-  if (exact) return exact;
+  if (!key) return [];
+  const scored = [];
+  const push = (item, score) => {
+    if (!item || scored.some(s => s.item.name === item.name)) return;
+    scored.push({ item, score });
+  };
+  FOOD_DB.forEach(f => { if (normalizeFoodName(f.name) === key) push(f, 0); });
   const aliasTarget = FOOD_ALIASES[key];
+  if (aliasTarget) FOOD_DB.forEach(f => { if (normalizeFoodName(f.name) === normalizeFoodName(aliasTarget)) push(f, 1); });
+  FOOD_DB.forEach(f => { if (normalizeFoodName(f.name).startsWith(key)) push(f, 2 + f.name.length / 100); });
+  FOOD_DB.forEach(f => { if (normalizeFoodName(f.name).includes(key)) push(f, 3 + f.name.length / 100); });
+  // 별칭이 가리키는 음식과 이름이 겹치는 항목도 후보로 넓혀 준다(예: "참치" → 참치캔(물)/참치캔(기름)).
   if (aliasTarget) {
-    const byAlias = FOOD_DB.find(f => normalizeFoodName(f.name) === normalizeFoodName(aliasTarget));
-    if (byAlias) return byAlias;
+    const aliasKey = normalizeFoodName(aliasTarget).replace(/[()]/g, "");
+    FOOD_DB.forEach(f => { if (normalizeFoodName(f.name).includes(aliasKey.slice(0, 3))) push(f, 4 + f.name.length / 100); });
   }
-  const partial = FOOD_DB
-    .filter(f => { const n = normalizeFoodName(f.name); return n.includes(key) || key.includes(n); })
-    .sort((a, b) => a.name.length - b.name.length);
-  return partial[0] || null;
+  // 이름이 정확히 일치한 후보는 항상 1순위다 — "계란 100g"에서 단위(g)만 보고
+  // 계란찜 같은 다른 음식이 앞으로 나오면 안 되기 때문에 단위 보너스로도 밀려나지 않게 고정한다.
+  // 정확 일치가 없을 때만 단위가 맞는 후보를 크게 우대해 "밥 한공기" → 공기밥이 흰쌀밥보다 앞서게 한다.
+  const u = String(unitHint || "").trim();
+  const rank = e => (e.score === 0 ? -100 : e.score - (u && e.item.unit === u ? 2.5 : 0));
+  return scored.sort((a, b) => rank(a) - rank(b)).slice(0, limit).map(e => e.item);
 }
-// 단위가 힌트가 되는 경우("밥 한공기" → 공기밥) 같은 단위를 쓰는 음식을 우선 찾는다.
-function findFoodItemByUnit(name, unit) {
-  const key = normalizeFoodName(name);
-  const u = String(unit || "").trim();
-  if (!key || !u) return null;
-  return FOOD_DB
-    .filter(f => f.unit === u && (normalizeFoodName(f.name).includes(key) || key.includes(normalizeFoodName(f.name))))
-    .sort((a, b) => a.name.length - b.name.length)[0] || null;
+// FOOD_DB 항목 + 섭취량 → 저장 후보 항목. 섭취량을 바꿔 다시 계산할 때도 이 함수만 쓴다.
+function buildFoodItemFromDb(item, { amount = null, unit = "", id = null, keepId = null } = {}) {
+  const sameGroup = !unit || foodUnitGroup(unit) === foodUnitGroup(item.unit);
+  const useAmount = amount != null && sameGroup ? Number(amount) : item.per;
+  const ratio = useAmount / item.per;
+  const r1 = v => Math.round(v * 10) / 10;
+  return {
+    id: keepId || id || newFoodItemId(),
+    name: item.name,
+    amount: String(useAmount), unit: item.unit,
+    cal: Math.round(item.cal * ratio), carb: r1(item.carb * ratio), protein: r1(item.protein * ratio), fat: r1(item.fat * ratio),
+    estimated: true, matched: true, source: "음식 DB", sourceKind: "local",
+    accuracy: detectAccuracy(item.unit),
+    // 입력 단위와 DB 단위가 달라 기본 1회 제공량으로 대체한 경우에만 섭취량 확인을 요구한다.
+    needsCheck: amount == null || !sameGroup,
+  };
 }
+function newFoodItemId() { return "f" + Date.now() + Math.random().toString(36).slice(2, 7); }
 // 한 줄 → 저장 후보 항목. 확정 저장이 아니라 회원이 확인·수정할 "예상값"을 만든다.
-// matched=false면 칼로리를 임의로 만들어내지 않고 0으로 두어 회원이 직접 입력하게 한다.
-function estimateFoodLine(raw) {
+// matched=false면 칼로리를 임의로 만들어내지 않고 0으로 두어 회원이 직접 입력하게 하고,
+// 비슷한 이름의 후보(candidates)를 함께 돌려줘 회원이 한 번 눌러 고를 수 있게 한다.
+function estimateFoodLine(raw, keepId = null) {
   const parsed = parseFoodInputLine(raw);
   if (!parsed) return null;
   const base = {
-    id: "f" + Date.now() + Math.random().toString(36).slice(2, 7),
+    id: keepId || newFoodItemId(),
     name: parsed.name, raw: parsed.raw,
     cal: 0, carb: 0, protein: 0, fat: 0,
-    estimated: true, matched: false, needsCheck: true, source: "manual", accuracy: "낮음",
+    estimated: true, matched: false, needsCheck: true,
+    source: "manual", sourceKind: "manual", accuracy: "낮음",
     amount: parsed.amount != null ? String(parsed.amount) : "", unit: parsed.unit || "",
+    candidates: [],
   };
   if (parsed.directKcal) {
-    return { ...base, cal: Math.round(parsed.directKcal), amount: "1", unit: "회", source: "직접 입력", needsCheck: false, accuracy: "낮음" };
+    return { ...base, cal: Math.round(parsed.directKcal), amount: "1", unit: "회",
+      source: "직접 입력", sourceKind: "manual", needsCheck: false };
   }
-  // 단위가 안 맞으면("밥 한공기"처럼) 같은 단위를 쓰는 음식을 먼저 찾아본다.
-  let item = findFoodItem(parsed.name);
-  if (parsed.unit && (!item || foodUnitGroup(parsed.unit) !== foodUnitGroup(item.unit))) {
-    item = findFoodItemByUnit(parsed.name, parsed.unit) || item;
-  }
-  if (!item) return base;
-  const sameGroup = !parsed.unit || foodUnitGroup(parsed.unit) === foodUnitGroup(item.unit);
-  const amount = parsed.amount != null && sameGroup ? parsed.amount : item.per;
-  const ratio = amount / item.per;
-  const r1 = v => Math.round(v * 10) / 10;
-  return {
-    ...base,
-    name: item.name, matched: true, source: "음식 DB",
-    amount: String(amount), unit: item.unit,
-    cal: Math.round(item.cal * ratio), carb: r1(item.carb * ratio), protein: r1(item.protein * ratio), fat: r1(item.fat * ratio),
-    accuracy: detectAccuracy(item.unit),
-    // 입력 단위와 DB 단위가 달라 기본 1회 제공량으로 대체한 경우에만 섭취량 확인을 요구한다.
-    needsCheck: parsed.amount == null || !sameGroup,
-  };
+  const hits = searchFoodItems(parsed.name, { unitHint: parsed.unit });
+  if (!hits.length) return base;
+  const built = buildFoodItemFromDb(hits[0], { amount: parsed.amount, unit: parsed.unit, keepId: base.id });
+  // 후보가 2개 이상이면 첫 결과를 확정하지 않고 회원이 바꿀 수 있게 함께 넘긴다.
+  return { ...built, raw: parsed.raw, candidates: hits.slice(0, 5), searchKey: parsed.name };
 }
 function estimateFoodLines(text) {
   return String(text || "")
     .split(/[\n,、]/).map(s => s.trim()).filter(Boolean)
-    .map(estimateFoodLine).filter(Boolean);
+    .map(s => estimateFoodLine(s)).filter(Boolean);
 }
 function sumFoodItems(items = []) {
   const r1 = v => Math.round(v * 10) / 10;

@@ -3,10 +3,11 @@
 //
 // App.jsx / db.js 원본을 그대로 슬라이스해 실행한다 — 계산 로직을 테스트용으로 복제하지 않는다.
 // 확인 범위:
-//   1) 기록 없는 회원 / 레거시 총칼로리만 있는 회원 / 식단+레거시가 섞인 회원이 모두 정상 표시되는지
-//   2) 텍스트 입력 → 예상 계산 → 회원이 수정 → 저장 흐름에서 "회원이 확인한 값"만 저장되는지
-//   3) 같은 날 여러 끼 기록 / 음식 수정 / 음식 삭제 후 하루 총 kcal이 맞게 합산되는지
-//   4) 회원앱 화면 합계(sumDayMeals)와 db.js 저장 합계(sumMealsForSave)가 어긋나지 않는지
+//   1) 기록 없는 회원 / 레거시 총칼로리만 있는 회원 / meals만 있는 과거 기록 / 둘이 섞인 회원
+//   2) CTA 하나로 계산 → 확인 → 저장이 강제되는지(계산 안 하고 저장 눌러도 저장되지 않음)
+//   3) 이름·양·단위 수정 시 재계산, 칼로리 직접 수정 시 manual override 보존
+//   4) 같은 날 여러 끼 / 음식 수정 / 음식 삭제 / 하루 총 kcal 합산
+//   5) 필수 음식(거봉·오이무침·현미밥·닭가슴살·계란·옥수수) 매칭과 오탐 방지
 process.env.NODE_ENV = process.env.NODE_ENV || 'development'; // babel-preset-react-app 요구사항
 const fs = require('fs');
 const path = require('path');
@@ -30,7 +31,7 @@ const sliceFood = slice(APP, 'const FOOD_DB = [', 'function getSupplFeedback', '
 const sliceUi = slice(APP, '// 회원앱 식단 기록\n// ═'.replace('\n', '\r\n'), 'function MemberHealth(p){', 'MemberDietSection');
 const sliceSave = slice(DB_SRC, 'function sumMealsForSave(meals = {})', 'export async function saveMemberDietMeal', 'sumMealsForSave');
 
-const source = `
+const out = babel.transformSync(`
 ${sliceNum}
 ${sliceKcal}
 ${sliceFood}
@@ -42,9 +43,10 @@ window.__sumDayMeals = sumDayMeals;
 window.__getKcalLogs = getKcalLogs;
 window.__sumMealsForSave = sumMealsForSave;
 window.__estimateFoodLines = estimateFoodLines;
-`;
-
-const out = babel.transformSync(source, {
+window.__searchFoodItems = searchFoodItems;
+window.__foodSourceKind = foodSourceKind;
+window.__FOOD_DB = FOOD_DB;
+`, {
   presets: [[require.resolve('babel-preset-react-app'), { runtime: 'classic' }]],
   babelrc: false, configFile: false, filename: 'diet.jsx',
 }).code;
@@ -81,26 +83,29 @@ const sumDayMeals = dom.window.__sumDayMeals;
 const getKcalLogs = dom.window.__getKcalLogs;
 const sumMealsForSave = dom.window.__sumMealsForSave;
 const estimateFoodLines = dom.window.__estimateFoodLines;
+const foodSourceKind = dom.window.__foodSourceKind;
+const FOOD_DB = dom.window.__FOOD_DB;
 
 const results = [];
 const check = (name, ok, extra) => { results.push([name, ok]); if (!ok && extra !== undefined) console.log('   ↳', String(extra).slice(0, 500)); };
 
+// window.confirm은 "칼로리 0 항목 그대로 저장" 확인용 — 기본은 승인으로 둔다.
+dom.window.confirm = () => true;
+dom.window.alert = () => {};
+
 const reactRoot = ReactDOM.createRoot(document.getElementById('root'));
-function names_of(container, sel){ return [...container.querySelectorAll(sel)].map(i=>i.value); }
-let renderSeq = 0;
+function valuesOf(container, sel) { return [...container.querySelectorAll(sel)].map(i => i.value); }
 async function render(el) {
   await act(async () => { reactRoot.render(el); });
   return document.getElementById('root');
 }
 function setInput(el, value) {
-  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype === el.constructor.prototype
-    ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype, 'value').set;
-  setter.call(el, value);
+  const proto = el.tagName === 'TEXTAREA' ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
   el.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 }
-function findButton(container, text) {
-  return [...container.querySelectorAll('button')].find(b => (b.textContent || '').includes(text));
-}
+const cta = el => el.querySelector('.diet-cta');
+const ctaText = el => (cta(el).textContent || '').trim();
 
 function makeProps(nutrition, saved) {
   return {
@@ -113,81 +118,156 @@ function makeProps(nutrition, saved) {
     saveDietMeal: async (date, mealType, items) => { saved.push({ date, mealType, items }); },
   };
 }
+let sheetSeq = 0;
+async function openSheet(nutrition, saved, mealType = '아침') {
+  sheetSeq += 1;
+  return render(React.createElement(MemberDietSheet, {
+    key: 'sheet' + sheetSeq, p: makeProps(nutrition, saved), date: TODAY, mealType, onClose: () => {},
+  }));
+}
 
 (async () => {
-  // ── 1. 기록이 없는 회원 ─────────────────────────────────────────
+  // ══ A. 화면 표시 — 기록 상태별 ═════════════════════════════════
   let saved = [];
-  let el = await render(React.createElement(MemberDietSection, { p: makeProps({ logs: [], dates: {} }, saved) }));
+  let el = await render(React.createElement(MemberDietSection, { key: 'a1', p: makeProps({ logs: [], dates: {} }, saved) }));
   let text = el.textContent;
   check('기록 없는 회원: 오늘 섭취 0 / 권장 2,607 kcal을 보여준다',
     text.includes('0') && text.includes('/ 2,607 kcal'), text.slice(0, 300));
   check('기록 없는 회원: 아침·점심·저녁·간식 4개 끼니가 모두 "기록하기"로 나온다',
     ['아침', '점심', '저녁', '간식'].every(m => text.includes(m)) && (text.match(/기록하기/g) || []).length === 4, text.slice(0, 400));
-  check('기록 없는 회원: 예상값 안내 문구가 항상 보인다', text.includes('예상값'), text.slice(0, 400));
 
-  // ── 2. 레거시 총칼로리 기록만 있는 회원 ────────────────────────
   el = await render(React.createElement(MemberDietSection, { key: 'a2', p: makeProps({ logs: [], dates: { [TODAY]: { totalKcal: 1900, memberInputKcal: 1900 } } }, saved) }));
-  text = el.textContent;
-  check('레거시 회원: 직접 입력한 하루 총칼로리(1,900)가 그대로 표시된다', text.includes('1,900'), text.slice(0, 300));
+  check('레거시 총칼로리 기록만 있는 회원: 1,900kcal이 그대로 표시된다', el.textContent.includes('1,900'), el.textContent.slice(0, 300));
 
-  // ── 3. 식단 기록 + 레거시 총칼로리가 함께 있는 회원 ────────────
+  el = await render(React.createElement(MemberDietSection, { key: 'a3', p: makeProps({ logs: [], dates: { [TODAY]: { meals: { '점심': [{ id: 'x', name: '비빔밥', cal: 550 }] } } } }, saved) }));
+  check('meals만 있는 과거 기록: totalKcal이 없어도 550kcal로 집계된다', el.textContent.includes('550'), el.textContent.slice(0, 400));
+
   const mixed = { logs: [], dates: { [TODAY]: { totalKcal: 2000, meals: { '점심': [{ id: 'a', name: '비빔밥', cal: 550, carb: 85, protein: 18, fat: 12 }] } } } };
-  el = await render(React.createElement(MemberDietSection, { key: 'a3', p: makeProps(mixed, saved) }));
-  text = el.textContent;
+  el = await render(React.createElement(MemberDietSection, { key: 'a4', p: makeProps(mixed, saved) }));
   check('혼합 회원: 총칼로리(2,000)를 우선 표시하고 식단 합계(550)를 함께 안내한다',
-    text.includes('2,000') && text.includes('식단 기록 합계는 550kcal'), text.slice(0, 600));
-  check('혼합 회원: 끼니 카드에 저장된 음식명과 합계가 보인다', text.includes('비빔밥') && text.includes('550 kcal'), text.slice(0, 600));
+    el.textContent.includes('2,000') && el.textContent.includes('식단 기록 합계는 550kcal'), el.textContent.slice(0, 600));
 
-  // ── 4. 예상 계산 → 수정 → 저장 흐름 ─────────────────────────────
+  // ══ B. 계산하지 않고 저장을 눌렀을 때(이번 개선의 핵심) ═════════
   saved = [];
-  el = await render(React.createElement(MemberDietSheet, {
-    key: 'sheet-new', p: makeProps({ logs: [], dates: {} }, saved), date: TODAY, mealType: '아침', onClose: () => {},
-  }));
-  const area = el.querySelector('textarea');
-  await act(async () => { setInput(area, '현미밥 200g\n닭가슴살 100g\n계란 2개'); });
-  await act(async () => { findButton(el, '예상 칼로리 계산하기').click(); });
-  text = el.textContent;
-  const foodNames = names_of(el, '.diet-item-name');
-  check('예상 계산: 입력한 3개 음식이 모두 항목으로 나온다',
-    foodNames.join('|') === '현미밥|닭가슴살|계란', JSON.stringify(foodNames));
-  check('예상 계산: 계산 결과는 확정이 아니라 "예상값"으로 표시된다',
-    (text.match(/예상값/g) || []).length >= 3, text.slice(0, 600));
-  check('예상 계산: 현미밥 200g + 닭가슴살 100g + 계란 2개 = 481kcal 합계가 표시된다',
-    text.includes('481 kcal'), text.slice(0, 800));
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  check('빈 상태에서는 CTA가 비활성화된다', cta(el).disabled === true, ctaText(el));
+  await act(async () => { setInput(el.querySelector('textarea'), '현미밥 200g\n닭가슴살 100g\n계란 2개'); });
+  check('음식을 입력하면 CTA가 "칼로리 확인하기"로 바뀐다(저장 문구가 아니다)',
+    ctaText(el) === '칼로리 확인하기', ctaText(el));
+  await act(async () => { cta(el).click(); });
+  check('계산하지 않고 저장을 눌러도 저장되지 않는다 — 대신 자동으로 계산이 실행된다',
+    saved.length === 0 && valuesOf(el, '.diet-item-name').join('|') === '현미밥|닭가슴살|계란',
+    JSON.stringify({ saved: saved.length, names: valuesOf(el, '.diet-item-name') }));
+  check('자동 계산 결과가 화면에 표시된다(481kcal 합계)', el.textContent.includes('481 kcal'), el.textContent.slice(0, 600));
+  check('자동 계산 직후 자동 저장하지 않는다 — CTA만 "확인하고 저장"으로 바뀌고 저장은 아직 0건',
+    ctaText(el) === '확인하고 저장' && saved.length === 0, ctaText(el) + ' / saved=' + saved.length);
+  check('계산 직후 확인 안내 문구를 보여준다', el.textContent.includes('계산했어요'), el.textContent.slice(0, 800));
+  await act(async () => { cta(el).click(); });
+  check('한 번 더 눌러 최종 확인했을 때 비로소 저장된다',
+    saved.length === 1 && saved[0].items.length === 3 && saved[0].mealType === '아침', JSON.stringify(saved));
+  check('저장 payload에 화면 전용 필드(pending/stale/manual/candidates)가 없다',
+    saved[0].items.every(f => f.pending === undefined && f.stale === undefined && f.manual === undefined && f.candidates === undefined),
+    JSON.stringify(saved[0].items[0]));
+  check('저장 payload에 출처 구분(sourceKind=local)이 남는다',
+    saved[0].items.every(f => f.sourceKind === 'local'), JSON.stringify(saved[0].items.map(f => f.sourceKind)));
 
-  // 회원이 계란 kcal을 150 → 200으로 직접 수정
-  const numInputs = [...el.querySelectorAll('.diet-num input')];
-  await act(async () => { setInput(numInputs[8], '200'); }); // 3번째 항목(계란)의 kcal 칸
-  await act(async () => { findButton(el, '확인하고 저장').click(); });
-  check('저장: 회원이 확인·수정한 값만 저장된다(계란 150 → 200 반영)',
-    saved.length === 1 && saved[0].mealType === '아침' && saved[0].date === TODAY &&
-    saved[0].items.length === 3 && Number(saved[0].items[2].cal) === 200,
+  // 입력창에 글을 남긴 채 저장을 눌러도 그 음식이 사라지지 않는다(예전 버그 재발 방지)
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '계란 2개'); });
+  await act(async () => { cta(el).click(); });
+  await act(async () => { setInput(el.querySelector('textarea'), '현미밥 200g'); });
+  check('계산 후 새 음식을 더 적으면 CTA가 다시 "칼로리 확인하기"로 돌아간다', ctaText(el) === '칼로리 확인하기', ctaText(el));
+  await act(async () => { cta(el).click(); });
+  check('입력창에 남은 음식이 버려지지 않고 항목으로 추가된다',
+    valuesOf(el, '.diet-item-name').join('|') === '계란|현미밥' && saved.length === 0,
+    JSON.stringify(valuesOf(el, '.diet-item-name')));
+
+  // ══ C. 수정 후 재계산 / manual override ═════════════════════════
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '계란 2개'); });
+  await act(async () => { cta(el).click(); });
+  check('계란 2개 = 150kcal로 계산된다', valuesOf(el, '.diet-num input')[0] === '150', valuesOf(el, '.diet-num input'));
+  await act(async () => { setInput(el.querySelector('.diet-item-amount'), '3'); });
+  check('양을 수정하면 재계산 필요 상태가 되고 CTA가 다시 계산으로 바뀐다',
+    ctaText(el) === '칼로리 확인하기' && el.textContent.includes('내용을 수정했어요'), ctaText(el));
+  await act(async () => { cta(el).click(); });
+  check('양 수정 후 재계산: 계란 3개 = 225kcal (낡은 150이 저장되지 않는다)',
+    valuesOf(el, '.diet-num input')[0] === '225', valuesOf(el, '.diet-num input'));
+  await act(async () => { setInput(el.querySelector('.diet-item-name'), '현미밥'); });
+  check('음식명을 수정해도 재계산 필요 상태가 된다', ctaText(el) === '칼로리 확인하기', ctaText(el));
+  await act(async () => { cta(el).click(); });
+  // 계란(개) → 현미밥(g)으로 이름만 바꾸면 남아 있던 단위 '개'가 현미밥에 맞지 않는다.
+  // 이때는 값을 억지로 환산하지 않고 기본 1회 제공량(100g)으로 계산한 뒤 섭취량 확인을 요청해야 한다.
+  check('음식명 수정 후 재계산: 단위가 맞지 않으면 기본 제공량(100g)으로 계산하고 확인을 요청한다',
+    valuesOf(el, '.diet-item-name')[0] === '현미밥' && valuesOf(el, '.diet-item-amount')[0] === '100' &&
+    valuesOf(el, '.diet-item-unit')[0] === 'g' && el.textContent.includes('섭취량을 확인해 주세요'),
+    JSON.stringify({ n: valuesOf(el, '.diet-item-name'), a: valuesOf(el, '.diet-item-amount'), u: valuesOf(el, '.diet-item-unit') }));
+
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '계란 2개'); });
+  await act(async () => { cta(el).click(); });
+  await act(async () => { setInput(el.querySelectorAll('.diet-num input')[0], '500'); });
+  check('칼로리를 직접 수정하면 출처 배지가 "직접 입력"으로 바뀐다', el.textContent.includes('직접 입력'), el.textContent.slice(0, 700));
+  check('직접 수정한 항목은 재계산 대상이 되지 않는다(CTA가 바로 저장)', ctaText(el) === '확인하고 저장', ctaText(el));
+  await act(async () => { setInput(el.querySelector('.diet-item-amount'), '5'); });
+  check('직접 입력 항목은 양을 바꿔도 재계산 단계 없이 바로 저장 상태를 유지한다',
+    ctaText(el) === '확인하고 저장' && valuesOf(el, '.diet-num input')[0] === '500',
+    ctaText(el) + ' / ' + valuesOf(el, '.diet-num input'));
+  await act(async () => { cta(el).click(); });
+  check('직접 입력값은 양을 바꿔도 자동 계산이 덮어쓰지 않는다(500 유지)',
+    valuesOf(el, '.diet-num input')[0] === '500', valuesOf(el, '.diet-num input'));
+  check('직접 입력 항목은 sourceKind=manual로 저장된다',
+    saved.length === 1 && saved[0].items[0].sourceKind === 'manual' && Number(saved[0].items[0].cal) === 500,
+    JSON.stringify({ count: saved.length, items: saved[0] && saved[0].items }));
+
+  // ══ D. DB에 없는 음식 / 직접 입력 저장 ══════════════════════════
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '엄마표 닭볶음탕'); });
+  await act(async () => { cta(el).click(); });
+  check('DB에 없는 음식: 칼로리를 지어내지 않고 0으로 두고 직접 입력을 안내한다',
+    valuesOf(el, '.diet-num input')[0] === '0' && el.textContent.includes('등록된 영양정보를 찾지 못했습니다'),
+    el.textContent.slice(0, 700));
+  await act(async () => { setInput(el.querySelectorAll('.diet-num input')[0], '650'); });
+  await act(async () => { cta(el).click(); });
+  check('직접 입력한 음식이 manual로 저장된다',
+    saved.length === 1 && saved[0].items[0].name === '엄마표 닭볶음탕' &&
+    Number(saved[0].items[0].cal) === 650 && saved[0].items[0].sourceKind === 'manual',
     JSON.stringify(saved[0] && saved[0].items));
-  check('저장: 저장 payload에는 화면 전용 필드(pending/raw)가 포함되지 않는다',
-    saved.length === 1 && saved[0].items.every(f => f.pending === undefined && f.raw === undefined),
-    JSON.stringify(saved[0] && saved[0].items[0]));
-  check('저장: 추정값이라는 사실(estimated/source)이 기록에 남는다',
-    saved.length === 1 && saved[0].items.every(f => f.estimated === true) && saved[0].items[0].source === '음식 DB',
-    JSON.stringify(saved[0] && saved[0].items[0]));
 
-  // ── 5. 음식 삭제 ────────────────────────────────────────────────
+  // ══ E. 검색 결과가 여러 개일 때 후보 선택 ═══════════════════════
   saved = [];
-  el = await render(React.createElement(MemberDietSheet, {
-    key: 'sheet-saved', p: makeProps({ logs: [], dates: { [TODAY]: { meals: { '점심': [
-      { id: 'x1', name: '비빔밥', cal: 550, carb: 85, protein: 18, fat: 12 },
-      { id: 'x2', name: '된장찌개', cal: 150, carb: 10, protein: 12, fat: 5 },
-    ] } } } }, saved), date: TODAY, mealType: '점심', onClose: () => {},
-  }));
-  check('기존 저장 항목은 "저장됨"으로 열리고 그대로 수정할 수 있다',
-    el.textContent.includes('저장됨') && names_of(el, '.diet-item-name').join('|') === '비빔밥|된장찌개',
-    JSON.stringify(names_of(el, '.diet-item-name')));
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '계란 2개'); });
+  await act(async () => { cta(el).click(); });
+  const cands = [...el.querySelectorAll('.diet-cands button')].map(b => b.textContent);
+  check('검색 결과가 여러 개면 첫 결과를 확정하지 않고 다른 후보를 함께 보여준다',
+    cands.length > 0 && cands.includes('계란흰자'), JSON.stringify(cands));
+  const whiteBtn = [...el.querySelectorAll('.diet-cands button')].find(b => b.textContent === '계란흰자');
+  await act(async () => { whiteBtn.click(); });
+  check('후보를 누르면 그 음식으로 다시 계산된다(계란흰자 2개 = 34kcal)',
+    valuesOf(el, '.diet-item-name')[0] === '계란흰자' && valuesOf(el, '.diet-num input')[0] === '34',
+    JSON.stringify({ n: valuesOf(el, '.diet-item-name'), v: valuesOf(el, '.diet-num input') }));
+
+  // ══ F. 기존 저장 항목 수정 / 삭제 ═══════════════════════════════
+  saved = [];
+  el = await openSheet({ logs: [], dates: { [TODAY]: { meals: { '점심': [
+    { id: 'x1', name: '비빔밥', cal: 550, carb: 85, protein: 18, fat: 12, source: '음식 DB' },
+    { id: 'x2', name: '된장찌개', cal: 150, carb: 10, protein: 12, fat: 5, source: '음식 DB' },
+  ] } } } }, saved, '점심');
+  check('기존 저장 항목이 그대로 열리고 출처가 TEO GYM DB로 표시된다',
+    valuesOf(el, '.diet-item-name').join('|') === '비빔밥|된장찌개' && el.textContent.includes('TEO GYM DB'),
+    el.textContent.slice(0, 500));
   await act(async () => { el.querySelectorAll('.diet-item-del')[1].click(); });
-  await act(async () => { findButton(el, '확인하고 저장').click(); });
+  await act(async () => { cta(el).click(); });
   check('음식 삭제: 삭제한 항목을 뺀 나머지만 저장된다',
     saved.length === 1 && saved[0].items.length === 1 && saved[0].items[0].name === '비빔밥',
     JSON.stringify(saved[0] && saved[0].items));
 
-  // ── 6. 하루 총 kcal 합산 · 저장 합계와 화면 합계 일치 ──────────
+  // ══ G. 집계 · 관리자 분석/그래프 반영 ═══════════════════════════
   const dayMeals = { meals: {
     '아침': [{ cal: 300, carb: 40, protein: 20, fat: 5 }],
     '점심': [{ cal: 700, carb: 90, protein: 35, fat: 20 }],
@@ -199,17 +279,46 @@ function makeProps(nutrition, saved) {
   check('같은 날 여러 끼(4끼) 합산: 하루 총 1,820kcal', uiTotal.kcal === 1820, JSON.stringify(uiTotal));
   check('화면 합계와 db.js 저장 합계가 완전히 일치한다(집계 기준 이원화 방지)',
     uiTotal.kcal === dbTotal.kcal && uiTotal.protein === dbTotal.protein &&
-    uiTotal.carb === dbTotal.carb && uiTotal.fat === dbTotal.fat,
-    JSON.stringify({ uiTotal, dbTotal }));
-  check('관리자 식단 분석 자동 반영: totalKcal이 없어도 meals 합계가 날짜별 칼로리로 잡힌다',
+    uiTotal.carb === dbTotal.carb && uiTotal.fat === dbTotal.fat, JSON.stringify({ uiTotal, dbTotal }));
+  check('관리자 식단 분석 / 회원앱 칼로리 그래프 반영: totalKcal이 없어도 meals 합계가 날짜별 칼로리로 잡힌다',
     getKcalLogs({ dates: { [TODAY]: dayMeals } })[0].kcal === 1820,
     JSON.stringify(getKcalLogs({ dates: { [TODAY]: dayMeals } })));
+  check('레거시 총칼로리 기록의 우선순위는 그대로 유지된다',
+    getKcalLogs({ dates: { [TODAY]: { totalKcal: 2000, meals: { '아침': [{ cal: 300 }] } } } })[0].kcal === 2000);
 
-  // ── 7. 매칭 실패 항목은 칼로리를 지어내지 않는다 ─────────────────
-  const rows = estimateFoodLines('알수없는신메뉴 1인분');
-  check('매칭 실패: 칼로리를 임의로 만들지 않고 0으로 두어 회원이 직접 입력하게 한다',
-    rows.length === 1 && rows[0].matched === false && rows[0].cal === 0 && rows[0].needsCheck === true,
-    JSON.stringify(rows));
+  // ══ H. 출처 구분(레거시 역산 포함) ══════════════════════════════
+  check('출처 구분: 과거 기록은 source 문자열에서 sourceKind를 역산한다(레거시 호환)',
+    foodSourceKind({ source: '음식 DB' }) === 'local' &&
+    foodSourceKind({ source: '직접 입력' }) === 'manual' &&
+    foodSourceKind({ sourceKind: 'official' }) === 'official');
+
+  // ══ I. 필수 음식 매칭 / 오탐 방지 ═══════════════════════════════
+  const expect = [
+    ['거봉 100g', '거봉', '100', 'g', 69],
+    ['거봉 150g', '거봉', '150', 'g', 104],
+    ['오이무침 100g', '오이무침', '100', 'g', 45],
+    ['현미밥 200g', '현미밥', '200', 'g', 222],
+    ['닭가슴살 100g', '닭가슴살', '100', 'g', 109],
+    ['계란 2개', '계란', '2', '개', 150],
+    ['옥수수 0.5개', '옥수수', '0.5', '개', 65],
+  ];
+  expect.forEach(([q, name, amount, unit, cal]) => {
+    const r = estimateFoodLines(q)[0];
+    check(`필수 음식 매칭: ${q} → ${name} ${amount}${unit} ${cal}kcal`,
+      !!r && r.name === name && r.amount === amount && r.unit === unit && r.cal === cal && r.sourceKind === 'local',
+      JSON.stringify(r && { n: r.name, a: r.amount, u: r.unit, c: r.cal }));
+  });
+  check('오탐 방지: "오이무침"이 "오이"로 조용히 바뀌지 않는다',
+    estimateFoodLines('오이무침 100g')[0].name === '오이무침');
+  check('오탐 방지: 단위가 힌트일 때만 다른 음식으로 넘어간다("밥 한공기" → 공기밥 300kcal)',
+    (() => { const r = estimateFoodLines('밥 한공기')[0]; return r.name === '공기밥' && r.cal === 300; })(),
+    JSON.stringify(estimateFoodLines('밥 한공기')[0]));
+  check('오탐 방지: 이름이 정확히 일치하면 단위가 달라도 그 음식을 유지한다("계란 100g" → 계란, 섭취량 확인 요청)',
+    (() => { const r = estimateFoodLines('계란 100g')[0]; return r.name === '계란' && r.needsCheck === true; })(),
+    JSON.stringify(estimateFoodLines('계란 100g')[0]));
+  check('음식 DB는 이름이 중복되지 않는다', new Set(FOOD_DB.map(f => f.name)).size === FOOD_DB.length);
+  check('음식 DB의 모든 항목이 계산 가능한 기준량(per > 0)을 가진다',
+    FOOD_DB.every(f => Number(f.per) > 0 && Number.isFinite(Number(f.cal))));
 
   const failed = results.filter(([, ok]) => !ok);
   results.forEach(([n, ok]) => console.log(`${ok ? 'PASS' : 'FAIL'} 회원앱 식단 기록: ${n}`));

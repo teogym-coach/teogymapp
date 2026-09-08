@@ -18,7 +18,7 @@ import {
   getMembers, addMember, updateMember, deleteMember,
   getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession, setSessionJournalDeferred,
   getBodyCheck, saveBodyCheck,
-  getNutrition, saveNutrition,
+  getNutrition, saveNutrition, saveMemberDietMeal,
   getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
   migrateAddTrainerUid, getPublishedSessions, toMemberVisibleSession, getMemberAppProfile, getMemberPrivate, saveMemberCheckin, getMemberCheckins, addMemberMessage, getMemberMessages,
   getMemberOnboarding, getMemberAcquisitionOnboardingMap, saveMemberOnboarding, resetMemberOnboarding, syncOnboardingToMemberProfile, touchMemberAppLastLogin, recordGoalChange, saveSessionSoreness, saveSessionMemberFeedback, saveMemberHealthInputs, saveMemberProfileFields, prepareMemberAppEmailRelink, buildMemberIdentityDiagnostics, getRoutineRecommendations, saveRoutineRecommendation, deleteRoutineRecommendation, getDailyConditioning, saveDailyConditioning, deleteDailyConditioning, deleteMemberHealthRecord, getNotices, saveNotice, deleteNotice, getMemberNotices, markNoticeRead, republishNotice, getNoticeReads,
@@ -129,7 +129,12 @@ function getProfileAge(profile={},onboarding={}){const profileBirth=parseBirthYe
 function getCalorieProfileBasis(profile={},onboarding={},body=null){const weight=toPositiveNumber(onboarding.currentWeightKg)||toPositiveNumber(onboarding.currentWeight)||toPositiveNumber(onboarding.startingWeightKg)||getLatestBodyWeight(body)?.weight||toPositiveNumber(profile.currentWeight)||toPositiveNumber(profile.weight)||70; const height=toPositiveNumber(onboarding.heightCm)||toPositiveNumber(onboarding.height)||toPositiveNumber(profile.height)||170; const age=getProfileAge(profile,onboarding); const gender=onboarding.gender||profile.gender||"남성"; return {weight,height,age,gender};}
 function initialBmrCalories(profile={},onboarding={},body=null){const {weight,height,age,gender}=getCalorieProfileBasis(profile,onboarding,body); return Math.round(10*weight+6.25*height-5*age+(gender==="여성"?-161:5));}
 function initialMaintenanceCalories(profile={},onboarding={},body=null,checkins=[]){const bmr=initialBmrCalories(profile,onboarding,body); const explicitAct=onboarding.activityLevel&&ACTIVITY_MULT?.[onboarding.activityLevel]; const factor=explicitAct||activityFactorFromProfile(onboarding,checkins); return Math.round(bmr*factor);}
-function getKcalLogs(nutrition={}){const byDate=new Map(); (nutrition?.logs||[]).forEach(l=>{const kcal=toPositiveNumber(l.kcal||l.totalKcal||l.memberInputKcal||l.cal); if(l.date&&kcal)byDate.set(l.date,{date:l.date,kcal,source:l.source||l.sourceType||"log"});}); Object.entries(nutrition?.dates||{}).forEach(([date,d])=>{const kcal=toPositiveNumber(d.totalKcal||d.memberInputKcal||d.kcal||d.cal); if(kcal)byDate.set(date,{date,kcal,source:d.source||"date"});}); return [...byDate.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));}
+function getKcalLogs(nutrition={}){const byDate=new Map(); (nutrition?.logs||[]).forEach(l=>{const kcal=toPositiveNumber(l.kcal||l.totalKcal||l.memberInputKcal||l.cal); if(l.date&&kcal)byDate.set(l.date,{date:l.date,kcal,source:l.source||l.sourceType||"log"});}); Object.entries(nutrition?.dates||{}).forEach(([date,d])=>{const explicit=toPositiveNumber(d.totalKcal||d.memberInputKcal||d.kcal||d.cal); const kcal=explicit||toPositiveNumber(sumDayMeals(d).kcal); if(kcal)byDate.set(date,{date,kcal,source:d.source||(explicit?"date":"meals")});}); return [...byDate.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));}
+// 하루치 식단(meals) 합계 — 관리자 "음식" 탭과 회원앱 "식단 기록"이 같은 nutrition/{YYYY-MM-DD}.meals에 저장하므로 합산은 여기 한 곳에서만 한다.
+// getKcalLogs가 이 값을 총칼로리 필드(totalKcal 등)가 없을 때의 대체값으로 쓴다 — 기존에 음식만 기록돼 분석에서 빠지던 날짜가 그대로 살아난다.
+function sumDayMeals(dayData={}){const meals=dayData?.meals||{}; let kcal=0,carb=0,protein=0,fat=0,count=0; Object.values(meals).forEach(list=>{(Array.isArray(list)?list:[]).forEach(f=>{const c=Number(f?.cal); if(Number.isFinite(c))kcal+=c; const cb=Number(f?.carb); if(Number.isFinite(cb))carb+=cb; const pr=Number(f?.protein??f?.prot); if(Number.isFinite(pr))protein+=pr; const ft=Number(f?.fat); if(Number.isFinite(ft))fat+=ft; count+=1;});}); const r1=v=>Math.round(v*10)/10; return {kcal:Math.round(kcal),carb:r1(carb),protein:r1(protein),fat:r1(fat),count};}
+// 날짜별 단백질 — 식단 기록(meals 합계 또는 저장된 dietProtein)과 기존 빠른 기록(logs[].prot)을 같은 규칙으로 모은다.
+function getProteinLogs(nutrition={}){const byDate=new Map(); (nutrition?.logs||[]).forEach(l=>{const p=toPositiveNumber(l.prot||l.protein); if(l.date&&p)byDate.set(l.date,{date:l.date,protein:p});}); Object.entries(nutrition?.dates||{}).forEach(([date,d])=>{const p=toPositiveNumber(d.dietProtein)||toPositiveNumber(sumDayMeals(d).protein); if(p)byDate.set(date,{date,protein:p});}); return [...byDate.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));}
 function getRecentKcalLogsByDays(nutrition={},days=7){const since=new Date(Date.now()-(Math.max(1,days)-1)*86400000).toISOString().slice(0,10); return getKcalLogs(nutrition).filter(x=>String(x.date)>=since);}
 function averageKcalLogs(rows=[]){const valid=rows.filter(r=>r.kcal>0); return valid.length?Math.round(valid.reduce((a,b)=>a+b.kcal,0)/valid.length):null;}
 function estimateMaintenance(profile={},onboarding={},body=null,nutrition=null,checkins=[],sessions=[]){const bmr=initialBmrCalories(profile,onboarding,body); const formula=initialMaintenanceCalories(profile,onboarding,body,checkins); const kcalLogs=getKcalLogs(nutrition); const weights=getBodyWeightRecords(body); const today=new Date(); const windows=[14,28,56]; const estimates=[]; windows.forEach(days=>{const since=new Date(today.getTime()-days*86400000).toISOString().slice(0,10); const kcals=kcalLogs.filter(x=>x.date>=since); const ws=weights.filter(x=>x.date>=since); if(kcals.length>=4&&ws.length>=2){const avg=kcals.reduce((a,b)=>a+b.kcal,0)/kcals.length; const first=ws[0],last=ws.at(-1); const span=Math.max(1,(new Date(last.date)-new Date(first.date))/86400000); const weekly=(last.weight-first.weight)/span*7; const maintenance=avg-(weekly*7700/7); estimates.push({days,maintenance,avg,weekly,quality:Math.min(1,kcals.length/days)*0.65+Math.min(1,ws.length/Math.max(2,days/7))*0.35});}}); const weighted=estimates.reduce((a,e)=>a+e.maintenance*e.quality*(e.days===28?1.15:e.days===56?0.9:1),0); const wsum=estimates.reduce((a,e)=>a+e.quality*(e.days===28?1.15:e.days===56?0.9:1),0); const learned=wsum?Math.round(weighted/wsum):null; const maintenance=learned||formula; const confidence=Math.round(Math.min(96,Math.max(42,(learned?58:35)+Math.min(30,kcalLogs.length*2)+Math.min(18,weights.length*3)+Math.min(8,sessions.length)))); const diet=Math.max(1200,Math.round(maintenance-500)); const bulk=Math.round(maintenance+300); const recent7=getRecentKcalLogsByDays(nutrition,7); const avg7=averageKcalLogs(recent7); const recent30=getRecentKcalLogsByDays(nutrition,30); const avg30=averageKcalLogs(recent30); const lastEstimate=estimates.find(e=>e.days===28)||estimates[0]; return {bmr,formula,maintenance,diet,maintain:maintenance,bulk,confidence,learned:!!learned,period:learned?`실제 데이터 보정값 · 최근 ${lastEstimate?.days||28}일`:"공식 기반 초기값",basis:learned?"실제 데이터 보정값":"공식 기반 초기값",avg7,avg28:avg30,avg30,weeklyChange:lastEstimate?.weekly??null,avgIntake:lastEstimate?.avg?Math.round(lastEstimate.avg):avg30};}
@@ -2221,7 +2226,7 @@ function isMemberDebugMode(){
 const APP_USAGE_MIN_INTERVAL_MS=10*60*1000;
 const APP_USAGE_LAST_WRITE_KEY="teogym_appUsage_lastWriteAt";
 function MemberApp({ onLogout }) {
-  const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [noticeCenterAutoOpen,setNoticeCenterAutoOpen]=useState(false); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [conditionSaving,setConditionSaving]=useState(false); const [painSaving,setPainSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
+  const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [noticeCenterAutoOpen,setNoticeCenterAutoOpen]=useState(false); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [dietSaving,setDietSaving]=useState(false); const [conditionSaving,setConditionSaving]=useState(false); const [painSaving,setPainSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
   // ── 개인운동 기록 ──
   // personalWorkouts: 최근 완료+진행중 기록(limit 30, 최신 우선) / personalInProgress: 진행 중 기록만 별도 조회해 오래된 기록도 놓치지 않는다.
   const [personalWorkouts,setPersonalWorkouts]=useState([]);
@@ -2326,6 +2331,10 @@ function MemberApp({ onLogout }) {
   const MEMBER_SAVE_NETWORK_CODES=new Set(["unavailable","deadline-exceeded","network-request-failed","cancelled","resource-exhausted"]);
   const logMemberSaveError=(action,error)=>{ console.error("[MemberApp Save Error]",{action,memberId:profile?.id||null,errorCode:error?.code,message:error?.message,error}); };
   const memberSaveErrorMessage=(error,fallback)=>MEMBER_SAVE_NETWORK_CODES.has(error?.code||"")?"저장하지 못했습니다. 네트워크 상태를 확인한 후 다시 시도해주세요.":(error?.message||fallback);
+  // 식단 기록 저장 — 회원이 확인·수정한 값만 저장한다(자동 추정값 그대로 확정 저장 금지).
+  // 저장 경로는 기존 members/{id}/nutrition/{날짜}.meals 그대로이고, 하루 총칼로리(totalKcal)도 함께 갱신되어
+  // 기존 칼로리 그래프·분석(getKcalLogs)에 자동으로 반영된다.
+  const saveDietMeal=async(dateKey,mealType,items)=>{ if(dietSaving)return; setDietSaving(true); try{ assertOwnMember(); await saveMemberDietMeal(profile.id,dateKey,mealType,items); await load({silent:true}); }catch(e){ logMemberSaveError("diet-meal-save",e); alert(memberSaveErrorMessage(e,"식단 기록 저장에 실패했습니다.")); throw e; }finally{ setDietSaving(false); } };
   // 체중·칼로리·걸음수 저장 — 컨디션/통증은 각자 독립된 저장 버튼(saveCondition/savePain)으로 분리되어 여기서 건드리지 않는다.
   const saveCheck=async()=>{if(healthSaving)return; const weightValue=String(form.weight??"").trim(); const kcalValue=String(form.kcal??"").trim(); const stepsValue=String(form.steps??"").trim(); const parsedWeight=weightValue===""?null:Number(weightValue); if(weightValue!==""&&(!Number.isFinite(parsedWeight)||parsedWeight<=0)){alert("체중은 0보다 큰 숫자로 입력해주세요.");return;} if(!weightValue&&!kcalValue&&!stepsValue){alert("저장할 건강 기록을 입력해주세요.");return;} setHealthSaving(true); try{assertOwnMember(); const dateKey=form.date||today; await saveMemberHealthInputs(profile.id,dateKey,{weight:weightValue,kcal:kcalValue,steps:stepsValue}); if(parsedWeight){setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`member_${dateKey}`,date:dateKey,weight:parsedWeight,note:"회원앱 직접 입력"})}));} setForm(f=>({...f,weight:"",kcal:"",steps:""})); await load({silent:true}); alert("건강관리 기록이 저장됐어요");}catch(e){logMemberSaveError("health-check-save",e); alert(memberSaveErrorMessage(e,"건강관리 기록 저장에 실패했습니다."));}finally{setHealthSaving(false);}};
   const saveCondition=async()=>{if(conditionSaving)return; if(!form.condition){alert("컨디션을 선택해주세요.");return;} setConditionSaving(true); try{assertOwnMember(); const dateKey=form.date||today; await saveMemberCheckin(profile.id,dateKey,{condition:form.condition}); await load({silent:true}); alert("컨디션이 저장됐어요");}catch(e){logMemberSaveError("condition-save",e); alert(memberSaveErrorMessage(e,"컨디션 저장에 실패했습니다."));}finally{setConditionSaving(false);}};
@@ -2607,7 +2616,8 @@ function MemberApp({ onLogout }) {
     personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
     personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
     startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast,
-    personalSorenessMap,personalEditBusy,saveCompletedPersonalWorkoutEdit,savePersonalSorenessRecord};
+    personalSorenessMap,personalEditBusy,saveCompletedPersonalWorkoutEdit,savePersonalSorenessRecord,
+    saveDietMeal,dietSaving};
   return <div className="member-shell"><style>{CSS+MEMBER_CSS}</style><main className="member-page" ref={pageRef}>{debugPanel}<div key={tab} className="member-tab-fade">{tab==="home"&&<MemberHome {...common}/>} {tab==="workout"&&<MemberWorkout {...common}/>} {tab==="health"&&<MemberHealth {...common}/>} {tab==="analysis"&&<MemberAnalysis {...common}/>} {tab==="profile"&&<MemberProfile {...common}/>}</div></main><nav className={"member-nav"+(navHidden?" nav-hidden":"")}>{/* 하단 탭 표시 문구만 "수업"→"운동"으로 변경 — 내부 라우팅 key(workout), 딥링크, 앱 이용 현황(appUsage) 기록은 그대로 유지한다. */}
     {[["home",HM_PATHS.house,"홈"],["workout",HM_PATHS.dumbbell,"운동"],["health",HM_PATHS.heartPulse,"건강"],["analysis",HM_PATHS.barChart,"분석"],["profile",HM_PATHS.userRound,"프로필"]].map(([k,i,l])=>{const bc=(k==="workout"&&unreadCount>0?unreadCount:0)||(k==="home"&&noticeUnreadCount>0?noticeUnreadCount:0); return <button key={k} onClick={()=>goMemberTab(k)} className={tab===k?"active":""}><span className="member-nav-icon" style={{position:"relative",display:"inline-flex"}}><SjIcon paths={i} size={22} strokeWidth={1.9}/>{bc>0&&<em className="nav-badge">{bc>99?"99+":bc}</em>}</span><span className="member-nav-label">{l}</span></button>;})}  </nav>
     </div>;
@@ -6521,6 +6531,146 @@ function HealthTileButton({t}){
     </button>
   );
 }
+// ════════════════════════════════════════════
+// 회원앱 식단 기록
+// ════════════════════════════════════════════
+// 음식명 + 섭취량을 텍스트로 적으면 로컬 음식 DB(FOOD_DB)로 "예상값"을 계산해 보여주고,
+// 회원이 확인·수정한 값만 저장한다. 추정값이 그대로 확정 데이터로 저장되는 경로는 만들지 않는다.
+// 저장 위치는 기존 members/{id}/nutrition/{날짜}.meals 그대로 — 새 컬렉션을 만들지 않는다.
+const MEMBER_MEAL_TYPES = ["아침", "점심", "저녁", "간식"];
+function formatKcalNumber(v) { return Number.isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString() : "0"; }
+
+function MemberDietSection({ p }) {
+  const today = getKoreaDateString();
+  const [sheet, setSheet] = useState(null); // {date, mealType}
+  const [openDate, setOpenDate] = useState(today);
+  const analysis = estimateMaintenance(p.profile, p.onboarding, p.body, p.nutrition, p.checkins, p.sessions);
+  const goal = p.onboarding?.goal || p.profile?.goal || p.nutrition?.goal;
+  const targetKcal = getGoalCalorieRecommendation(analysis, goal).value;
+  const dayData = p.nutrition?.dates?.[openDate] || {};
+  const meals = dayData.meals || {};
+  // 기존에 "운동 전/운동 후"로 저장된 기록도 그대로 보이게 저장된 끼니를 합쳐서 보여준다(기존 데이터 숨김 금지).
+  const mealTypes = [...new Set([...MEMBER_MEAL_TYPES, ...Object.keys(meals).filter(k => (meals[k] || []).length)])];
+  const dietTotals = sumFoodItems(Object.values(meals).flat());
+  const dayKcalRow = getKcalLogs(p.nutrition).find(r => r.date === openDate);
+  const dayKcal = dayKcalRow?.kcal ?? dietTotals.cal;
+  const pct = targetKcal > 0 ? Math.min(100, Math.round(dayKcal / targetKcal * 100)) : 0;
+  const overrideNote = dietTotals.cal > 0 && dayKcal !== dietTotals.cal;
+  return <div className="health-hub member-diet">
+    <div className="health-block-head">
+      <span className="health-block-icon mint"><SjIcon paths={HM_PATHS.clipboard} size={18} /></span>
+      <div><b>식단 기록</b><span>드신 음식과 양을 적으면 예상 칼로리를 계산해 드려요.</span></div>
+    </div>
+    <div className="diet-daypick">
+      <button type="button" className={openDate === today ? "active" : ""} onClick={() => setOpenDate(today)}>오늘</button>
+      <button type="button" className={openDate === getKoreaYesterdayDateString() ? "active" : ""} onClick={() => setOpenDate(getKoreaYesterdayDateString())}>어제</button>
+      <input type="date" value={openDate} onChange={e => setOpenDate(e.target.value || today)} />
+    </div>
+    <div className="diet-total">
+      <div className="diet-total-head">
+        <b>{formatKcalNumber(dayKcal)} <em>/ {targetKcal ? formatKcalNumber(targetKcal) : "-"} kcal</em></b>
+        <span>{targetKcal ? `권장 대비 ${pct}%` : "권장 섭취량 계산 중"}</span>
+      </div>
+      <div className="diet-bar"><i style={{ width: pct + "%" }} /></div>
+      {dietTotals.cal > 0 && <div className="diet-macros">
+        <span>탄 {dietTotals.carb}g</span><span>단 {dietTotals.protein}g</span><span>지 {dietTotals.fat}g</span>
+      </div>}
+      {overrideNote && <p className="diet-note">직접 입력한 하루 총칼로리({formatKcalNumber(dayKcal)}kcal)가 우선 표시됩니다. 식단 기록 합계는 {formatKcalNumber(dietTotals.cal)}kcal 입니다.</p>}
+    </div>
+    <div className="diet-meals">
+      {mealTypes.map(mt => {
+        const list = meals[mt] || [];
+        const t = sumFoodItems(list);
+        return <button type="button" key={mt} className={`diet-meal${list.length ? " filled" : ""}`} onClick={() => setSheet({ date: openDate, mealType: mt })}>
+          <span className="diet-meal-name">{mt}</span>
+          <span className="diet-meal-kcal">{list.length ? `${formatKcalNumber(t.cal)} kcal` : "기록하기"}</span>
+          <span className="diet-meal-sub">{list.length ? list.map(f => f.name).join(" · ") : "음식과 양을 입력해 주세요"}</span>
+        </button>;
+      })}
+    </div>
+    <p className="notice soft" style={{ marginTop: 10 }}>칼로리·영양소는 음식 DB 기준 <b>예상값</b>입니다. 저장 전에 값을 확인하고 필요하면 수정해 주세요.</p>
+    <MemberBottomSheet open={!!sheet} onClose={() => setSheet(null)} title={sheet ? `${sheet.mealType} 식단 기록` : "식단 기록"}>
+      {sheet && <MemberDietSheet key={sheet.date + sheet.mealType} p={p} date={sheet.date} mealType={sheet.mealType} onClose={() => setSheet(null)} />}
+    </MemberBottomSheet>
+  </div>;
+}
+
+function MemberDietSheet({ p, date, mealType, onClose }) {
+  const saved = p.nutrition?.dates?.[date]?.meals?.[mealType] || [];
+  const [items, setItems] = useState(() => saved.map(f => ({ ...f, pending: false })));
+  const [text, setText] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
+  const totals = sumFoodItems(items);
+  const pendingCount = items.filter(f => f.pending).length;
+  const checkCount = items.filter(f => f.needsCheck && f.pending).length;
+  const estimate = () => {
+    const rows = estimateFoodLines(text);
+    if (!rows.length) { alert("음식과 섭취량을 입력해 주세요.\n예) 현미밥 200g"); return; }
+    setItems(prev => [...prev, ...rows.map(r => ({ ...r, pending: true }))]);
+    setText("");
+  };
+  const patch = (id, next) => setItems(prev => prev.map(f => (f.id === id ? { ...f, ...next } : f)));
+  const remove = id => setItems(prev => prev.filter(f => f.id !== id));
+  const submit = async () => {
+    const cleaned = items.filter(f => String(f.name || "").trim());
+    if (cleaned.some(f => !(Number(f.cal) > 0))) {
+      if (!window.confirm("칼로리가 0인 항목이 있습니다. 그대로 저장할까요?")) return;
+    }
+    try {
+      await p.saveDietMeal(date, mealType, cleaned.map(({ pending, raw, ...f }) => f));
+      setJustSaved(true); setTimeout(() => setJustSaved(false), 700);
+      onClose();
+    } catch (e) { /* 저장 실패 안내는 saveDietMeal 내부에서 처리한다 */ }
+  };
+  const numField = (f, key, label, color) => <label className="diet-num">
+    <span>{label}</span>
+    <input type="number" inputMode="decimal" value={f[key] ?? ""} style={{ color }}
+      onChange={e => patch(f.id, { [key]: e.target.value === "" ? 0 : Number(e.target.value) })} />
+  </label>;
+  return <div className="diet-sheet">
+    <p className="mv2-sheet-hint">{date} · {mealType}<span>음식과 양을 한 줄에 하나씩 적어주세요.</span></p>
+    <div className="form-line">
+      <label>음식 · 섭취량 입력</label>
+      <textarea className="diet-input" rows={4} value={text} onChange={e => setText(e.target.value)}
+        placeholder={"현미밥 200g\n닭가슴살 100g\n계란 2개"} />
+    </div>
+    <button type="button" className="ghost diet-estimate-btn" onClick={estimate}>예상 칼로리 계산하기</button>
+    {items.length === 0 && <p className="notice soft" style={{ marginTop: 10 }}>아직 기록이 없어요. 위에 음식을 적고 계산해 보세요.</p>}
+    {items.length > 0 && <>
+      <div className="diet-list">
+        {items.map(f => <div key={f.id} className={`diet-item${f.pending ? " pending" : ""}`}>
+          <div className="diet-item-head">
+            <input className="diet-item-name" value={f.name || ""} onChange={e => patch(f.id, { name: e.target.value })} />
+            <button type="button" className="diet-item-del" onClick={() => remove(f.id)} aria-label="삭제">✕</button>
+          </div>
+          <div className="diet-item-meta">
+            <input className="diet-item-amount" value={f.amount ?? ""} placeholder="섭취량"
+              onChange={e => patch(f.id, { amount: e.target.value })} />
+            <input className="diet-item-unit" value={f.unit || ""} placeholder="단위"
+              onChange={e => patch(f.id, { unit: e.target.value })} />
+            <em className={`diet-badge${f.matched ? "" : " manual"}`}>{f.pending ? (f.matched ? "예상값" : "직접 입력") : "저장됨"}</em>
+          </div>
+          <div className="diet-item-nums">
+            {numField(f, "cal", "kcal", "#20242A")}
+            {numField(f, "carb", "탄(g)", "#2F73F6")}
+            {numField(f, "protein", "단(g)", "#0F9488")}
+            {numField(f, "fat", "지(g)", "#B45309")}
+          </div>
+          {f.pending && f.needsCheck && <p className="diet-item-warn">{f.matched ? "섭취량을 확인해 주세요(기본 1회 제공량으로 계산됨)." : "음식 DB에 없는 항목입니다. 칼로리를 직접 입력해 주세요."}</p>}
+        </div>)}
+      </div>
+      <div className="diet-sheet-total">
+        <b>{formatKcalNumber(totals.cal)} kcal</b>
+        <span>탄 {totals.carb}g · 단 {totals.protein}g · 지 {totals.fat}g</span>
+      </div>
+      {pendingCount > 0 && <p className="notice soft">{checkCount > 0 ? `확인이 필요한 항목이 ${checkCount}개 있습니다. 값을 수정한 뒤 저장해 주세요.` : "계산된 값은 예상값입니다. 확인 후 저장해 주세요."}</p>}
+    </>}
+    <button className={`primary${justSaved ? " save-success" : ""}`} onClick={submit} disabled={p.dietSaving}>
+      {p.dietSaving ? "저장 중..." : justSaved ? "저장 완료 ✓" : items.length ? "확인하고 저장" : "저장"}
+    </button>
+  </div>;
+}
+
 function MemberHealth(p){
   const today=getKoreaDateString();
   const yesterday=getKoreaYesterdayDateString(); // 월/연도 경계·자정 전후에도 안전한 KST 달력일 기준(기존 공용 헬퍼)
@@ -6599,6 +6749,9 @@ function MemberHealth(p){
         </button>
       </div>
     </div>
+
+    {/* 식단 기록 — 음식/섭취량 텍스트 입력 → 예상값 계산 → 회원 확인·수정 → 저장. 저장 경로는 기존 nutrition/{날짜}.meals 그대로. */}
+    <MemberDietSection p={p}/>
 
     {/* 기록 분석 — 기본은 3줄 요약만, 상세 문장(기존 buildHealthMotivation)은 접힘식 "자세히 보기"로만 노출 */}
     <div className="health-hub health-insight-card">
@@ -7011,6 +7164,50 @@ function goalWeightHeadline(state){
   if(state.tone==="good") return "최근 체중이 "+moveText+" 있어 목표 방향과 잘 맞습니다.";
   if(state.tone==="warn") return "최근 체중이 "+moveText+" 있어 목표 방향과는 다르게 움직이고 있습니다.";
   return "최근 체중은 "+moveText+" 있습니다.";
+}
+// 목표 날짜 상태 — "목표일 전 / 목표일 경과+달성 / 목표일 경과+미달성"을 한 곳에서만 판단한다.
+// 예전에는 화면마다 Math.max(0, ...)로 남은 일수를 계산해 목표일이 지나도 "0일 남음"으로만 보였다.
+// 달성 판정은 목표 방향(getGoalWeightDirection 결과)을 그대로 쓴다 — 감량은 목표 이하, 증량은 목표 이상, 유지는 ±1kg 범위.
+// phase:  "none"(목표일 미설정) | "before" | "dday" | "after"
+// status: "none" | "ongoing" | "achieved"(목표일 경과·달성) | "expired"(목표 기간 종료·미달성) | "unknown"(현재/목표 체중이 없어 판단 불가)
+const GOAL_STABLE_BAND_KG = 1;
+function buildGoalDeadlineState({ targetDate, currentWeight, targetWeight, goalDirection = "down", today = null } = {}) {
+  const key = String(targetDate || "").slice(0, 10);
+  const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(key);
+  const todayKey = String(today || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())).slice(0, 10);
+  const dayOf = v => { const t = Date.parse(String(v).slice(0, 10) + "T00:00:00Z"); return Number.isFinite(t) ? Math.round(t / 86400000) : null; };
+  const cur = toPositiveNumber(currentWeight), target = toPositiveNumber(targetWeight);
+  let achieved = null;
+  if (cur && target && goalDirection) {
+    if (goalDirection === "up") achieved = cur >= target;
+    else if (goalDirection === "stable") achieved = Math.abs(cur - target) <= GOAL_STABLE_BAND_KG;
+    else achieved = cur <= target;
+  }
+  if (!hasDate) {
+    return { hasDate: false, targetDate: "", daysLeft: null, daysPast: null, phase: "none", achieved, status: "none",
+      statusLabel: "목표일 미설정", daysLabel: "목표일 미설정", detailLabel: "목표 탭에서 목표일을 설정하면 남은 기간이 표시됩니다.", tone: "unknown" };
+  }
+  const daysLeft = dayOf(key) - dayOf(todayKey);
+  const phase = daysLeft > 0 ? "before" : daysLeft === 0 ? "dday" : "after";
+  if (phase !== "after") {
+    return { hasDate: true, targetDate: key, daysLeft, daysPast: 0, phase, achieved,
+      status: achieved ? "achieved" : "ongoing",
+      statusLabel: achieved ? "목표 달성" : (phase === "dday" ? "오늘이 목표일" : `D-${daysLeft}`),
+      daysLabel: phase === "dday" ? "오늘이 목표일" : `${daysLeft}일 남음`,
+      detailLabel: achieved ? "목표 체중에 도달했습니다" : "",
+      tone: achieved ? "good" : "neutral" };
+  }
+  const daysPast = -daysLeft;
+  if (achieved === true) {
+    return { hasDate: true, targetDate: key, daysLeft, daysPast, phase, achieved: true, status: "achieved",
+      statusLabel: "목표 달성", daysLabel: `목표일 ${daysPast}일 경과`, detailLabel: "목표 체중 유지 중", tone: "good" };
+  }
+  if (achieved === false) {
+    return { hasDate: true, targetDate: key, daysLeft, daysPast, phase, achieved: false, status: "expired",
+      statusLabel: "목표 기간 종료", daysLabel: `목표일 ${daysPast}일 경과`, detailLabel: "새 목표 설정 필요", tone: "warn" };
+  }
+  return { hasDate: true, targetDate: key, daysLeft, daysPast, phase, achieved: null, status: "unknown",
+    statusLabel: "목표 기간 종료", daysLabel: `목표일 ${daysPast}일 경과`, detailLabel: "현재 체중 기록이 없어 달성 여부를 판단할 수 없습니다.", tone: "unknown" };
 }
 function average(arr=[]){const v=arr.filter(n=>Number.isFinite(Number(n))).map(Number); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;}
 // ── 체중 추이 그래프 표시용 집계 ── 원본 체중/칼로리 기록(Firestore)은 절대 수정하지 않고,
@@ -9053,6 +9250,49 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .health-collapse.open{grid-template-rows:1fr}
 .health-collapse-inner{overflow:hidden}
 .cardio-tab-fade{animation:healthFadeIn .2s ease}
+/* ── 회원앱 식단 기록 (건강 탭) — 라이트 테마, 카드 = 끼니 1개 ── */
+.member-diet .diet-daypick{display:flex;gap:6px;align-items:center;margin:12px 0 10px;flex-wrap:wrap}
+.member-diet .diet-daypick button{border:1px solid #E8ECF1;background:#fff;color:#66717C;border-radius:999px;padding:7px 14px;font-size:12.5px;font-weight:900;cursor:pointer;font-family:inherit}
+.member-diet .diet-daypick button.active{background:#0F9488;border-color:#0F9488;color:#fff}
+.member-diet .diet-daypick input[type=date]{flex:1;min-width:130px;border:1px solid #E8ECF1;border-radius:12px;padding:7px 10px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit}
+.member-diet .diet-total{background:linear-gradient(135deg,#EEF5FF,#F8FAFC);border:1px solid #D9E7FF;border-radius:18px;padding:14px 16px}
+.member-diet .diet-total-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.member-diet .diet-total-head b{font-family:'Syne',sans-serif;font-size:26px;font-weight:900;color:#20242A;letter-spacing:-.5px}
+.member-diet .diet-total-head b em{font-style:normal;font-size:14px;font-weight:800;color:#8B949E}
+.member-diet .diet-total-head span{font-size:12px;font-weight:900;color:#0F9488}
+.member-diet .diet-bar{height:8px;border-radius:999px;background:#E4ECF7;margin-top:10px;overflow:hidden}
+.member-diet .diet-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#0F9488,#2F73F6);transition:width .4s}
+.member-diet .diet-macros{display:flex;gap:12px;margin-top:9px}
+.member-diet .diet-macros span{font-size:12px;font-weight:900;color:#66717C}
+.member-diet .diet-note{margin:9px 0 0;font-size:11.5px;font-weight:700;color:#8B949E;line-height:1.55}
+.member-diet .diet-meals{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
+.member-diet .diet-meal{display:flex;flex-direction:column;gap:3px;text-align:left;border:1px solid #E8ECF1;background:#fff;border-radius:16px;padding:13px 14px;cursor:pointer;font-family:inherit;min-height:74px}
+.member-diet .diet-meal.filled{border-color:#0F9488;background:#F2FBFA}
+.member-diet .diet-meal-name{font-size:13px;font-weight:900;color:#20242A}
+.member-diet .diet-meal-kcal{font-family:'Syne',sans-serif;font-size:17px;font-weight:900;color:#0F9488}
+.member-diet .diet-meal-sub{font-size:11px;font-weight:700;color:#8B949E;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diet-sheet .diet-input{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:14px;padding:12px;font-size:14px;font-family:inherit;color:#20242A;background:#fff;line-height:1.6;resize:vertical}
+.diet-sheet .diet-estimate-btn{margin-top:4px}
+.diet-sheet .diet-list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.diet-sheet .diet-item{border:1px solid #E8ECF1;border-radius:16px;padding:12px;background:#fff}
+.diet-sheet .diet-item.pending{border-color:#D9E7FF;background:#F8FBFF}
+.diet-sheet .diet-item-head{display:flex;gap:8px;align-items:center}
+.diet-sheet .diet-item-name{flex:1;min-width:0;border:none;border-bottom:1px solid #EEF1F4;padding:4px 0;font-size:14.5px;font-weight:900;color:#20242A;background:transparent;font-family:inherit}
+.diet-sheet .diet-item-del{border:none;background:#F6F7F9;color:#8B949E;border-radius:10px;width:28px;height:28px;flex-shrink:0;cursor:pointer;font-size:13px}
+.diet-sheet .diet-item-meta{display:flex;gap:6px;align-items:center;margin-top:8px}
+.diet-sheet .diet-item-amount{width:78px;border:1px solid #E8ECF1;border-radius:10px;padding:6px 8px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit}
+.diet-sheet .diet-item-unit{width:62px;border:1px solid #E8ECF1;border-radius:10px;padding:6px 8px;font-size:12.5px;font-weight:800;color:#20242A;background:#fff;font-family:inherit}
+.diet-sheet .diet-badge{margin-left:auto;font-style:normal;font-size:10.5px;font-weight:900;color:#0F9488;background:#E6F6F4;border-radius:999px;padding:4px 9px}
+.diet-sheet .diet-badge.manual{color:#B45309;background:#FEF3C7}
+.diet-sheet .diet-item-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}
+.diet-sheet .diet-num{display:flex;flex-direction:column;gap:3px}
+.diet-sheet .diet-num span{font-size:10.5px;font-weight:900;color:#8B949E}
+.diet-sheet .diet-num input{width:100%;box-sizing:border-box;border:1px solid #E8ECF1;border-radius:10px;padding:7px 6px;font-size:13px;font-weight:900;text-align:center;background:#fff;font-family:inherit}
+.diet-sheet .diet-item-warn{margin:8px 0 0;font-size:11.5px;font-weight:800;color:#B45309;line-height:1.5}
+.diet-sheet .diet-sheet-total{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:12px;padding:12px 14px;border-radius:14px;background:#F6F7F9}
+.diet-sheet .diet-sheet-total b{font-family:'Syne',sans-serif;font-size:20px;font-weight:900;color:#20242A}
+.diet-sheet .diet-sheet-total span{font-size:11.5px;font-weight:800;color:#66717C}
+@media (max-width:400px){.member-diet .diet-meals{grid-template-columns:1fr}}
 /* ── 건강 탭 최종 개편 — 오늘 건강 기록 최상단 + 기록 히스토리 버튼 + 기록 분석(3줄 요약/접힘식 상세) ── */
 .health-block-icon.mint{background:#E6F7F4;color:#0F9488}
 .health-history-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:14px;height:50px;border:1px solid #CBEAE3;border-radius:16px;background:#F2FBF9;color:#0F9488;font-size:14px;font-weight:900;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .15s ease,background-color .15s ease}
@@ -9811,9 +10051,13 @@ function GoalPeriodInfo({currentWeight,targetWeight,period,customDate,goal=""}){
   const deadline=goalDeadlineFromPeriod(period,customDate);
   const pace=getGoalPace(currentWeight,targetWeight,deadline,goalDirection);
   const labels=pace?GOAL_PACE_LABELS[goalDirection]:null;
+  // 목표일이 지난 뒤에도 "-"만 보이지 않도록 관리자앱과 같은 공용 판단(buildGoalDeadlineState)을 쓴다.
+  const dl=buildGoalDeadlineState({targetDate:deadline,currentWeight,targetWeight,goalDirection});
   return <div>
     <Info l="목표 기간" v={deadline?formatCompactDate(deadline):(period||"-")}/>
-    {deadline&&<Info l="예상 남은 기간" v={pace?`약 ${pace.weeks}주`:"-"}/>}
+    {deadline&&<Info l="목표일까지" v={dl.hasDate?dl.daysLabel:"-"}/>}
+    {deadline&&dl.phase!=="after"&&<Info l="예상 남은 기간" v={pace?`약 ${pace.weeks}주`:"-"}/>}
+    {deadline&&dl.phase==="after"&&<div className={dl.status==="achieved"?"notice soft":"notice goal-warning"} style={{marginTop:10,whiteSpace:"pre-line"}}>{dl.detailLabel?`${dl.statusLabel} · ${dl.detailLabel}`:dl.statusLabel}</div>}
     {pace&&pace.mode==="stable"&&<div className="notice soft" style={{marginTop:10,whiteSpace:"pre-line"}}>{`목표 유지 범위 ${pace.rangeLow}~${pace.rangeHigh}kg · ${pace.withinRange?"현재 범위 안에서 유지 중":`현재 범위에서 ${pace.gap.toFixed(1)}kg 벗어나 있어요`}`}</div>}
     {pace&&labels&&<div className={pace.fast?"notice goal-warning":"notice soft"} style={{marginTop:10,whiteSpace:"pre-line"}}>{`${labels.need} ${pace.need.toFixed(1)}kg · ${labels.weekly} 약 ${pace.weekly.toFixed(1)}kg`}{pace.fast?`\n${labels.fast}`:""}</div>}
   </div>;
@@ -28373,53 +28617,73 @@ function ReferralStatsScreen({
 }
 
 // ════════════════════════════════════════════
-// 건강관리 허브 — 바디체크 + 영양관리 통합
+// 건강관리 허브 — 대표가 회원 상태를 빠르게 파악하는 화면
 // ════════════════════════════════════════════
+// 상단 메뉴는 "수업에 바로 쓰는 것"만 남긴다(대시보드/기록/식단 분석/유산소/목표/인바디).
+// 음식·영양제·즐겨찾기는 상단에서 내리고 "식단 분석" 안의 상세 섹션으로 옮겼다 — 화면에서만 접었을 뿐
+// Firestore 데이터(nutrition/meta.favFoods, nutrition/{날짜}.meals·supplements)는 그대로 두고 계속 읽고 쓴다.
+// 캘린더·설문도 같은 이유로 "기록" 탭 안의 하위 화면으로 이동했다.
+const HEALTH_HUB_TABS = [
+  { key: "대시보드", role: "dash", icon: "📊" },
+  { key: "기록", role: "record", icon: "✏️" },
+  { key: "식단 분석", role: "diet", icon: "🥗" },
+  { key: "유산소", role: "cardio", icon: "🏃" },
+  { key: "목표", role: "body", bodyTab: "목표", icon: "🎯" },
+  { key: "인바디", role: "body", bodyTab: "인바디", icon: "📋" },
+];
+// 예전 탭 이름으로 들어와도(오늘 입력 피드 딥링크·저장된 상태) 빈 화면이 되지 않게 새 탭으로 옮겨준다.
+const HEALTH_HUB_TAB_ALIASES = {
+  "AI 칼로리 분석": "식단 분석", "음식": "식단 분석", "영양제": "식단 분석", "즐겨찾기": "식단 분석",
+  "캘린더": "기록", "설문": "기록",
+};
+function resolveHealthHubTab(key) {
+  const wanted = HEALTH_HUB_TAB_ALIASES[key] || key;
+  return HEALTH_HUB_TABS.find(t => t.key === wanted) ? wanted : "대시보드";
+}
+
 function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveBodyData, onSaveNutrition, showToast, onBack, targetCal, initialTab }) {
   const [memberCheckins,setMemberCheckins]=useState([]);
-  useEffect(()=>{let alive=true; if(member?.id)getMemberCheckins(member.id,30).then(v=>alive&&setMemberCheckins(v||[])).catch(()=>{}); return()=>{alive=false};},[member?.id]);
+  const [cardioLogs,setCardioLogs]=useState([]);
+  useEffect(()=>{let alive=true; if(member?.id){
+    getMemberCheckins(member.id,30).then(v=>alive&&setMemberCheckins(v||[])).catch(()=>{});
+    // 대시보드와 유산소 탭이 같은 기록을 쓰므로 허브에서 한 번만 읽어 내려준다(Firestore read 절약).
+    getCardioLogs(member.id,60).then(v=>alive&&setCardioLogs(v||[])).catch(()=>{});
+  } return()=>{alive=false};},[member?.id]);
   // ── 단일 탭 state — 항상 정확히 하나만 활성 ──────────────────────────
   // initialTab: 오늘 입력 피드에서 특정 항목(체중/칼로리/유산소 등)을 눌러 바로 해당 탭으로 진입할 때 사용
   const [tab, setTab] = useState(initialTab || "대시보드");
 
-  const TABS = [
-    {key:"대시보드", role:"body",   bodyTab:"대시보드", icon:"📊"},
-    {key:"기록",     role:"record",                     icon:"✏️"},
-    {key:"AI 칼로리 분석", role:"ai", icon:"🤖"},
-    {key:"유산소",   role:"cardio", icon:"🏃"},
-    {key:"음식",     role:"nut",    nutTab:"오늘",       icon:"🥗"},
-    {key:"영양제",   role:"nut",    nutTab:"영양제",     icon:"💊"},
-    {key:"목표",     role:"body",   bodyTab:"목표",      icon:"🎯"},
-    {key:"인바디",   role:"body",   bodyTab:"인바디",    icon:"📋"},
-    {key:"캘린더",   role:"body",   bodyTab:"캘린더",    icon:"📅"},
-    {key:"설문",     role:"body",   bodyTab:"설문",      icon:"📝"},
-    {key:"즐겨찾기", role:"nut",    nutTab:"즐겨찾기",   icon:"⭐"},
-  ];
+  const TABS = HEALTH_HUB_TABS;
 
   const ac  = "#00cec9";
-  const cur = TABS.find(t=>t.key===tab) || TABS[0];
+  const cur = TABS.find(t=>t.key===resolveHealthHubTab(tab)) || TABS[0];
 
   return (
     <div>
       <SH title="🏥 건강관리 허브" sub={member.name}
         right={<Btn ghost sm onClick={onBack}>← 뒤로</Btn>} />
 
-      <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:4,marginBottom:12,
-        WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
+      {/* iPad/모바일에서 메뉴가 화면 밖으로 밀리지 않도록 가로 스크롤 대신 줄바꿈한다 — 6개 전부 한눈에 보이게 */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
         {TABS.map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)}
-            style={{padding:"6px 12px",borderRadius:18,border:"1px solid",flexShrink:0,
-              cursor:"pointer",fontSize:10,fontWeight:tab===t.key?800:400,
-              borderColor:tab===t.key?ac:"rgba(255,255,255,0.1)",
-              background:tab===t.key?ac+"22":"rgba(255,255,255,.02)",
-              color:tab===t.key?ac:"#94a3b8"}}>
+            style={{padding:"8px 14px",borderRadius:18,border:"1px solid",flex:"0 0 auto",
+              cursor:"pointer",fontSize:11.5,fontWeight:cur.key===t.key?800:600,
+              borderColor:cur.key===t.key?ac:"rgba(255,255,255,0.1)",
+              background:cur.key===t.key?ac+"22":"rgba(255,255,255,.02)",
+              color:cur.key===t.key?ac:"#94a3b8"}}>
             {t.icon} {t.key}
           </button>
         ))}
       </div>
 
+      {cur.role==="dash" && (
+        <HealthDashboardTab key="dash" member={member} sessions={sessions} bodyData={bodyData}
+          nutritionData={nutritionData} memberCheckins={memberCheckins} cardioLogs={cardioLogs}
+          onGoTab={setTab} />
+      )}
       {cur.role==="record" && (
-        <HealthRecordTab key="record" member={member} bodyData={bodyData} nutritionData={nutritionData}
+        <HealthRecordTab key="record" member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData}
           memberCheckins={memberCheckins}
           onSaveBodyData={onSaveBodyData} onSaveNutrition={onSaveNutrition} showToast={showToast} />
       )}
@@ -28429,21 +28693,287 @@ function HealthHubScreen({ member, sessions=[], bodyData, nutritionData, onSaveB
           showToast={showToast} onBack={onBack}
           initialTab={cur.bodyTab} hideHeader={true} hideTabs={true} />
       )}
-      {cur.role==="ai" && <AdminCalorieAnalysisSection member={member} bodyData={bodyData} nutritionData={nutritionData} sessions={sessions} />}
-      {cur.role==="cardio" && <AdminCardioSection member={member} bodyData={bodyData} />}
-      {cur.role==="nut" && (
-        <NutritionScreen key={"nut-"+cur.nutTab} member={member}
-          nutritionData={nutritionData} onSaveNutrition={onSaveNutrition}
-          showToast={showToast} onBack={onBack} targetCal={targetCal}
-          initialTab={cur.nutTab} hideHeader={true} hideTabs={true} />
+      {cur.role==="diet" && (
+        <AdminDietAnalysisSection key="diet" member={member} bodyData={bodyData} nutritionData={nutritionData}
+          sessions={sessions} onSaveNutrition={onSaveNutrition} showToast={showToast} onBack={onBack} targetCal={targetCal} />
+      )}
+      {cur.role==="cardio" && <AdminCardioSection member={member} bodyData={bodyData} cardioLogs={cardioLogs} />}
+    </div>
+  );
+}
+
+// 건강관리 대시보드 — 수업 전 30초 안에 확인해야 하는 순서로만 배치한다.
+// ① 체중/목표 → ② 최근 체중 추세 → ③ 권장 섭취(메인) · BMR/TDEE(보조) → ④ 최근 7일 실제 섭취 · 권장 대비
+// → ⑤ 최근 유산소 → ⑥ 최근 통증/근육통 → ⑦ 회원이 남긴 메모
+// 계산은 전부 기존 공용 함수를 그대로 쓴다(estimateMaintenance / buildGoalDeadlineState / buildCalorieIntakeSummary 등).
+function HealthDashboardTab({ member, sessions=[], bodyData, nutritionData, memberCheckins=[], cardioLogs=[], onGoTab }) {
+  const goal = bodyData?.goal || {};
+  const goalText = goal.goal || member?.goal || nutritionData?.goal || "";
+  const persona = getAnalysisPersona(goalText);
+  const goalDirection = getGoalWeightDirection(persona);
+  const weights = getBodyWeightRecords(bodyData);
+  const progress = getWeightProgress(bodyData);
+  const startWeight = getMemberStartWeight({ records: weights, profile: member, onboarding: goal, currentWeight: progress.latestWeight })
+    || toPositiveNumber(goal.currentWeight) || progress.firstWeight;
+  const currentWeight = progress.latestWeight ?? toPositiveNumber(goal.currentWeight);
+  const targetWeight = toPositiveNumber(goal.targetWeight);
+  const deadline = buildGoalDeadlineState({ targetDate: goal.targetDate, currentWeight, targetWeight, goalDirection });
+  const goalProgress = getWeightGoalProgress({ startWeight, currentWeight, targetWeight });
+  // 체중 변화 기준은 기존 화면과 동일하게 실제 측정 기록의 첫 값 ↔ 최근 값(getWeightProgress)만 쓴다.
+  const change = progress.hasEnoughData ? progress.change : null;
+  const changeTone = goalDeltaTone(goalDirection, change);
+
+  const analysis = estimateMaintenance(member, goal, bodyData, nutritionData, [], sessions);
+  const target = getGoalCalorieRecommendation(analysis, goalText);
+  const recent7 = getRecentKcalLogsByDays(nutritionData, 7);
+  const avg7 = averageKcalLogs(recent7);
+  const intake = buildCalorieIntakeSummary({ avg7, targetKcal: target.value, goalDirection, recentCount: recent7.length });
+
+  const week = summarizeCardioWeek(cardioLogs);
+  const lastCardio = [...(cardioLogs || [])].filter(l => l.date).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
+
+  const painRows = getPainRecords(memberCheckins);
+  const lastPain = painRows.length ? painRows[painRows.length - 1] : null;
+  const soreness = [...(sessions || [])].filter(s => s.memberFeedback?.sorenessLevel && s.memberFeedback.sorenessLevel !== "없음")
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0] || null;
+
+  const memoRows = [
+    lastPain?.memo ? { label: `통증 메모 · ${lastPain.date}`, text: lastPain.memo } : null,
+    ...[...weights].reverse().filter(r => String(r.memo || "").trim()).slice(0, 1).map(r => ({ label: `체중 기록 메모 · ${r.date}`, text: r.memo })),
+  ].filter(Boolean);
+
+  const trendRows = weights.slice(-12).map(r => ({ date: String(r.date).slice(5), weight: Number(r.weight), target: targetWeight || null }));
+  const tt = { background:"#111827", border:"1px solid rgba(255,255,255,0.08)", borderRadius:8, fontFamily:"'DM Mono',monospace", fontSize:11 };
+  const tile = { background:"#0B1120", borderRadius:9, padding:"9px 11px" };
+  const deadlineColor = goalToneColor(deadline.tone, { admin: true });
+
+  return (
+    <div>
+      {/* ① 현재 체중 · 첫 측정 대비 변화 · 목표 체중 · 목표 상태 */}
+      <Card style={{marginBottom:11}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+          <div>
+            <Mo c="#94a3b8" s={9}>현재 체중</Mo>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:32,color:"#fff",marginTop:2}}>
+              {currentWeight ?? "-"}<span style={{fontSize:14,color:"#94a3b8",fontWeight:400}}> kg</span>
+            </div>
+            {change !== null && progress.hasEnoughData ? (
+              <Mo c={goalToneColor(changeTone,{admin:true})} s={11}>{change > 0 ? "▲ +" : change < 0 ? "▼ " : ""}{change === 0 ? "변화 없음" : `${Math.abs(change)}kg`} 첫 측정 대비 (첫 {progress.firstWeight}kg)</Mo>
+            ) : <Mo c="#94a3b8" s={10}>체중 기록이 2회 이상 쌓이면 변화가 표시됩니다</Mo>}
+          </div>
+          <div style={{textAlign:"right"}}>
+            <Mo c="#94a3b8" s={9}>목표 체중</Mo>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:"#5EEAD4",marginTop:2}}>
+              {targetWeight || "-"}<span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}> kg</span>
+            </div>
+            <Mo c={deadlineColor} s={10} style={{display:"block",fontWeight:800,marginTop:3}}>{deadline.statusLabel}</Mo>
+            {deadline.hasDate && <Mo c="#94a3b8" s={9} style={{display:"block"}}>{deadline.targetDate} · {deadline.daysLabel}</Mo>}
+            {deadline.detailLabel && <Mo c={deadlineColor} s={9} style={{display:"block",marginTop:2}}>{deadline.detailLabel}</Mo>}
+          </div>
+        </div>
+        {goalProgress && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <Mo c="#94a3b8" s={9}>{goalProgress.offTrack ? "목표 달성률 · 목표와 반대 방향" : "목표 달성률"}</Mo>
+              <Mo c={goalToneColor(goalProgress.tone,{admin:true})} s={10}>{goalProgress.pct.toFixed(1)}%</Mo>
+            </div>
+            <div style={{height:7,background:"rgba(255,255,255,0.08)",borderRadius:4}}>
+              <div style={{height:"100%",width:goalProgress.pct+"%",background:"linear-gradient(90deg,#5EEAD4,#7c6fff)",borderRadius:4,transition:"width .6s"}} />
+            </div>
+          </div>
+        )}
+        {deadline.status === "expired" && (
+          <div style={{marginTop:10,padding:"10px 12px",borderRadius:9,border:"1px solid rgba(255,209,102,.3)",background:"rgba(255,209,102,.08)"}}>
+            <Mo c="#ffd166" s={10} style={{display:"block",fontWeight:800}}>목표 기간이 끝났지만 목표 체중에 도달하지 못했습니다.</Mo>
+            <div style={{marginTop:8}}><Btn sm onClick={()=>onGoTab?.("목표")}>새 목표 설정 →</Btn></div>
+          </div>
+        )}
+        {!targetWeight && (
+          <div style={{marginTop:10}}><Btn sm onClick={()=>onGoTab?.("목표")}>목표 설정 →</Btn></div>
+        )}
+      </Card>
+
+      {/* ② 최근 체중 추세 */}
+      <Card title="📉 최근 체중 추세" style={{marginBottom:11}}>
+        {trendRows.length >= 2 ? (
+          <ResponsiveContainer width="100%" height={150}>
+            <LineChart data={trendRows} margin={{top:6,right:14,left:-18,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+              <XAxis dataKey="date" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} />
+              <YAxis domain={["auto","auto"]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}} unit="kg" />
+              <Tooltip contentStyle={tt} formatter={(v,n)=>[v+"kg",n]} />
+              <Line type="monotone" dataKey="weight" stroke="#5EEAD4" strokeWidth={2.5} dot={{fill:"#5EEAD4",r:3}} name="체중" />
+              {targetWeight > 0 && <Line type="monotone" dataKey="target" stroke="#ff6b6b" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name={"목표 "+targetWeight+"kg"} />}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{padding:"14px 0",textAlign:"center"}}>
+            <Mo c="#94a3b8" s={10}>{trendRows.length === 1 ? "체중 기록 1건 — 2건 이상 쌓이면 추세가 표시됩니다." : "체중 기록이 없습니다."}</Mo>
+            <div style={{marginTop:10}}><Btn sm onClick={()=>onGoTab?.("기록")}>+ 체중 기록</Btn></div>
+          </div>
+        )}
+      </Card>
+
+      {/* ③ 권장 섭취 칼로리(메인) + BMR/TDEE(보조) */}
+      <Card title="🔥 섭취 칼로리" style={{marginBottom:11}}>
+        <div style={{background:"linear-gradient(135deg,#0d2018,#0B1120)",border:"1px solid rgba(0,229,160,.25)",borderRadius:10,padding:"13px 15px"}}>
+          <Mo c="#94a3b8" s={9}>권장 섭취 칼로리 · {target.shortLabel || target.label}</Mo>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:30,color:"#5EEAD4",marginTop:3,marginBottom:3}}>
+            {formatKcal(target.value)}<span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}> / 일</span>
+          </div>
+          <Mo c="#94a3b8" s={9}>{analysis.basis} · 신뢰도 {analysis.confidence}%</Mo>
+        </div>
+        {/* BMR·TDEE는 판단의 근거일 뿐이라 권장 섭취량과 같은 크기로 두지 않고 한 줄 보조 정보로 내린다 */}
+        <div style={{display:"flex",gap:8,marginTop:9,flexWrap:"wrap"}}>
+          <div style={{...tile,flex:"1 1 120px"}}><Mo c="#94a3b8" s={8}>기초대사량 BMR</Mo><Mo c="#e2e8f0" s={12} style={{display:"block",fontWeight:800,marginTop:2}}>{formatKcal(analysis.bmr)}</Mo></div>
+          <div style={{...tile,flex:"1 1 120px"}}><Mo c="#94a3b8" s={8}>유지 칼로리 TDEE</Mo><Mo c="#ffd166" s={12} style={{display:"block",fontWeight:800,marginTop:2}}>{formatKcal(analysis.maintenance)}</Mo></div>
+        </div>
+        {/* ④ 최근 7일 실제 섭취 + 권장 대비 상태 */}
+        <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+          <div style={{...tile,flex:"1 1 120px"}}>
+            <Mo c="#94a3b8" s={8}>최근 7일 평균 섭취</Mo>
+            <Mo c="#e2e8f0" s={14} style={{display:"block",fontWeight:800,marginTop:2}}>{formatKcal(avg7)}</Mo>
+            <Mo c="#94a3b8" s={8} style={{display:"block",marginTop:2}}>기록 {recent7.length}일</Mo>
+          </div>
+          <div style={{...tile,flex:"1 1 120px"}}>
+            <Mo c="#94a3b8" s={8}>권장 대비</Mo>
+            <Mo c={goalToneColor(intake.tone,{admin:true})} s={14} style={{display:"block",fontWeight:800,marginTop:2}}>{intake.display}</Mo>
+            <Mo c="#94a3b8" s={8} style={{display:"block",marginTop:2}}>{intake.diff!=null?formatSignedKcal(intake.diff):"기록 부족"}</Mo>
+          </div>
+        </div>
+        <Mo c="#cbd5e1" s={9} style={{display:"block",marginTop:8,lineHeight:1.6}}>{intake.note}</Mo>
+        <div style={{marginTop:9}}><Btn ghost sm onClick={()=>onGoTab?.("식단 분석")}>식단 분석 자세히 →</Btn></div>
+      </Card>
+
+      {/* ⑤ 최근 유산소 */}
+      <Card title="🏃 최근 유산소" style={{marginBottom:11}}>
+        {lastCardio ? (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div style={{...tile,flex:"1 1 130px"}}><Mo c="#94a3b8" s={8}>최근 기록</Mo><Mo c="#e2e8f0" s={11} style={{display:"block",fontWeight:800,marginTop:2}}>{lastCardio.date}</Mo><Mo c="#94a3b8" s={9} style={{display:"block"}}>{getCardioTypes(lastCardio).join(" · ")||"-"} {lastCardio.durationMinutes?`${lastCardio.durationMinutes}분`:""}</Mo></div>
+            <div style={{...tile,flex:"1 1 130px"}}><Mo c="#94a3b8" s={8}>최근 7일</Mo><Mo c="#5EEAD4" s={13} style={{display:"block",fontWeight:800,marginTop:2}}>{week.count}회 · {week.totalMinutes}분</Mo></div>
+          </div>
+        ) : <Mo c="#94a3b8" s={10}>유산소 기록이 없습니다.</Mo>}
+      </Card>
+
+      {/* ⑥ 최근 통증 / 근육통 */}
+      <Card title="📍 최근 통증 · 근육통" style={{marginBottom:11}}>
+        {lastPain ? (
+          <div style={{padding:"9px 11px",borderRadius:9,background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.2)",marginBottom:8}}>
+            <Mo c="#f87171" s={10} style={{display:"block",fontWeight:800}}>통증 · {lastPain.side} {lastPain.part} · VAS {lastPain.vas}</Mo>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{lastPain.date}</Mo>
+          </div>
+        ) : <Mo c="#94a3b8" s={10} style={{display:"block",marginBottom:8}}>회원앱 통증 기록이 없습니다.</Mo>}
+        {soreness ? (
+          <div style={{padding:"9px 11px",borderRadius:9,background:"rgba(249,115,22,.08)",border:"1px solid rgba(249,115,22,.2)"}}>
+            <Mo c="#fb923c" s={10} style={{display:"block",fontWeight:800}}>근육통 · {soreness.memberFeedback.sorenessLevel} · {formatSorenessBodyParts(soreness.memberFeedback)}</Mo>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{soreness.date}</Mo>
+          </div>
+        ) : <Mo c="#94a3b8" s={10}>수업 후 근육통 기록이 없습니다.</Mo>}
+      </Card>
+
+      {/* ⑦ 회원 메모 — 있을 때만 표시 */}
+      {memoRows.length > 0 && (
+        <Card title="📝 회원이 남긴 메모" style={{marginBottom:11}}>
+          {memoRows.map((m,i)=>(
+            <div key={i} style={{padding:"7px 0",borderBottom:i<memoRows.length-1?"1px solid rgba(255,255,255,.08)":"none"}}>
+              <Mo c="#94a3b8" s={9} style={{display:"block"}}>{m.label}</Mo>
+              <Mo c="#e2e8f0" s={11} style={{display:"block",marginTop:2,lineHeight:1.6}}>{m.text}</Mo>
+            </div>
+          ))}
+        </Card>
       )}
     </div>
   );
 }
 
+// 식단 분석 — 대표가 음식을 직접 입력하는 화면이 아니라, 회원앱에서 회원이 기록한 식단을 읽어 분석하는 화면.
+// (예전 "AI 칼로리 분석"에는 실제로 AI가 없었다 — 이 프로젝트에 AI/외부 음식 API 호출 경로가 없어 이름만 바꾼 게 아니라 실제 의미에 맞춘 것이다)
+function AdminDietAnalysisSection({ member, bodyData, nutritionData, sessions=[], onSaveNutrition, showToast, onBack, targetCal }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const goal = bodyData?.goal || {};
+  const goalText = goal.goal || member?.goal || nutritionData?.goal || "";
+  const goalDirection = getGoalWeightDirection(getAnalysisPersona(goalText));
+  const analysis = estimateMaintenance(member, goal, bodyData, nutritionData, [], sessions);
+  const target = getGoalCalorieRecommendation(analysis, goalText);
+  const allLogs = getKcalLogs(nutritionData);
+  const today = getKoreaDateString();
+  const todayKcal = allLogs.find(r => r.date === today)?.kcal ?? null;
+  const recent7 = getRecentKcalLogsByDays(nutritionData, 7);
+  const recent30 = getRecentKcalLogsByDays(nutritionData, 30);
+  const avg7 = averageKcalLogs(recent7), avg30 = averageKcalLogs(recent30);
+  const intake = buildCalorieIntakeSummary({ avg7, targetKcal: target.value, goalDirection, recentCount: recent7.length });
+  const proteinRows = getProteinLogs(nutritionData).filter(r => r.date >= dateStrDaysAgo(29));
+  const avgProtein = proteinRows.length >= 3 ? Math.round(proteinRows.reduce((a,b)=>a+b.protein,0)/proteinRows.length) : null;
+  const chartRows = recent30.map(x => ({ date: x.date.slice(5), kcal: x.kcal, target: target.value }));
+  const tile = { background:"#0B1120", borderRadius:9, padding:"10px 12px" };
+  const kpi = (label, value, sub, color) => (
+    <div style={{...tile,flex:"1 1 130px"}}>
+      <Mo c="#94a3b8" s={8}>{label}</Mo>
+      <Mo c={color||"#e2e8f0"} s={14} style={{display:"block",fontWeight:800,marginTop:3}}>{value}</Mo>
+      {sub && <Mo c="#94a3b8" s={8} style={{display:"block",marginTop:2}}>{sub}</Mo>}
+    </div>
+  );
+
+  return (
+    <div>
+      {allLogs.length === 0 ? (
+        // 기록이 없으면 그래프나 평균을 억지로 만들지 않는다.
+        <Card style={{marginBottom:11}}>
+          <div style={{textAlign:"center",padding:"28px 12px"}}>
+            <div style={{fontSize:34,marginBottom:8}}>🥗</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"#e2e8f0",marginBottom:6}}>식단 기록 없음</div>
+            <Mo c="#94a3b8" s={10} style={{display:"block",lineHeight:1.7}}>회원앱 건강 탭 &gt; 식단 기록에서 음식을 입력하면<br/>이 화면에 자동으로 반영됩니다.</Mo>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:8}}>권장 섭취 칼로리 {formatKcal(target.value)} · {analysis.basis}</Mo>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <Card title="🥗 섭취 현황" style={{marginBottom:11}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+              {kpi("오늘 섭취", todayKcal!=null?formatKcal(todayKcal):"오늘 기록 없음", today, todayKcal!=null?"#5EEAD4":"#94a3b8")}
+              {kpi("권장 섭취", formatKcal(target.value), target.shortLabel||target.label, "#22c55e")}
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {kpi("최근 7일 평균", formatKcal(avg7), `기록 ${recent7.length}일`, "#54a0ff")}
+              {kpi("최근 30일 평균", formatKcal(avg30), `기록 ${recent30.length}일`, "#7c6fff")}
+              {kpi("권장 대비 상태", intake.display, intake.diff!=null?formatSignedKcal(intake.diff):"기록 부족", goalToneColor(intake.tone,{admin:true}))}
+              {kpi("총 기록 일수", `${allLogs.length}일`, allLogs.length?`${allLogs[0].date} ~ ${allLogs[allLogs.length-1].date}`:"", "#e2e8f0")}
+            </div>
+            {avgProtein != null && (
+              <div style={{marginTop:8}}>{kpi("최근 30일 평균 단백질", `${avgProtein} g`, `단백질 기록 ${proteinRows.length}일`, "#fdba74")}</div>
+            )}
+            <Mo c="#cbd5e1" s={10} style={{display:"block",marginTop:9,lineHeight:1.6}}>{intake.note}</Mo>
+          </Card>
+
+          <Card title="📈 날짜별 섭취 칼로리" style={{marginBottom:11}}>
+            <CalorieTrendChart rows={chartRows} chartRows={chartRows} admin />
+          </Card>
+        </>
+      )}
+
+      {/* 상세 식단(음식·영양제·즐겨찾기) — 상단 메뉴에서는 내렸지만 기존 데이터를 계속 보고 고칠 수 있게 여기 접어둔다. */}
+      <Card style={{marginBottom:11}}>
+        <button onClick={()=>setDetailOpen(o=>!o)}
+          style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",border:"none",background:"transparent",cursor:"pointer",padding:0}}>
+          <Mo c="#e2e8f0" s={11} style={{fontWeight:800}}>🍽️ 상세 식단 기록 (음식 · 영양제 · 즐겨찾기)</Mo>
+          <Mo c="#94a3b8" s={11}>{detailOpen?"접기 ▲":"펼치기 ▼"}</Mo>
+        </button>
+        {detailOpen && (
+          <div style={{marginTop:12}}>
+            <Mo c="#94a3b8" s={9} style={{display:"block",marginBottom:8,lineHeight:1.6}}>회원앱 식단 기록과 같은 저장 위치(nutrition/날짜)를 씁니다. 여기서 추가·수정한 음식도 위 분석에 그대로 반영됩니다.</Mo>
+            <NutritionScreen member={member} nutritionData={nutritionData} onSaveNutrition={onSaveNutrition}
+              showToast={showToast} onBack={onBack} targetCal={targetCal} initialTab="오늘" hideHeader={true} />
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 // 관리자앱 — 회원별 유산소 기록 연동 (건강관리 허브 "유산소" 탭)
-function AdminCardioSection({ member, bodyData }) {
-  const [logs, setLogs] = useState([]);
+// cardioLogs를 prop으로 받으면(건강관리 허브) 그 기록을 그대로 쓰고, 없으면 예전처럼 직접 읽는다.
+function AdminCardioSection({ member, bodyData, cardioLogs = null }) {
+  const [fetchedLogs, setFetchedLogs] = useState([]);
   const [onboarding, setOnboarding] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -28451,11 +28981,13 @@ function AdminCardioSection({ member, bodyData }) {
     if (!member?.id) return;
     setLoading(true);
     Promise.all([
-      getCardioLogs(member.id, 60).catch(() => []),
+      cardioLogs ? Promise.resolve(cardioLogs) : getCardioLogs(member.id, 60).catch(() => []),
       getMemberOnboarding(member.id).catch(() => null),
-    ]).then(([l, ob]) => { if (!alive) return; setLogs(l || []); setOnboarding(ob); setLoading(false); });
+    ]).then(([l, ob]) => { if (!alive) return; setFetchedLogs(l || []); setOnboarding(ob); setLoading(false); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [member?.id]);
+  const logs = cardioLogs || fetchedLogs;
 
   if (loading) return <Skel n={3} />;
   if (!logs.length) return <Card title="🏃 유산소 기록"><Emp msg="아직 회원이 기록한 유산소 운동이 없습니다." /></Card>;
@@ -28514,7 +29046,10 @@ function AdminCardioSection({ member, bodyData }) {
   );
 }
 
-function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], onSaveBodyData, onSaveNutrition, showToast }) {
+// 기록 탭 — 대표가 직접 입력하는 화면 + 조회 전용이던 캘린더/설문을 이 안의 하위 화면으로 통합했다.
+// (상단 메뉴를 6개로 줄이면서 화면만 옮긴 것이고, 캘린더·설문이 읽고 쓰는 데이터는 그대로다)
+function HealthRecordTab({ member, sessions=[], bodyData, nutritionData, memberCheckins=[], onSaveBodyData, onSaveNutrition, showToast }) {
+  const [view, setView] = useState("입력"); // 입력 | 캘린더 | 설문
   const today = new Date().toISOString().split("T")[0];
   const [dt,    setDt]    = useState(today);
   const [w,     setW]     = useState("");
@@ -28559,8 +29094,16 @@ function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], o
   const recentRecs = [...(bodyData?.records||[])].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,5);
   const memberPainRows=getPainRecords(memberCheckins).slice(-7).reverse();
 
+  const seg=(k)=>({padding:"6px 13px",borderRadius:16,border:"1px solid",flex:"0 0 auto",cursor:"pointer",fontSize:11,fontWeight:view===k?800:600,
+    borderColor:view===k?"#5EEAD4":"rgba(255,255,255,0.08)",background:view===k?"rgba(0,229,160,.12)":"transparent",color:view===k?"#5EEAD4":"#94a3b8"});
   return (
     <div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+        {["입력","캘린더","설문"].map(k=><button key={k} onClick={()=>setView(k)} style={seg(k)}>{k==="입력"?"✏️ 입력":k==="캘린더"?"📅 캘린더":"📝 설문"}</button>)}
+      </div>
+      {view==="캘린더" && <ChangeCalendar sessions={sessions} records={bodyData?.records||[]} />}
+      {view==="설문" && <SurveyAnalysis member={member} bodyData={bodyData} sessions={sessions} onSave={onSaveBodyData} showToast={showToast} />}
+      {view==="입력" && <>
       <input type="date" value={dt} onChange={e=>setDt(e.target.value)}
         style={{width:"100%",boxSizing:"border-box",padding:"7px 10px",borderRadius:7,
           fontSize:12,border:"1px solid rgba(255,255,255,0.1)",
@@ -28628,6 +29171,7 @@ function HealthRecordTab({ member, bodyData, nutritionData, memberCheckins=[], o
           ))}
         </Card>
       )}
+      </>}
     </div>
   );
 }
@@ -28679,6 +29223,14 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
   const bmr       = calorieAnalysis.bmr;
   const tdee      = calorieAnalysis.maintenance;
   const daysLeft  = calcDaysLeft(goal.targetDate);
+  // 남은 기간 계산(weeklyLoss)은 기존 그대로 두고, 화면 표시는 공용 판단(buildGoalDeadlineState)만 쓴다 —
+  // 목표일이 지나면 어디서나 "0일 남음"으로 보이던 문제를 한 곳에서 정리하기 위함.
+  const goalDeadlineState = buildGoalDeadlineState({
+    targetDate: goal.targetDate,
+    currentWeight: getWeightProgress(bodyData).latestWeight ?? cw,
+    targetWeight: tw,
+    goalDirection: getGoalWeightDirection(getAnalysisPersona(goal.goal || member?.goal || nutritionData?.goal || "")),
+  });
   const totalLoss = cw - tw;
   const targetCal = calorieTarget.value || 0;
   const weeklyLoss= (daysLeft && totalLoss > 0) ? totalLoss / (daysLeft / 7) : 0;
@@ -28808,7 +29360,11 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:"#5EEAD4",marginTop:2}}>
                       {tw}<span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}> kg</span>
                     </div>
-                    {daysLeft!==null && <Mo c="#cbd5e1" s={9}>{daysLeft}일 남음</Mo>}
+                    {goalDeadlineState.hasDate && <>
+                      <Mo c={goalToneColor(goalDeadlineState.tone,{admin:true})} s={9} style={{display:"block",fontWeight:800}}>{goalDeadlineState.statusLabel}</Mo>
+                      <Mo c="#cbd5e1" s={9} style={{display:"block"}}>{goalDeadlineState.daysLabel}</Mo>
+                      {goalDeadlineState.detailLabel && <Mo c={goalToneColor(goalDeadlineState.tone,{admin:true})} s={9} style={{display:"block"}}>{goalDeadlineState.detailLabel}</Mo>}
+                    </>}
                   </div>
                 </div>
                 <div style={{marginBottom:6}}>
@@ -28930,7 +29486,7 @@ function BodyCheckScreen({ member, sessions=[], onBack, bodyData, nutritionData,
                     </LineChart>
                   </ResponsiveContainer>
                   <Mo c="#94a3b8" s={9} style={{textAlign:"center",display:"block",marginTop:4}}>
-                    {goal.targetDate} 목표 {tw}kg 달성 ({daysLeft}일 남음)
+                    {goal.targetDate} 목표 {tw}kg 달성 ({goalDeadlineState.daysLabel})
                   </Mo>
                 </Card>
               )}
@@ -29525,6 +30081,78 @@ const FOOD_DB = [
   {name:"닭가슴살 샐러드",unit:"팩", per:1,   cal:200, carb:10.0, protein:25.0, fat:6.0},
   {name:"비빔밥",        unit:"그릇",per:1,   cal:550, carb:85.0, protein:18.0, fat:12.0},
   {name:"된장찌개",      unit:"그릇",per:1,   cal:150, carb:10.0, protein:12.0, fat:5.0},
+  // ── 아래는 회원앱 "식단 기록"(텍스트 입력 → 예상 계산)을 위해 추가한 항목이다.
+  // 위 기존 36개 항목은 값·이름·단위를 그대로 두었다(기존에 저장된 음식 기록과 계속 같은 기준으로 계산되어야 하므로).
+  // 출처: 식품의약품안전처 식품영양성분DB의 대표값을 100g/1인분 기준으로 반올림한 근사치 — 모두 "예상값"으로만 사용한다.
+  {name:"보리밥",        unit:"g",   per:100, cal:123, carb:26.0, protein:2.8,  fat:0.5},
+  {name:"귀리밥",        unit:"g",   per:100, cal:129, carb:25.0, protein:3.5,  fat:1.4},
+  {name:"공기밥",        unit:"공기",per:1,   cal:300, carb:66.0, protein:5.6,  fat:0.6},
+  {name:"식빵",          unit:"장",  per:1,   cal:80,  carb:15.0, protein:2.6,  fat:1.0},
+  {name:"통밀빵",        unit:"장",  per:1,   cal:75,  carb:13.0, protein:3.2,  fat:1.1},
+  {name:"베이글",        unit:"개",  per:1,   cal:250, carb:49.0, protein:9.0,  fat:1.5},
+  {name:"떡",            unit:"g",   per:100, cal:214, carb:48.0, protein:3.9,  fat:0.5},
+  {name:"떡볶이",        unit:"인분",per:1,   cal:480, carb:88.0, protein:9.0,  fat:9.0},
+  {name:"라면",          unit:"개",  per:1,   cal:500, carb:79.0, protein:10.0, fat:16.0},
+  {name:"파스타",        unit:"인분",per:1,   cal:520, carb:70.0, protein:16.0, fat:18.0},
+  {name:"짜장면",        unit:"그릇",per:1,   cal:700, carb:110.0,protein:18.0, fat:20.0},
+  {name:"짬뽕",          unit:"그릇",per:1,   cal:660, carb:95.0, protein:26.0, fat:18.0},
+  {name:"칼국수",        unit:"그릇",per:1,   cal:520, carb:88.0, protein:18.0, fat:8.0},
+  {name:"냉면",          unit:"그릇",per:1,   cal:550, carb:105.0,protein:18.0, fat:5.0},
+  {name:"김치찌개",      unit:"그릇",per:1,   cal:250, carb:12.0, protein:16.0, fat:14.0},
+  {name:"순두부찌개",    unit:"그릇",per:1,   cal:280, carb:14.0, protein:18.0, fat:16.0},
+  {name:"미역국",        unit:"그릇",per:1,   cal:100, carb:5.0,  protein:8.0,  fat:5.0},
+  {name:"설렁탕",        unit:"그릇",per:1,   cal:420, carb:20.0, protein:38.0, fat:20.0},
+  {name:"삼계탕",        unit:"그릇",per:1,   cal:800, carb:40.0, protein:60.0, fat:44.0},
+  {name:"제육볶음",      unit:"인분",per:1,   cal:560, carb:20.0, protein:32.0, fat:38.0},
+  {name:"불고기",        unit:"인분",per:1,   cal:400, carb:14.0, protein:30.0, fat:24.0},
+  {name:"닭갈비",        unit:"인분",per:1,   cal:520, carb:26.0, protein:34.0, fat:30.0},
+  {name:"찜닭",          unit:"인분",per:1,   cal:600, carb:45.0, protein:36.0, fat:28.0},
+  {name:"치킨(후라이드)",unit:"조각",per:1,   cal:170, carb:8.0,  protein:12.0, fat:10.0},
+  {name:"치킨(양념)",    unit:"조각",per:1,   cal:200, carb:16.0, protein:11.0, fat:10.0},
+  {name:"피자",          unit:"조각",per:1,   cal:270, carb:30.0, protein:12.0, fat:11.0},
+  {name:"햄버거",        unit:"개",  per:1,   cal:500, carb:44.0, protein:25.0, fat:25.0},
+  {name:"김치",          unit:"g",   per:100, cal:18,  carb:3.0,  protein:1.5,  fat:0.3},
+  {name:"소고기(등심)",  unit:"g",   per:100, cal:250, carb:0.0,  protein:19.0, fat:19.0},
+  {name:"소고기(안심)",  unit:"g",   per:100, cal:160, carb:0.0,  protein:21.0, fat:8.0},
+  {name:"돼지목살",      unit:"g",   per:100, cal:220, carb:0.0,  protein:19.0, fat:16.0},
+  {name:"닭안심",        unit:"g",   per:100, cal:105, carb:0.0,  protein:23.5, fat:0.8},
+  {name:"오리고기",      unit:"g",   per:100, cal:230, carb:0.0,  protein:19.0, fat:17.0},
+  {name:"새우",          unit:"g",   per:100, cal:99,  carb:0.2,  protein:20.0, fat:1.4},
+  {name:"오징어",        unit:"g",   per:100, cal:92,  carb:3.0,  protein:16.0, fat:1.4},
+  {name:"명태",          unit:"g",   per:100, cal:80,  carb:0.0,  protein:17.5, fat:0.7},
+  {name:"참치캔(기름)",  unit:"개",  per:1,   cal:190, carb:0.0,  protein:20.0, fat:12.0},
+  {name:"훈제오리",      unit:"g",   per:100, cal:290, carb:1.0,  protein:19.0, fat:23.0},
+  {name:"소시지",        unit:"g",   per:100, cal:300, carb:5.0,  protein:13.0, fat:25.0},
+  {name:"베이컨",        unit:"g",   per:100, cal:390, carb:1.0,  protein:14.0, fat:37.0},
+  {name:"치즈",          unit:"장",  per:1,   cal:60,  carb:1.0,  protein:4.0,  fat:4.5},
+  {name:"우유(저지방)",  unit:"ml",  per:200, cal:90,  carb:10.0, protein:6.6,  fat:2.0},
+  {name:"두유",          unit:"ml",  per:190, cal:120, carb:14.0, protein:7.0,  fat:4.0},
+  {name:"플레인요거트",  unit:"g",   per:100, cal:65,  carb:8.0,  protein:3.5,  fat:2.5},
+  {name:"단호박",        unit:"g",   per:100, cal:66,  carb:15.0, protein:1.5,  fat:0.2},
+  {name:"옥수수",        unit:"개",  per:1,   cal:130, carb:28.0, protein:4.5,  fat:1.5},
+  {name:"양배추",        unit:"g",   per:100, cal:25,  carb:5.8,  protein:1.3,  fat:0.1},
+  {name:"오이",          unit:"개",  per:1,   cal:20,  carb:4.5,  protein:0.9,  fat:0.1},
+  {name:"파프리카",      unit:"개",  per:1,   cal:30,  carb:6.5,  protein:1.2,  fat:0.2},
+  {name:"버섯",          unit:"g",   per:100, cal:22,  carb:3.3,  protein:3.1,  fat:0.3},
+  {name:"김",            unit:"장",  per:1,   cal:5,   carb:0.3,  protein:0.6,  fat:0.2},
+  {name:"블루베리",      unit:"g",   per:100, cal:57,  carb:14.0, protein:0.7,  fat:0.3},
+  {name:"딸기",          unit:"g",   per:100, cal:32,  carb:7.7,  protein:0.7,  fat:0.3},
+  {name:"오렌지",        unit:"개",  per:1,   cal:62,  carb:15.0, protein:1.2,  fat:0.2},
+  {name:"포도",          unit:"g",   per:100, cal:69,  carb:18.0, protein:0.7,  fat:0.2},
+  {name:"수박",          unit:"g",   per:100, cal:30,  carb:7.6,  protein:0.6,  fat:0.2},
+  {name:"방울토마토",    unit:"g",   per:100, cal:22,  carb:4.8,  protein:1.1,  fat:0.2},
+  {name:"호두",          unit:"g",   per:30,  cal:196, carb:4.1,  protein:4.6,  fat:19.6},
+  {name:"땅콩버터",      unit:"g",   per:20,  cal:118, carb:4.0,  protein:5.0,  fat:10.0},
+  {name:"올리브유",      unit:"g",   per:10,  cal:88,  carb:0.0,  protein:0.0,  fat:10.0},
+  {name:"아메리카노",    unit:"잔",  per:1,   cal:10,  carb:2.0,  protein:0.5,  fat:0.0},
+  {name:"라떼",          unit:"잔",  per:1,   cal:180, carb:16.0, protein:9.0,  fat:9.0},
+  {name:"콜라",          unit:"ml",  per:250, cal:105, carb:27.0, protein:0.0,  fat:0.0},
+  {name:"맥주",          unit:"ml",  per:500, cal:200, carb:16.0, protein:1.5,  fat:0.0},
+  {name:"소주",          unit:"병",  per:1,   cal:400, carb:0.0,  protein:0.0,  fat:0.0},
+  {name:"초콜릿",        unit:"g",   per:100, cal:546, carb:61.0, protein:4.9,  fat:31.0},
+  {name:"아이스크림",    unit:"개",  per:1,   cal:200, carb:24.0, protein:3.5,  fat:10.0},
+  {name:"과자",          unit:"g",   per:100, cal:490, carb:62.0, protein:6.0,  fat:24.0},
+  {name:"에너지바",      unit:"개",  per:1,   cal:180, carb:24.0, protein:6.0,  fat:6.0},
 ];
 
 // 목표별 탄단지 비율 (칼로리 %)
@@ -29550,6 +30178,127 @@ function detectAccuracy(unit) {
   return "낮음";
 }
 const ACC_COLOR = {"높음":"#5EEAD4","중간":"#ffd166","낮음":"#ff9f43"};
+// ════════════════════════════════════════════
+// 음식명 + 섭취량 텍스트 → 예상 영양성분
+// ════════════════════════════════════════════
+// 이 프로젝트에는 외부 음식 API도, AI 호출 경로도 없다(Firebase Spark 요금제 · Cloud Functions 미사용).
+// 따라서 계산은 위 FOOD_DB(로컬 표준 음식 데이터)와 회원이 직접 입력한 값만 사용하고,
+// 매칭된 결과는 전부 "예상값"으로 표시한 뒤 회원이 확인·수정한 값만 저장한다(자동 확정 저장 금지).
+// 사진 분석은 이번 범위가 아니지만, estimateFoodLines()가 돌려주는 항목 형태(estimated/source/needsCheck)를
+// 그대로 쓰면 나중에 다른 추정 소스(사진·AI)를 source 값만 바꿔 끼울 수 있다.
+const FOOD_AMOUNT_UNITS = ["g", "kg", "ml", "l", "cc", "그램", "리터"];
+const FOOD_QTY_WORDS = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "반": 0.5 };
+// 자주 쓰는 다른 이름 → FOOD_DB의 정식 이름. FOOD_DB 자체는 건드리지 않고 검색만 넓힌다.
+const FOOD_ALIASES = {
+  "밥": "흰쌀밥", "쌀밥": "흰쌀밥", "백미밥": "흰쌀밥", "햇반": "공기밥",
+  "달걀": "계란", "계란후라이": "계란", "삶은계란": "계란", "에그": "계란",
+  "닭가슴": "닭가슴살", "닭찌찌": "닭가슴살", "치밥": "닭가슴살",
+  "웨이": "프로틴", "웨이프로틴": "프로틴", "단백질보충제": "프로틴", "프로틴쉐이크": "프로틴",
+  "고구마구이": "고구마", "찐고구마": "고구마", "삶은고구마": "고구마",
+  "그릭": "그릭요거트", "요거트": "플레인요거트",
+  "아메": "아메리카노", "카페라떼": "라떼", "카페라테": "라떼", "라테": "라떼",
+  "삼겹": "삼겹살", "목살": "돼지목살", "등심": "소고기(등심)", "안심": "소고기(안심)",
+  "참치": "참치캔(물)", "닭꼬치": "닭안심", "치킨": "치킨(후라이드)",
+  "샐러드팩": "샐러드", "방토": "방울토마토", "브로컬리": "브로콜리",
+};
+function normalizeFoodName(v) { return String(v || "").toLowerCase().replace(/[\s()（）[\]{}\-_.,·・/]/g, ""); }
+function foodUnitGroup(unit) { return FOOD_AMOUNT_UNITS.includes(String(unit || "").toLowerCase()) ? "amount" : "count"; }
+// 입력 단위를 FOOD_DB 기준 단위로 환산(kg→g, l→ml). 나머지는 그대로 둔다.
+function normalizeFoodAmount(amount, unit) {
+  const u = String(unit || "").toLowerCase();
+  if (u === "kg") return { amount: amount * 1000, unit: "g" };
+  if (u === "그램") return { amount, unit: "g" };
+  if (u === "l" || u === "리터") return { amount: amount * 1000, unit: "ml" };
+  if (u === "cc") return { amount, unit: "ml" };
+  return { amount, unit: u || "" };
+}
+// "현미밥 200g" / "계란 2개" / "밥 한공기" / "샐러드" / "회식 800kcal" 를 {name, amount, unit, directKcal}로 나눈다.
+function parseFoodInputLine(raw) {
+  const line = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!line) return null;
+  const m = line.match(/^(.*?)\s*([0-9]+(?:\.[0-9]+)?|한|두|세|네|다섯|반)\s*([가-힣a-zA-Z]*)$/);
+  if (!m || !String(m[1] || "").trim()) return { raw: line, name: line, amount: null, unit: "", directKcal: null };
+  const name = String(m[1]).trim();
+  const qty = FOOD_QTY_WORDS[m[2]] ?? Number(m[2]);
+  const rawUnit = String(m[3] || "").trim();
+  if (!Number.isFinite(qty) || qty <= 0) return { raw: line, name: line, amount: null, unit: "", directKcal: null };
+  if (/^kcal$/i.test(rawUnit) || rawUnit === "칼로리") return { raw: line, name, amount: null, unit: "", directKcal: qty };
+  const norm = normalizeFoodAmount(qty, rawUnit);
+  return { raw: line, name, amount: norm.amount, unit: norm.unit, directKcal: null };
+}
+// FOOD_DB에서 음식 찾기 — 정확 일치 → 별칭 → 부분 일치(가장 짧은 이름 우선) 순서.
+function findFoodItem(name) {
+  const key = normalizeFoodName(name);
+  if (!key) return null;
+  const exact = FOOD_DB.find(f => normalizeFoodName(f.name) === key);
+  if (exact) return exact;
+  const aliasTarget = FOOD_ALIASES[key];
+  if (aliasTarget) {
+    const byAlias = FOOD_DB.find(f => normalizeFoodName(f.name) === normalizeFoodName(aliasTarget));
+    if (byAlias) return byAlias;
+  }
+  const partial = FOOD_DB
+    .filter(f => { const n = normalizeFoodName(f.name); return n.includes(key) || key.includes(n); })
+    .sort((a, b) => a.name.length - b.name.length);
+  return partial[0] || null;
+}
+// 단위가 힌트가 되는 경우("밥 한공기" → 공기밥) 같은 단위를 쓰는 음식을 우선 찾는다.
+function findFoodItemByUnit(name, unit) {
+  const key = normalizeFoodName(name);
+  const u = String(unit || "").trim();
+  if (!key || !u) return null;
+  return FOOD_DB
+    .filter(f => f.unit === u && (normalizeFoodName(f.name).includes(key) || key.includes(normalizeFoodName(f.name))))
+    .sort((a, b) => a.name.length - b.name.length)[0] || null;
+}
+// 한 줄 → 저장 후보 항목. 확정 저장이 아니라 회원이 확인·수정할 "예상값"을 만든다.
+// matched=false면 칼로리를 임의로 만들어내지 않고 0으로 두어 회원이 직접 입력하게 한다.
+function estimateFoodLine(raw) {
+  const parsed = parseFoodInputLine(raw);
+  if (!parsed) return null;
+  const base = {
+    id: "f" + Date.now() + Math.random().toString(36).slice(2, 7),
+    name: parsed.name, raw: parsed.raw,
+    cal: 0, carb: 0, protein: 0, fat: 0,
+    estimated: true, matched: false, needsCheck: true, source: "manual", accuracy: "낮음",
+    amount: parsed.amount != null ? String(parsed.amount) : "", unit: parsed.unit || "",
+  };
+  if (parsed.directKcal) {
+    return { ...base, cal: Math.round(parsed.directKcal), amount: "1", unit: "회", source: "직접 입력", needsCheck: false, accuracy: "낮음" };
+  }
+  // 단위가 안 맞으면("밥 한공기"처럼) 같은 단위를 쓰는 음식을 먼저 찾아본다.
+  let item = findFoodItem(parsed.name);
+  if (parsed.unit && (!item || foodUnitGroup(parsed.unit) !== foodUnitGroup(item.unit))) {
+    item = findFoodItemByUnit(parsed.name, parsed.unit) || item;
+  }
+  if (!item) return base;
+  const sameGroup = !parsed.unit || foodUnitGroup(parsed.unit) === foodUnitGroup(item.unit);
+  const amount = parsed.amount != null && sameGroup ? parsed.amount : item.per;
+  const ratio = amount / item.per;
+  const r1 = v => Math.round(v * 10) / 10;
+  return {
+    ...base,
+    name: item.name, matched: true, source: "음식 DB",
+    amount: String(amount), unit: item.unit,
+    cal: Math.round(item.cal * ratio), carb: r1(item.carb * ratio), protein: r1(item.protein * ratio), fat: r1(item.fat * ratio),
+    accuracy: detectAccuracy(item.unit),
+    // 입력 단위와 DB 단위가 달라 기본 1회 제공량으로 대체한 경우에만 섭취량 확인을 요구한다.
+    needsCheck: parsed.amount == null || !sameGroup,
+  };
+}
+function estimateFoodLines(text) {
+  return String(text || "")
+    .split(/[\n,、]/).map(s => s.trim()).filter(Boolean)
+    .map(estimateFoodLine).filter(Boolean);
+}
+function sumFoodItems(items = []) {
+  const r1 = v => Math.round(v * 10) / 10;
+  const t = (items || []).reduce((a, f) => ({
+    cal: a.cal + (Number(f.cal) || 0), carb: a.carb + (Number(f.carb) || 0),
+    protein: a.protein + (Number(f.protein ?? f.prot) || 0), fat: a.fat + (Number(f.fat) || 0),
+  }), { cal: 0, carb: 0, protein: 0, fat: 0 });
+  return { cal: Math.round(t.cal), carb: r1(t.carb), protein: r1(t.protein), fat: r1(t.fat) };
+}
 
 function getSupplFeedback(supps) {
   const out = [];
@@ -31127,6 +31876,13 @@ const GOAL_TYPES = [
 
 function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSaveBodyData }) {
   const goal = bodyData?.goal || {};
+  // 목표일 표시는 공용 판단(buildGoalDeadlineState) 하나만 쓴다 — 화면마다 다른 결과가 나오지 않게 한다.
+  const goalDeadlineState = buildGoalDeadlineState({
+    targetDate: goal.targetDate,
+    currentWeight: getWeightProgress(bodyData).latestWeight ?? toPositiveNumber(goal.currentWeight),
+    targetWeight: toPositiveNumber(goal.targetWeight),
+    goalDirection: getGoalWeightDirection(getAnalysisPersona(goal.goal || member?.goal || "")),
+  });
 
   function makeReportCards() {
     const cards  = [];
@@ -31277,7 +32033,7 @@ function GoalManageScreen({ member, sessions, bodyData, onBack, showToast, onSav
                 <Mo c={goalProgress.offTrack?"#ffd166":"#cbd5e1"} s={10} style={{display:"block"}}>
                   {`시작 ${goalProgress.start}kg → 현재 ${goalProgress.current}kg (목표 ${goalProgress.target}kg${goalProgress.offTrack?` · ${goalProgress.moved>0?"+":""}${goalProgress.moved}kg`:""})`}
                 </Mo>
-                <Mo c="#94a3b8" s={10} style={{display:"block",marginTop:2}}>{goal.targetDate?`D-${Math.max(0,Math.ceil((new Date(goal.targetDate+"T00:00:00")-new Date())/86400000))}일 남음`:"목표일 미설정"}</Mo>
+                <Mo c="#94a3b8" s={10} style={{display:"block",marginTop:2}}>{goalDeadlineState.hasDate?`${goalDeadlineState.statusLabel} · ${goalDeadlineState.daysLabel}${goalDeadlineState.detailLabel?" · "+goalDeadlineState.detailLabel:""}`:"목표일 미설정"}</Mo>
               </div>
             </div>
           )}

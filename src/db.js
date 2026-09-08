@@ -7,6 +7,10 @@
 //    /members/{id}/bodyCheck/main         ← 바디체크
 //    /members/{id}/nutrition/meta         ← 영양 메타 (목표, 즐겨찾기)
 //    /members/{id}/nutrition/{YYYY-MM-DD} ← 날짜별 식단
+//        · meals{끼니:[음식]}  ← 관리자 "음식" 탭 + 회원앱 "식단 기록"이 공유하는 유일한 식단 저장 위치
+//        · totalKcal           ← 그날의 총섭취칼로리(기존 필드). 식단 저장 시 식단 합계로 함께 갱신된다
+//        · dietKcal/dietProtein/dietCarb/dietFat ← 식단(meals)에서만 계산한 합계(분석 보조용, 신규)
+//        · memberInputKcal     ← 회원이 직접 입력한 하루 총칼로리(기존 필드, 그대로 유지)
 //    /members/{id}/counselNotes/main      ← 상담 리포트: 대표 상담 메모(트레이너 전용)
 //    /members/{id}/memberOnboarding/main  ← 회원앱 온보딩 답변(v2 맵 포함) — 사전 문진의 단일 원본
 //    /members/{id}/personalWorkouts/{id}  ← 개인운동 기록(회원이 직접 작성, 트레이너는 읽기만)
@@ -1861,6 +1865,82 @@ export async function saveNutrition(memberId, data) {
     console.error("[DB] saveNutrition error:", e.message, `memberId=${memberId}`);
     throw new Error("영양 관리 저장 실패: " + e.message);
   }
+}
+
+
+// ── 식단 기록(회원앱 "식단 기록" / 관리자 "음식" 탭 공용) ──────────────────
+// 저장 위치는 기존 구조 그대로다: members/{id}/nutrition/{YYYY-MM-DD}.meals[끼니][]
+// 새 컬렉션을 만들지 않고, 기존 일일 총칼로리(totalKcal)와 호환되도록 식단 합계를 함께 갱신한다.
+//  - dietKcal/dietProtein/dietCarb/dietFat : 식단(meals)에서만 계산한 합계(관리자 식단 분석의 보조 지표)
+//  - totalKcal                             : 기존 그래프·분석(getKcalLogs)이 이미 읽고 있는 필드. 식단 합계로 덮어써
+//                                            새 기록이 기존 화면에 그대로 반영되게 한다.
+// saveNutrition()은 트레이너 소유권(verifyMemberOwnership)을 요구하므로 회원앱에서 쓸 수 없다.
+// 이 함수는 requireUid()만 하고 실제 권한은 Firestore Rules(nutrition: canAccessMember)가 판정한다.
+function sumMealsForSave(meals = {}) {
+  let kcal = 0, carb = 0, protein = 0, fat = 0, count = 0;
+  Object.values(meals || {}).forEach(list => {
+    (Array.isArray(list) ? list : []).forEach(f => {
+      const c = Number(f?.cal); if (Number.isFinite(c)) kcal += c;
+      const cb = Number(f?.carb); if (Number.isFinite(cb)) carb += cb;
+      const pr = Number(f?.protein ?? f?.prot); if (Number.isFinite(pr)) protein += pr;
+      const ft = Number(f?.fat); if (Number.isFinite(ft)) fat += ft;
+      count += 1;
+    });
+  });
+  const r1 = v => Math.round(v * 10) / 10;
+  return { kcal: Math.round(kcal), carb: r1(carb), protein: r1(protein), fat: r1(fat), count };
+}
+
+export async function saveMemberDietMeal(memberId, dateKey, mealType, items = []) {
+  requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ""))) throw new Error("날짜 형식이 올바르지 않습니다.");
+  if (!mealType) throw new Error("식사 구분이 없습니다.");
+  dbLog("saveMemberDietMeal", `memberId=${memberId} date=${dateKey} meal=${mealType} items=${items.length}`);
+  const ref = doc(db, "members", memberId, "nutrition", dateKey);
+  const snap = await getDoc(ref);
+  const cur = snap.exists() ? snap.data() : {};
+  const nextItems = (items || []).map(f => clean({
+    id: f.id || ("f" + Date.now() + Math.random().toString(36).slice(2, 7)),
+    name: String(f.name || "").trim(),
+    amount: f.amount === "" || f.amount === undefined ? null : String(f.amount),
+    unit: f.unit || "",
+    cal: Number(f.cal) || 0,
+    carb: Number(f.carb) || 0,
+    protein: Number(f.protein ?? f.prot) || 0,
+    fat: Number(f.fat) || 0,
+    // 추정값 표시용 메타 — 확정 데이터가 아니라 "회원이 확인한 예상값"임을 기록에 남긴다.
+    estimated: f.estimated !== false,
+    source: f.source || "manual",
+    accuracy: f.accuracy || "낮음",
+    memo: f.memo || null,
+    updatedAt: new Date().toISOString(),
+  })).filter(f => f.name);
+  // setDoc(merge:true)는 map을 키 단위로 병합하므로, 끼니를 통째로 비울 때도 키를 빼지 않고
+  // 빈 배열을 그대로 써야 삭제가 실제로 저장된다(키를 빼면 기존 음식이 그대로 남는다).
+  const meals = { ...(cur.meals || {}), [mealType]: nextItems };
+  const totals = sumMealsForSave(meals);
+  const payload = {
+    meals,
+    dietKcal: totals.kcal, dietCarb: totals.carb, dietProtein: totals.protein, dietFat: totals.fat,
+    dietItemCount: totals.count,
+    dietUpdatedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (totals.kcal > 0) {
+    payload.totalKcal = totals.kcal;
+    payload.source = "member-diet";
+  } else if (Number(cur.totalKcal) > 0 && Number(cur.totalKcal) === Number(cur.dietKcal)) {
+    // 저장돼 있던 총칼로리가 식단에서 나온 값일 때만 함께 지운다.
+    // 회원이 따로 입력한 하루 총칼로리(memberInputKcal 기반)는 절대 건드리지 않는다.
+    payload.totalKcal = deleteField();
+  }
+  await setDoc(ref, payload, { merge: true });
+  if (totals.kcal > 0) {
+    await touchMemberActivities(memberId, [{
+      type: "kcal", label: "식단 기록", value: `${totals.kcal.toLocaleString()}kcal`, dateKey,
+    }]);
+  }
+  return { meals, dietKcal: totals.kcal, dietProtein: totals.protein, totalKcal: totals.kcal > 0 ? totals.kcal : null };
 }
 
 // ════════════════════════════════════════════════════

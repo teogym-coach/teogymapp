@@ -153,7 +153,7 @@ try {
   const sliceWeeks = app.slice(app.indexOf('function weeksUntilDate'), app.indexOf('function getGoalPace'));
   const slicePace = app.slice(app.indexOf('function getGoalPace'), app.indexOf('const STEP_RANGE_OPTIONS'));
   const sliceGoal2 = app.slice(app.indexOf('function getAnalysisPersona'), app.indexOf('function average(arr=[])'));
-  startWeightLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceWeeks}\n${slicePace}\n${sliceGoal2}\nreturn { getMemberStartWeight, getGoalPace, getWeightRemaining, getGoalWeightDirection, getAnalysisPersona, GOAL_PACE_LABELS, getWeightGoalProgress, goalToneColor };`)();
+  startWeightLib = new Function(`${sliceNum}\n${sliceRec}\n${sliceWeeks}\n${slicePace}\n${sliceGoal2}\nreturn { getMemberStartWeight, getGoalPace, getWeightRemaining, getGoalWeightDirection, getAnalysisPersona, GOAL_PACE_LABELS, getWeightGoalProgress, goalToneColor, buildGoalDeadlineState };`)();
 } catch (e) {
   console.error('[regression] 시작 체중/목표 페이스 헬퍼 추출 실패:', e.message);
 }
@@ -202,7 +202,7 @@ try {
   const sliceKcal = app.slice(app.indexOf('function getKcalLogs'), app.indexOf('function getRecentKcalLogsByDays'));
   kcalLogsLib = new Function(`${sliceNum}
 ${sliceKcal}
-return { getKcalLogs };`)();
+return { getKcalLogs, sumDayMeals, getProteinLogs };`)();
 } catch (e) {
   console.error('[regression] 섭취 칼로리 집계 헬퍼 추출 실패:', e.message);
 }
@@ -1751,9 +1751,159 @@ const checks = [
     app.includes('<CardioEntryForm key={yesterdayCardio?.id||"new"} p={p} initialDate={yesterday} initialLog={yesterdayCardio} onSaved={()=>setSheet(null)}/>')
   ],
   ['관리자앱 건강관리 허브: 유산소 탭 연동(최근 기록/주간 요약/Zone2/체중 비교)',
-    app.includes('function AdminCardioSection(') &&
-    app.includes('{key:"유산소",   role:"cardio"') &&
+    app.includes('function AdminCardioSection({ member, bodyData, cardioLogs = null })') &&
+    app.includes('{ key: "유산소", role: "cardio", icon: "🏃" }') &&
     app.includes('cur.role==="cardio" && <AdminCardioSection')
+  ],
+
+  // ── 건강관리 허브 메뉴 단순화 ──
+  // 상단 메뉴는 6개(대시보드/기록/식단 분석/유산소/목표/인바디)만 남기고,
+  // 음식·영양제·즐겨찾기는 식단 분석 안, 캘린더·설문은 기록 탭 안으로 옮겼다. 데이터는 하나도 지우지 않았다.
+  ["건강관리 허브 메뉴: 상단은 대시보드/기록/식단 분석/유산소/목표/인바디 6개만 노출",
+    (() => {
+      // 허브 상단 메뉴 정의(HEALTH_HUB_TABS)만 잘라서 확인한다 —
+      // NutritionScreen 내부 탭(오늘/기록/영양제/즐겨찾기)은 식단 분석 안 상세 섹션으로 그대로 살아 있어야 하므로
+      // 파일 전체에서 이름이 사라졌는지 보면 안 된다.
+      const from = app.indexOf("const HEALTH_HUB_TABS = [");
+      if (from < 0) return false;
+      const block = app.slice(from, app.indexOf("];", from));
+      const keys = [...block.matchAll(/key: "([^"]+)"/g)].map(m => m[1]);
+      return keys.join("|") === "대시보드|기록|식단 분석|유산소|목표|인바디";
+    })()
+  ],
+  ["건강관리 허브: 예전 탭 이름(AI 칼로리 분석·음식·영양제·즐겨찾기·캘린더·설문)으로 들어와도 새 탭으로 연결된다",
+    app.includes("const HEALTH_HUB_TAB_ALIASES") &&
+    app.includes('"AI 칼로리 분석": "식단 분석"') &&
+    app.includes('"캘린더": "기록", "설문": "기록"') &&
+    app.includes("function resolveHealthHubTab(key)")
+  ],
+  ["건강관리 허브: 음식·영양제·즐겨찾기 화면(NutritionScreen)은 삭제하지 않고 식단 분석 안 상세 섹션으로 유지 — 기존 데이터 조회·수정 경로 보존",
+    app.includes("function NutritionScreen(") &&
+    app.includes("🍽️ 상세 식단 기록 (음식 · 영양제 · 즐겨찾기)") &&
+    app.includes("<NutritionScreen member={member} nutritionData={nutritionData} onSaveNutrition={onSaveNutrition}")
+  ],
+  ["건강관리 허브: 캘린더·설문은 기록 탭 안 하위 화면으로 이동(컴포넌트·저장 로직 그대로 재사용)",
+    app.includes('const [view, setView] = useState("입력"); // 입력 | 캘린더 | 설문') &&
+    app.includes('{view==="캘린더" && <ChangeCalendar sessions={sessions} records={bodyData?.records||[]} />}') &&
+    app.includes('{view==="설문" && <SurveyAnalysis member={member} bodyData={bodyData} sessions={sessions} onSave={onSaveBodyData} showToast={showToast} />}')
+  ],
+  ["건강관리 허브: iPad/모바일에서 메뉴가 잘리지 않도록 가로 스크롤 대신 줄바꿈으로 표시",
+    app.includes('<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>')
+  ],
+
+  // ── 대시보드 우선순위 재정리 ──
+  ["건강관리 대시보드: 권장 섭취 칼로리를 메인으로 두고 BMR/TDEE는 보조 한 줄로 내린다",
+    app.includes("function HealthDashboardTab(") &&
+    app.includes("권장 섭취 칼로리 · ") &&
+    app.includes("기초대사량 BMR") && app.includes("유지 칼로리 TDEE")
+  ],
+  ["건강관리 대시보드: 최근 7일 실제 평균 섭취와 권장 대비 상태를 공용 로직(buildCalorieIntakeSummary)으로만 판단한다",
+    app.includes("const intake = buildCalorieIntakeSummary({ avg7, targetKcal: target.value, goalDirection, recentCount: recent7.length });")
+  ],
+  ["건강관리 대시보드: 최근 유산소·최근 통증/근육통·회원 메모를 함께 보여준다",
+    app.includes("🏃 최근 유산소") && app.includes("📍 최근 통증 · 근육통") && app.includes("📝 회원이 남긴 메모")
+  ],
+
+  // ── 목표 날짜 상태 ──
+  ["목표 날짜: 판단 로직은 buildGoalDeadlineState 한 곳만 쓰고, 화면별로 D-day를 다시 계산하지 않는다",
+    app.includes("function buildGoalDeadlineState({ targetDate, currentWeight, targetWeight, goalDirection") &&
+    !app.includes("`D-${Math.max(0,Math.ceil((new Date(goal.targetDate")
+  ],
+  startWeightScenario("목표 날짜: 목표일 전이면 남은 일수를 표시한다", lib => {
+    const st = lib.buildGoalDeadlineState({ targetDate: "2026-07-22", currentWeight: 84, targetWeight: 81, goalDirection: "down", today: "2026-07-12" });
+    return st.phase === "before" && st.daysLeft === 10 && st.daysLabel === "10일 남음" && st.status === "ongoing";
+  }),
+  startWeightScenario("목표 날짜: 목표일이 지났고 목표를 달성했으면 '목표 달성 · 목표 체중 유지 중'으로 표시한다", lib => {
+    const st = lib.buildGoalDeadlineState({ targetDate: "2026-07-22", currentWeight: 81, targetWeight: 81, goalDirection: "down", today: "2026-09-08" });
+    return st.phase === "after" && st.status === "achieved" && st.statusLabel === "목표 달성" && st.detailLabel === "목표 체중 유지 중" && st.daysLabel === "목표일 48일 경과";
+  }),
+  startWeightScenario("목표 날짜: 목표일이 지났는데 목표 미달성이면 '목표 기간 종료 · 새 목표 설정 필요'로 표시한다", lib => {
+    const st = lib.buildGoalDeadlineState({ targetDate: "2026-07-22", currentWeight: 84.5, targetWeight: 81, goalDirection: "down", today: "2026-09-08" });
+    return st.phase === "after" && st.status === "expired" && st.statusLabel === "목표 기간 종료" && st.detailLabel === "새 목표 설정 필요" && st.tone === "warn";
+  }),
+  startWeightScenario("목표 날짜: 목표일이 지나도 '0일 남음'으로 뭉개지지 않는다", lib => {
+    const st = lib.buildGoalDeadlineState({ targetDate: "2026-07-22", currentWeight: 84.5, targetWeight: 81, goalDirection: "down", today: "2026-09-08" });
+    return st.daysLeft === -48 && !st.daysLabel.includes("0일 남음");
+  }),
+  startWeightScenario("목표 날짜: 증량 목표는 목표 이상, 체중 유지 목표는 ±1kg 범위로 달성을 판정한다", lib => {
+    const bulk = lib.buildGoalDeadlineState({ targetDate: "2026-01-01", currentWeight: 75, targetWeight: 74, goalDirection: "up", today: "2026-09-08" });
+    const keep = lib.buildGoalDeadlineState({ targetDate: "2026-01-01", currentWeight: 70.6, targetWeight: 70, goalDirection: "stable", today: "2026-09-08" });
+    return bulk.status === "achieved" && keep.status === "achieved";
+  }),
+  startWeightScenario("목표 날짜: 현재 체중이 없으면 달성 여부를 단정하지 않는다", lib => {
+    const st = lib.buildGoalDeadlineState({ targetDate: "2026-07-22", currentWeight: null, targetWeight: 81, goalDirection: "down", today: "2026-09-08" });
+    return st.status === "unknown" && st.achieved === null && st.tone === "unknown";
+  }),
+
+  // ── 회원앱 식단 기록 ──
+  ["회원앱 식단 기록: 저장은 기존 nutrition/{날짜}.meals 경로만 쓰고 새 컬렉션을 만들지 않는다",
+    db.includes("export async function saveMemberDietMeal(memberId, dateKey, mealType, items = [])") &&
+    db.includes('const ref = doc(db, "members", memberId, "nutrition", dateKey);') &&
+    db.includes("const meals = { ...(cur.meals || {}), [mealType]: nextItems };")
+  ],
+  ["회원앱 식단 기록: 하루 총칼로리(totalKcal)를 식단 합계로 함께 갱신해 기존 그래프·분석에 자동 반영된다",
+    db.includes("payload.totalKcal = totals.kcal;") &&
+    db.includes("dietKcal: totals.kcal, dietCarb: totals.carb, dietProtein: totals.protein, dietFat: totals.fat,")
+  ],
+  ["회원앱 식단 기록: 음식을 모두 지워도 회원이 직접 입력한 하루 총칼로리는 지우지 않는다",
+    db.includes("Number(cur.totalKcal) > 0 && Number(cur.totalKcal) === Number(cur.dietKcal)") &&
+    db.includes("payload.totalKcal = deleteField();")
+  ],
+  ["회원앱 식단 기록: 알림 피드는 기존 kcal 타입을 재사용한다(신규 타입 추가 없음)",
+    db.includes('type: "kcal", label: "식단 기록"')
+  ],
+  ["회원앱 식단 기록: 자동 예상 → 회원 확인·수정 → 저장 흐름(추정값 자동 확정 저장 금지)",
+    app.includes("function MemberDietSheet(") &&
+    app.includes("예상 칼로리 계산하기") &&
+    app.includes("확인하고 저장") &&
+    app.includes('{f.pending ? (f.matched ? "예상값" : "직접 입력") : "저장됨"}')
+  ],
+  ["회원앱 식단 기록: 아침·점심·저녁·간식 단위로 기록하고 하루 섭취/권장 kcal을 함께 보여준다",
+    app.includes('const MEMBER_MEAL_TYPES = ["아침", "점심", "저녁", "간식"];') &&
+    app.includes("{formatKcalNumber(dayKcal)} <em>/ {targetKcal ? formatKcalNumber(targetKcal) : \"-\"} kcal</em>")
+  ],
+  ["회원앱 식단 기록: 기존에 운동 전/운동 후로 저장된 끼니도 계속 보인다(기존 데이터 숨김 금지)",
+    app.includes("const mealTypes = [...new Set([...MEMBER_MEAL_TYPES, ...Object.keys(meals).filter(k => (meals[k] || []).length)])];")
+  ],
+
+  // ── 음식 칼로리 계산 방식 ──
+  // 이 프로젝트에는 외부 음식 API도 AI 호출 경로도 없다(Spark 요금제 · Cloud Functions 미사용).
+  // 따라서 로컬 FOOD_DB + 회원 직접 입력만 쓰고, 결과는 항상 "예상값"으로 표시해야 한다.
+  ["음식 칼로리: 외부 API/AI 호출 없이 로컬 FOOD_DB와 직접 입력만 사용한다",
+    app.includes("const FOOD_DB = [") &&
+    app.includes("function estimateFoodLine(raw)") &&
+    !/fetch\(\s*['"`]https:\/\/(?!identitytoolkit)/.test(app)
+  ],
+  ["음식 칼로리: 매칭 실패 시 칼로리를 지어내지 않고 0으로 두어 회원이 직접 입력하게 한다",
+    app.includes("cal: 0, carb: 0, protein: 0, fat: 0,") &&
+    app.includes("음식 DB에 없는 항목입니다. 칼로리를 직접 입력해 주세요.")
+  ],
+  ["음식 칼로리: 기존 FOOD_DB 36개 항목의 값·이름·단위는 그대로 두고 추가만 했다",
+    app.includes('{name:"현미밥",        unit:"g",   per:100, cal:111, carb:23.0, protein:2.6,  fat:0.9},') &&
+    app.includes('{name:"닭가슴살",      unit:"g",   per:100, cal:109, carb:0.0,  protein:23.0, fat:1.2},') &&
+    app.includes('{name:"계란",          unit:"개",  per:1,   cal:75,  carb:0.6,  protein:6.3,  fat:5.0},')
+  ],
+
+  // ── 관리자 식단 분석 ──
+  ["식단 분석: 기록이 없으면 그래프·평균을 만들지 않고 '식단 기록 없음'을 명확히 표시한다",
+    app.includes("function AdminDietAnalysisSection(") &&
+    app.includes("식단 기록 없음") &&
+    app.includes("allLogs.length === 0 ? (")
+  ],
+  ["식단 분석: 오늘 섭취·권장·최근 7일/30일 평균·기록 일수·권장 대비 상태·날짜별 그래프를 표시한다",
+    app.includes('kpi("오늘 섭취"') && app.includes('kpi("권장 섭취"') &&
+    app.includes('kpi("최근 7일 평균"') && app.includes('kpi("최근 30일 평균"') &&
+    app.includes('kpi("권장 대비 상태"') && app.includes('kpi("총 기록 일수"') &&
+    app.includes("📈 날짜별 섭취 칼로리")
+  ],
+  ["식단 분석: 단백질 기록이 충분할 때만(3일 이상) 평균 단백질을 보조 표시한다",
+    app.includes("const avgProtein = proteinRows.length >= 3 ?")
+  ],
+
+  ['건강관리 허브: 유산소 기록을 허브에서 한 번만 읽어 대시보드·유산소 탭이 함께 쓴다(중복 조회 방지)',
+    app.includes('getCardioLogs(member.id,60).then(v=>alive&&setCardioLogs(v||[]))') &&
+    app.includes('cardioLogs={cardioLogs}') &&
+    app.includes('cardioLogs ? Promise.resolve(cardioLogs) : getCardioLogs(member.id, 60)')
   ],
 
   // ── 회원앱 PC 크롬 스크롤 고정 버그 재발 방지 ──
@@ -6727,6 +6877,46 @@ const checks = [
     }
   ),
 
+  // ── 식단 기록(회원앱) ↔ 기존 칼로리 데이터 호환 ──
+  // 새 컬렉션을 만들지 않고 기존 nutrition/{날짜}.meals + totalKcal 구조를 그대로 쓴다.
+  // 기존 기록만 있는 회원 / 식단 기록만 있는 회원 / 둘 다 있는 회원이 모두 깨지지 않아야 한다.
+  kcalLogsScenario('식단 호환: 레거시 총칼로리 기록만 있는 회원은 기존과 동일하게 집계된다',
+    lib => {
+      const rows = lib.getKcalLogs({ logs: [{ date: '2026-09-01', kcal: 1900 }], dates: { '2026-09-02': { memberInputKcal: 2100 } } });
+      return rows.length === 2 && rows[0].kcal === 1900 && rows[1].kcal === 2100;
+    }
+  ),
+  kcalLogsScenario('식단 호환: 총칼로리 필드 없이 음식(meals)만 저장된 날짜도 식단 합계로 집계된다(기존 음식 탭 기록 복구)',
+    lib => {
+      const rows = lib.getKcalLogs({ dates: { '2026-09-03': { meals: { '아침': [{ cal: 300 }], '점심': [{ cal: 520 }, { cal: 180 }] } } } });
+      return rows.length === 1 && rows[0].kcal === 1000 && rows[0].source === 'meals';
+    }
+  ),
+  kcalLogsScenario('식단 호환: 직접 입력한 하루 총칼로리(totalKcal)가 있으면 그 값이 우선한다(기존 우선순위 유지)',
+    lib => {
+      const rows = lib.getKcalLogs({ dates: { '2026-09-04': { totalKcal: 2000, meals: { '아침': [{ cal: 300 }] } } } });
+      return rows.length === 1 && rows[0].kcal === 2000;
+    }
+  ),
+  kcalLogsScenario('식단 호환: 기록이 없는 회원은 빈 배열 — 가짜 값을 만들지 않는다',
+    lib => lib.getKcalLogs({}).length === 0 && lib.getKcalLogs({ dates: { '2026-09-05': { meals: {} } } }).length === 0
+  ),
+  kcalLogsScenario('식단 합계: 같은 날 여러 끼(아침·점심·저녁·간식)를 모두 더해 하루 총 kcal을 만든다',
+    lib => {
+      const t = lib.sumDayMeals({ meals: { '아침': [{ cal: 300, protein: 20 }], '점심': [{ cal: 700, protein: 35 }], '저녁': [{ cal: 600, protein: 40 }], '간식': [{ cal: 220, protein: 5 }] } });
+      return t.kcal === 1820 && t.protein === 100 && t.count === 4;
+    }
+  ),
+  kcalLogsScenario('식단 합계: 음식 삭제 후 남은 항목만 합산된다(수정·삭제 반영)',
+    lib => lib.sumDayMeals({ meals: { '점심': [{ cal: 700 }] } }).kcal === 700 && lib.sumDayMeals({ meals: { '점심': [] } }).kcal === 0
+  ),
+  kcalLogsScenario('단백질 집계: 식단 합계(dietProtein 없어도 meals)와 기존 빠른 기록(logs[].prot)을 같은 규칙으로 모은다',
+    lib => {
+      const rows = lib.getProteinLogs({ logs: [{ date: '2026-09-01', prot: 90 }], dates: { '2026-09-02': { meals: { '점심': [{ cal: 500, protein: 42 }] } }, '2026-09-03': { dietProtein: 120 } } });
+      return rows.length === 3 && rows[0].protein === 90 && rows[1].protein === 42 && rows[2].protein === 120;
+    }
+  ),
+
   // ── 분석 탭 "전날 생활 ↔ 오늘 상태" 카드 UI + 반응형(기존 breakpoint 재사용) ──
   ['분석 탭: 전날 생활(칼로리·걸음수·유산소)과 오늘 몸 상태(체중·컨디션·통증)를 한 행에서 좌우로 비교하는 카드로 렌더한다',
     app.includes('<MCard title="전날 생활 ↔ 오늘 상태">') &&
@@ -7865,6 +8055,8 @@ function runRenderTests() {
     ['회원앱 자동 추천 미리보기 일치', path.join(root, 'tests', 'render', 'member-auto-routine-parity.test.js')],
     ['회원앱 자동 추천 미리보기 화면', path.join(root, 'tests', 'render', 'member-auto-routine-screen.test.js')],
     ['회원앱 자동 추천 RPE·sessionType 데이터 경로', path.join(root, 'tests', 'render', 'member-auto-routine-rpe.test.js')],
+    ['회원앱 식단 기록 저장·수정·삭제·합산', path.join(root, 'tests', 'render', 'member-diet-log.test.js')],
+    ['관리자 건강관리 허브 대시보드·식단 분석', path.join(root, 'tests', 'render', 'health-hub-dashboard.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

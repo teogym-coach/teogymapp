@@ -18380,6 +18380,20 @@ function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], persona
   return byPart;
 }
 
+// 관리자 "최근 개인운동" 카드의 "근육통 미입력" 힌트 — 회원앱 근육통 입력이 D+1/D+2 창 제한 없이 언제든
+// 가능해진 뒤로(PersonalWorkoutStatusSection), getPersonalWorkoutSorenessWindow.withinAutoWindow(days===1||2만
+// true)를 그대로 재사용하면 D+3 이후엔 회원이 여전히 입력할 수 있는데도 관리자에게 "미입력" 사실이 아예
+// 안 보이는 모순이 생긴다. withinAutoWindow는 회원앱 timing 배지 판정용으로 계속 쓰이므로 그 의미는 바꾸지
+// 않고, 이 힌트만을 위한 별도 최근성 기준을 둔다: 당일(D0, 아직 입력할 시간이 없었음)은 제외하고
+// D+1~D+PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS까지만 노출한다. 그 이후까지 계속 띄우면 오래된
+// 개인운동 기록에 "미입력" 경고가 끝없이 누적돼 화면이 지저분해지므로(회원이 사실상 입력할 가능성도 낮음)
+// 일정 기간이 지나면 조용히 사라지게 한다(HUB_PAIN_RECENCY_DAYS·APP_USAGE_INACTIVE_GRACE_DAYS와 같은 7일).
+const PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS = 7;
+function shouldShowPersonalWorkoutSorenessMissingHint(sorenessWindow) {
+  const days = sorenessWindow?.daysAfterWorkout;
+  return days != null && days >= 1 && days <= PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS;
+}
+
 function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsage, bodyData, nutritionData, cardioLogs=[], personalWorkouts=[], personalSorenessMap={}, ptRegistrations=[], onPtRegistrationsChange, onSyncPtBalance, dataLoaded=false, loading, setScreen, onEdit, onMemberPatch, onEditSession, onPublish, onUnpublish, onSendPair, scrollTarget=null, onScrollTargetDone, showToast, onOpenUnreadHistory, liveMembersById={} }) {
   // 홈에서 "일정 미정"을 지정하면 Firestore(members 실시간 구독)에만 반영되고, 이 화면의 member prop은
   // 회원 목록/검색에서 "그 시점의" 회원 객체를 그대로 넘겨받아 최신값이 아닐 수 있다(goHub가 회원 문서를
@@ -19141,8 +19155,10 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
                             {soreness.overallLevel>0&&soreness.bodyParts.length>0&&` · ${soreness.bodyParts.map(bp=>`${bp.part} ${bp.level}`).join(" · ")}`}
                           </span>
                         )}
-                        {/* 운동 당일에는 미입력을 주의사항처럼 노출하지 않는다 — withinAutoWindow는 다음날/다다음날에만 true */}
-                        {!soreness && sorenessWindow.withinAutoWindow && <span style={{fontSize:11.5,fontWeight:700,color:DB.faint}}>근육통 미입력</span>}
+                        {/* 운동 당일(아직 입력할 시간이 없었음)과, 너무 오래돼 사실상 입력을 기대하기 어려운 시점은 제외한다.
+                            withinAutoWindow(D+1/D+2만 true)는 회원앱 timing 배지 판정용으로 의미가 좁혀졌으므로 여기서는
+                            더 이상 쓰지 않고, 이 힌트 전용 최근성 기준(shouldShowPersonalWorkoutSorenessMissingHint)을 쓴다. */}
+                        {!soreness && shouldShowPersonalWorkoutSorenessMissingHint(sorenessWindow) && <span style={{fontSize:11.5,fontWeight:700,color:DB.faint}}>근육통 미입력</span>}
                         {reasons.length>0 && (
                           <span style={{fontSize:10.5,fontWeight:800,color:"#fff",background:DB.warning,borderRadius:999,padding:"2px 8px"}}>주의 · {reasons.join(" · ")}</span>
                         )}

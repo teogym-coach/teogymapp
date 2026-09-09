@@ -389,14 +389,17 @@ function visitAtScenario(name, fn) {
 let hubAwarenessLib = null;
 try {
   const sliceKoreaDate = app.slice(app.indexOf('function getKoreaDateString'), app.indexOf('function getKoreaYesterdayDateString'));
-  const sliceDaysDiff = app.slice(app.indexOf('function koreaDateDaysDiff(fromDateStr,toDateStr){'), app.indexOf('function getPersonalWorkoutCompletionDateKey'));
+  // getPersonalWorkoutSorenessWindow까지 포함해 관리자 "근육통 미입력" 힌트 판정(shouldShowPersonalWorkoutSorenessMissingHint,
+  // sliceAwareness에 포함됨)을 실제 workout 객체로 끝까지 실행 검증할 수 있게 한다.
+  // getPersonalWorkoutCompletionDateKey가 toPersonalWorkoutDate를 쓰므로 그 정의부터 함께 자른다.
+  const sliceDaysDiff = app.slice(app.indexOf('function toPersonalWorkoutDate'), app.indexOf('function normalizePersonalWorkoutSoreness'));
   const sliceNormalize = app.slice(app.indexOf('function normalizePersonalWorkoutSoreness'), app.indexOf('function sorenessTimingLabel'));
   const sliceLevelDesc = app.slice(app.indexOf('function sorenessTimingLabel'), app.indexOf('function getPersonalWorkoutAttentionReasons'));
   const sliceFeedbackParts = app.slice(app.indexOf('function memberFeedbackParts(existing={})'), app.indexOf('function formatSorenessBodyParts'));
   // 건강 탭 상시 근육통(memberCheckins)도 같은 참고 표시에 들어가므로 그 읽기 헬퍼 원본까지 같은 스코프에 넣는다(JSX 직전까지만 자른다).
   const sliceCheckinSore = app.slice(app.indexOf('const SORENESS_LEVELS='), app.indexOf('// 근육통 입력 UI —'));
   const sliceAwareness = app.slice(app.indexOf('const HUB_SORENESS_RECENCY_DAYS'), app.indexOf('function HubScreen('));
-  hubAwarenessLib = new Function(`${sliceKoreaDate}\n${sliceDaysDiff}\n${sliceNormalize}\n${sliceLevelDesc}\n${sliceFeedbackParts}\n${sliceCheckinSore}\n${sliceAwareness}\nreturn { getHubBodyPartAwareness, getCheckinSoreness, HUB_SORENESS_RECENCY_DAYS, HUB_PAIN_RECENCY_DAYS };`)();
+  hubAwarenessLib = new Function(`${sliceKoreaDate}\n${sliceDaysDiff}\n${sliceNormalize}\n${sliceLevelDesc}\n${sliceFeedbackParts}\n${sliceCheckinSore}\n${sliceAwareness}\nreturn { getHubBodyPartAwareness, getCheckinSoreness, HUB_SORENESS_RECENCY_DAYS, HUB_PAIN_RECENCY_DAYS, getPersonalWorkoutSorenessWindow, shouldShowPersonalWorkoutSorenessMissingHint, PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS };`)();
 } catch (e) {
   console.error('[regression] 오늘 수업 카드 부위 경고 로직 추출 실패:', e.message);
 }
@@ -5267,6 +5270,23 @@ const checks = [
         app.includes('savePersonalWorkoutSoreness(profile.id,workout.id,{');
     })()
   ],
+  // ── 관리자 "최근 개인운동" 카드 "근육통 미입력" 힌트 — 회원앱 D+1/D+2 창 제한 제거 후속 조사·수정 ──
+  // withinAutoWindow(D+1/D+2만 true)를 그대로 재사용하면 회원이 여전히 입력 가능한 D+3 이후에도 관리자에게
+  // "미입력" 사실이 안 보이는 모순이 생겨, 이 힌트 전용 별도 최근성 기준(shouldShowPersonalWorkoutSorenessMissingHint)을 뒀다.
+  ['근육통 미입력 힌트 기준일 상수: PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS = 7 (값이 바뀌면 hbaScenario 경계 시나리오도 함께 review)',
+    app.includes('const PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS = 7;')
+  ],
+  ['관리자 "최근 개인운동" 카드: 근육통 미입력 힌트가 더 이상 withinAutoWindow(D+1/D+2 전용, 회원앱 입력 게이트로는 안 쓰임)를 직접 쓰지 않고 shouldShowPersonalWorkoutSorenessMissingHint로 판정한다',
+    app.includes('{!soreness && shouldShowPersonalWorkoutSorenessMissingHint(sorenessWindow) && <span style={{fontSize:11.5,fontWeight:700,color:DB.faint}}>근육통 미입력</span>}') &&
+    !app.includes('{!soreness && sorenessWindow.withinAutoWindow && <span style={{fontSize:11.5,fontWeight:700,color:DB.faint}}>근육통 미입력</span>}')
+  ],
+  ['getPersonalWorkoutSorenessWindow 함수 자체는 관리자 힌트 수정에도 변경되지 않았다(withinAutoWindow는 회원앱 timing 배지 판정용으로 그대로 유지, 다른 소비처 회귀 없음)',
+    (() => {
+      const fn = app.slice(app.indexOf('function getPersonalWorkoutSorenessWindow'), app.indexOf('function normalizePersonalWorkoutSoreness'));
+      return fn.includes('const timing=days===1?"next_day":days===2?"two_days_later":null;') &&
+        fn.includes('withinAutoWindow:days===1||days===2,');
+    })()
+  ],
   ['완료 기록 수정 화면: 기존 값이 모두 채워진 채로 열리고, 변경 후 나가면 확인창을 띄운다(자동저장 아님)',
     (() => {
       const fn = app.slice(app.indexOf('function PersonalWorkoutEditScreen'), app.indexOf('// 건강 탭 대시보드'));
@@ -5702,6 +5722,36 @@ const checks = [
     const ci = [{ date: '2026-08-09', soreness: '심함', sorenessParts: ['등'] }];
     const info = lib.getHubBodyPartAwareness({ sessions, ci, todayKey: '2026-08-10' });
     return info['등']?.source === 'checkin' && info['등']?.date === '2026-08-09';
+  }),
+
+  // ── 관리자 "최근 개인운동" 카드 "근육통 미입력" 힌트: 회원앱 D+1/D+2 창 제한 제거 후에도 적절한 기간까지만 노출 ──
+  // shouldShowPersonalWorkoutSorenessMissingHint는 getPersonalWorkoutSorenessWindow.withinAutoWindow(D+1/D+2만 true,
+  // 회원앱 timing 배지 판정용으로 의미가 좁혀짐)를 재사용하지 않는 별도의 관리자 전용 최근성 기준이다.
+  hbaScenario('근육통 미입력 힌트 D0: 운동 완료 당일은 아직 입력할 시간이 없었다고 보고 힌트를 띄우지 않는다', lib =>
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: 0 }) === false
+  ),
+  hbaScenario('근육통 미입력 힌트 D+1/D+2: 기존 자동 안내 창과 동일하게 계속 노출된다(회귀 없음)', lib =>
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: 1 }) === true &&
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: 2 }) === true
+  ),
+  hbaScenario('근육통 미입력 힌트 D+3~D+7: 회원이 여전히 입력 가능한 기간이라 힌트가 새로 노출된다(창 제한 제거 반영)', lib =>
+    [3, 5, 7].every(d => lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: d }) === true)
+  ),
+  hbaScenario('근육통 미입력 힌트 D+8 이상: 너무 오래된 기록은 힌트를 끄고 조용히 넘어간다(오래된 기록 누적으로 화면이 지저분해지는 것 방지)', lib =>
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: 8 }) === false &&
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: 10 }) === false &&
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: 90 }) === false
+  ),
+  hbaScenario('근육통 미입력 힌트: daysAfterWorkout이 없는(완료일 판정 불가) 경우도 오류 없이 false 처리', lib =>
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({ daysAfterWorkout: null }) === false &&
+    lib.shouldShowPersonalWorkoutSorenessMissingHint({}) === false &&
+    lib.shouldShowPersonalWorkoutSorenessMissingHint(null) === false
+  ),
+  hbaScenario('근육통 미입력 힌트: 실제 개인운동 완료일(endedAt) 기준 D+5짜리 workout을 getPersonalWorkoutSorenessWindow로 계산해도 힌트가 뜬다(end-to-end)', lib => {
+    const today = '2026-08-15';
+    const workout = { endedAt: '2026-08-10T12:00:00+09:00' }; // toPersonalWorkoutDate는 ISO 문자열/Date/Timestamp(.toDate())만 처리한다
+    const w = lib.getPersonalWorkoutSorenessWindow(workout, today);
+    return w.daysAfterWorkout === 5 && w.withinAutoWindow === false && lib.shouldShowPersonalWorkoutSorenessMissingHint(w) === true;
   }),
 
   // ── 근육통 상시 기록 (개인운동·PT 기록 여부와 무관하게 언제든 입력·수정) ──

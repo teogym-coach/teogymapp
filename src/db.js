@@ -13,6 +13,11 @@
 //        · memberInputKcal     ← 회원이 직접 입력한 하루 총칼로리(기존 필드, 그대로 유지)
 //    /members/{id}/counselNotes/main      ← 상담 리포트: 대표 상담 메모(트레이너 전용)
 //    /members/{id}/memberOnboarding/main  ← 회원앱 온보딩 답변(v2 맵 포함) — 사전 문진의 단일 원본
+//    /members/{id}/memberCheckins/{YYYY-MM-DD} ← 회원앱 하루 체크인(날짜별 upsert)
+//        · condition                        ← 컨디션
+//        · painPart/painSide/painVas/painMemo/painRecord ← 통증
+//        · soreness/sorenessParts/sorenessMemo ← 근육통(운동 기록 유무와 무관한 상시 입력)
+//        · steps                            ← 걸음수
 //    /members/{id}/personalWorkouts/{id}  ← 개인운동 기록(회원이 직접 작성, 트레이너는 읽기만)
 //    /members/{id}/personalWorkoutSoreness/{workoutId} ← 개인운동 후 근육통(문서ID=workoutId로 1:1 고정, 회원이 직접 작성)
 //    /consultations/{id}                  ← 상담 고객(리드). 정식 회원 전환 전까지 members를 만들지 않는다
@@ -2097,6 +2102,16 @@ export async function saveMemberCheckin(memberId, dateKey, data) {
     const noPain = data.painPart === "없음";
     const value = noPain ? "통증 없음" : `${data.painPart}${data.painSide && data.painSide !== "해당 없음" ? " · " + data.painSide : ""} · VAS ${data.painVas ?? 0}`;
     activities.push({ type: "pain", label: "통증", value, dateKey });
+  }
+  // 근육통(soreness/sorenessParts/sorenessMemo)도 통증·컨디션과 똑같이 같은 날짜 문서에 merge로 쌓인다(날짜별 upsert, 새 컬렉션 없음).
+  // 활동 type은 PT 수업 근육통과 같은 "soreness"를 쓴다 — 관리자 "오늘 입력 피드"에서 함께 근육통으로 집계돼야 하기 때문이며,
+  // 개인운동 전용 type(personalWorkoutSoreness)과는 출처가 달라 계속 분리해 둔다.
+  if (data.soreness !== undefined) {
+    const soreParts = Array.isArray(data.sorenessParts) ? data.sorenessParts : [];
+    const value = !data.soreness || data.soreness === "없음"
+      ? "근육통 없음"
+      : `${soreParts.join("/") || "-"} · ${data.soreness}`;
+    activities.push({ type: "soreness", label: "근육통", value, dateKey });
   }
   await touchMemberActivities(memberId, activities);
   return { skipped: false };

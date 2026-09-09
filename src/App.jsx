@@ -2226,7 +2226,7 @@ function isMemberDebugMode(){
 const APP_USAGE_MIN_INTERVAL_MS=10*60*1000;
 const APP_USAGE_LAST_WRITE_KEY="teogym_appUsage_lastWriteAt";
 function MemberApp({ onLogout }) {
-  const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [noticeCenterAutoOpen,setNoticeCenterAutoOpen]=useState(false); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [dietSaving,setDietSaving]=useState(false); const [conditionSaving,setConditionSaving]=useState(false); const [painSaving,setPainSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
+  const C=MEMBER_COLORS; const today=getKoreaDateString(); const pageRef=useRef(null); const [tab,setTab]=useState("home"); const [noticeCenterAutoOpen,setNoticeCenterAutoOpen]=useState(false); const [profile,setProfile]=useState(null); const [sessions,setSessions]=useState([]); const [body,setBody]=useState(null); const [nutrition,setNutrition]=useState(null); const [checkins,setCheckins]=useState([]); const [messages,setMessages]=useState([]); const [onboarding,setOnboarding]=useState(null); const [loading,setLoading]=useState(true); const [memberError,setMemberError]=useState(""); const [form,setForm]=useState({date:today,weight:"",kcal:"",steps:"",condition:"",painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:"",sorenessLevel:"없음",sorenessParts:[],sorenessMemo:"",goalNote:"",memberMessage:""}); const [memberErrorDetails,setMemberErrorDetails]=useState(null); const [accessLogs,setAccessLogs]=useState([]); const [accessErrors,setAccessErrors]=useState({}); const [routineRecommendations,setRoutineRecommendations]=useState([]); const [dailyConditioning,setDailyConditioning]=useState([]); const [notices,setNotices]=useState([]); const [readSessionIds,setReadSessionIds]=useState(()=>new Set()); const [healthSaving,setHealthSaving]=useState(false); const [dietSaving,setDietSaving]=useState(false); const [conditionSaving,setConditionSaving]=useState(false); const [painSaving,setPainSaving]=useState(false); const [sorenessSaving,setSorenessSaving]=useState(false); const [attendance,setAttendance]=useState([]); const [attendanceSaving,setAttendanceSaving]=useState(false); const [cardioLogs,setCardioLogs]=useState([]); const [cardioSaving,setCardioSaving]=useState(false); const [correctionSummaries,setCorrectionSummaries]=useState([]);
   // ── 개인운동 기록 ──
   // personalWorkouts: 최근 완료+진행중 기록(limit 30, 최신 우선) / personalInProgress: 진행 중 기록만 별도 조회해 오래된 기록도 놓치지 않는다.
   const [personalWorkouts,setPersonalWorkouts]=useState([]);
@@ -2339,6 +2339,32 @@ function MemberApp({ onLogout }) {
   const saveCheck=async()=>{if(healthSaving)return; const weightValue=String(form.weight??"").trim(); const kcalValue=String(form.kcal??"").trim(); const stepsValue=String(form.steps??"").trim(); const parsedWeight=weightValue===""?null:Number(weightValue); if(weightValue!==""&&(!Number.isFinite(parsedWeight)||parsedWeight<=0)){alert("체중은 0보다 큰 숫자로 입력해주세요.");return;} if(!weightValue&&!kcalValue&&!stepsValue){alert("저장할 건강 기록을 입력해주세요.");return;} setHealthSaving(true); try{assertOwnMember(); const dateKey=form.date||today; await saveMemberHealthInputs(profile.id,dateKey,{weight:weightValue,kcal:kcalValue,steps:stepsValue}); if(parsedWeight){setBody(prev=>({...(prev||{}),records:upsertBodyRecord(prev?.records||[],{id:`member_${dateKey}`,date:dateKey,weight:parsedWeight,note:"회원앱 직접 입력"})}));} setForm(f=>({...f,weight:"",kcal:"",steps:""})); await load({silent:true}); alert("건강관리 기록이 저장됐어요");}catch(e){logMemberSaveError("health-check-save",e); alert(memberSaveErrorMessage(e,"건강관리 기록 저장에 실패했습니다."));}finally{setHealthSaving(false);}};
   const saveCondition=async()=>{if(conditionSaving)return; if(!form.condition){alert("컨디션을 선택해주세요.");return;} setConditionSaving(true); try{assertOwnMember(); const dateKey=form.date||today; await saveMemberCheckin(profile.id,dateKey,{condition:form.condition}); await load({silent:true}); alert("컨디션이 저장됐어요");}catch(e){logMemberSaveError("condition-save",e); alert(memberSaveErrorMessage(e,"컨디션 저장에 실패했습니다."));}finally{setConditionSaving(false);}};
   const savePain=async()=>{if(painSaving)return; const noPain=form.painPart==="없음"; const hasPain=!noPain||String(form.painMemo||"").trim()!==""; if(!hasPain){alert("통증 부위나 메모를 입력해주세요.");return;} setPainSaving(true); try{assertOwnMember(); const dateKey=form.date||today; const painPart=noPain?"없음":form.painPart; const painSide=noPain?"해당 없음":form.painSide; const painVas=noPain?0:(Number(form.painVas)||0); const painMemo=String(form.painMemo||"").trim(); await saveMemberCheckin(profile.id,dateKey,{painPart,painSide,painVas,painMemo,painRecord:{part:painPart,side:painSide,vas:painVas,memo:painMemo}}); setForm(f=>({...f,painPart:"없음",painSide:"해당 없음",painVas:0,painMemo:""})); await load({silent:true}); alert("통증 기록이 저장됐어요");}catch(e){logMemberSaveError("pain-save",e); alert(memberSaveErrorMessage(e,"통증 저장에 실패했습니다."));}finally{setPainSaving(false);}};
+  // 근육통 상시 기록 — 개인운동/PT 기록 유무와 무관하게 "오늘의 몸 상태"로 언제든 저장·수정한다.
+  // 저장 위치는 기존 members/{id}/memberCheckins/{날짜} 그대로(통증·컨디션과 같은 문서, merge upsert) — 새 컬렉션·새 저장 함수를 만들지 않는다.
+  // 저장 후에는 전체 load()를 다시 돌리지 않고 방금 저장한 날짜의 체크인만 로컬 상태에 반영한다(저장 후 전체 재조회로 인한 무한 로딩 재발 방지).
+  const saveDailySoreness=async(patch={})=>{
+    if(sorenessSaving) return;
+    const dateKey=patch.date||form.date||today;
+    const level=SORENESS_LEVELS.includes(patch.level)?patch.level:"없음";
+    const parts=level==="없음"?[]:[...new Set((patch.parts||[]).map(v=>String(v||"").trim()).filter(Boolean))];
+    const memo=String(patch.memo||"").trim().slice(0,300);
+    setSorenessSaving(true);
+    try{
+      assertOwnMember();
+      await saveMemberCheckin(profile.id,dateKey,{soreness:level,sorenessParts:parts,sorenessMemo:memo});
+      setCheckins(prev=>{
+        const rows=Array.isArray(prev)?[...prev]:[];
+        const idx=rows.findIndex(c=>(c.date||c.id)===dateKey);
+        const base=idx>=0?rows[idx]:{id:dateKey,date:dateKey};
+        const merged={...base,id:base.id||dateKey,date:dateKey,soreness:level,sorenessParts:parts,sorenessMemo:memo};
+        if(idx>=0){ rows[idx]=merged; return rows; }
+        return [merged,...rows].sort((a,b)=>String(b.date||b.id||"").localeCompare(String(a.date||a.id||"")));
+      });
+    }catch(e){
+      logMemberSaveError("soreness-save",e);
+      throw new Error(memberSaveErrorMessage(e,"근육통 저장에 실패했습니다."));
+    }finally{ setSorenessSaving(false); }
+  };
   const deleteHealthRecord=async(dateKey)=>{if(!dateKey||!window.confirm(`${dateKey} 건강 기록을 삭제할까요?`))return; try{assertOwnMember(); await deleteMemberHealthRecord(profile.id,dateKey); setCheckins(prev=>prev.filter(r=>(r.date||r.id)!==dateKey)); setBody(prev=>prev?{...prev,records:(prev.records||[]).filter(r=>r.date!==dateKey&&r.id!==`member_${dateKey}`)}:prev); setNutrition(prev=>prev?{...prev,logs:(prev.logs||[]).filter(r=>r.date!==dateKey&&r.id!==dateKey)}:prev); await load({silent:true}); alert("건강 기록을 삭제했어요.");}catch(e){logMemberSaveError("health-record-delete",e); alert(memberSaveErrorMessage(e,"건강 기록 삭제에 실패했습니다."));}};
   const saveSoreness=async(sessionId,report)=>{assertOwnMember(); await saveSessionSoreness(profile.id,sessionId,report); await load({silent:true}); alert("근육통 기록이 저장됐어요");};
   // 완료 안내는 alert()이 아닌 MemberFeedbackForm 내부 비차단 토스트(sj-fb-saved-toast)로 표시한다.
@@ -2612,7 +2638,7 @@ function MemberApp({ onLogout }) {
   // 운동 종목 후보 — 본인 PT 수업일지 + 본인 개인운동 + 코드 내장 분류 상수(별도 운동 사전 신설 없음)
   const personalExerciseCandidates=buildPersonalExerciseCandidates({sessions,personalWorkouts});
   const completedPersonalWorkouts=personalWorkouts.filter(w=>w.status==="completed");
-  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,goNoticeCenter,noticeCenterAutoOpen,clearNoticeCenterAutoOpen:()=>setNoticeCenterAutoOpen(false),curW,startW,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
+  const common={profile,sessions,body:effectiveBody,nutrition:effectiveNutrition,checkins,onboarding:effectiveOnboarding,routineRecommendations,dailyConditioning,notices,openNotice,goNoticeCenter,noticeCenterAutoOpen,clearNoticeCenterAutoOpen:()=>setNoticeCenterAutoOpen(false),curW,startW,latest,recentKcal,steps,form,setForm,saveCheck,deleteHealthRecord,healthSaving,saveCondition,conditionSaving,savePain,painSaving,saveDailySoreness,sorenessSaving,saveSoreness,saveFeedback,saveProfileInfo,saveGoalUpdate,onLogout,setTab:goMemberTab,resetMemberScroll,accessErrors,readSessionIds,markSessionsAsRead,markSessionDetailRead,attendance,saveAttendanceToday,attendanceSaving,cardioLogs,saveCardioEntry,deleteCardioEntry,saveRestingHeartRate,workoutView,setWorkoutView,journalFocusId,setJournalFocusId,expandedFeedbackIds,setFeedbackOpen,healthIntent,setHealthIntent,saveAttendanceForDate,deleteAttendanceForDate,canEditAttendanceDate,reloadMemberApp:load,cardioSaving,correctionSummaries,
     personalWorkouts:completedPersonalWorkouts,allPersonalWorkouts:personalWorkouts,personalInProgress,personalBusy,personalRecordTarget,
     personalExerciseCandidates,openPersonalWorkoutStart,resumePersonalWorkout,closePersonalWorkoutRecord,
     startPersonalWorkout,savePersonalWorkoutProgress,completePersonalWorkoutRecord,removePersonalWorkout,personalWorkoutToast,
@@ -4157,7 +4183,7 @@ function MemberHome(p){
     <DailyConditioningCard items={p.dailyConditioning}/>
   </div>;
 }
-function HomeHealthStatus({checkins=[],body,nutrition,setTab}){const today=getKoreaDateString(); const todayCheck=(checkins||[]).find(c=>(c.date||c.id)===today)||{}; const hasWeight=getBodyWeightRecords(body).some(r=>r.date===today); const hasKcal=getKcalLogs(nutrition).some(r=>r.date===today); const done=hasWeight||hasKcal||todayCheck.steps||todayCheck.condition||todayCheck.painPart||todayCheck.painMemo; return <section className={`home-health-status ${done?"done":""}`}><div><span>오늘 건강기록</span><b>{done?"입력 완료":"오늘 건강기록을 입력해주세요."}</b></div><button type="button" onClick={()=>setTab?.("health")}>{done?"기록 보기":"입력"}</button></section>}
+function HomeHealthStatus({checkins=[],body,nutrition,setTab}){const today=getKoreaDateString(); const todayCheck=(checkins||[]).find(c=>(c.date||c.id)===today)||{}; const hasWeight=getBodyWeightRecords(body).some(r=>r.date===today); const hasKcal=getKcalLogs(nutrition).some(r=>r.date===today); const done=hasWeight||hasKcal||todayCheck.steps||todayCheck.condition||todayCheck.painPart||todayCheck.painMemo||todayCheck.soreness; return <section className={`home-health-status ${done?"done":""}`}><div><span>오늘 건강기록</span><b>{done?"입력 완료":"오늘 건강기록을 입력해주세요."}</b></div><button type="button" onClick={()=>setTab?.("health")}>{done?"기록 보기":"입력"}</button></section>}
 // 수업 탭 V2 — 세그먼트(수업일지 | 캘린더). 수업일지 로직은 MemberJournal로 그대로 이동(기능 동일).
 // ── 수업 탭 리디자인(sj-*) — 인라인 Lucide 스타일 선형 아이콘(이모지 대체, 의존성 추가 없음) ──
 function SjIcon({paths,size=16,strokeWidth=2,className}){return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths.map((p,i)=><path key={i} d={p}/>)}</svg>;}
@@ -5653,7 +5679,10 @@ function PersonalWorkoutStatusSection({workout,soreness,sorenessWindow,onSaveRpe
           {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>통증은 건강 탭에서 기록</button>}
           {sorenessError&&<p className="pw-error">{sorenessError}</p>}
           <div className="sj-fb-save-row"><button type="button" className="sj-fb-section-save" disabled={savingSoreness} onClick={saveSorenessSection}>{savingSoreness?"저장 중...":"근육통 저장"}</button></div>
-        </>:<span className="pw-hint">근육통 입력 가능 기간(다음날~다다음날)이 지나 새로 기록할 수 없어요.</span>}
+        </>:<>
+          <span className="pw-hint">이 운동에 붙는 근육통 기록 기간(다음날~다다음날)은 지났어요. 오늘 느끼는 근육통은 건강 탭에서 언제든 기록할 수 있어요.</span>
+          {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>건강 탭에서 오늘 근육통 기록</button>}
+        </>}
       </div>
     </div>}
   </div>;
@@ -6496,6 +6525,7 @@ const HEALTH_TILE_ICONS={
   condition:{paths:["M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20","M8 14s1.5 2 4 2 4-2 4-2","M9 9h.01","M15 9h.01"],color:"#F59E0B",bg:"#FEF6E7"},
   pain:{paths:["M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"],color:"#F97316",bg:"#FFF1E7"},
   cardio:{paths:["M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z","M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"],color:"#F26D6D",bg:"#FDEEEE"},
+  soreness:{paths:["M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"],color:"#F59E0B",bg:"#FEF6E7"},
 };
 // 건강 기록 카드 6종 계산 — "카드 하나 = 입력 항목 하나". 회원이 오늘 앱을 열어도 실제로 기록하는 의미 날짜는 항목마다 다르다:
 // 칼로리·걸음수·유산소는 "어제 한 일"(그룹A), 체중·컨디션·통증은 "오늘의 몸 상태"(그룹B) — 그룹별로 조회 기준 날짜를 분리한다.
@@ -6515,10 +6545,13 @@ function buildTodayStatusTiles(p,today,open){
   const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
   const hasPainRecord=todayCheck.painPart!==undefined&&todayCheck.painPart!==null&&todayCheck.painPart!=="";
   const hasActualPain=hasPainRecord&&todayCheck.painPart!=="없음";
+  const sore=getCheckinSoreness(todayCheck);
   return [
     {key:"weight",label:"체중",value:todayWeight!=null?`${todayWeight}kg`:"—",hint:todayWeight!=null?"기록 완료":"탭해서 입력",done:todayWeight!=null,onClick:open.weight},
     {key:"condition",label:"컨디션",value:todayCheck.condition?`${CONDITION_EMOJI[todayCheck.condition]||""} ${todayCheck.condition}`:"—",hint:todayCheck.condition?"기록 완료":"탭해서 입력",done:!!todayCheck.condition,onClick:open.condition},
     {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
+    // 근육통 — 개인운동·PT 기록 유무와 무관하게 항상 노출되는 상시 입력 카드(기존 memberCheckins 같은 날짜 문서에 저장)
+    {key:"soreness",label:"근육통",value:sore.has?(sore.level==="없음"?"없음":`${sore.parts.join("/")||"-"} · ${sore.level}`):"—",hint:sore.has?"기록 완료":"탭해서 입력",done:sore.has,warn:sore.has&&sore.level==="심함",onClick:open.soreness},
   ];
 }
 // 건강 기록 카드 버튼 — 어제 기록/오늘 상태 두 그룹이 같은 카드 마크업을 공유한다(중복 구현 방지).
@@ -6772,6 +6805,8 @@ function MemberHealth(p){
     steps:()=>{ p.setForm(f=>({...f,date:yesterday,steps:yesterdayCheck.steps?String(yesterdayCheck.steps):"",weight:"",kcal:""})); setSheet("steps"); },
     condition:()=>{ p.setForm(f=>({...f,date:today,condition:todayCheck.condition||""})); setSheet("condition"); },
     pain:()=>{ p.setForm(f=>({...f,date:today,painPart:todayCheck.painPart||"없음",painSide:todayCheck.painSide||"해당 없음",painVas:todayCheck.painVas??0,painMemo:todayCheck.painMemo||""})); setSheet("pain"); },
+    // 근육통은 운동 기록과 무관한 "오늘의 몸 상태"라 다른 오늘 항목과 똑같이 오늘 값을 채워서 열고, 저장하면 같은 날짜 문서를 덮어쓴다.
+    soreness:()=>{ const cur=getCheckinSoreness(todayCheck); p.setForm(f=>({...f,date:today,sorenessLevel:cur.level,sorenessParts:cur.parts,sorenessMemo:cur.memo})); setSorenessError(""); setSheet("soreness"); },
     cardio:()=>setSheet("cardio"),
   };
   // 홈에서 넘어온 입력 의도(healthIntent) → 해당 카드의 시트를 오늘 값으로 자동 열기. 저장 로직은 기존 그대로.
@@ -6789,6 +6824,8 @@ function MemberHealth(p){
   const [justSaved,setJustSaved]=useState(false);
   const [justSavedCondition,setJustSavedCondition]=useState(false);
   const [justSavedPain,setJustSavedPain]=useState(false);
+  const [justSavedSoreness,setJustSavedSoreness]=useState(false);
+  const [sorenessError,setSorenessError]=useState("");
   const submitWeight=async()=>{
     const w=String(p.form.weight??"").trim();
     if(!w){ alert("체중을 입력해주세요."); return; }
@@ -6805,6 +6842,16 @@ function MemberHealth(p){
   };
   const submitCondition=async()=>{ if(!p.form.condition){alert("컨디션을 선택해주세요.");return;} await p.saveCondition(); setJustSavedCondition(true); setTimeout(()=>setJustSavedCondition(false),700); setSheet(null); };
   const submitPain=async()=>{ const noPain=p.form.painPart==="없음"; if(noPain&&String(p.form.painMemo||"").trim()===""){alert("통증 부위나 메모를 입력해주세요.");return;} await p.savePain(); setJustSavedPain(true); setTimeout(()=>setJustSavedPain(false),700); setSheet(null); };
+  // 근육통 저장 — 실패해도 시트를 닫지 않고 화면에 사유를 남긴다(입력값 유실 방지). 중복 클릭은 sorenessSaving으로 막는다.
+  const submitSoreness=async()=>{
+    const level=p.form.sorenessLevel||"없음";
+    if(level!=="없음"&&!(p.form.sorenessParts||[]).length){ setSorenessError("근육통 부위를 한 곳 이상 선택해주세요."); return; }
+    setSorenessError("");
+    try{
+      await p.saveDailySoreness?.({date:p.form.date||today,level,parts:p.form.sorenessParts||[],memo:p.form.sorenessMemo||""});
+      setJustSavedSoreness(true); setTimeout(()=>setJustSavedSoreness(false),700); setSheet(null);
+    }catch(e){ setSorenessError(e?.message||"근육통 저장에 실패했습니다."); }
+  };
   return <>
     <h1>건강관리</h1>
     <p className="sub">어제의 생활과 오늘의 몸 상태를 함께 기록해 꾸준한 변화를 만들어가세요.</p>
@@ -6879,6 +6926,13 @@ function MemberHealth(p){
       <PainInput form={p.form} setForm={p.setForm}/>
       <button className={`primary${justSavedPain?" save-success":""}`} onClick={submitPain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
+    <MemberBottomSheet open={sheet==="soreness"} onClose={()=>setSheet(null)} title="근육통 입력">
+      <p className="mv2-sheet-hint">오늘 느껴지는 근육통을 기록해주세요.<span>운동 기록이 없어도 언제든 입력할 수 있고, 같은 날 다시 열어 수정하면 오늘 기록이 그대로 갱신돼요.</span></p>
+      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
+      <SorenessInput form={p.form} setForm={p.setForm}/>
+      {sorenessError&&<p className="notice soft">{sorenessError}</p>}
+      <button className={`primary${justSavedSoreness?" save-success":""}`} onClick={submitSoreness} disabled={p.sorenessSaving}>{p.sorenessSaving?"저장 중...":justSavedSoreness?"근육통 저장 완료 ✓":"저장"}</button>
+    </MemberBottomSheet>
     <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title={yesterdayCardio?"유산소 기록 수정":"유산소 기록"}>
       <CardioEntryForm key={yesterdayCardio?.id||"new"} p={p} initialDate={yesterday} initialLog={yesterdayCardio} onSaved={()=>setSheet(null)}/>
     </MemberBottomSheet>
@@ -6928,6 +6982,26 @@ function PainInput({form,setForm}){const noPain=form.painPart==="없음"; const 
 function PainTrend({checkins=[]}){const rows=getPainRecords(checkins); const groups=[...rows.reduce((m,r)=>m.set(painKey(r),[...(m.get(painKey(r))||[]),r]),new Map()).entries()].filter(([,v])=>v.length>=2).slice(-4); return <MCard title="통증 변화">{groups.length?groups.map(([k,v])=>{const last=v.at(-1), prev=v.at(-2); const state=last.vas<prev.vas?"감소하고 있습니다.":last.vas>prev.vas?"증가했습니다. 무리한 운동은 피해주세요.":"유지되고 있습니다. 다음 수업 때 대표에게 알려주세요."; return <div className="pain-trend" key={k}><b>{k} 통증 변화</b><p>{v.slice(-7).map(x=>x.vas).join(" → ")}</p><em>최근 {k} 통증이 {state}</em>{last.memo&&<small>{last.date} 메모: {last.memo}</small>}</div>}):<p className="notice soft">통증 기록이 2개 이상 쌓이면 좌우별 변화가 표시됩니다.</p>}</MCard>}
 const SORENESS_LEVELS=["없음","약간","보통","심함"];
 const SORENESS_BODY_PARTS=["목","어깨","가슴","등","허리","팔","엉덩이","허벅지 앞","허벅지 뒤","종아리","기타"];
+// 건강 체크인(memberCheckins/{날짜})에 저장된 상시 근육통 읽기 — 레거시 문서(soreness 문자열만 있는 경우)도 그대로 살린다.
+// PT 수업 근육통(sessions.memberFeedback)·개인운동 근육통(personalWorkoutSoreness)과는 저장 위치가 달라 서로 덮어쓰지 않는다.
+function getCheckinSoreness(check={}){
+  const raw=check?.soreness;
+  const has=raw!==undefined&&raw!==null&&String(raw).trim()!=="";
+  const level=has&&SORENESS_LEVELS.includes(String(raw))?String(raw):"없음";
+  const parts=Array.isArray(check?.sorenessParts)?check.sorenessParts.map(v=>String(v||"").trim()).filter(Boolean):[];
+  return {has,level,parts:level==="없음"?[]:parts,memo:String(check?.sorenessMemo||"")};
+}
+// 근육통 입력 UI — 통증 입력(PainInput)과 같은 chip 패턴을 그대로 쓰고, 정도/부위/메모만 다르다.
+function SorenessInput({form,setForm}){
+  const level=form.sorenessLevel||"없음";
+  const parts=Array.isArray(form.sorenessParts)?form.sorenessParts:[];
+  const toggle=part=>setForm({...form,sorenessParts:parts.includes(part)?parts.filter(x=>x!==part):[...parts,part]});
+  return <div className="pain-input">
+    <div className="form-line"><label>근육통 정도</label><div className="choice-buttons">{SORENESS_LEVELS.map(lv=><button type="button" key={lv} className={level===lv?"active":""} onClick={()=>setForm({...form,sorenessLevel:lv,sorenessParts:lv==="없음"?[]:parts})}>{lv}</button>)}</div></div>
+    {level!=="없음"&&<div className="form-line"><label>근육통 부위 <small>여러 부위 선택 가능</small></label><div className="choice-buttons">{SORENESS_BODY_PARTS.map(part=><button type="button" key={part} className={parts.includes(part)?"active":""} onClick={()=>toggle(part)}>{part}</button>)}</div></div>}
+    <InputLine label="근육통 메모" value={form.sorenessMemo} onChange={v=>setForm({...form,sorenessMemo:v})}/>
+  </div>;
+}
 // 통증 성격 선택 UI(느낌 유형 3종 chip-row)는 제거됨(회원 요청). sorenessNature 필드·저장 로직·위험 신호 판정은
 // 기존 저장값과의 호환을 위해 그대로 유지한다(신규 입력 경로만 없어짐, 과거 기록의 risk 배지는 계속 표시됨).
 const SORENESS_RISK_NATURES=["움직일 때 불편함","날카롭거나 찌르는 통증"];
@@ -18266,6 +18340,13 @@ function getHubBodyPartAwareness({ sessions = [], personalWorkouts = [], persona
     if (!soreness) return;
     (soreness.bodyParts || []).forEach(bp => noteSore(bp.part, soreness.workoutDate, sorenessLevelDescription(bp.level), "personal"));
   });
+  // 회원이 건강 탭에서 상시로 남기는 근육통(memberCheckins/{날짜}) — 운동 기록이 없어도 들어오는 입력이라 여기서도 함께 본다.
+  (ci || []).forEach(c => {
+    const sore = getCheckinSoreness(c);
+    if (!sore.has || sore.level === "없음") return;
+    const date = String(c.date || c.id || "").slice(0, 10);
+    sore.parts.forEach(part => noteSore(part, date, sore.level, "checkin"));
+  });
 
   const painByPart = {};
   (ci || []).forEach(c => {
@@ -18450,7 +18531,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const ciPain = ci.find(c=>c.painRecord?.part||c.painPart)||null;
   const ciPainRec = ciPain ? (ciPain.painRecord||{part:ciPain.painPart,side:ciPain.painSide,vas:ciPain.painVas,memo:ciPain.painMemo}) : null;
   const ciCond = ci.find(c=>c.condition)||null;
-  const soreInfo = (()=>{
+  // 근육통 출처는 두 곳이다 — PT 수업 피드백(sessions)과 회원이 건강 탭에서 상시로 남기는 체크인(memberCheckins).
+  // 둘 다 있으면 날짜가 더 최근인 쪽을 "오늘 회원 상태"에 보여준다(기존 세션 기반 표시는 그대로 유지).
+  const soreFromSessions = (()=>{
     for (let i=sessions.length-1;i>=0;i--) {
       const s=sessions[i];
       const f=s.memberFeedback;
@@ -18460,6 +18543,12 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     }
     return null;
   })();
+  const ciSore = ci.find(c=>{ const x=getCheckinSoreness(c); return x.has&&x.level!=="없음"; })||null;
+  const soreFromCheckin = ciSore ? (()=>{ const x=getCheckinSoreness(ciSore); return {parts:x.parts,level:x.level,date:String(ciSore.date||ciSore.id||"").slice(0,10),memo:x.memo}; })() : null;
+  const soreInfo = (!soreFromCheckin&&!soreFromSessions) ? null
+    : !soreFromCheckin ? soreFromSessions
+    : !soreFromSessions ? soreFromCheckin
+    : (String(soreFromCheckin.date||"")>=String(soreFromSessions.date||"") ? soreFromCheckin : soreFromSessions);
   const memberRpe = (()=>{
     for (let i=sessions.length-1;i>=0;i--) {
       const f=sessions[i].memberFeedback;

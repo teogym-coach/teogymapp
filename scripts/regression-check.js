@@ -1909,6 +1909,28 @@ const checks = [
     app.includes("const mealTypes = [...new Set([...MEMBER_MEAL_TYPES, ...Object.keys(meals).filter(k => (meals[k] || []).length)])];")
   ],
 
+  // ── 하루 권장 칼로리 ──
+  // 오늘 먹은 양이 오늘의 목표(분모)를 다시 계산하던 순환 참조를 막는다.
+  // getKcalLogs가 오늘 날짜를 포함하므로, learned 표본에서만 오늘을 빼야 한다(평균 표시값 avg7/avg30은 그대로 둔다).
+  ["권장 칼로리: learned 학습 표본에서 오늘을 제외한다(오늘 식단이 오늘 목표를 바꾸지 않음)",
+    app.includes("const kcals=kcalLogs.filter(x=>x.date>=since&&x.date<todayKey);") &&
+    app.includes("const todayKey=getKoreaDateString();")
+  ],
+  ["권장 칼로리: learned 값은 공식값을 덮어쓰지 않고 ±15% 범위로만 보정한다",
+    app.includes("const maintenance=learned!=null?Math.round(Math.min(formula*1.15,Math.max(formula*0.85,learned))):formula;")
+  ],
+  // 목표 체중이 현재 체중과 사실상 같으면 운동 목표가 "다이어트"여도 적자를 만들지 않는다.
+  // 목표 체중 미입력은 기존 -500 동작을 유지한다(레거시 호환).
+  ["권장 칼로리: 감량 보정(-500)은 실제 감량 목표가 있을 때만 적용하고 하한선을 둔다",
+    app.includes("const hasDeficitGoal=targetWeight==null||(currentWeight-targetWeight)>=0.5;") &&
+    app.includes("const calorieFloor=Math.max(1200,Math.round(bmr*0.85));") &&
+    app.includes("const diet=hasDeficitGoal?Math.max(calorieFloor,Math.round(maintenance-500)):Math.round(maintenance);") &&
+    app.includes("function getTargetWeight(") // 목표 체중은 기존 공용 헬퍼를 재사용한다
+  ],
+  ["회원앱 식단 기록: 상단에 남은 칼로리(권장-섭취, 0 하한)를 함께 보여준다",
+    app.includes('<p className="diet-remain"><span>남은 칼로리</span><b>{formatKcalNumber(Math.max(targetKcal - dayKcal, 0))} kcal</b></p>')
+  ],
+
   // ── 음식 칼로리 계산 방식 ──
   // 이 프로젝트에는 외부 음식 API도 AI 호출 경로도 없다(Spark 요금제 · Cloud Functions 미사용).
   // 따라서 로컬 FOOD_DB + 회원 직접 입력만 쓰고, 결과는 항상 "예상값"으로 표시해야 한다.
@@ -8269,6 +8291,7 @@ function runRenderTests() {
     ['회원앱 자동 추천 미리보기 화면', path.join(root, 'tests', 'render', 'member-auto-routine-screen.test.js')],
     ['회원앱 자동 추천 RPE·sessionType 데이터 경로', path.join(root, 'tests', 'render', 'member-auto-routine-rpe.test.js')],
     ['회원앱 식단 기록 저장·수정·삭제·합산', path.join(root, 'tests', 'render', 'member-diet-log.test.js')],
+    ['회원앱 하루 권장 칼로리 고정·목표체중·하한선', path.join(root, 'tests', 'render', 'member-calorie-target.test.js')],
     ['관리자 건강관리 허브 대시보드·식단 분석', path.join(root, 'tests', 'render', 'health-hub-dashboard.test.js')],
     ['회원앱 근육통 상시 기록(운동 기록 무관 입력·수정)', path.join(root, 'tests', 'render', 'member-daily-soreness.test.js')],
     ['개인운동 카드 근육통 D+1/D+2 창 제한 제거(당일·D+3 이후도 항상 입력·수정)', path.join(root, 'tests', 'render', 'member-personal-workout-soreness-window.test.js')],

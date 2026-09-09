@@ -145,8 +145,28 @@ const target = (onboarding, body, nutrition, goal) => {
       target(legacyOb, FLAT_BODY, noneNut, goal).value === want,
       JSON.stringify(target(legacyOb, FLAT_BODY, noneNut, goal).value));
   });
-  check('증량(+300) 로직은 이번 수정 범위가 아니므로 기존 그대로다',
-    target(onboardingOf({ targetWeightKg: 81 }), FLAT_BODY, noneNut, '근육 증가/벌크').value === formula + 300);
+  // ══ E-2. 증량 보정도 감량과 같은 원칙(목표=현재면 보정 없음) ═════
+  // 감량의 hasDeficitGoal(현재-목표>=0.5)과 부호만 반대인 판단식을 그대로 재사용한다.
+  [
+    ['현재 81 / 목표 81 / 증량 → +300 미적용', 81, formula],
+    ['현재 81 / 목표 81.3 / 증량 → +300 미적용(0.3kg 차이)', 81.3, formula],
+    ['현재 81 / 목표 81.49 / 증량 → +300 미적용(0.49kg 차이, 경계 직전)', 81.49, formula],
+    ['현재 81 / 목표 81.5 / 증량 → +300 정상 적용(경계값, 감량 기준과 동일하게 >=0.5는 목표 있음으로 처리)', 81.5, formula + 300],
+    ['현재 81 / 목표 83 / 증량 → +300 정상 적용(실제 증량 목표)', 83, formula + 300],
+  ].forEach(([label, tw, want]) => {
+    const v = target(onboardingOf({ targetWeightKg: tw }), FLAT_BODY, noneNut, '근육 증가/벌크').value;
+    check(label, v === want, JSON.stringify({ targetWeightKg: tw, value: v, want }));
+  });
+  check('목표 체중 미입력 증량 회원은 기존 레거시 +300 동작을 유지한다',
+    target(onboardingOf({}), FLAT_BODY, noneNut, '근육 증가/벌크').value === formula + 300);
+  // "체중 증가" 같은 다른 증량 계열 문구도 같은 목표 판정 로직(analysis.bulk)을 그대로 쓴다.
+  check('증량 계열 다른 문구("체중 증가")도 같은 목표=현재 판단이 적용된다',
+    target(onboardingOf({ targetWeightKg: 81 }), FLAT_BODY, noneNut, '체중 증가').value === formula);
+  // 감량 로직에는 영향이 없어야 한다 — 같은 회원, 감량 목표는 이번 수정 전과 동일하게 동작.
+  check('증량 보정 수정이 감량 로직(목표 75, 다이어트)에 영향을 주지 않는다',
+    target(onboardingOf({ targetWeightKg: 75 }), FLAT_BODY, noneNut, '다이어트').value === formula - 500);
+  check('증량 보정 수정이 감량 로직(목표=현재, 다이어트)에 영향을 주지 않는다',
+    target(ob81, FLAT_BODY, noneNut, '다이어트').value === formula);
 
   // ══ F. 화면(식단 상단) — 변하는 값은 섭취·남은 칼로리·진행률뿐 ══
   const sliceNum = slice('function toPositiveNumber', 'function getBodyWeightRecords', 'ui-num');

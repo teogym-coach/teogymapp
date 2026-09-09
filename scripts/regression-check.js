@@ -1927,6 +1927,12 @@ const checks = [
     app.includes("const diet=hasDeficitGoal?Math.max(calorieFloor,Math.round(maintenance-500)):Math.round(maintenance);") &&
     app.includes("function getTargetWeight(") // 목표 체중은 기존 공용 헬퍼를 재사용한다
   ],
+  // 증량 보정(+300)도 감량과 같은 원칙 — hasDeficitGoal과 부호만 반대인 판단식을 재사용한다.
+  // 목표 체중 미입력은 기존 +300 동작을 유지한다(레거시 호환). 하한선은 감량 전용이라 증량에는 적용하지 않는다.
+  ["권장 칼로리: 증량 보정(+300)도 목표=현재 체중이면 적용하지 않는다(감량과 같은 0.5kg 기준 재사용)",
+    app.includes("const hasSurplusGoal=targetWeight==null||(targetWeight-currentWeight)>=0.5;") &&
+    app.includes("const bulk=hasSurplusGoal?Math.round(maintenance+300):Math.round(maintenance);")
+  ],
   ["회원앱 식단 기록: 상단에 남은 칼로리(권장-섭취, 0 하한)를 함께 보여준다",
     app.includes('<p className="diet-remain"><span>남은 칼로리</span><b>{formatKcalNumber(Math.max(targetKcal - dayKcal, 0))} kcal</b></p>')
   ],

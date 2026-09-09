@@ -104,6 +104,15 @@ function setInput(el, value) {
   Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
   el.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 }
+// React 18은 focus/blur를 focusin/focusout으로 위임받는다 — jsdom에서 두 경로를 모두 쏴 준다.
+function focusInput(el) {
+  el.focus();
+  el.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true }));
+}
+function blurInput(el) {
+  el.blur();
+  el.dispatchEvent(new dom.window.FocusEvent('focusout', { bubbles: true }));
+}
 const cta = el => el.querySelector('.diet-cta');
 const ctaText = el => (cta(el).textContent || '').trim();
 
@@ -319,6 +328,137 @@ async function openSheet(nutrition, saved, mealType = '아침') {
   check('음식 DB는 이름이 중복되지 않는다', new Set(FOOD_DB.map(f => f.name)).size === FOOD_DB.length);
   check('음식 DB의 모든 항목이 계산 가능한 기준량(per > 0)을 가진다',
     FOOD_DB.every(f => Number(f.per) > 0 && Number.isFinite(Number(f.cal))));
+
+  // ══ J. 직접 입력 숫자칸 UX — 초기값 0이 안 지워지던 문제 ════════
+  // 모바일에서 0인 칸을 터치하면 커서 위치에 따라 "0350" / "3500"이 되던 문제를 막는다.
+  const numsOf = c => [...c.querySelectorAll('.diet-num input')];
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '엄마표 닭볶음탕'); });
+  await act(async () => { cta(el).click(); });
+  check('직접 입력 음식: kcal·탄·단·지 4칸이 모두 0으로 시작한다',
+    numsOf(el).length === 4 && numsOf(el).every(i => i.value === '0'), JSON.stringify(numsOf(el).map(i => i.value)));
+
+  // A·B — 4칸 모두 같은 규칙: 터치하면 비워지고, 입력한 숫자만 정확히 남는다.
+  const typed = [['kcal', 0, '350', 350], ['탄수화물', 1, '10', 10], ['단백질', 2, '20', 20], ['지방', 3, '15', 15]];
+  for (const [label, idx, keys, want] of typed) {
+    await act(async () => { focusInput(numsOf(el)[idx]); });
+    check(`${label} 칸: 값이 0일 때 터치하면 입력칸이 비워진다(기존 0을 지울 필요가 없다)`,
+      numsOf(el)[idx].value === '', JSON.stringify(numsOf(el).map(i => i.value)));
+    await act(async () => { setInput(numsOf(el)[idx], keys); });
+    check(`${label} 칸: ${keys}을 입력하면 0${keys}/${keys}0이 아니라 정확히 ${keys}만 남는다`,
+      numsOf(el)[idx].value === keys, numsOf(el)[idx].value);
+    await act(async () => { blurInput(numsOf(el)[idx]); });
+    check(`${label} 칸: 포커스가 빠져도 입력한 값(${want})이 그대로 보인다`,
+      numsOf(el)[idx].value === String(want), numsOf(el)[idx].value);
+  }
+
+  // C — 이미 값이 있는 칸을 다시 터치해도 값이 사라지지 않는다.
+  await act(async () => { focusInput(numsOf(el)[0]); });
+  check('이미 350이 입력된 kcal 칸을 다시 터치해도 350이 지워지지 않는다',
+    numsOf(el)[0].value === '350', numsOf(el)[0].value);
+  await act(async () => { blurInput(numsOf(el)[0]); });
+  check('다시 터치했다가 아무것도 입력하지 않고 빠져나와도 350이 유지된다',
+    numsOf(el)[0].value === '350', numsOf(el)[0].value);
+  await act(async () => { cta(el).click(); });
+  check('입력한 4개 값이 그대로 저장된다(kcal 350 / 탄 10 / 단 20 / 지 15)',
+    saved.length === 1 && Number(saved[0].items[0].cal) === 350 && Number(saved[0].items[0].carb) === 10 &&
+    Number(saved[0].items[0].protein) === 20 && Number(saved[0].items[0].fat) === 15,
+    JSON.stringify(saved[0] && saved[0].items));
+
+  // D — 숫자 0 자체도 정상 저장된다("입력 안 함"과 구분하려고 0을 막지 않는다).
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '블랙커피'); });
+  await act(async () => { cta(el).click(); });
+  await act(async () => { focusInput(numsOf(el)[0]); });
+  await act(async () => { setInput(numsOf(el)[0], '0'); });
+  await act(async () => { blurInput(numsOf(el)[0]); });
+  check('회원이 직접 0을 입력하면 화면에 0이 남는다', numsOf(el)[0].value === '0', numsOf(el)[0].value);
+  await act(async () => { cta(el).click(); });
+  check('0 kcal도 그대로 저장된다(0 입력이 막히지 않는다)',
+    saved.length === 1 && saved[0].items[0].name === '블랙커피' && Number(saved[0].items[0].cal) === 0,
+    JSON.stringify(saved[0] && saved[0].items));
+
+  // ══ K. 직접 입력 음식명 보존 / 부분 일치 자동 확정 금지 ══════════
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '고구마줄기 무침 100g'); });
+  await act(async () => { cta(el).click(); });
+  check('"고구마줄기 무침"을 입력하면 음식명이 "고구마"로 바뀌지 않고 그대로 남는다',
+    valuesOf(el, '.diet-item-name')[0] === '고구마줄기 무침', JSON.stringify(valuesOf(el, '.diet-item-name')));
+  check('"고구마줄기 무침"에 고구마 칼로리(86kcal)가 자동으로 붙지 않는다(0으로 두고 직접 입력 안내)',
+    numsOf(el)[0].value === '0' && el.textContent.includes('등록된 영양정보를 찾지 못했습니다'),
+    JSON.stringify(numsOf(el).map(i => i.value)));
+  await act(async () => { focusInput(numsOf(el)[0]); });
+  await act(async () => { setInput(numsOf(el)[0], '60'); });
+  await act(async () => { cta(el).click(); });
+  check('직접 입력한 음식명이 저장 데이터에도 "고구마줄기 무침" 그대로 들어간다',
+    saved.length === 1 && saved[0].items[0].name === '고구마줄기 무침' &&
+    Number(saved[0].items[0].cal) === 60 && saved[0].items[0].sourceKind === 'manual',
+    JSON.stringify(saved[0] && saved[0].items));
+
+  // 저장 후 재조회 — 원문 이름·중량·영양값이 그대로 복원된다.
+  const reopened = { logs: [], dates: { [TODAY]: { meals: { '아침': saved[0].items } } } };
+  el = await openSheet(reopened, [], '아침');
+  check('저장 후 다시 열어도 "고구마줄기 무침" 이름과 값이 그대로 복원된다',
+    valuesOf(el, '.diet-item-name')[0] === '고구마줄기 무침' && valuesOf(el, '.diet-item-amount')[0] === '100' &&
+    valuesOf(el, '.diet-item-unit')[0] === 'g' && numsOf(el)[0].value === '60',
+    JSON.stringify({ n: valuesOf(el, '.diet-item-name'), a: valuesOf(el, '.diet-item-amount'), v: numsOf(el).map(i => i.value) }));
+  el = await render(React.createElement(MemberDietSection, { key: 'k1', p: makeProps(reopened, []) }));
+  check('식단 카드 요약에도 "고구마줄기 무침"이 그대로 표시된다',
+    el.textContent.includes('고구마줄기 무침') , el.textContent.slice(0, 600));
+
+  // 부분 일치 후보를 회원이 직접 눌렀을 때만 DB 음식으로 바뀐다(요구 5).
+  saved = [];
+  el = await openSheet({ logs: [], dates: {} }, saved);
+  await act(async () => { setInput(el.querySelector('textarea'), '고구 200g'); });
+  await act(async () => { cta(el).click(); });
+  const sweet = [...el.querySelectorAll('.diet-cands button')].find(b => b.textContent === '고구마');
+  check('부분 일치 결과는 "비슷한 음식" 후보 버튼으로만 노출된다("고구" → 고구마)',
+    !!sweet && valuesOf(el, '.diet-item-name')[0] === '고구' && el.textContent.includes('비슷한 음식'),
+    el.textContent.slice(0, 700));
+  // F — 편집 중 draft가 남아 후보 선택 결과를 가리지 않는지(외부 값 변경 반영)
+  await act(async () => { focusInput(numsOf(el)[0]); });
+  await act(async () => { setInput(numsOf(el)[0], '999'); });
+  await act(async () => { sweet.click(); });
+  check('후보를 누르면 DB 음식명·영양정보가 정상 적용된다(고구마 200g = 172kcal)',
+    valuesOf(el, '.diet-item-name')[0] === '고구마' && numsOf(el)[0].value === '172',
+    JSON.stringify({ n: valuesOf(el, '.diet-item-name'), v: numsOf(el).map(i => i.value) }));
+  check('편집 중이던 숫자(999)가 후보 선택 후에도 남아 있지 않는다',
+    numsOf(el)[0].value !== '999', numsOf(el)[0].value);
+  await act(async () => { cta(el).click(); });
+  check('회원이 고른 DB 음식은 DB 이름·sourceKind=local로 저장된다',
+    saved.length === 1 && saved[0].items[0].name === '고구마' && saved[0].items[0].sourceKind === 'local' &&
+    Number(saved[0].items[0].cal) === 172, JSON.stringify(saved[0] && saved[0].items));
+
+  check('오탐 방지: "고구마줄기 무침"은 계산 단계에서도 고구마로 확정되지 않는다',
+    (() => { const r = estimateFoodLines('고구마줄기 무침')[0]; return r.name === '고구마줄기 무침' && r.cal === 0 && r.matched !== true; })(),
+    JSON.stringify(estimateFoodLines('고구마줄기 무침')[0]));
+  check('오탐 방지: 부분 일치만 있으면 이름을 바꾸지 않는다("닭가 100g" → 닭가슴살 자동 확정 금지)',
+    (() => { const r = estimateFoodLines('닭가 100g')[0];
+      return r.name === '닭가' && r.cal === 0 && (r.candidates || []).some(c => c.name === '닭가슴살'); })(),
+    JSON.stringify(estimateFoodLines('닭가 100g')[0]));
+  check('정확 일치는 기존처럼 자동 매칭된다("고구마 200g" → 고구마 172kcal)',
+    (() => { const r = estimateFoodLines('고구마 200g')[0];
+      return r.name === '고구마' && r.cal === 172 && r.carb === 40 && r.protein === 3.2 && r.fat === 0.2 && r.sourceKind === 'local'; })(),
+    JSON.stringify(estimateFoodLines('고구마 200g')[0]));
+
+  // ══ L. 항정살 검색 ═══════════════════════════════════════════════
+  check('음식 DB에 "항정살"이 등록되어 있다', FOOD_DB.some(f => f.name === '항정살'));
+  check('"항정살" 검색 시 결과가 나온다',
+    dom.window.__searchFoodItems('항정살').some(f => f.name === '항정살'),
+    JSON.stringify(dom.window.__searchFoodItems('항정살').map(f => f.name)));
+  [['항정살 100g', 280, 18, 23], ['항정살 150g', 420, 27, 34.5],
+   ['돼지 항정살 100g', 280, 18, 23], ['구운 항정살 200g', 560, 36, 46]].forEach(([q, cal, protein, fat]) => {
+    const r = estimateFoodLines(q)[0];
+    check(`항정살 검색: ${q} → 항정살 ${cal}kcal (단 ${protein}g / 지 ${fat}g)`,
+      !!r && r.name === '항정살' && r.cal === cal && r.protein === protein && r.fat === fat && r.sourceKind === 'local',
+      JSON.stringify(r && { n: r.name, c: r.cal, p: r.protein, f: r.fat }));
+  });
+  check('항정살을 넣어도 검색이 지나치게 넓어지지 않는다(엉뚱한 음식이 항정살로 확정되지 않는다)',
+    estimateFoodLines('항정살덮밥')[0].name === '항정살덮밥' && estimateFoodLines('항정살덮밥')[0].cal === 0,
+    JSON.stringify(estimateFoodLines('항정살덮밥')[0]));
 
   const failed = results.filter(([, ok]) => !ok);
   results.forEach(([n, ok]) => console.log(`${ok ? 'PASS' : 'FAIL'} 회원앱 식단 기록: ${n}`));

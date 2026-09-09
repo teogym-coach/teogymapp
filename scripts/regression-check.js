@@ -1930,6 +1930,28 @@ const checks = [
   ["음식 검색: 이름이 정확히 일치한 후보는 단위 보너스로도 밀려나지 않는다",
     app.includes("const rank = e => (e.score === 0 ? -100 : e.score - (u && e.item.unit === u ? 2.5 : 0));")
   ],
+  // "고구마줄기 무침"이 부분 일치로 "고구마"가 되어 저장되던 문제 — 후보 노출은 넓게 두되
+  // 자동 확정(회원이 적은 이름을 DB 이름으로 대체)은 정확 일치·별칭으로만 제한한다.
+  ["음식 검색: 부분 일치만으로 회원이 적은 음식명을 자동 확정하지 않는다(정확 일치·별칭만 자동 매칭)",
+    app.includes("function isConfidentFoodMatch(query, item, unitHint = \"\") {") &&
+    app.includes("const confident = hits.find(h => isConfidentFoodMatch(parsed.name, h, parsed.unit));") &&
+    app.includes("if (!confident) return { ...base, candidates: hits.slice(0, 5), searchKey: parsed.name };")
+  ],
+  ["음식 검색: 부분 일치 결과는 회원이 직접 누를 수 있는 후보로만 보여준다",
+    app.includes('<span>{f.matched ? "다른 후보" : "비슷한 음식"}</span>')
+  ],
+  ["음식 데이터: 회원 요청 음식(항정살)이 로컬 DB와 별칭에 등록되어 있다",
+    app.includes('{name:"항정살",') &&
+    app.includes('"항정": "항정살", "돼지항정살": "항정살", "구운항정살": "항정살"')
+  ],
+  // 모바일에서 0인 입력칸을 터치하면 커서 위치 때문에 "0350"/"3500"이 되던 문제를 막는 구조.
+  // 저장 스키마는 숫자 그대로 두고 화면에서만 "아직 입력 안 함"을 구분한다.
+  ["회원앱 식단 기록: 영양값 입력칸은 값이 0일 때 터치하면 비워지고, 값이 있으면 지우지 않는다",
+    app.includes("function DietNumInput({ value, label, color, onChange }) {") &&
+    app.includes('if (num === 0) { setDraft(""); return; }') &&
+    app.includes("onBlur={() => setDraft(null)} />") &&
+    app.includes("const numField = (f, key, label, color) => <DietNumInput")
+  ],
   ["음식 데이터: 공식 API 미연동 사유와 연동 조건을 코드에 남긴다(FOOD_SOURCE_NOTE)",
     app.includes("FOOD_SOURCE_NOTE") &&
     app.includes("인증키") &&

@@ -6631,6 +6631,40 @@ function MemberDietSection({ p }) {
   </div>;
 }
 
+// 식단 영양값 입력칸(kcal·탄·단·지) — 모바일에서 초기값 0을 손으로 지우지 않아도 되게 한다.
+//
+// 저장 스키마는 그대로 숫자다. "아직 입력 안 함"을 위한 새 필드는 만들지 않고 화면에서만 구분한다.
+//   · 포커스 전   : 저장된 숫자를 그대로 보여준다(값이 0이면 0으로 보인다).
+//   · 포커스 순간 : 값이 0이면 입력칸을 비워 새 숫자가 바로 들어가게 한다(placeholder로 0을 남긴다).
+//                  → 커서 위치 때문에 "0350" / "3500"이 되던 문제가 사라진다.
+//                  값이 0이 아니면 지우지 않고 전체 선택만 한다(이미 입력한 350이 사라지지 않는다).
+//   · 편집 중     : 입력한 원문을 그대로 유지하고("3." 같은 중간 상태 포함) 숫자만 상위로 올린다.
+//   · 포커스 해제 : 다시 저장된 숫자를 보여준다. 회원이 0을 직접 입력하면 숫자 0이 그대로 저장된다.
+function DietNumInput({ value, label, color, onChange }) {
+  const [draft, setDraft] = useState(null); // null이면 편집 중이 아님(저장된 숫자를 그대로 표시)
+  const num = Number(value) || 0;
+  // 후보 선택·재계산처럼 바깥에서 값이 바뀌면 편집 중 원문을 버리고 새 값을 보여준다.
+  useEffect(() => { setDraft(d => (d == null || Number(d || 0) === num ? d : null)); }, [num]);
+  return <label className="diet-num">
+    <span>{label}</span>
+    <input type="number" inputMode="decimal" step="any" placeholder="0" style={{ color }}
+      value={draft != null ? draft : String(num)}
+      onFocus={e => {
+        if (num === 0) { setDraft(""); return; }
+        setDraft(String(num));
+        // number 입력은 브라우저에 따라 setSelectionRange를 막는다 — select()가 실패해도 값은 그대로 둔다.
+        try { e.target.select(); } catch (_) { /* noop */ }
+      }}
+      onChange={e => {
+        const raw = e.target.value;
+        setDraft(raw);
+        const n = raw === "" ? 0 : Number(raw);
+        onChange(Number.isFinite(n) ? n : 0);
+      }}
+      onBlur={() => setDraft(null)} />
+  </label>;
+}
+
 // 식단 입력 시트 — 버튼은 하단 CTA 하나뿐이다.
 //
 // 예전에는 "예상 칼로리 계산하기"와 "확인하고 저장" 두 버튼이 따로 있어서, 회원이 계산을 누르지 않고
@@ -6717,11 +6751,8 @@ function MemberDietSheet({ p, date, mealType, onClose }) {
     : needsCalc ? "칼로리 확인하기"
     : items.length ? "확인하고 저장" : "저장";
 
-  const numField = (f, key, label, color) => <label className="diet-num">
-    <span>{label}</span>
-    <input type="number" inputMode="decimal" value={f[key] ?? ""} style={{ color }}
-      onChange={e => patchNutrition(f.id, { [key]: e.target.value === "" ? 0 : Number(e.target.value) })} />
-  </label>;
+  const numField = (f, key, label, color) => <DietNumInput key={key} value={f[key]} label={label} color={color}
+    onChange={v => patchNutrition(f.id, { [key]: v })} />;
 
   return <div className="diet-sheet">
     <p className="mv2-sheet-hint">{date} · {mealType}<span>음식과 양을 한 줄에 하나씩 적어주세요.</span></p>
@@ -6766,7 +6797,7 @@ function MemberDietSheet({ p, date, mealType, onClose }) {
           )}
           {/* 검색 결과가 여러 개면 첫 결과를 확정하지 않고 회원이 눌러 바꿀 수 있게 한다. */}
           {others.length > 0 && <div className="diet-cands">
-            <span>다른 후보</span>
+            <span>{f.matched ? "다른 후보" : "비슷한 음식"}</span>
             {others.map(c => <button type="button" key={c.name} onClick={() => applyCandidate(f.id, c)}>{c.name}</button>)}
           </div>}
         </div>;
@@ -30405,6 +30436,13 @@ const FOOD_DB = [
   {name:"떡국",          unit:"그릇",per:1,   cal:480, carb:82.0, protein:16.0, fat:8.0},
   {name:"카레라이스",    unit:"인분",per:1,   cal:620, carb:95.0, protein:16.0, fat:18.0},
   {name:"짜장밥",        unit:"인분",per:1,   cal:680, carb:100.0,protein:18.0, fat:22.0},
+  // ── 3차 추가(회원 검색 실패 항목 보완) ──
+  // 항정살: 회원앱 검색에서 나오지 않아 추가한다. 위 항목들과 같은 기준(100g "예상값")이며,
+  // 식약처 식품영양성분DB를 조회해 옮긴 값이 아니다(공식 DB 대조 검증된 적이 없다).
+  // 근거: 같은 돼지 부위인 돼지목살(100g 220kcal·지방 16g)보다 지방이 많고
+  //       삼겹살(생 기준 약 330kcal·지방 28g)보다는 적은 부위라는 통용 성분표 범위 안에서
+  //       탄단지 열량(18*4 + 23*9 ≈ 279kcal)이 맞아떨어지는 값으로 잡았다.
+  {name:"항정살",        unit:"g",   per:100, cal:280, carb:0.0,  protein:18.0, fat:23.0},
 ];
 
 // 목표별 탄단지 비율 (칼로리 %)
@@ -30472,6 +30510,9 @@ const FOOD_ALIASES = {
   "샐러드팩": "샐러드", "방토": "방울토마토", "브로컬리": "브로콜리",
   "오이무침무침": "오이무침", "포도알": "포도", "머스캣": "샤인머스캣",
   "계란후라이2": "계란", "달걀말이": "계란말이", "계란찜기": "계란찜",
+  // 항정살 — 회원이 부위 이름만 적거나("항정") 조리법·축종을 붙여 적는 경우("돼지 항정살", "구운 항정살")까지 찾게 한다.
+  // 별칭은 정규화(공백·괄호 제거, 소문자) 후의 키로 적는다.
+  "항정": "항정살", "돼지항정살": "항정살", "구운항정살": "항정살", "항정살구이": "항정살", "돼지항정": "항정살",
 };
 function normalizeFoodName(v) { return String(v || "").toLowerCase().replace(/[\s()（）[\]{}\-_.,·・/]/g, ""); }
 function foodUnitGroup(unit) { return FOOD_AMOUNT_UNITS.includes(String(unit || "").toLowerCase()) ? "amount" : "count"; }
@@ -30529,6 +30570,25 @@ function searchFoodItems(name, { unitHint = "", limit = 5 } = {}) {
   const rank = e => (e.score === 0 ? -100 : e.score - (u && e.item.unit === u ? 2.5 : 0));
   return scored.sort((a, b) => rank(a) - rank(b)).slice(0, limit).map(e => e.item);
 }
+// 검색 후보가 "회원이 적은 음식명을 대신해도 되는" 확실한 일치인지 판정한다.
+//
+// 매칭 우선순위(자동 확정이 허용되는 범위):
+//   1순위 정확한 음식명 일치
+//   2순위 정규화(공백·괄호 차이) 후 일치, 그리고 등록된 별칭 일치
+//   3순위 부분 일치 → 후보로 보여주기만 하고 자동 확정하지 않는다
+// "고구마줄기 무침"이 부분 일치로 "고구마"가 되던 문제를 구조적으로 막는 판정이다.
+// 예외는 회원이 단위까지 적어 의도가 분명한 개수 단위 한 가지뿐이다("밥 한공기" → 공기밥).
+// g·ml 같은 무게 단위는 어느 음식에나 붙으므로 이 예외에서 제외한다("닭가 100g"이 닭가슴살로 바뀌지 않는다).
+function isConfidentFoodMatch(query, item, unitHint = "") {
+  const key = normalizeFoodName(query);
+  const target = normalizeFoodName(item && item.name);
+  if (!key || !target) return false;
+  if (key === target) return true;                                         // 1·2순위
+  const alias = FOOD_ALIASES[key];
+  if (alias && normalizeFoodName(alias) === target) return true;           // 2순위(별칭)
+  const u = String(unitHint || "").trim();
+  return !!u && foodUnitGroup(u) === "count" && item.unit === u;           // 단위가 명확한 경우만
+}
 // FOOD_DB 항목 + 섭취량 → 저장 후보 항목. 섭취량을 바꿔 다시 계산할 때도 이 함수만 쓴다.
 function buildFoodItemFromDb(item, { amount = null, unit = "", id = null, keepId = null } = {}) {
   const sameGroup = !unit || foodUnitGroup(unit) === foodUnitGroup(item.unit);
@@ -30568,7 +30628,11 @@ function estimateFoodLine(raw, keepId = null) {
   }
   const hits = searchFoodItems(parsed.name, { unitHint: parsed.unit });
   if (!hits.length) return base;
-  const built = buildFoodItemFromDb(hits[0], { amount: parsed.amount, unit: parsed.unit, keepId: base.id });
+  // 부분 일치밖에 없으면 회원이 적은 음식명을 그대로 두고 후보만 제시한다(자동 치환 금지).
+  // 회원이 후보를 눌러 고른 경우에만 applyCandidate → buildFoodItemFromDb로 DB 음식명이 확정된다.
+  const confident = hits.find(h => isConfidentFoodMatch(parsed.name, h, parsed.unit));
+  if (!confident) return { ...base, candidates: hits.slice(0, 5), searchKey: parsed.name };
+  const built = buildFoodItemFromDb(confident, { amount: parsed.amount, unit: parsed.unit, keepId: base.id });
   // 후보가 2개 이상이면 첫 결과를 확정하지 않고 회원이 바꿀 수 있게 함께 넘긴다.
   return { ...built, raw: parsed.raw, candidates: hits.slice(0, 5), searchKey: parsed.name };
 }

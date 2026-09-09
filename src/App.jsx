@@ -4481,8 +4481,10 @@ function getPersonalWorkoutCompletionDateKey(workout){
   return null;
 }
 
-// 근육통 자동 안내 창(다음날/다다음날) 판정 — 당일(daysAfterWorkout=0)과 72시간 이후(2일 초과)는 timing이 null이 되어
-// 자동 안내·신규 입력 UI가 노출되지 않는다(기존 근육통 기록의 수정만 가능, 신규 추가는 제공하지 않음 — 최종 승인 정책).
+// 근육통 안내 배지 판정(다음날/다다음날) — 당일(daysAfterWorkout=0)과 72시간 이후(2일 초과)는 timing이 null이 된다.
+// 신규 입력을 막던 게이트(canEditSoreness)는 회원 요청으로 제거되어 이 함수는 더 이상 입력 가능 여부를 결정하지
+// 않는다(PersonalWorkoutStatusSection은 이제 항상 입력 가능) — timing/withinAutoWindow는 안내 문구·배지 표시에만 쓰인다.
+// 값 자체는 과거 데이터·관리자 화면(예: 회원 상세 "근육통 미입력" 힌트)이 그대로 참조하므로 반환 스키마는 바꾸지 않는다.
 function getPersonalWorkoutSorenessWindow(workout,todayKey=getKoreaDateString()){
   const doneKey=getPersonalWorkoutCompletionDateKey(workout);
   if(!doneKey) return {daysAfterWorkout:null,timing:null,withinAutoWindow:false,isSameDay:false,isPast:false};
@@ -5587,16 +5589,22 @@ function buildPersonalWorkoutStatusSummary(workout,soreness){
 }
 // 개인운동 카드 내부 "운동 후 상태" — PT 수업일지 MemberFeedbackForm(수업 후 몸 상태)과 동일한 패턴으로,
 // 기본 접힘 + 펼치면 RPE·근육통을 각자 독립된 저장 버튼으로 저장한다(선택 즉시 저장 아님). 완료된 기록에서만 렌더된다.
-// 근육통 새 입력은 기존 자동 안내 창(다음날/다다음날, getPersonalWorkoutSorenessWindow) 안에서만 허용하는 기존 정책을 그대로 따르고,
-// 이미 저장된 기록은 창이 지나도 계속 수정할 수 있다 — 창 판정과 데이터 재사용 로직은 옛 PersonalSorenessSheet에서 그대로 옮겨왔다.
+// 근육통 입력은 개인운동 완료 시점과 무관하게 항상 가능하다(당일/D+1/D+2/D+3 이후 모두 신규 입력·수정 가능 — 회원 요청으로
+// getPersonalWorkoutSorenessWindow 기반 창 제한(canEditSoreness) 게이트를 제거함). timing 필드는 기존 next_day/two_days_later
+// 2값 스키마를 그대로 쓰고(personalWorkoutSoreness/{workoutId} 저장 방식·db.js savePersonalWorkoutSoreness 변경 없음),
+// 창 안(1~2일)이면 그 날짜에 맞는 값을, 창 밖(당일·3일 이후)이면 daysAfterWorkout로 가장 가까운 값을 골라 채운다.
+// 이 근육통은 "이 개인운동 이후의 몸 상태" 피드백이고, 건강 탭의 "오늘 근육통"(saveDailySoreness)은 운동과 무관한
+// 현재 시점의 몸 상태 기록이라 서로 목적이 다르다 — 저장 위치(personalWorkoutSoreness vs memberCheckins)도 분리되어 있다.
 function PersonalWorkoutStatusSection({workout,soreness,sorenessWindow,onSaveRpe,onSaveSoreness,onGoToPain}){
   const [open,setOpen]=useState(false);
   const [rpe,setRpe]=useState(()=>workout?.rpe??null);
   const [savingRpe,setSavingRpe]=useState(false);
   const [rpeError,setRpeError]=useState("");
   useEffect(()=>{ setRpe(workout?.rpe??null); },[workout?.rpe]);
-  const canEditSoreness=!!soreness||sorenessWindow.withinAutoWindow;
-  const timing=soreness?.timing||(sorenessWindow.timing||"next_day");
+  // 근육통 입력은 항상 가능(창 제한 없음) — 기존 canEditSoreness 게이트를 제거했다.
+  // timing은 저장된 값 > 오늘 기준 창 판정(1~2일) > 그 밖의 날짜는 daysAfterWorkout로 가장 가까운 값(0일=next_day, 3일 이상=two_days_later)
+  // 순으로 정한다. 저장 스키마(next_day/two_days_later 2값)는 그대로다 — 새 값을 추가하지 않는다.
+  const timing=soreness?.timing||sorenessWindow.timing||(sorenessWindow.daysAfterWorkout!=null&&sorenessWindow.daysAfterWorkout>=2?"two_days_later":"next_day");
   const sorenessPartsKey=JSON.stringify(soreness?.bodyParts||[]);
   const [overall,setOverall]=useState(()=>soreness?.overallLevel||0);
   const [parts,setParts]=useState(()=>soreness?.bodyParts?.length?soreness.bodyParts:(workout?.workoutParts||[]).map(part=>({part,level:0})));
@@ -5653,36 +5661,31 @@ function PersonalWorkoutStatusSection({workout,soreness,sorenessWindow,onSaveRpe
       </div>
       <div className="sj-fb-section">
         <label className="sj-fb-label"><SjIcon paths={SJ_PATHS.flame} size={14}/> 운동 후 근육통</label>
-        {canEditSoreness?<>
-          <span className="sj-fb-instruction">{sorenessTimingLabel(timing)} 기준으로 정도를 선택해주세요.</span>
-          <span className="sj-fb-sublabel">전체 근육통 정도</span>
-          <div className="pw-level-grid">{[0,1,2,3,4,5].map(lv=>(
-            <button key={lv} type="button" className={overall===lv?"active":""} onClick={()=>setOverall(lv)}>{lv}</button>
-          ))}</div>
-          <small className="pw-hint">{sorenessLevelDescription(overall)}</small>
-          <span className="sj-fb-sublabel">부위별 근육통</span>
-          {parts.map(p=>(
-            <div key={p.part} className="pw-soreness-part-row">
-              <b>{p.part}</b>
-              <div className="pw-level-grid sm">{[0,1,2,3,4,5].map(lv=>(
-                <button key={lv} type="button" className={p.level===lv?"active":""} onClick={()=>setPartLevel(p.part,lv)}>{lv}</button>
-              ))}</div>
-              <button type="button" className="pw-part-remove" onClick={()=>removePart(p.part)} aria-label={`${p.part} 삭제`}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
-            </div>
-          ))}
-          {remainingParts.length>0&&<select className="pw-part-add-select" value="" onChange={e=>addBodyPart(e.target.value)}>
-            <option value="">+ 다른 부위 추가</option>
-            {remainingParts.map(part=><option key={part} value={part}>{part}</option>)}
-          </select>}
-          <span className="sj-fb-sublabel">메모 <em>(선택)</em></span>
-          <textarea className="pw-memo" rows={2} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength} placeholder="움직일 때 불편했던 점이나 특이사항이 있다면 적어주세요." value={memo} onChange={e=>setMemo(e.target.value)}/>
-          {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>통증은 건강 탭에서 기록</button>}
-          {sorenessError&&<p className="pw-error">{sorenessError}</p>}
-          <div className="sj-fb-save-row"><button type="button" className="sj-fb-section-save" disabled={savingSoreness} onClick={saveSorenessSection}>{savingSoreness?"저장 중...":"근육통 저장"}</button></div>
-        </>:<>
-          <span className="pw-hint">이 운동에 붙는 근육통 기록 기간(다음날~다다음날)은 지났어요. 오늘 느끼는 근육통은 건강 탭에서 언제든 기록할 수 있어요.</span>
-          {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>건강 탭에서 오늘 근육통 기록</button>}
-        </>}
+        <span className="sj-fb-instruction">{sorenessTimingLabel(timing)} 기준으로 정도를 선택해주세요.</span>
+        <span className="sj-fb-sublabel">전체 근육통 정도</span>
+        <div className="pw-level-grid">{[0,1,2,3,4,5].map(lv=>(
+          <button key={lv} type="button" className={overall===lv?"active":""} onClick={()=>setOverall(lv)}>{lv}</button>
+        ))}</div>
+        <small className="pw-hint">{sorenessLevelDescription(overall)}</small>
+        <span className="sj-fb-sublabel">부위별 근육통</span>
+        {parts.map(p=>(
+          <div key={p.part} className="pw-soreness-part-row">
+            <b>{p.part}</b>
+            <div className="pw-level-grid sm">{[0,1,2,3,4,5].map(lv=>(
+              <button key={lv} type="button" className={p.level===lv?"active":""} onClick={()=>setPartLevel(p.part,lv)}>{lv}</button>
+            ))}</div>
+            <button type="button" className="pw-part-remove" onClick={()=>removePart(p.part)} aria-label={`${p.part} 삭제`}><SjIcon paths={SJ_PATHS.x} size={13}/></button>
+          </div>
+        ))}
+        {remainingParts.length>0&&<select className="pw-part-add-select" value="" onChange={e=>addBodyPart(e.target.value)}>
+          <option value="">+ 다른 부위 추가</option>
+          {remainingParts.map(part=><option key={part} value={part}>{part}</option>)}
+        </select>}
+        <span className="sj-fb-sublabel">메모 <em>(선택)</em></span>
+        <textarea className="pw-memo" rows={2} maxLength={PERSONAL_WORKOUT_LIMITS.maxMemoLength} placeholder="움직일 때 불편했던 점이나 특이사항이 있다면 적어주세요." value={memo} onChange={e=>setMemo(e.target.value)}/>
+        {onGoToPain&&<button type="button" className="pw-link" onClick={onGoToPain}>통증은 건강 탭에서 기록</button>}
+        {sorenessError&&<p className="pw-error">{sorenessError}</p>}
+        <div className="sj-fb-save-row"><button type="button" className="sj-fb-section-save" disabled={savingSoreness} onClick={saveSorenessSection}>{savingSoreness?"저장 중...":"근육통 저장"}</button></div>
       </div>
     </div>}
   </div>;

@@ -5209,11 +5209,12 @@ const checks = [
       return fn.includes('T00:00:00Z') && !fn.includes('/ 86400000 / 24') && fn.includes('Math.round((b.getTime()-a.getTime())/86400000)');
     })()
   ],
-  ['근육통 안내 창(window): 당일(0)·72시간 초과(3일 이상)는 timing이 null 이 되어 자동 안내·신규 입력이 노출되지 않음, 1/2일만 next_day/two_days_later',
+  ['근육통 안내 창(window) 함수 자체는 그대로 유지: 당일(0)·72시간 초과(3일 이상)는 timing이 null, 1/2일만 next_day/two_days_later — 회원 근육통 입력 게이트(canEditSoreness)는 제거됐고 이 값은 이제 배지·라벨 표시에만 쓰인다',
     (() => {
       const fn = app.slice(app.indexOf('function getPersonalWorkoutSorenessWindow'), app.indexOf('function normalizePersonalWorkoutSoreness'));
       return fn.includes('const timing=days===1?"next_day":days===2?"two_days_later":null;') &&
-        fn.includes('withinAutoWindow:days===1||days===2,');
+        fn.includes('withinAutoWindow:days===1||days===2,') &&
+        !app.includes('const canEditSoreness=!!soreness||sorenessWindow.withinAutoWindow;');
     })()
   ],
   ['근육통 완료 날짜 우선순위: endedAt → completedAt → workoutDate → updatedAt → createdAt 순으로 판정',
@@ -5238,17 +5239,32 @@ const checks = [
         fn.includes('sorenessLevelDescription(bp.level)');
     })()
   ],
-  ['개인운동 카드 "운동 후 상태": RPE·근육통 각각 독립된 저장 버튼(PT 수업 후 몸 상태와 동일 패턴), 근육통 신규 입력은 기존 자동 안내 창 정책을 그대로 따름(창이 지나면 기존 기록 수정만 허용)',
+  ['개인운동 카드 "운동 후 상태": RPE·근육통 각각 독립된 저장 버튼(PT 수업 후 몸 상태와 동일 패턴), 근육통 신규 입력에 D+1/D+2 창 제한이 없어 완료 시점과 무관하게 항상 입력·수정 가능(canEditSoreness 게이트 제거)',
     (() => {
       const fn = app.slice(app.indexOf('function PersonalWorkoutStatusSection'), app.indexOf('// 운동 종목 선택 시트'));
       return fn.includes('className="sj-feedback-card"') &&
-        fn.includes('const canEditSoreness=!!soreness||sorenessWindow.withinAutoWindow;') &&
-        fn.includes('const timing=soreness?.timing||(sorenessWindow.timing||"next_day");') &&
+        !fn.includes('const canEditSoreness=') &&
+        !fn.includes('canEditSoreness?<>') &&
+        !fn.includes('이 운동에 붙는 근육통 기록 기간') &&
+        fn.includes('const timing=soreness?.timing||sorenessWindow.timing||(sorenessWindow.daysAfterWorkout!=null&&sorenessWindow.daysAfterWorkout>=2?"two_days_later":"next_day");') &&
         fn.includes('onSaveRpe?.(workout.id,rpe)') &&
         fn.includes('onSaveSoreness?.(workout,{timing,overallLevel:overall,bodyParts:parts,memo})') &&
-        fn.includes('이 운동에 붙는 근육통 기록 기간(다음날~다다음날)은 지났어요. 오늘 느끼는 근육통은 건강 탭에서 언제든 기록할 수 있어요.') &&
-        fn.includes('건강 탭에서 오늘 근육통 기록') &&
         fn.includes('통증은 건강 탭에서 기록');
+    })()
+  ],
+  ['개인운동 카드 근육통: timing은 여전히 next_day/two_days_later 2값 스키마만 쓰고(db.js savePersonalWorkoutSoreness·personalWorkoutSoreness/{workoutId} 저장 방식 변경 없음), 창을 벗어난 날짜(당일·3일 이상)도 daysAfterWorkout 기준으로 그중 하나로 매핑될 뿐 새 timing 값이 추가되지 않는다',
+    db.includes('const timing = data.timing === "two_days_later" ? "two_days_later" : "next_day";') &&
+    db.includes('daysAfterWorkout: timing === "two_days_later" ? 2 : 1,') &&
+    app.includes('const timing=soreness?.timing||sorenessWindow.timing||(sorenessWindow.daysAfterWorkout!=null&&sorenessWindow.daysAfterWorkout>=2?"two_days_later":"next_day");')
+  ],
+  ['개인운동 카드 근육통 상시 입력과 건강 탭 상시 근육통(saveDailySoreness)은 서로 다른 저장 대상을 쓰며 섞이지 않는다 — 개인운동은 onSaveSoreness(personalWorkoutSoreness/{workoutId}), 건강 탭은 saveDailySoreness(memberCheckins/{날짜})',
+    (() => {
+      const fn = app.slice(app.indexOf('function PersonalWorkoutStatusSection'), app.indexOf('// 운동 종목 선택 시트'));
+      return !fn.includes('saveDailySoreness') && !fn.includes('memberCheckins') &&
+        app.includes('const saveDailySoreness=async(patch={})=>{') &&
+        !app.slice(app.indexOf('const saveDailySoreness=async(patch={})=>{'), app.indexOf('const deleteHealthRecord=async(dateKey)=>{')).includes('personalWorkoutSoreness') &&
+        app.includes('onSaveSoreness={savePersonalSorenessRecord}') &&
+        app.includes('savePersonalWorkoutSoreness(profile.id,workout.id,{');
     })()
   ],
   ['완료 기록 수정 화면: 기존 값이 모두 채워진 채로 열리고, 변경 후 나가면 확인창을 띄운다(자동저장 아님)',
@@ -8178,6 +8194,7 @@ function runRenderTests() {
     ['회원앱 식단 기록 저장·수정·삭제·합산', path.join(root, 'tests', 'render', 'member-diet-log.test.js')],
     ['관리자 건강관리 허브 대시보드·식단 분석', path.join(root, 'tests', 'render', 'health-hub-dashboard.test.js')],
     ['회원앱 근육통 상시 기록(운동 기록 무관 입력·수정)', path.join(root, 'tests', 'render', 'member-daily-soreness.test.js')],
+    ['개인운동 카드 근육통 D+1/D+2 창 제한 제거(당일·D+3 이후도 항상 입력·수정)', path.join(root, 'tests', 'render', 'member-personal-workout-soreness-window.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

@@ -387,15 +387,13 @@ async function openSheet(nutrition, saved, mealType = '아침') {
   await act(async () => { cta(el).click(); });
   check('"고구마줄기 무침"을 입력하면 음식명이 "고구마"로 바뀌지 않고 그대로 남는다',
     valuesOf(el, '.diet-item-name')[0] === '고구마줄기 무침', JSON.stringify(valuesOf(el, '.diet-item-name')));
-  check('"고구마줄기 무침"에 고구마 칼로리(86kcal)가 자동으로 붙지 않는다(0으로 두고 직접 입력 안내)',
-    numsOf(el)[0].value === '0' && el.textContent.includes('등록된 영양정보를 찾지 못했습니다'),
+  check('"고구마줄기 무침"에 고구마 칼로리(86kcal)가 아니라 자기 DB 항목(100g 60kcal)이 적용된다',
+    numsOf(el).slice(0, 4).map(i => i.value).join('|') === '60|8|2|2',
     JSON.stringify(numsOf(el).map(i => i.value)));
-  await act(async () => { focusInput(numsOf(el)[0]); });
-  await act(async () => { setInput(numsOf(el)[0], '60'); });
   await act(async () => { cta(el).click(); });
-  check('직접 입력한 음식명이 저장 데이터에도 "고구마줄기 무침" 그대로 들어간다',
+  check('입력한 음식명이 저장 데이터에도 "고구마줄기 무침" 그대로 들어간다',
     saved.length === 1 && saved[0].items[0].name === '고구마줄기 무침' &&
-    Number(saved[0].items[0].cal) === 60 && saved[0].items[0].sourceKind === 'manual',
+    Number(saved[0].items[0].cal) === 60 && saved[0].items[0].sourceKind === 'local',
     JSON.stringify(saved[0] && saved[0].items));
 
   // 저장 후 재조회 — 원문 이름·중량·영양값이 그대로 복원된다.
@@ -433,8 +431,28 @@ async function openSheet(nutrition, saved, mealType = '아침') {
     Number(saved[0].items[0].cal) === 172, JSON.stringify(saved[0] && saved[0].items));
 
   check('오탐 방지: "고구마줄기 무침"은 계산 단계에서도 고구마로 확정되지 않는다',
-    (() => { const r = estimateFoodLines('고구마줄기 무침')[0]; return r.name === '고구마줄기 무침' && r.cal === 0 && r.matched !== true; })(),
+    (() => { const r = estimateFoodLines('고구마줄기 무침')[0]; return r.name === '고구마줄기 무침' && r.cal === 60; })(),
     JSON.stringify(estimateFoodLines('고구마줄기 무침')[0]));
+  // 고구마줄기 무침 — 100g 기준값 하나만 DB에 두고 나머지는 기존 중량 비례 계산으로만 만든다.
+  check('음식 DB에 "고구마줄기 무침"이 100g 기준 1건만 등록되어 있다(중량별 중복 항목 없음)',
+    FOOD_DB.filter(f => f.name.includes('고구마줄기')).length === 1 &&
+    (() => { const f = FOOD_DB.find(x => x.name === '고구마줄기 무침');
+      return f && f.unit === 'g' && f.per === 100 && f.cal === 60 && f.carb === 8.0 && f.protein === 2.0 && f.fat === 2.0; })(),
+    JSON.stringify(FOOD_DB.filter(f => f.name.includes('고구마줄기'))));
+  [[30, 18, 2.4, 0.6, 0.6], [50, 30, 4, 1, 1], [70, 42, 5.6, 1.4, 1.4],
+   [100, 60, 8, 2, 2], [150, 90, 12, 3, 3], [200, 120, 16, 4, 4]].forEach(([g, cal, carb, protein, fat]) => {
+    const r = estimateFoodLines(`고구마줄기 무침 ${g}g`)[0];
+    check(`고구마줄기 무침 중량별 계산: ${g}g → ${cal}kcal / 탄 ${carb} / 단 ${protein} / 지 ${fat}`,
+      !!r && r.name === '고구마줄기 무침' && r.amount === String(g) && r.unit === 'g' &&
+      r.cal === cal && r.carb === carb && r.protein === protein && r.fat === fat && r.sourceKind === 'local',
+      JSON.stringify(r && { n: r.name, a: r.amount, c: r.cal, cb: r.carb, p: r.protein, f: r.fat }));
+  });
+  check('고구마줄기 무침: 공백 차이("고구마 줄기 무침")도 같은 항목으로 정확 일치한다',
+    estimateFoodLines('고구마 줄기 무침 100g')[0].name === '고구마줄기 무침',
+    JSON.stringify(estimateFoodLines('고구마 줄기 무침 100g')[0]));
+  check('고구마줄기 무침 추가 후에도 "고구마" 검색은 기존 고구마 항목이 1순위다',
+    (() => { const r = estimateFoodLines('고구마 100g')[0]; return r.name === '고구마' && r.cal === 86; })(),
+    JSON.stringify(estimateFoodLines('고구마 100g')[0]));
   check('오탐 방지: 부분 일치만 있으면 이름을 바꾸지 않는다("닭가 100g" → 닭가슴살 자동 확정 금지)',
     (() => { const r = estimateFoodLines('닭가 100g')[0];
       return r.name === '닭가' && r.cal === 0 && (r.candidates || []).some(c => c.name === '닭가슴살'); })(),

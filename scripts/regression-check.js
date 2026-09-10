@@ -397,7 +397,7 @@ try {
   const sliceLevelDesc = app.slice(app.indexOf('function sorenessTimingLabel'), app.indexOf('function getPersonalWorkoutAttentionReasons'));
   const sliceFeedbackParts = app.slice(app.indexOf('function memberFeedbackParts(existing={})'), app.indexOf('function formatSorenessBodyParts'));
   // 건강 탭 상시 근육통(memberCheckins)도 같은 참고 표시에 들어가므로 그 읽기 헬퍼 원본까지 같은 스코프에 넣는다(JSX 직전까지만 자른다).
-  const sliceCheckinSore = app.slice(app.indexOf('const SORENESS_LEVELS='), app.indexOf('// 근육통 입력 UI —'));
+  const sliceCheckinSore = app.slice(app.indexOf('const SORENESS_LEVELS='), app.indexOf('// 통증 성격 선택 UI'));
   const sliceAwareness = app.slice(app.indexOf('const HUB_SORENESS_RECENCY_DAYS'), app.indexOf('function HubScreen('));
   hubAwarenessLib = new Function(`${sliceKoreaDate}\n${sliceDaysDiff}\n${sliceNormalize}\n${sliceLevelDesc}\n${sliceFeedbackParts}\n${sliceCheckinSore}\n${sliceAwareness}\nreturn { getHubBodyPartAwareness, getCheckinSoreness, HUB_SORENESS_RECENCY_DAYS, HUB_PAIN_RECENCY_DAYS, getPersonalWorkoutSorenessWindow, shouldShowPersonalWorkoutSorenessMissingHint, PERSONAL_WORKOUT_SORENESS_MISSING_HINT_DAYS };`)();
 } catch (e) {
@@ -5315,12 +5315,11 @@ const checks = [
     db.includes('daysAfterWorkout: timing === "two_days_later" ? 2 : 1,') &&
     app.includes('const timing=soreness?.timing||sorenessWindow.timing||(sorenessWindow.daysAfterWorkout!=null&&sorenessWindow.daysAfterWorkout>=2?"two_days_later":"next_day");')
   ],
-  ['개인운동 카드 근육통 상시 입력과 건강 탭 상시 근육통(saveDailySoreness)은 서로 다른 저장 대상을 쓰며 섞이지 않는다 — 개인운동은 onSaveSoreness(personalWorkoutSoreness/{workoutId}), 건강 탭은 saveDailySoreness(memberCheckins/{날짜})',
+  ['개인운동 카드 근육통 입력은 personalWorkoutSoreness/{workoutId}에 저장되고(onSaveSoreness), 건강 탭 상시 근육통(saveDailySoreness, memberCheckins 기반 신규 입력)은 2026-09-10 제거되어 더 이상 존재하지 않는다',
     (() => {
       const fn = app.slice(app.indexOf('function PersonalWorkoutStatusSection'), app.indexOf('// 운동 종목 선택 시트'));
       return !fn.includes('saveDailySoreness') && !fn.includes('memberCheckins') &&
-        app.includes('const saveDailySoreness=async(patch={})=>{') &&
-        !app.slice(app.indexOf('const saveDailySoreness=async(patch={})=>{'), app.indexOf('const deleteHealthRecord=async(dateKey)=>{')).includes('personalWorkoutSoreness') &&
+        !app.includes('const saveDailySoreness=') &&
         app.includes('onSaveSoreness={savePersonalSorenessRecord}') &&
         app.includes('savePersonalWorkoutSoreness(profile.id,workout.id,{');
     })()
@@ -5809,38 +5808,36 @@ const checks = [
     return w.daysAfterWorkout === 5 && w.withinAutoWindow === false && lib.shouldShowPersonalWorkoutSorenessMissingHint(w) === true;
   }),
 
-  // ── 근육통 상시 기록 (개인운동·PT 기록 여부와 무관하게 언제든 입력·수정) ──
-  // 기존에는 근육통 입력 UI가 (1) 발행된 PT 수업 카드 내부, (2) 완료된 개인운동 카드 내부(그것도 운동 다음날~다다음날)
-  // 에만 있어서, 운동 기록이 없는 날에는 근육통을 남길 방법이 아예 없었다. 건강 탭 "오늘 상태"에 상시 입력 카드를 두어
-  // 기존 memberCheckins/{날짜} 문서(통증·컨디션과 같은 곳)에 merge로 저장한다 — 새 컬렉션·새 저장 함수를 만들지 않는다.
-  ['근육통 상시 기록: 건강 탭 "오늘 상태"에 근육통 카드가 통증·컨디션과 나란히 항상 노출된다',
-    app.includes('{key:"soreness",label:"근육통",value:sore.has?') &&
-    app.includes('const sore=getCheckinSoreness(todayCheck);') &&
-    app.includes('soreness:{paths:["M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"],color:"#F59E0B",bg:"#FEF6E7"}')
-  ],
-  ['근육통 상시 기록: 전용 Bottom Sheet(근육통 입력)와 입력 UI(SorenessInput)가 존재하고, 기존 근육통 정도·부위 상수를 재사용한다',
-    app.includes('<MemberBottomSheet open={sheet==="soreness"} onClose={()=>setSheet(null)} title="근육통 입력">') &&
-    app.includes('<SorenessInput form={p.form} setForm={p.setForm}/>') &&
-    app.includes('function SorenessInput({form,setForm}){') &&
-    app.includes('{SORENESS_LEVELS.map(lv=>') && app.includes('{SORENESS_BODY_PARTS.map(part=>')
-  ],
-  ['근육통 상시 기록: 저장 위치는 기존 memberCheckins/{날짜} 문서 그대로(날짜별 upsert) — 새 컬렉션을 만들지 않는다',
-    app.includes('await saveMemberCheckin(profile.id,dateKey,{soreness:level,sorenessParts:parts,sorenessMemo:memo});') &&
-    !app.includes('dailySoreness') && !app.includes('memberSoreness')
-  ],
-  ['근육통 상시 기록: 저장 후 전체 재조회(load) 없이 해당 날짜 체크인만 로컬 갱신 + 중복 클릭 차단 + 실패 시 화면에 사유 표시',
+  // ── 근육통 건강 탭 입력 제거 (2026-09-10) ──
+  // 근육통은 PT 수업 카드(MemberFeedbackForm "수업 후 몸 상태")와 개인운동 카드(PersonalWorkoutStatusSection
+  // "운동 후 상태")에서 각 운동 기록에 연결해 입력하도록 통합됐다. 건강 탭 "오늘 상태"의 독립 근육통 입력
+  // 카드(2026-09-09 83039de에서 추가됐던 saveDailySoreness/SorenessInput 경로)는 완전히 제거됐지만,
+  // memberCheckins 문서에 남아있는 과거 근육통 값은 삭제하지 않고 getCheckinSoreness로 계속 읽어
+  // 관리자 화면(HubScreen soreInfo 등)에 그대로 표시한다 — 데이터 손실 없음, 입력 경로만 이동.
+  ['근육통 건강 탭 입력 제거: 건강 탭 "오늘 상태" 타일 목록에 근육통 카드가 더 이상 없다',
+    !app.includes('{key:"soreness",label:"근육통",value:sore.has?') &&
+    !app.includes('soreness:{paths:["M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"],color:"#F59E0B",bg:"#FEF6E7"}') &&
     (() => {
-      const fn = app.slice(app.indexOf('const saveDailySoreness=async(patch={})=>{'), app.indexOf('const deleteHealthRecord=async(dateKey)=>{'));
-      return fn.length > 0 &&
-        fn.includes('if(sorenessSaving) return;') &&
-        fn.includes('setCheckins(prev=>{') &&
-        !fn.includes('load({silent:true})') && !fn.includes('reloadMemberApp') &&
-        app.includes('catch(e){ setSorenessError(e?.message||"근육통 저장에 실패했습니다."); }') &&
-        app.includes('disabled={p.sorenessSaving}') &&
-        app.includes('justSavedSoreness?"근육통 저장 완료 ✓"');
+      const fn = app.slice(app.indexOf('function buildTodayStatusTiles'), app.indexOf('// 건강 기록 카드 버튼'));
+      return fn.includes('{key:"weight"') && fn.includes('{key:"condition"') && fn.includes('{key:"pain"') && !fn.includes('soreness');
     })()
   ],
-  ['근육통 상시 기록: 저장이 관리자 최근 활동/오늘 입력 피드에 기존 "soreness" 타입으로 남는다(개인운동 전용 타입과 분리 유지)',
+  ['근육통 건강 탭 입력 제거: 전용 Bottom Sheet·입력 UI(SorenessInput)·저장 함수(saveDailySoreness)가 모두 삭제됐다',
+    !app.includes('<MemberBottomSheet open={sheet==="soreness"}') &&
+    !app.includes('function SorenessInput(') &&
+    !app.includes('<SorenessInput ') &&
+    !app.includes('const saveDailySoreness=') &&
+    !app.includes('submitSoreness') &&
+    !app.includes('sorenessSaving') &&
+    !app.includes('open.soreness')
+  ],
+  ['근육통 건강 탭 입력 제거: 과거 기록 읽기(getCheckinSoreness)와 SORENESS_LEVELS/SORENESS_BODY_PARTS 상수는 그대로 남아 관리자 표시·PT/개인운동 근육통 UI가 계속 동작한다',
+    app.includes('function getCheckinSoreness(check={}){') &&
+    app.includes('const SORENESS_LEVELS=["없음","약간","보통","심함"];') &&
+    app.includes('const SORENESS_BODY_PARTS=[') &&
+    app.includes('return {has,level,parts:level==="없음"?[]:parts,memo:String(check?.sorenessMemo||"")};')
+  ],
+  ['근육통 건강 탭 입력 제거: 저장이 관리자 최근 활동/오늘 입력 피드에 기존 "soreness" 타입으로 남는 db.js 로직 자체는 손대지 않았다(과거 저장분 호환, 신규 호출부만 없어짐)',
     db.includes('if (data.soreness !== undefined) {') &&
     db.includes('activities.push({ type: "soreness", label: "근육통", value, dateKey });') &&
     db.includes('? "근육통 없음"')
@@ -8299,7 +8296,6 @@ function runRenderTests() {
     ['회원앱 식단 기록 저장·수정·삭제·합산', path.join(root, 'tests', 'render', 'member-diet-log.test.js')],
     ['회원앱 하루 권장 칼로리 고정·목표체중·하한선', path.join(root, 'tests', 'render', 'member-calorie-target.test.js')],
     ['관리자 건강관리 허브 대시보드·식단 분석', path.join(root, 'tests', 'render', 'health-hub-dashboard.test.js')],
-    ['회원앱 근육통 상시 기록(운동 기록 무관 입력·수정)', path.join(root, 'tests', 'render', 'member-daily-soreness.test.js')],
     ['개인운동 카드 근육통 D+1/D+2 창 제한 제거(당일·D+3 이후도 항상 입력·수정)', path.join(root, 'tests', 'render', 'member-personal-workout-soreness-window.test.js')],
   ];
   let bad = 0;

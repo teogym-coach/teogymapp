@@ -36,7 +36,7 @@ try {
   const sliceC = app.slice(app.indexOf('function hasRoutineCautionText'), app.indexOf('function ReviewRoutine'));
   const sliceEquip = app.slice(app.indexOf('const EQUIP_LIST'), app.indexOf('const EQUIP_COLOR'));
   const sliceLib = app.slice(app.indexOf('const EXERCISE_LIBRARY'), app.indexOf('function suggestMuscle'));
-  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, partComboLabel, SPLIT_5WAY, SPLIT_2WAY, SPLIT_3WAY, SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance, resolveBarbellKind, detectBarbellKindFromText, BARBELL_BASE_WEIGHT_BY_KIND };`);
+  const factory = new Function(`${sliceNum}\n${sliceFunc}\n${sliceEquip}\n${sliceLib}\n${sliceA}\n${sliceB}\n${sliceC}\nreturn { getRecommendedPart, getLatestSessionType, getRecentPartSequence, getUnifiedRecentPartSequence, getRecentPartCounts, partComboLabel, SPLIT_5WAY, SPLIT_2WAY, SPLIT_3WAY, SPLIT_COMBO_2WAY, PAIR_SPLIT_DEFAULT, normalizeExerciseName, recommendExerciseDose, buildReviewRoutine, getPartRecoveryHours, DOSE_REP_SCHEME, BARBELL_PLATE_WEIGHTS, BARBELL_WEIGHT_STEP, DEFAULT_BARBELL_BASE_WEIGHT, DUMBBELL_WEIGHTS, DUMBBELL_JUMP_PCT_THRESHOLD, nextWorkingWeight, nextDumbbellWeight, resolveEquipmentKind, estimateWeightIncrement, isBarbellWeightPlausible, hasStableRecentPerformance, resolveBarbellKind, detectBarbellKindFromText, BARBELL_BASE_WEIGHT_BY_KIND };`);
   workoutGuideLib = factory();
 } catch (e) {
   console.error('[regression] 오늘의 운동 가이드 로직 추출 실패:', e.message);
@@ -2668,19 +2668,26 @@ const checks = [
     app.includes('const isPaired=getLatestSessionType(sessions)==="2:1";') &&
     app.includes('const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:pickBaseCycle(patternSequence,freq);')
   ],
-  ['오늘의 운동 가이드: 분할 패턴 추론이 최근 창(28일)만으로 부족하면 전체 수업 기록으로 확장해 재시도하되, 직전 수업(lastPart) 회피 로직은 최근 창만 사용해 오래된 기록을 직전 수업으로 오인하지 않음',
+  ['오늘의 운동 가이드: 분할 패턴 추론이 최근 창(28일)만으로 부족하면 전체 수업 기록으로 확장해 재시도(PT 수업일지만 사용 — 개인운동은 섞지 않아 트레이너 분할 추정을 왜곡하지 않음)',
     app.includes('const patternSequence=sequence.length<4?getRecentPartSequence(sessions,40,3650):sequence;') &&
     app.includes('const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:pickBaseCycle(patternSequence,freq);') &&
-    app.includes('const inferred=inferActualSplit(patternSequence);') &&
-    app.includes('const lastPart=sequence[0];')
+    app.includes('const inferred=inferActualSplit(patternSequence);')
   ],
-  ['오늘의 운동 가이드: 다음 수업 날짜 역산(2·3순위) 결과가 실제 최근 수업과 상극이면 채택하지 않고 다음 단계(패턴 이어가기/회복 회피)로 넘김 — 사이클 위치 계산만으로 상극 조합을 추천하지 않도록 보장',
+  ['오늘의 운동 가이드: 직전 실제 운동 부위(lastPart)는 PT 수업일지만이 아니라 개인운동 기록도 통합해서 판단(getUnifiedRecentPartSequence) — 어제 개인운동만 한 경우도 회피/패턴이어가기 판단에 반영됨',
+    app.includes('function getUnifiedRecentPartSequence(sessions=[], personalWorkouts=[], n=14, windowDays=28){') &&
+    app.includes('const lastPart=getUnifiedRecentPartSequence(sessions,personalWorkouts)[0]||sequence[0];')
+  ],
+  ['오늘의 운동 가이드: 다음 수업 날짜 역산(2·3순위)·패턴 이어가기(4순위) 결과 모두 "다음 PT 보호"(protect)와 "실제 최근 상극"을 함께 검사 — 어느 우선순위도 다음 PT 부위 보호를 우회할 수 없음',
     app.includes('const conflictsWithLast=lastAtoms.some(a=>candidate.split(" · ").includes(a)||candidate.split(" · ").includes(CONFLICT[a]));') &&
-    app.includes('if(!conflictsWithLast){')
+    app.includes('if(!conflictsWithLast && !overlapsAvoid(candidate,protect)){') &&
+    app.includes('const candidate=idxLast!==-1?cycle[(idxLast+1)%cycle.length]:null;') &&
+    app.includes('if(candidate && !overlapsAvoid(candidate,protect)){')
   ],
-  ['오늘의 운동 가이드: 최종 폴백(4·5순위)이 다음 수업이 오늘·내일처럼 임박하면 그 예정 부위와 상극인 조합도 함께 회피(다음 수업 부위와 겹치는 추천 방지)',
-    app.includes('if(info.daysUntil!=null && info.daysUntil>=0 && info.daysUntil<=1 && info.part){') &&
-    app.includes('info.part.split(" · ").forEach(a=>{avoid.add(a); const c=CONFLICT[a]; if(c)avoid.add(c);});')
+  ['오늘의 운동 가이드: 다음 PT 보호(protect)는 달력상 며칠 남았는지가 아니라 예약 시각까지 반영한 실제 남은 시간(estimateHoursUntilNextPt)으로 3단계(24h 이내 강한 제외/24~48h 동일부위만 제외/그 이상 제외 없음)를 나누고, 어떤 우선순위 계산보다 먼저 적용됨',
+    app.includes('function estimateHoursUntilNextPt(info){') &&
+    app.includes('if(nextPtHours<=24){') &&
+    app.includes('}else if(nextPtHours<=48){') &&
+    app.includes('info.part.split(" · ").forEach(a=>protect.add(a));')
   ],
   ['오늘의 운동 가이드: 실제 수업일지 반복 패턴 추정(1순위)이 최근 2~4주(windowDays) 안에서, 실제 "반복" 여부를 검증(단순 나열 아님)',
     app.includes('function getRecentPartSequence(sessions=[], n=14, windowDays=28)') &&
@@ -2689,17 +2696,24 @@ const checks = [
     app.includes('if(sequence.length<4)return null;') &&
     app.includes('return detectRepeatingCycle([...sequence].reverse());')
   ],
-  ['오늘의 운동 가이드: 패턴이 확인되면 마지막 수업 다음 순서로 이어가기(회복 회피 규칙보다 우선 — 가슴→어깨처럼 실제 반복된 흐름은 그대로 따름)',
-    app.includes('part=cycle[(idxLast+1)%cycle.length];')
+  ['오늘의 운동 가이드: 패턴이 확인되면 마지막 수업 다음 순서로 이어가기(회복 회피 규칙보다 우선 — 가슴→어깨처럼 실제 반복된 흐름은 그대로 따름), 단 다음 PT 보호 대상이면 이어가지 않고 다음 단계로 넘김',
+    app.includes('const candidate=idxLast!==-1?cycle[(idxLast+1)%cycle.length]:null;')
   ],
   ['오늘의 운동 가이드: 다음 수업 날짜 역산 공식이 사이클 길이 이내 + 주당 빈도가 사이클 길이에 못 미치지 않을 때만 적용(3순위 게이트로 "주 2회에게 5회처럼" 추천 방지)',
     app.includes('const freq=getWorkoutFrequencyNumber(profile);') &&
     app.includes('if(info.daysUntil!=null && info.daysUntil>=1 && info.daysUntil<=cycle.length && freq>=cycle.length-1){') &&
     app.includes('const idxToday=((idxNext-info.daysUntil)%cycle.length+cycle.length)%cycle.length;')
   ],
-  ['오늘의 운동 가이드: getNextWorkoutInfo/normalizeWorkoutPart/getRecentPartCounts/getWorkoutFrequencyNumber 등 관리자앱 공유 함수는 본체 변경 없음',
+  ['오늘의 운동 가이드: 최종 폴백은 다음 PT 보호(protect)를 avoid에 포함해 검사하되, 후보가 전부 소진되면 "최근 부위 회피"부터 완화하고 protect는 마지막까지 지킨다(1순위이므로) — 그래도 없으면(cycle이 너무 좁음) 더 넓은 기본 분할(baseCycle)에서 protect만 지켜 다시 찾는다(빈 화면·다음 PT 부위 강제 추천 방지)',
+    app.includes('const avoid=new Set(protect);') &&
+    app.includes('if(!candidates.length)candidates=cycle.filter(p=>!overlapsAvoid(p,protect));') &&
+    app.includes('if(!candidates.length && cycle!==baseCycle)candidates=baseCycle.filter(p=>!overlapsAvoid(p,protect));') &&
+    app.includes('part=candidates.sort((a,b)=>comboCount(a)-comboCount(b))[0]||cycle.find(p=>!overlapsAvoid(p,protect))||cycle[0];')
+  ],
+  ['오늘의 운동 가이드: getNextWorkoutInfo/normalizeWorkoutPart/getWorkoutFrequencyNumber 등 관리자앱 공유 함수는 본체 변경 없음, getRecentPartCounts/getPartRecoveryHours는 개인운동(personalWorkouts)도 함께 세도록 확장',
     app.includes('function getNextWorkoutInfo(profile){const part=getNextPtPart(profile);') &&
-    app.includes('function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10);')
+    app.includes('function getRecentPartCounts(sessions=[], personalWorkouts=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10);') &&
+    app.includes('function getPartRecoveryHours(part, sessions=[], personalWorkouts=[]){')
   ],
   ['오늘의 운동 가이드: exerciseMatchesPart가 배열(콤보 부위)도 하위호환으로 지원 + 원본 값(이두/삼두)도 함께 비교',
     app.includes('const rawVals=[memberTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));')
@@ -2750,6 +2764,79 @@ const checks = [
   wgScenario('오늘의 운동 가이드 시나리오7: 주 4회 이상이고 기록이 뒷받침되지 않아도(짧은 기록) 5분할 폴백이 적용될 수 있음(성별 무관)', lib => {
     const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 4회' }, [], {});
     return arrEq(r.cycle, lib.SPLIT_5WAY);
+  }),
+
+  // ── 다음 PT 보호 + 개인운동 통합 (2026-09-10, "내일 등 PT인데 오늘 등 추천" 버그 수정) ──
+  // nextWorkoutTime을 항상 "00:00"으로 고정해 estimateHoursUntilNextPt가 실행 시각과 무관하게 항상 같은 시간 구간에 들어가도록 만든다
+  // (daysFromNowStr(n) + "00:00" ⇒ 남은 시간은 항상 (24*(n-1), 24*n] 구간 — 회귀 스크립트가 언제 실행되든 결과가 흔들리지 않음).
+  wgScenario('오늘의 운동 가이드 CASE1: 어제 개인운동으로 가슴+어깨를 기록했고 내일 PT가 등이면, 오늘 등을 추천하지 않고 그 사실을 이유에 반영한다', lib => {
+    const profile = { weeklyWorkoutCount: '주 5회', nextWorkoutPart: '등', nextWorkoutDate: daysFromNowStr(1), nextWorkoutTime: '00:00' };
+    const personalWorkouts = [{ workoutDate: daysAgoStr(1), workoutParts: ['가슴', '어깨'], exercises: [], status: 'completed' }];
+    const r = lib.getRecommendedPart(profile, [], {}, personalWorkouts);
+    return !r.part.split(' · ').includes('등') && r.reason.includes('제외했습니다');
+  }),
+  wgScenario('오늘의 운동 가이드 CASE2: 어제 PT 등, 내일 PT 하체 → 등·하체를 모두 피해서 다른 부위를 추천(우선순위 1의 날짜 역산도 보호를 우회하지 않음)', lib => {
+    const profile = { weeklyWorkoutCount: '주 5회', nextWorkoutPart: '하체', nextWorkoutDate: daysFromNowStr(1), nextWorkoutTime: '00:00' };
+    const sessions = [{ date: daysAgoStr(1), selectedTypes: ['등'], exercises: [] }];
+    const r = lib.getRecommendedPart(profile, sessions, {});
+    return r.part !== '등' && r.part !== '하체';
+  }),
+  wgScenario('오늘의 운동 가이드 CASE3: 오늘 개인운동으로 이미 가슴을 기록했으면 같은 날 다시 가슴을 추천하지 않음', lib => {
+    const personalWorkouts = [{ workoutDate: daysAgoStr(0), workoutParts: ['가슴'], exercises: [], status: 'completed' }];
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 3회' }, [], {}, personalWorkouts);
+    return r.part === '하체' && !r.part.split(' · ').includes('가슴');
+  }),
+  wgScenario('오늘의 운동 가이드 CASE4: 최근 PT(등)·최근 개인운동(가슴)·다음 PT(하체)를 모두 반영 — 직전 실제 운동 부위(lastPart)는 더 최근인 개인운동(가슴)을 따르고, 추천은 다음 PT 부위(하체)도 함께 피한다', lib => {
+    const profile = { weeklyWorkoutCount: '주 5회', nextWorkoutPart: '하체', nextWorkoutDate: daysFromNowStr(1), nextWorkoutTime: '00:00' };
+    const sessions = [{ date: daysAgoStr(3), selectedTypes: ['등'], exercises: [] }];
+    const personalWorkouts = [{ workoutDate: daysAgoStr(1), workoutParts: ['가슴'], exercises: [], status: 'completed' }];
+    const r = lib.getRecommendedPart(profile, sessions, {}, personalWorkouts);
+    return r.lastPart === '가슴' && r.part !== '하체' && r.part !== '등';
+  }),
+  wgScenario('오늘의 운동 가이드 CASE5: 다음 PT 부위가 없어도 최근 PT+개인운동 기록만으로 정상 추천된다(빈 화면 없음)', lib => {
+    const sessions = [{ date: daysAgoStr(2), selectedTypes: ['등'], exercises: [] }];
+    const personalWorkouts = [{ workoutDate: daysAgoStr(1), workoutParts: ['가슴'], exercises: [], status: 'completed' }];
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 3회' }, sessions, {}, personalWorkouts);
+    return typeof r.part === 'string' && r.part.length > 0;
+  }),
+  wgScenario('오늘의 운동 가이드 CASE6: 개인운동 기록이 없어도(personalWorkouts=[]) PT 기록만으로 기존과 동일하게 정상 추천된다', lib => {
+    const sessions = [{ date: daysAgoStr(1), selectedTypes: ['가슴'], exercises: [] }];
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 5회' }, sessions, {}, []);
+    return r.part !== '어깨';
+  }),
+  wgScenario('오늘의 운동 가이드 CASE7: PT 기록이 전혀 없어도 개인운동 기록만으로 정상 추천되고, 어제 한 부위(하체)와 그 상극(등)을 함께 피한다', lib => {
+    const personalWorkouts = [{ workoutDate: daysAgoStr(1), workoutParts: ['하체'], exercises: [], status: 'completed' }];
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 3회' }, [], {}, personalWorkouts);
+    return r.part === '가슴 · 어깨 · 삼두';
+  }),
+  wgScenario('오늘의 운동 가이드 CASE8: 운동 기록이 거의 없어도(PT·개인운동 모두 없음) 기본 분할 폴백이 정상 작동한다(빈 화면 없음)', lib => {
+    const r = lib.getRecommendedPart({ weeklyWorkoutCount: '주 1회' }, [], {}, []);
+    return arrEq(r.cycle, lib.SPLIT_2WAY) && typeof r.part === 'string' && r.part.length > 0;
+  }),
+  wgScenario('오늘의 운동 가이드 CASE9: 개인운동 한 세션에 가슴+어깨처럼 복수 부위를 기록하면 두 부위 모두 최근 운동 이력으로 인식된다(workoutParts 저장값 우선, 비어 있으면 종목 muscleTop으로 보완)', lib => {
+    const byParts = lib.getRecommendedPart({}, [], {}, [{ workoutDate: daysAgoStr(1), workoutParts: ['가슴', '어깨'], exercises: [], status: 'completed' }]);
+    const byMuscleTop = lib.getRecommendedPart({}, [], {}, [{ workoutDate: daysAgoStr(1), workoutParts: [], exercises: [{ muscleTop: '가슴' }, { muscleTop: '어깨' }], status: 'completed' }]);
+    return byParts.lastPart === '가슴 · 어깨' && byMuscleTop.lastPart === '가슴 · 어깨';
+  }),
+  ['오늘의 운동 가이드 CASE10: 관리자가 직접 보낸 추천 루틴(hasCoachRoutine)이 있으면 그 대표 루틴 화면이 자동 추천(recommended.part/reason) 문구보다 먼저 반환되어, 자동 추천 엔진이 관리자 루틴을 덮어쓸 수 없는 구조다',
+    (() => {
+      const fn = app.slice(app.indexOf('function ReviewRoutine({profile,sessions'), app.indexOf('function buildPartVolumeChange'));
+      const coachIdx = fn.indexOf('formatPartsForMember(publishedRoutine)');
+      const autoIdx = fn.indexOf('{recommended.reason}');
+      return coachIdx > -1 && autoIdx > -1 && coachIdx < autoIdx;
+    })()
+  ],
+  wgScenario('오늘의 운동 가이드 CASE11: 다음 PT까지 24~48시간이면 같은 부위는 반드시 제외되고, 우선순위 1(날짜 역산)이 그 부위를 그대로 계산해내도 보호 필터가 채택을 막는다', lib => {
+    const profile = { weeklyWorkoutCount: '주 2회', nextWorkoutPart: '하체', nextWorkoutDate: daysFromNowStr(2), nextWorkoutTime: '00:00' };
+    const r = lib.getRecommendedPart(profile, [], {});
+    return !r.part.split(' · ').includes('하체');
+  }),
+  wgScenario('오늘의 운동 가이드 CASE12: 다음 PT까지 시간이 충분히 남았으면(5일) 같은 부위라도 무조건 제외하지 않고, 최근 운동 이력에 따른 회피는 평소와 동일하게 작동한다', lib => {
+    const profile = { weeklyWorkoutCount: '주 5회', nextWorkoutPart: '하체', nextWorkoutDate: daysFromNowStr(5) };
+    const farEnough = lib.getRecommendedPart(profile, [], {});
+    const sessions = [{ date: daysAgoStr(3), selectedTypes: ['하체'], exercises: [] }];
+    const withRecentHistory = lib.getRecommendedPart(profile, sessions, {});
+    return farEnough.part === '하체' && withRecentHistory.part === '어깨' && withRecentHistory.part !== '하체';
   }),
 
   // ── 운동명 정규화 + 세트·중량·볼륨·RPE 추천 — 실제 buildReviewRoutine/recommendExerciseDose 실행 검증 ──
@@ -8164,8 +8251,9 @@ const checks = [
       app.indexOf('// loading / error / (기록 없음)은 서로 다른 상태다')
     );
     return [
-      ['자동 추천 미리보기: 관리자 화면이 회원앱과 같은 추천 엔진(getRecommendedPart/buildReviewRoutine)을 그대로 호출한다(알고리즘 복제 금지)',
-        previewFn.includes('getRecommendedPart(member, memberSessions, {})') &&
+      ['자동 추천 미리보기: 관리자 화면이 회원앱과 같은 추천 엔진(getRecommendedPart/buildReviewRoutine)을 그대로 호출한다(알고리즘 복제 금지) — 개인운동(완료 기록만)도 회원앱과 동일하게 함께 넘긴다',
+        previewFn.includes('getRecommendedPart(member, memberSessions, {}, completedPersonalWorkouts)') &&
+        previewFn.includes('const completedPersonalWorkouts = useMemo(() => (personalWorkouts || []).filter(w => w?.status === "completed")') &&
         previewFn.includes('buildReviewRoutine(memberSessions, {}, checkins || [], activeParts)')
       ],
       ['자동 추천 미리보기: 입력 세션을 회원앱과 동일하게 맞춘다(공개 수업만 + toMemberVisibleSession 공개 필드 투영)',
@@ -8182,10 +8270,10 @@ const checks = [
       ['자동 추천 미리보기: 조회 전용 — 저장·수정·삭제 호출이 없다',
         !/save[A-Z]|update[A-Z]|delete[A-Z]|addDoc|setDoc/.test(previewFn)
       ],
-      ['자동 추천 미리보기: 추천 근거로 실제 엔진 값만 쓴다(부위 순서·회복시간·최근 부위 횟수)',
+      ['자동 추천 미리보기: 추천 근거로 실제 엔진 값만 쓴다(부위 순서·회복시간·최근 부위 횟수) — 회복시간·최근 횟수 계산도 개인운동을 함께 반영한다',
         previewFn.includes('recommended.sequence') &&
-        previewFn.includes('getPartRecoveryHours(p, memberSessions)') &&
-        previewFn.includes('getRecentPartCounts(memberSessions)')
+        previewFn.includes('getPartRecoveryHours(p, memberSessions, completedPersonalWorkouts)') &&
+        previewFn.includes('getRecentPartCounts(memberSessions, completedPersonalWorkouts)')
       ],
       ['관리자 추천 루틴과 이름·화면 분리: 회원 상세에 "관리자 추천 루틴 전송"과 "회원앱 자동 추천 미리보기" 두 진입점이 서로 다른 screen으로 나뉜다',
         app.includes('>관리자 추천 루틴 전송 →</button>') &&

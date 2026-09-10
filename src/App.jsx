@@ -4042,7 +4042,7 @@ function HomeNextSessionCard(p){
   // 관리자가 실제로 저장한 부위가 있을 때만 표시(없으면 기본값 대신 준비 중 문구) — getNextPtPart의 "하체" 폴백을 화면에 노출하지 않는다
   const hasSavedPart=(p.profile?.nextWorkoutPart&&p.profile.nextWorkoutPart!=="미정")||(p.profile?.nextPtPart&&p.profile.nextPtPart!=="미정");
   const nextPart=hasSavedPart?info.part:null;
-  const recommended=getRecommendedPart(p.profile,p.sessions,p.onboarding);
+  const recommended=getRecommendedPart(p.profile,p.sessions,p.onboarding,p.personalWorkouts);
   return <section className="hm-card hm-next">
     <div className="hm-next-head">
       <span className="hm-card-ico"><SjIcon paths={HM_PATHS.calendar} size={15}/></span>
@@ -4067,7 +4067,8 @@ function HomeNextSessionCard(p){
           : <div className="hm-part-tags">{recommended.part.split(" · ").map(t=><b key={t}>{t}</b>)}</div>}
       </div>
     </div>
-    <p className="hm-next-reason">{isTodayPt?"수업 전 준비 루틴으로 몸을 깨워주세요.":nextPart?`다음 ${nextPart} 수업을 고려한 추천이에요.`:"최근 운동 흐름을 고려한 추천이에요."}</p>
+    {/* 다음 수업 부위와 오늘 추천 부위가 겹치면(=보호 로직이 개입하지 못한 예외 상황) "그 수업을 고려한 추천"이라는 모순된 문구를 보여주지 않는다. */}
+    <p className="hm-next-reason">{isTodayPt?"수업 전 준비 루틴으로 몸을 깨워주세요.":(nextPart&&!nextPart.split(" · ").some(t=>recommended.part.split(" · ").includes(t)))?`다음 ${nextPart} 수업을 고려한 추천이에요.`:"최근 운동 흐름을 고려한 추천이에요."}</p>
     <button type="button" className="hm-next-btn" onClick={()=>setOpen(v=>!v)}>{open?"가이드 접기":isTodayPt?"준비 루틴 보기":"추천 루틴 보기"}<SjIcon className="hm-next-btn-arr" paths={open?SJ_PATHS.chevronUp:HM_PATHS.chevronRight} size={15}/></button>
     {open&&<div className="hm-next-detail"><ReviewRoutine {...p} initialOpen/></div>}
   </section>;
@@ -8883,7 +8884,9 @@ function recommendExerciseDose(history=[], opts={}){
     volumeDeltaPct:volumeNote,
   }};
 }
-function getRecentPartCounts(sessions=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; sessions.filter(s=>String(s.date||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(getMemberFacingMuscleTop(e)||e.type); if(part)counts[part]=(counts[part]||0)+1;})); return counts;}
+// personalWorkouts(개인운동)도 함께 세야 "최근에 이미 그 부위를 했다"는 사실을 놓치지 않는다(과거엔 PT 수업일지만 셌음).
+// 운동 카드 구조(exercises[].muscleTop)가 PT와 동일해 별도 변환 없이 date 대신 workoutDate만 대체해 그대로 합산한다.
+function getRecentPartCounts(sessions=[], personalWorkouts=[]){const cutoff=new Date(Date.now()-21*86400000).toISOString().slice(0,10); const counts={}; const tally=list=>(list||[]).filter(s=>String(s.date||s.workoutDate||"")>=cutoff).forEach(s=>(s.exercises||[]).forEach(e=>{const part=normalizeWorkoutPart(getMemberFacingMuscleTop(e)||e.type); if(part)counts[part]=(counts[part]||0)+1;})); tally(sessions); tally(personalWorkouts); return counts;}
 function getWorkoutFrequencyNumber(profile={}){const raw=String(profile.workoutFrequency||profile.weeklyWorkoutCount||""); const n=Number(raw.match(/\d+/)?.[0]); return Number.isFinite(n)&&n>0?n:3;}
 // 회원의 가장 최근 실제 수업이 2:1이었는지 — 과거 이력이 아니라 "현재 진행 중인 수업 형태"를 판별하는 유일한 기준.
 // 2:1 관리 화면에서 나눠서 기록되거나 수업일지에서 수동으로 2:1 표시된 세션 모두 sessionType:"2:1"로 저장되므로, 별도 조회 없이 회원 본인 sessions만으로 판별할 수 있다.
@@ -8935,6 +8938,42 @@ function getRecentPartSequence(sessions=[], n=14, windowDays=28){
   return seq;
 }
 
+// 개인운동 부위 콤보 라벨 — PT 수업일지의 partComboLabel과 완전히 같은 관례(PART_COMBO_ORDER 순서, 이두/삼두 유지)를 그대로 재사용한다.
+// 저장된 workoutParts가 비어 있으면(과거 레거시 기록 등) 종목의 muscleTop으로 보완한다(formatPersonalWorkoutPartsLabel과 동일 원칙).
+function personalWorkoutPartComboLabel(w){
+  const parts=(w?.workoutParts||[]).filter(Boolean);
+  if(parts.length)return partComboLabel(parts);
+  return partComboLabel((w?.exercises||[]).map(e=>e?.muscleTop).filter(Boolean));
+}
+// PT 수업 + 개인운동을 합쳐 "실제로 최근 무슨 부위를 움직였는지"를 판단한다 — 어느 쪽이든 실제로 몸을 움직인 기록이면
+// 최근 이력으로 동일하게 인정해야 한다(과거엔 PT 수업일지만 봤음). 두 컬렉션 모두 날짜만 저장하므로(시각 없음)
+// 같은 날짜에 PT+개인운동이 함께 있으면 그날 하루의 콤보로 합쳐 하나의 항목으로 취급한다.
+// "분할 패턴 추정"(inferActualSplit)에는 쓰지 않는다 — 그건 트레이너가 실제로 이끄는 PT 수업 분할을 추정하는 목적이라
+// 개인운동이 섞이면 오히려 패턴을 왜곡한다. 이 함수는 오직 "직전에 실제로 뭘 했는지"(lastPart) 판단 전용이다.
+function getUnifiedRecentPartSequence(sessions=[], personalWorkouts=[], n=14, windowDays=28){
+  const cutoff=new Date(Date.now()-windowDays*86400000).toISOString().slice(0,10);
+  const byDate=new Map();
+  const addEntry=(date,label)=>{
+    if(!date||!label)return;
+    const atoms=label.split(" · ");
+    const cur=byDate.get(date)||new Set();
+    atoms.forEach(a=>cur.add(a));
+    byDate.set(date,cur);
+  };
+  (sessions||[]).forEach(s=>{ const date=String(s?.date||""); if(date<cutoff)return; addEntry(date,partComboLabel(s.selectedTypes||[s.type])); });
+  (personalWorkouts||[]).forEach(w=>{ const date=String(w?.workoutDate||"").slice(0,10); if(date<cutoff)return; addEntry(date,personalWorkoutPartComboLabel(w)); });
+  const dates=[...byDate.keys()].sort((a,b)=>b.localeCompare(a));
+  const seq=[];
+  for(const date of dates){
+    const atoms=byDate.get(date);
+    const label=PART_COMBO_ORDER.filter(p=>atoms.has(p)).join(" · ");
+    if(!label)continue;
+    if(seq[seq.length-1]!==label)seq.push(label);
+    if(seq.length>=n)break;
+  }
+  return seq;
+}
+
 // 시간순(오래된→최신) 시퀀스가 주기 L로 일관되게 반복되는지 확인 — i번째와 (i-L)번째가 전부 같아야 함.
 // (마지막 사이클이 완전히 끝나지 않은 "진행 중" 반복도 인정하기 위해, 두 구간을 통째로 자르지 않고 전체를 겹쳐서 비교한다)
 function isPeriodic(chrono,L){
@@ -8961,21 +9000,27 @@ function inferActualSplit(sequence=[]){
 // 부위별 회복시간 — 그 부위를 마지막으로 실제 운동한 날짜(최근 2주 내)를 찾아 48~72시간을 기본으로 판단하되,
 // 그 세션의 RPE·총볼륨이 낮았으면 더 짧게(48h), 높았으면 더 길게(최대 72h) 조정한다. 세션에는 날짜만 저장되고
 // 시각은 없어(Firestore 구조 변경 없이 기존 데이터만 사용) "경과 시간"은 날짜 차이×24h로 근사한다.
-function getPartRecoveryHours(part, sessions=[]){
+// personalWorkouts(개인운동)도 함께 본다 — 개인운동에는 세션 전체 RPE(memberFeedback.rpe) 대신 운동 전체 RPE(rpe 필드)가
+// 저장되므로, 두 컬렉션을 공통 형태(date/exercises/sessionRpe)로 맞춰 하나의 목록으로 합친 뒤 동일한 로직을 그대로 적용한다.
+function getPartRecoveryHours(part, sessions=[], personalWorkouts=[]){
   const cutoff=new Date(Date.now()-14*86400000).toISOString().slice(0,10);
+  const records=[
+    ...(sessions||[]).map(s=>({date:String(s?.date||""), exercises:s?.exercises, sessionRpe:getSessionMemberRpe(s)})),
+    ...(personalWorkouts||[]).map(w=>({date:String(w?.workoutDate||"").slice(0,10), exercises:w?.exercises, sessionRpe:Number.isFinite(Number(w?.rpe))?Number(w.rpe):null})),
+  ];
   let best=null;
-  (sessions||[]).forEach(s=>{
-    if(!s?.date || String(s.date)<cutoff) return;
+  records.forEach(s=>{
+    if(!s.date || s.date<cutoff) return;
     const exs=(s.exercises||[]).filter(e=>exerciseMatchesPart(e,part));
     if(!exs.length) return;
-    if(best && String(s.date)<=best.date) return;
+    if(best && s.date<=best.date) return;
     // 운동별 RPE는 과거 기록에만 남아 있으므로, 없으면 그 세션에 회원이 직접 입력한 세션 전체 RPE로 대신한다.
     // 회복시간 판단은 원래 "그 세션이 얼마나 힘들었나"를 보는 용도라 세션 전체 RPE가 오히려 본래 의도에 더 가깝다(임계값 48/72h는 기존 그대로).
-    const sessionRpe=getSessionMemberRpe(s);
+    const sessionRpe=s.sessionRpe;
     const rpes=exs.map(e=>{const n=getExerciseRpe(e); return n!=null?n:sessionRpe;}).filter(n=>Number.isFinite(n));
     const rpe=rpes.length?rpes.reduce((a,b)=>a+b,0)/rpes.length:null;
     const volume=exs.reduce((sum,e)=>sum+(isFuncEx(e)?0:(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0)),0);
-    best={date:String(s.date),rpe,volume};
+    best={date:s.date,rpe,volume};
   });
   if(!best)return {hoursSince:Infinity, requiredHours:0};
   const daysSince=Math.max(0,Math.floor((Date.now()-new Date(`${best.date}T00:00:00`).getTime())/86400000));
@@ -8990,14 +9035,26 @@ function getPartRecoveryHours(part, sessions=[]){
   return {hoursSince:daysSince*24, requiredHours, basisRpe:best.rpe, basisVolume:Math.round(best.volume), basisDate:best.date};
 }
 
-function getRecommendedPart(profile,sessions=[],onboarding={}){
+// 다음 PT까지 남은 "실제 시간"(시간 단위) — 달력상 며칠 남았는지(daysUntil)만으로는 "내일 새벽"과 "내일 밤"을 같은
+// 24시간 이내로 뭉개버린다. 예약 시각(nextWorkoutTime)까지 함께 반영해 더 정확한 시간 차이를 계산한다.
+// 시각이 저장되지 않은 예약(레거시·시간 미입력)은 정오(12:00)로 가정해 과도하게 보호하거나 과소 보호하지 않는 중립값을 쓴다.
+// "지금"은 getNextWorkoutInfo/parseLocalDate와 동일하게 기기 로컬 시각을 그대로 쓴다(새 시간대 변환 방식을 만들지 않음).
+function estimateHoursUntilNextPt(info){
+  if(info.daysUntil==null)return null;
+  const m=/^(\d{1,2}):(\d{2})$/.exec(String(info.time||"").trim());
+  const hh=m?Number(m[1]):12, mm=m?Number(m[2]):0;
+  const now=new Date();
+  const nowHours=now.getHours()+now.getMinutes()/60;
+  return info.daysUntil*24-nowHours+hh+mm/60;
+}
+function getRecommendedPart(profile,sessions=[],onboarding={},personalWorkouts=[]){
   const freq=getWorkoutFrequencyNumber(profile);
   // 1순위: 현재 진행 중인 수업 형태(1:1/2:1). 2:1 진행 중이면 실제 2:1 수업일지 패턴을 최우선으로 따르고,
   // 아직 패턴이 부족할 때만 공통 기본값(3분할)을 쓴다.
   const isPaired=getLatestSessionType(sessions)==="2:1";
   const sequence=getRecentPartSequence(sessions);
   // 분할 패턴 추론(baseCycle/inferred)에 한해서만 — 최근 창(28일)에 패턴을 못 잡을 만큼 기록이 적으면 존재하는 전체 수업 기록으로 확장해 재시도.
-  // "가장 최근 수업 부위(lastPart)" 기반 회피 로직은 그대로 최근 창(sequence)만 사용해 오래된 기록을 "직전 수업"으로 오인하지 않게 한다.
+  // 이 패턴 추정은 트레이너가 실제로 이끄는 PT 수업 분할을 추정하는 목적이라 PT 수업일지만 쓰고 개인운동은 섞지 않는다.
   const patternSequence=sequence.length<4?getRecentPartSequence(sessions,40,3650):sequence;
   const baseCycle=isPaired?PAIR_SPLIT_DEFAULT:pickBaseCycle(patternSequence,freq);
   const inferred=inferActualSplit(patternSequence);
@@ -9008,9 +9065,25 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
   const findCycleIndex=p=>cycle.findIndex(c=>c===p||c.split(" · ").includes(p));
   const overlapsAvoid=(p,avoid)=>p.split(" · ").some(x=>avoid.has(x));
   const cycleLabel=cycle.length===1?cycle[0]:`${cycle.length}분할`;
-  const lastPart=sequence[0];
+  // "직전에 실제로 뭘 했는지"(lastPart)는 PT 수업일지만이 아니라 개인운동 기록도 함께 봐야 한다 —
+  // 어제 개인운동으로 어깨+가슴을 했는데 그 사실을 무시하고 더 오래된 PT 기록만으로 판단하면 안 된다.
+  const lastPart=getUnifiedRecentPartSequence(sessions,personalWorkouts)[0]||sequence[0];
   const lastAtoms=lastPart?lastPart.split(" · "):[];
   const pairNote=isPaired?"2:1 수업 ":"";
+
+  // ── 다음 PT 보호 — 어떤 우선순위 계산보다 먼저 정해지는 하드 필터다(아래 우선순위들이 이 필터를 우회할 수 없다).
+  // A) 24시간 이내: 예정 부위 + 그 상극 조합까지 강하게 제외
+  // B) 24~48시간: 예정 부위만 제외(상극까지 확장하지 않음)
+  // C) 그 이상: 강제 제외 없이 최근 운동 이력·회복 간격만으로 판단
+  const nextPtHours=estimateHoursUntilNextPt(info);
+  const protect=new Set();
+  if(info.part && info.daysUntil!=null && info.daysUntil>=0 && nextPtHours!=null){
+    if(nextPtHours<=24){
+      info.part.split(" · ").forEach(a=>{protect.add(a); const c=CONFLICT[a]; if(c)protect.add(c);});
+    }else if(nextPtHours<=48){
+      info.part.split(" · ").forEach(a=>protect.add(a));
+    }
+  }
 
   let part=null, reason="";
 
@@ -9023,7 +9096,7 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
       const candidate=cycle[idxToday];
       // 날짜 역산 결과가 실제 최근 수업과 상극 조합이면(예: 어제 하체인데 오늘 등이 계산됨) 채택하지 않고 아래 단계로 넘긴다.
       const conflictsWithLast=lastAtoms.some(a=>candidate.split(" · ").includes(a)||candidate.split(" · ").includes(CONFLICT[a]));
-      if(!conflictsWithLast){
+      if(!conflictsWithLast && !overlapsAvoid(candidate,protect)){
         part=candidate;
         reason=inferred?`최근 ${pairNote}기록을 보면 ${cycle.join(" → ")} 순서가 반복되고 있습니다.`:`다음 수업이 ${info.part} 운동으로 예정되어 있어, 그 전까지 일정을 고려한 추천입니다.`;
       }
@@ -9034,36 +9107,42 @@ function getRecommendedPart(profile,sessions=[],onboarding={}){
   // (예: 가슴→어깨가 원래 상극 조합이라도, 회원이 실제로 그렇게 반복해왔다면 그 흐름을 따른다).
   if(!part && inferred && lastPart){
     const idxLast=findCycleIndex(lastPart);
-    if(idxLast!==-1){
-      part=cycle[(idxLast+1)%cycle.length];
+    const candidate=idxLast!==-1?cycle[(idxLast+1)%cycle.length]:null;
+    if(candidate && !overlapsAvoid(candidate,protect)){
+      part=candidate;
       reason=`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다. 지난 운동이 ${lastPart}이었기 때문에 이어지는 순서를 추천합니다.`;
     }
   }
 
   // 최종 폴백: 패턴도 다음 수업 정보도 못 정했을 때만 — 최근 부위·회복 간격 회피
   if(!part){
-    const avoid=new Set();
+    const avoid=new Set(protect);
     lastAtoms.forEach(a=>{avoid.add(a); const c=CONFLICT[a]; if(c)avoid.add(c);});
-    // 다음 수업이 오늘·내일처럼 임박했다면, 그 예정 부위와 상극인 조합은 오늘 추천에서도 피해 PT 수행에 지장이 없게 한다.
-    if(info.daysUntil!=null && info.daysUntil>=0 && info.daysUntil<=1 && info.part){
-      info.part.split(" · ").forEach(a=>{avoid.add(a); const c=CONFLICT[a]; if(c)avoid.add(c);});
-    }
     // 부위별 회복시간(48~72h, RPE·볼륨으로 보정) — "직전 수업 부위"만 보는 것과 별개로, 부위마다 마지막으로 한 시점을 따로 계산해 아직 회복 전이면 회피한다.
     // 72시간을 무조건 강제하지 않도록, 이 조건만으로 후보가 전부 사라지면 최소한("직전 부위만 회피")으로 완화한다.
     const recoveryAvoid=new Set(avoid);
     new Set(cycle.flatMap(p=>p.split(" · "))).forEach(atom=>{
-      const {hoursSince,requiredHours}=getPartRecoveryHours(atom,sessions);
+      const {hoursSince,requiredHours}=getPartRecoveryHours(atom,sessions,personalWorkouts);
       if(hoursSince<requiredHours)recoveryAvoid.add(atom);
     });
-    const counts=getRecentPartCounts(sessions);
+    const counts=getRecentPartCounts(sessions,personalWorkouts);
     const comboCount=label=>label.split(" · ").reduce((sum,atom)=>sum+(counts[normalizeWorkoutPart(atom)]||0),0);
     let candidates=cycle.filter(p=>!overlapsAvoid(p,recoveryAvoid));
     if(!candidates.length)candidates=cycle.filter(p=>!overlapsAvoid(p,avoid));
-    part=candidates.sort((a,b)=>comboCount(a)-comboCount(b))[0]||cycle.find(p=>!overlapsAvoid(p,avoid))||cycle[0];
+    // 후보가 계속 남지 않으면 "최근 부위 회피"부터 완화한다 — 다음 PT 보호(protect)는 마지막까지 지킨다(1순위이므로).
+    if(!candidates.length)candidates=cycle.filter(p=>!overlapsAvoid(p,protect));
+    // 그래도 없으면(추론된 분할이 단일 부위 등으로 너무 좁은 경우) 더 넓은 기본 분할(baseCycle)에서 protect만 지켜 다시 찾는다
+    // (협소한 cycle 때문에 어쩔 수 없이 다음 PT 부위를 추천하는 사태 방지).
+    if(!candidates.length && cycle!==baseCycle)candidates=baseCycle.filter(p=>!overlapsAvoid(p,protect));
+    part=candidates.sort((a,b)=>comboCount(a)-comboCount(b))[0]||cycle.find(p=>!overlapsAvoid(p,protect))||cycle[0];
     const avoidedConflict=lastAtoms.map(a=>CONFLICT[a]).find(Boolean);
     reason=(avoidedConflict && candidates.length<cycle.length)
       ?`${lastAtoms[0]} 운동 다음 날 ${avoidedConflict} 운동은 피로가 겹칠 수 있어, ${part} 운동을 먼저 배치했습니다.`
       :"최근 운동 부위와 회복 간격을 고려한 추천입니다.";
+    // 보호 대상(다음 PT 예정 부위)이 실제로 이번 추천에서 제외됐을 때만 이유에 덧붙인다 — 화면 문구가 실제 결과와 어긋나지 않도록 한다.
+    if(protect.size && info.part && !overlapsAvoid(part,protect)){
+      reason+=` 다음 ${info.part} 수업이 머지않아 같은 부위는 오늘 추천에서 제외했습니다.`;
+    }
   }
   if(!reason)reason=inferred?`최근 4주 ${pairNote}기록상 ${cycleLabel} 패턴으로 운동하고 있습니다.`:isPaired?"2:1 수업 기록이 아직 충분하지 않아 기본 3분할을 적용했습니다.":"기본 분할 기준을 따른 추천입니다.";
 
@@ -9149,7 +9228,7 @@ function buildReviewRoutine(sessions,onboarding,checkins,selectedPart){
   const excluded=list.filter(x=>x.history[0]&&x.history[0].isPainRisk).map(x=>({name:x.name,latestDate:x.latestDate}));
   const ranked=sorted.map(x=>({name:x.name,muscleTop:x.muscleTop,count:x.count,stim:x.stim,marked:x.marked,latestDate:x.latestDate}));
   return {selectedPart,excluded,ranked,hasClassSessions:classSessions.length>0,hasData:list.length>0,goodStim:sorted.filter(e=>e.stim>0).slice(0,2),painFree:sorted.filter(e=>e.painFree>0).slice(0,2),practice:sorted.filter(e=>e.count<3||!e.recent).slice(0,2),routine:routineList.map(itemFor),comment:lower?'오늘은 컨디션을 고려해 세트 수와 강도를 낮췄어요.':'수업 기록에서 자극이 좋고 불편감이 없었던 운동 위주로 추천합니다.'};}
-function ReviewRoutine({profile,sessions,onboarding,checkins,attendance=[],routineRecommendations=[],initialOpen=false}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions,onboarding); const recommendedParts=recommended.part.split(" · "); const [selected,setSelected]=useState(recommended.part); const [open,setOpen]=useState(!!initialOpen); const selectedParts=selected.split(" · "); const rec=buildReviewRoutine(sessions,onboarding,checkins,selectedParts); const weekly=computeWeeklyWorkoutCard(attendance,onboarding); const soloLine=weekly.count>=3?"개인 운동도 꾸준히 이어가고 계셔서 그 흐름을 함께 반영했어요.":weekly.count===0?"수업 기록을 중심으로 추천했어요.":""; const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} const recentTopEx=buildTopExercisesByFrequency(sessions,3); const recentBiggestGain=[...recentTopEx].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0]; const praiseLine=recentBiggestGain?`이전 기록보다 ${recentBiggestGain.name} 중량이 ${recentBiggestGain.before} → ${recentBiggestGain.after}로 늘었어요.`:rec.goodStim.length?`최근 ${rec.goodStim[0].name} 운동에서 자극이 좋았어요.`:(sessions.length>0?"수업을 꾸준히 이어가고 있어요.":""); const upcomingBlock=upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatPartsForMember(r)}</span></p>)}</div>; if(hasCoachRoutine){return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b></p></div>{upcomingBlock}<div className="routine-summary"><div><h3>{formatPartsForMember(publishedRoutine)}</h3><p>{coachExerciseCount?`추천 운동 ${coachExerciseCount}개`:"추천 부위"}</p></div><button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button></div>{open&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은 <b>{recommended.part} 운동</b>을 추천합니다.</p></div><div className="part-pills">{["가슴","등","하체","어깨","팔"].map(x=><button key={x} className={selectedParts.includes(x)?"active":recommendedParts.includes(x)?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingBlock}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다."}</p></div>{rec.hasData&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div>{x.reason&&<p style={{fontSize:11,color:"#8B949E",marginTop:6,lineHeight:1.5}}>{x.reason}</p>}</div>)}</div><div className="rec-group"><b>추천 이유</b><span>{rec.comment}</span><span>{rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`:rec.practice.length?`${rec.practice[0].name} 등은 기록이 조금 더 쌓이면 추천이 더 정교해져요.`:"수업 기록이 쌓이면 추천이 더 정교해집니다."}</span>{soloLine&&<span>{soloLine}</span>}</div></>}</MCard>;}
+function ReviewRoutine({profile,sessions,onboarding,checkins,attendance=[],routineRecommendations=[],personalWorkouts=[],initialOpen=false}){const today=getKoreaDateString(); const visibleRoutines=(routineRecommendations||[]).filter(r=>isPublishedData(r)&&String(r.date||"")>=today).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))); const publishedRoutine=visibleRoutines.find(r=>r.date===today)||visibleRoutines[0]; const upcomingRoutines=visibleRoutines.filter(r=>r.id!==publishedRoutine?.id&&r.date>today).slice(0,3); const info=getNextWorkoutInfo(profile); const isTodayPt=info.daysUntil===0; const recommended=getRecommendedPart(profile,sessions,onboarding,personalWorkouts); const recommendedParts=recommended.part.split(" · "); const [selected,setSelected]=useState(recommended.part); const [open,setOpen]=useState(!!initialOpen); const selectedParts=selected.split(" · "); const rec=buildReviewRoutine(sessions,onboarding,checkins,selectedParts); const weekly=computeWeeklyWorkoutCard(attendance,onboarding); const soloLine=weekly.count>=3?"개인 운동도 꾸준히 이어가고 계셔서 그 흐름을 함께 반영했어요.":weekly.count===0?"수업 기록을 중심으로 추천했어요.":""; const daysText=info.daysUntil===null?"아직 정해지지 않았습니다":info.daysUntil===0?"오늘입니다":`${Math.abs(info.daysUntil)}일${info.daysUntil<0?" 지났습니다":"입니다"}`; const hasCoachRoutine=!!publishedRoutine; const coachExerciseCount=(publishedRoutine?.exercises||[]).filter(ex=>String(ex.name||"").trim()).length; if(isTodayPt){const warmup=getPreSessionWarmup(info.part); return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>오늘은 <b>{info.part} 수업 날</b>입니다.<br/>수업 전 아래 준비 루틴으로 몸을 깨워주세요.</p></div><div className="warmup-list">{warmup.map((ex,i)=><div className="warmup-item" key={i}><span>{i+1}</span><b>{ex}</b></div>)}</div>{publishedRoutine&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} const recentTopEx=buildTopExercisesByFrequency(sessions,3); const recentBiggestGain=[...recentTopEx].filter(r=>r.delta>0).sort((a,b)=>b.delta-a.delta)[0]; const praiseLine=recentBiggestGain?`이전 기록보다 ${recentBiggestGain.name} 중량이 ${recentBiggestGain.before} → ${recentBiggestGain.after}로 늘었어요.`:rec.goodStim.length?`최근 ${rec.goodStim[0].name} 운동에서 자극이 좋았어요.`:(sessions.length>0?"수업을 꾸준히 이어가고 있어요.":""); const upcomingBlock=upcomingRoutines.length>0&&<div className="rec-group compact"><b>앞으로의 추천</b>{upcomingRoutines.map(r=><p key={r.id}><span>{String(r.date).slice(5)} · {formatPartsForMember(r)}</span></p>)}</div>; if(hasCoachRoutine){return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b></p></div>{upcomingBlock}<div className="routine-summary"><div><h3>{formatPartsForMember(publishedRoutine)}</h3><p>{coachExerciseCount?`추천 운동 ${coachExerciseCount}개`:"추천 부위"}</p></div><button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button></div>{open&&<CoachRoutineCard routine={publishedRoutine}/>}</MCard>;} return <MCard title="오늘의 운동 가이드"><div className="workout-guide"><p>다음 수업은 <b>{info.part}</b>입니다.<br/>남은 기간은 <b>{daysText}</b><br/>{praiseLine&&<>{praiseLine}<br/></>}{recommended.reason}<br/>오늘은 <b>{recommended.part} 운동</b>을 추천합니다.</p></div><div className="part-pills">{["가슴","등","하체","어깨","팔"].map(x=><button key={x} className={selectedParts.includes(x)?"active":recommendedParts.includes(x)?"recommended":""} onClick={()=>{setSelected(x);setOpen(false);scrollMemberAppToTop();}}>{x}</button>)}</div>{upcomingBlock}<div className="routine-summary"><div><h3>{selected} 추천</h3><p>{rec.hasData?`추천 운동 ${rec.routine.length}개`:"수업 기록이 쌓이면 추천 루틴이 표시됩니다."}</p></div>{rec.hasData&&<button type="button" className="ghost compact" onClick={()=>setOpen(v=>!v)}>{open?"접기":"루틴 보기"}</button>}</div>{open&&<><div className="routine-list">{rec.routine.map((x,i)=><div className="routine-row" key={i}><b>{x.name}</b><div className="routine-sets">{x.sets.map((st,j)=><span key={j}><strong>{st.label}</strong><i>{st.weight}</i><i>{st.reps}</i></span>)}</div>{x.reason&&<p style={{fontSize:11,color:"#8B949E",marginTop:6,lineHeight:1.5}}>{x.reason}</p>}</div>)}</div><div className="rec-group"><b>추천 이유</b><span>{rec.comment}</span><span>{rec.goodStim.length?`최근 ${rec.goodStim.map(e=>e.name).slice(0,2).join(", ")} 기록에서 자극이 좋았던 점을 반영했어요.`:rec.practice.length?`${rec.practice[0].name} 등은 기록이 조금 더 쌓이면 추천이 더 정교해져요.`:"수업 기록이 쌓이면 추천이 더 정교해집니다."}</span>{soloLine&&<span>{soloLine}</span>}</div></>}</MCard>;}
 function buildPartVolumeChange(sessions=[]){const parts=['가슴','등','하체','어깨','팔','코어']; const sorted=[...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')); const first=sorted.slice(0,Math.min(3,sorted.length)); const recent=sorted.slice(-Math.min(3,sorted.length)); const sum=(list,part)=>list.reduce((a,s)=>a+(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0),0); return parts.map(part=>{const f=first.length?sum(first,part)/first.length:0; const r=recent.length?sum(recent,part)/recent.length:0; return {part,first:f,recent:r,delta:r-f};});}
 // 부위별 "최근 운동할 때마다의 볼륨"(누적이 아님) — 최근 5회까지 표시해 회원이 "지난번보다 늘었다"를 바로 느끼게 함
 function buildPartVolumeChart(sessions=[]){const parts=["등","가슴","어깨","하체","팔","코어"]; const sorted=[...sessions].filter(s=>s.date).sort((a,b)=>String(a.date).localeCompare(String(b.date))); const volume=(s,part)=>(s.exercises||[]).filter(e=>normalizeWorkoutPart(e.muscleTop||e.type)===part).reduce((x,e)=>x+(e.sets||[]).reduce((v,st)=>v+(Number(st.volume)||Number(st.weight||0)*Number(st.reps||0)),0),0); return parts.map(part=>{const records=sorted.map(s=>({label:String(s.date||"").slice(5)||`${s.sessionNo||""}회`,value:Math.round(volume(s,part))})).filter(r=>r.value>0).slice(-5); return {part,values:records};});}
@@ -11605,7 +11684,7 @@ export default function App() {
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="routine_recommend" && member && <RoutineRecommendScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {/* 관리자 추천 루틴(routine_recommend)과 이름·화면 모두 분리 — 이쪽은 회원앱이 자동 생성하는 루틴을 그대로 보여주는 조회 전용 화면이다 */}
-        {screen==="member_auto_routine" && member && <MemberAutoRoutinePreviewScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
+        {screen==="member_auto_routine" && member && <MemberAutoRoutinePreviewScreen member={member} sessions={sessions} personalWorkouts={memberPersonalWorkouts} onBack={() => setScreen("hub")} />}
         {screen==="upcoming" && <UpcomingSessionsScreen members={members} pairSessions={pairSessions} onBack={()=>setScreen("home")} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} onOpenPairSession={goPairSession} />}
         {screen==="notices" && <NoticeAdminScreen members={members} sessionsMap={sessionsMap} onBack={()=>setScreen("home")} showToast={showToast} onOpenMember={goHub}/>}
         {screen==="daily_conditioning" && member && <DailyConditioningAdminScreen member={member} onBack={() => setScreen("hub")} showToast={showToast} />}
@@ -24704,7 +24783,7 @@ function PairSessionFormScreen({ editData, initialDate=null, members=[], pairSes
 //   · 대표 추천 루틴 — routineRecommendations(published): 이게 있으면 회원앱은 자동 추천 대신 대표 루틴을 보여준다.
 // 저장·수정은 일절 하지 않는다(조회 전용).
 const AUTO_PREVIEW_PARTS = ["가슴","등","하체","어깨","팔"];
-function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
+function MemberAutoRoutinePreviewScreen({ member, sessions, personalWorkouts = [], onBack }) {
   const [checkins, setCheckins] = useState(null);        // null = 조회 중
   const [coachRoutines, setCoachRoutines] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -24729,8 +24808,10 @@ function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
     .map(toMemberVisibleSession)
     .sort((a, b) => ((Number(a.sessionNo) || 0) - (Number(b.sessionNo) || 0)) || String(a.date || "").localeCompare(String(b.date || ""))),
     [sessions]);
+  // 회원앱이 실제로 추천에 반영하는 개인운동만 남긴다(완료 기록만 — 회원앱 completedPersonalWorkouts와 동일 필터)
+  const completedPersonalWorkouts = useMemo(() => (personalWorkouts || []).filter(w => w?.status === "completed"), [personalWorkouts]);
 
-  const recommended = useMemo(() => getRecommendedPart(member, memberSessions, {}), [member, memberSessions]);
+  const recommended = useMemo(() => getRecommendedPart(member, memberSessions, {}, completedPersonalWorkouts), [member, memberSessions, completedPersonalWorkouts]);
   const activePart = pickedPart || recommended.part;
   const activeParts = activePart.split(" · ");
   const rec = useMemo(
@@ -24747,18 +24828,23 @@ function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
   // 회원앱 ReviewRoutine의 분기와 동일한 순서로 "회원이 지금 실제로 보는 화면"을 판정한다.
   const memberViewState = info.daysUntil === 0 ? "pt" : publishedRoutine ? "coach" : "auto";
 
-  // 부위별 마지막 운동일 + 회복 판정 — 추천 엔진이 쓰는 getPartRecoveryHours / exerciseMatchesPart를 그대로 재사용한다
+  // 부위별 마지막 운동일 + 회복 판정 — 추천 엔진이 쓰는 getPartRecoveryHours / exerciseMatchesPart를 그대로 재사용한다(PT 수업 + 개인운동 모두 반영)
   const partStatus = useMemo(() => AUTO_PREVIEW_PARTS.map(p => {
     let last = "";
     memberSessions.forEach(s => {
       if (!s.date) return;
       if ((s.exercises || []).some(e => exerciseMatchesPart(e, p)) && String(s.date) > last) last = String(s.date);
     });
-    const { hoursSince, requiredHours, basisRpe, basisVolume } = getPartRecoveryHours(p, memberSessions);
+    completedPersonalWorkouts.forEach(w => {
+      const date = String(w?.workoutDate || "").slice(0, 10);
+      if (!date) return;
+      if ((w.exercises || []).some(e => exerciseMatchesPart(e, p)) && date > last) last = date;
+    });
+    const { hoursSince, requiredHours, basisRpe, basisVolume } = getPartRecoveryHours(p, memberSessions, completedPersonalWorkouts);
     const daysAgo = last ? Math.max(0, Math.floor((Date.now() - new Date(last + "T00:00:00").getTime()) / 86400000)) : null;
     return { part: p, last, daysAgo, hoursSince, requiredHours, basisRpe, basisVolume, recovering: hoursSince < requiredHours };
-  }), [memberSessions]);
-  const recentPartCounts = useMemo(() => getRecentPartCounts(memberSessions), [memberSessions]);
+  }), [memberSessions, completedPersonalWorkouts]);
+  const recentPartCounts = useMemo(() => getRecentPartCounts(memberSessions, completedPersonalWorkouts), [memberSessions, completedPersonalWorkouts]);
   // 검수용 — 추천 엔진이 실제로 읽는 RPE 입력(session.memberFeedback.rpe)을 최신순으로 그대로 보여준다.
   // 운동별 RPE 입력창은 관리자앱에 없으므로(과거 기록 전용) 여기 표시되는 값이 곧 엔진의 유일한 RPE 입력이다.
   const recentSessionRpes = useMemo(() => [...memberSessions]
@@ -24846,8 +24932,11 @@ function MemberAutoRoutinePreviewScreen({ member, sessions, onBack }) {
       <div style={box}>
         <span style={label}>추천 근거 (엔진이 실제로 사용한 값)</span>
         <div style={{...body, marginBottom:10}}>
-          최근 수업 부위 순서: <b>{recommended.sequence.length ? recommended.sequence.slice(0,5).join(" ← ") : "최근 4주 공개 수업 기록 없음"}</b>
+          최근 수업 부위 순서(PT만, 분할 패턴 추정용): <b>{recommended.sequence.length ? recommended.sequence.slice(0,5).join(" ← ") : "최근 4주 공개 수업 기록 없음"}</b>
           {recommended.sequence.length>0 && <span style={faint}> (왼쪽이 가장 최근)</span>}
+        </div>
+        <div style={{...body, marginBottom:10}}>
+          직전 실제 운동 부위(PT+개인운동 통합, 회피 판정용): <b>{recommended.lastPart||"기록 없음"}</b>
         </div>
         <div style={{...body, marginBottom:10}}>
           다음 PT 예정: <b>{info.part||"미정"}</b>

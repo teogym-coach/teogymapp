@@ -6566,10 +6566,11 @@ function buildTodayStatusTiles(p,today,open){
   const hasPainRecord=todayCheck.painPart!==undefined&&todayCheck.painPart!==null&&todayCheck.painPart!=="";
   const hasActualPain=hasPainRecord&&todayCheck.painPart!=="없음";
   // 근육통 입력 카드는 2026-09-10 제거됨 — 근육통은 PT/개인운동 기록의 "운동 후 상태"에서 입력한다.
+  // 2026-09-11: "통증" 라벨이 그 근육통 입력과 혼동돼 "통증·불편감"으로 변경(저장 field/schema는 그대로 painPart 등).
   return [
     {key:"weight",label:"체중",value:todayWeight!=null?`${todayWeight}kg`:"—",hint:todayWeight!=null?"기록 완료":"탭해서 입력",done:todayWeight!=null,onClick:open.weight},
     {key:"condition",label:"컨디션",value:todayCheck.condition?`${CONDITION_EMOJI[todayCheck.condition]||""} ${todayCheck.condition}`:"—",hint:todayCheck.condition?"기록 완료":"탭해서 입력",done:!!todayCheck.condition,onClick:open.condition},
-    {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
+    {key:"pain",label:"통증·불편감",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
   ];
 }
 // 건강 기록 카드 버튼 — "오늘 기록" 2열 그리드의 모든 카드가 같은 마크업을 공유한다(중복 구현 방지).
@@ -6950,7 +6951,7 @@ function MemberHealth(p){
       <SelectLine label="컨디션" value={p.form.condition} opts={["좋음","보통","피곤","매우 피곤"]} placeholder="선택 안 함" onChange={v=>p.setForm({...p.form,condition:v})}/>
       <button className={`primary${justSavedCondition?" save-success":""}`} onClick={submitCondition} disabled={p.conditionSaving}>{p.conditionSaving?"저장 중...":justSavedCondition?"컨디션 저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="pain"} onClose={()=>setSheet(null)} title="통증 입력">
+    <MemberBottomSheet open={sheet==="pain"} onClose={()=>setSheet(null)} title="통증·불편감 입력">
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
       <PainInput form={p.form} setForm={p.setForm}/>
       <button className={`primary${justSavedPain?" save-success":""}`} onClick={submitPain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"저장"}</button>
@@ -7000,7 +7001,10 @@ const PAIN_PARTS=["없음","목","어깨","팔꿈치","손목","허리","고관�
 const PAIN_SIDES=["해당 없음","왼쪽","오른쪽","양쪽","중앙"];
 function painKey(r){return `${r.side||"중앙/해당 없음"} ${r.part||"기타"}`.replace("중앙/해당 없음 ","중앙 ");}
 function getPainRecords(checkins=[]){return [...checkins].sort((a,b)=>String(a.date||a.id||"").localeCompare(String(b.date||b.id||""))).map(c=>({date:c.date||c.id,part:c.painPart||c.painRecord?.part,side:c.painSide||c.painRecord?.side,vas:Number(c.painVas??c.painRecord?.vas),memo:c.painMemo||c.painRecord?.memo})).filter(r=>r.part&&Number.isFinite(r.vas));}
-function PainInput({form,setForm}){const noPain=form.painPart==="없음"; const updatePainPart=v=>setForm({...form,painPart:v,painSide:v==="없음"?"해당 없음":form.painSide,painVas:v==="없음"?0:form.painVas}); return <div className="pain-input"><SelectLine label="통증 부위" value={form.painPart} opts={PAIN_PARTS} onChange={updatePainPart}/><div className="form-line"><label>좌/우</label><div className="choice-buttons">{PAIN_SIDES.map(x=><button type="button" key={x} className={(noPain?"해당 없음":form.painSide)===x?"active":""} onClick={()=>setForm({...form,painSide:x})} disabled={noPain&&x!=="해당 없음"}>{x}</button>)}</div></div><div className="form-line"><label>VAS 0~10 <small>0 통증 없음 · 10 가장 심함</small></label><div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(noPain?0:form.painVas)===i?"active":""} onClick={()=>setForm({...form,painVas:i})} disabled={noPain&&i!==0}>{i}</button>)}</div></div><InputLine label="통증 메모" value={form.painMemo} onChange={v=>setForm({...form,painMemo:v})}/></div>}
+// 2026-09-11: "통증"이 운동 후 일반적인 "근육통"을 적는 곳으로 오해받아, 이 설명 한 줄만 추가했다(저장 field·구조는 그대로).
+// 이 컴포넌트는 MemberHealth의 "통증·불편감" 시트와 MemberCalendar의 "컨디션 · 메모" 시트 둘 다에서 재사용되므로,
+// 여기 한 곳에만 넣으면 두 진입점 모두에 자동으로 반영된다(중복 설명 금지 원칙).
+function PainInput({form,setForm}){const noPain=form.painPart==="없음"; const updatePainPart=v=>setForm({...form,painPart:v,painSide:v==="없음"?"해당 없음":form.painSide,painVas:v==="없음"?0:form.painVas}); return <div className="pain-input"><p className="mv2-sheet-hint">근육통이 아닌 통증이나 불편감을 기록해주세요.</p><SelectLine label="통증 부위" value={form.painPart} opts={PAIN_PARTS} onChange={updatePainPart}/><div className="form-line"><label>좌/우</label><div className="choice-buttons">{PAIN_SIDES.map(x=><button type="button" key={x} className={(noPain?"해당 없음":form.painSide)===x?"active":""} onClick={()=>setForm({...form,painSide:x})} disabled={noPain&&x!=="해당 없음"}>{x}</button>)}</div></div><div className="form-line"><label>VAS 0~10 <small>0 통증 없음 · 10 가장 심함</small></label><div className="vas-buttons">{Array.from({length:11},(_,i)=><button type="button" key={i} className={Number(noPain?0:form.painVas)===i?"active":""} onClick={()=>setForm({...form,painVas:i})} disabled={noPain&&i!==0}>{i}</button>)}</div></div><InputLine label="통증 메모" value={form.painMemo} onChange={v=>setForm({...form,painMemo:v})}/></div>}
 function PainTrend({checkins=[]}){const rows=getPainRecords(checkins); const groups=[...rows.reduce((m,r)=>m.set(painKey(r),[...(m.get(painKey(r))||[]),r]),new Map()).entries()].filter(([,v])=>v.length>=2).slice(-4); return <MCard title="통증 변화">{groups.length?groups.map(([k,v])=>{const last=v.at(-1), prev=v.at(-2); const state=last.vas<prev.vas?"감소하고 있습니다.":last.vas>prev.vas?"증가했습니다. 무리한 운동은 피해주세요.":"유지되고 있습니다. 다음 수업 때 대표에게 알려주세요."; return <div className="pain-trend" key={k}><b>{k} 통증 변화</b><p>{v.slice(-7).map(x=>x.vas).join(" → ")}</p><em>최근 {k} 통증이 {state}</em>{last.memo&&<small>{last.date} 메모: {last.memo}</small>}</div>}):<p className="notice soft">통증 기록이 2개 이상 쌓이면 좌우별 변화가 표시됩니다.</p>}</MCard>}
 const SORENESS_LEVELS=["없음","약간","보통","심함"];
 const SORENESS_BODY_PARTS=["목","어깨","가슴","등","허리","팔","엉덩이","허벅지 앞","허벅지 뒤","종아리","기타"];
@@ -9497,9 +9501,10 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .health-block-head span{display:block;margin-top:3px;color:#8B949E;font-size:12.5px;font-weight:700}
 /* 건강 기록 — 2026-09-11: 좌/우 "오늘 활동"·"오늘 몸 상태" 2그룹(날짜 중복 표시)을 "오늘 기록" 단일 헤더 + 2열 카드 그리드로 통합.
    체중·걸음수·컨디션·유산소 2x2 + 통증 가로 전체너비, 카드 자체는 기존 .mv2-today-tile 스타일 그대로 재사용한다. */
-.health-today-head{margin-bottom:14px}
-.health-today-head b{display:block;font-size:15px;color:#20242A;letter-spacing:-.2px}
-.health-today-head .hdg-date{display:block;margin-top:3px;font-size:12.5px;font-weight:900;color:#0F9488}
+/* 2026-09-11: "오늘 기록"/날짜 두 줄을 한 줄로 압축 — 카드 grid가 그만큼 위에서 시작한다. 날짜는 pill 없이 텍스트만 양끝 배치. */
+.health-today-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px}
+.health-today-head b{font-size:15px;color:#20242A;letter-spacing:-.2px}
+.health-today-head .hdg-date{font-size:12.5px;font-weight:900;color:#0F9488;white-space:nowrap}
 .health-today-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .health-today-grid .mv2-today-tile.full{grid-column:1/-1}
 .health-subcard{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:18px;padding:16px;margin:12px 0}

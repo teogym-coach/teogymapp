@@ -2324,7 +2324,7 @@ const checks = [
       const okY = iY !== -1 && orderY.every(tok => { const idx = blockY.indexOf(tok); if (idx === -1 || idx <= posY) return false; posY = idx; return true; });
       const noKcalTile = !blockY.includes('key:"kcal"');
       const iT = app.indexOf('function buildTodayStatusTiles(p,today,open){');
-      const blockT = app.slice(iT, iT + 900);
+      const blockT = app.slice(iT, app.indexOf('function HealthTileButton', iT));
       const orderT = ['key:"weight"', 'key:"condition"', 'key:"pain"'];
       let posT = -1;
       const okT = iT !== -1 && orderT.every(tok => { const idx = blockT.indexOf(tok); if (idx === -1 || idx <= posT) return false; posT = idx; return true; });
@@ -2337,6 +2337,48 @@ const checks = [
     !app.includes('<b>오늘 활동</b>') && !app.includes('<b>오늘 몸 상태</b>') &&
     !app.includes('<b>어제 기록</b>') && !app.includes('어제의 식사·활동') &&
     !app.includes('<em>오늘의 활동</em>') && !app.includes('<em>오늘의 몸 상태</em>')
+  ],
+  // 2026-09-11 4차: "오늘 기록"/날짜를 한 줄로 압축(CSS만 변경, JSX 구조·텍스트는 그대로) + "통증"→"통증·불편감" 명칭 변경.
+  ['건강 탭: "오늘 기록"과 날짜가 flex로 한 줄에 양끝 배치되고, 날짜는 별도 pill/박스 없이 텍스트만이다',
+    app.includes('.health-today-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px}') &&
+    !app.includes('.health-today-head b{display:block') &&
+    !app.includes('.health-today-head .hdg-date{display:block')
+  ],
+  ['건강 탭: 통증 카드 라벨이 "통증·불편감"으로 바뀌었다(저장 key는 여전히 "pain", 값 표시·클릭 동작 불변)',
+    (() => {
+      const i = app.indexOf('function buildTodayStatusTiles(p,today,open){');
+      const block = app.slice(i, app.indexOf('function HealthTileButton', i));
+      return block.includes('{key:"pain",label:"통증·불편감"') && block.includes('onClick:open.pain');
+    })()
+  ],
+  ['건강 탭: 통증 입력 시트 제목이 "통증·불편감 입력"이다(체중/걸음수/컨디션 시트와 같은 "~입력" 명명 패턴 유지)',
+    app.includes('<MemberBottomSheet open={sheet==="pain"} onClose={()=>setSheet(null)} title="통증·불편감 입력">')
+  ],
+  ['통증 입력: PainInput에 "근육통이 아닌 통증이나 불편감을 기록해주세요" 안내가 있고, 이 설명은 painPart/painSide/painVas/painMemo 저장 필드를 하나도 바꾸지 않는다',
+    (() => {
+      const i = app.indexOf('function PainInput({form,setForm}){');
+      const block = app.slice(i, app.indexOf('function PainTrend', i));
+      return block.includes('근육통이 아닌 통증이나 불편감을 기록해주세요') &&
+        block.includes('painPart:v') && block.includes('painSide:') && block.includes('painVas:') &&
+        block.includes('label="통증 메모"') && block.includes('value={form.painMemo}');
+    })()
+  ],
+  ['통증 입력: 캘린더의 "컨디션 · 메모" 시트도 같은 PainInput을 재사용하므로 설명이 자동으로 함께 반영된다(중복 문구를 따로 추가하지 않음)',
+    app.includes('<PainInput form={p.form} setForm={p.setForm}/>') &&
+    (() => {
+      // PainInput 호출부가 정확히 2곳(MemberHealth 통증 시트 + MemberCalendar 컨디션·메모 시트)인지 확인
+      let count = 0, i = -1;
+      while ((i = app.indexOf('<PainInput form={p.form} setForm={p.setForm}/>', i + 1)) !== -1) count++;
+      return count === 2;
+    })()
+  ],
+  ['근육통(soreness)과 통증(pain)은 여전히 서로 다른 저장 구조다 — 이번 라벨 변경이 근육통 저장 로직/필드를 건드리지 않았다',
+    db.includes('painPart') && db.includes('painSide') && db.includes('painVas') && db.includes('painMemo') &&
+    app.includes('const SORENESS_LEVELS=["없음","약간","보통","심함"];') &&
+    !app.includes('function saveDailySoreness') // 상시 근육통 입력은 2026-09-10 이미 제거된 상태 그대로
+  ],
+  ['관리자 알림 라벨(ACTIVITY_LABEL.pain="통증")은 이번 회원앱 라벨 변경과 분리되어 그대로다(의도치 않은 관리자 화면 의미 변경 방지)',
+    app.includes('ACTIVITY_LABEL = { memo:"메모", pain:"통증", soreness:"근육통"')
   ],
   ['건강 탭: HealthTileButton에 더 이상 readOnly 분기가 없다(칼로리 카드 자체가 없어져 불필요해짐)',
     (() => {

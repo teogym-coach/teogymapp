@@ -2104,7 +2104,8 @@ function MemberLanding({ onLogin, loading, error }) {
 function getKoreaDateString(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
-// 섭취 칼로리 입력 기준일(전날) — 아침 공복 체중은 오늘 날짜, 섭취 칼로리는 어제 날짜로 저장한다.
+// KST 기준 어제 날짜 — 2026-09-11부터 건강 기록 입력은 전부 "오늘 날짜"만 쓰고(D-1 기본값 입력은 폐지),
+// 이 함수는 과거 날짜를 빠르게 골라주는 보조 용도(예: 식단 기록의 "어제" 빠른 선택 탭)로만 남아 있다.
 function getKoreaYesterdayDateString(date = new Date()) {
   return getKoreaDateString(new Date(date.getTime() - 86400000));
 }
@@ -6543,18 +6544,20 @@ const HEALTH_TILE_ICONS={
   pain:{paths:["M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"],color:"#F97316",bg:"#FFF1E7"},
   cardio:{paths:["M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z","M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"],color:"#F26D6D",bg:"#FDEEEE"},
 };
-// 건강 기록 카드 계산 — "카드 하나 = 입력 항목 하나". 회원이 오늘 앱을 열어도 실제로 기록하는 의미 날짜는 항목마다 다르다:
-// 걸음수·유산소는 "어제 한 일"(그룹A), 체중·컨디션·통증은 "오늘의 몸 상태"(그룹B) — 그룹별로 조회 기준 날짜를 분리한다.
-// 완료 여부·기존값 프리필도 각 그룹의 기준 날짜로 판정한다(그룹A는 어제 기록 유무, 그룹B는 오늘 기록 유무).
+// 건강 기록 카드 계산 — "카드 하나 = 입력 항목 하나".
+// 2026-09-11 재단순화: 예전엔 "걸음수·유산소는 어제 한 일을 오늘 보고"(그룹A=어제 날짜)였는데, 실제 사용성 확인 결과
+// 회원이 어제 기준으로 입력하는 걸 직관적으로 받아들이지 못했다. 이제 두 그룹 모두 "오늘 한 것은 오늘" 저장한다 —
+// 걸음수·유산소(그룹A="오늘 활동")·체중·컨디션·통증(그룹B="오늘 몸 상태") 전부 오늘 날짜 기준.
+// D-1↔D 매칭은 이제 저장이 아니라 분석 단계(buildPrevDayLifestyleRows)에서만 계산한다 — 저장 날짜는 절대 옮기지 않는다.
 // 칼로리 카드는 2026-09-11 이 화면에서 완전히 제거됨 — 걸음수/유산소와 같은 형태라 회원이 계속 입력 가능한
 // 항목으로 오인해 눌러볼 수 있다는 이유. 칼로리 값 자체(getKcalLogs)·식단 분석·분석 탭 D-1 그래프는 전부 그대로 유지되고,
 // 오직 이 화면에 칼로리 카드를 그리지 않을 뿐이다. 입력은 "식단 기록" 섹션에서만 한다.
-function buildYesterdayHealthTiles(p,yesterday,open){
-  const yesterdayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===yesterday)||{};
-  const yesterdayCardio=(p.cardioLogs||[]).find(l=>l.date===yesterday)||null;
+function buildTodayActivityTiles(p,today,open){
+  const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
+  const todayCardio=(p.cardioLogs||[]).find(l=>l.date===today)||null;
   return [
-    {key:"steps",label:"걸음수",value:yesterdayCheck.steps?`${Number(yesterdayCheck.steps).toLocaleString()}보`:"—",hint:yesterdayCheck.steps?"기록 완료":"탭해서 입력",done:!!yesterdayCheck.steps,onClick:open.steps},
-    {key:"cardio",label:"유산소",value:yesterdayCardio?`${getCardioTypes(yesterdayCardio).join(" · ")} · ${yesterdayCardio.durationMinutes}분`:"—",hint:yesterdayCardio?"기록 완료":"탭해서 입력",done:!!yesterdayCardio,onClick:open.cardio},
+    {key:"steps",label:"걸음수",value:todayCheck.steps?`${Number(todayCheck.steps).toLocaleString()}보`:"—",hint:todayCheck.steps?"기록 완료":"탭해서 입력",done:!!todayCheck.steps,onClick:open.steps},
+    {key:"cardio",label:"유산소",value:todayCardio?`${getCardioTypes(todayCardio).join(" · ")} · ${todayCardio.durationMinutes}분`:"—",hint:todayCardio?"기록 완료":"탭해서 입력",done:!!todayCardio,onClick:open.cardio},
   ];
 }
 function buildTodayStatusTiles(p,today,open){
@@ -6569,7 +6572,7 @@ function buildTodayStatusTiles(p,today,open){
     {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
   ];
 }
-// 건강 기록 카드 버튼 — 어제 기록/오늘 상태 두 그룹이 같은 카드 마크업을 공유한다(중복 구현 방지).
+// 건강 기록 카드 버튼 — 오늘 활동/오늘 몸 상태 두 그룹이 같은 카드 마크업을 공유한다(중복 구현 방지).
 function HealthTileButton({t}){
   const ic=HEALTH_TILE_ICONS[t.key];
   return (
@@ -6838,21 +6841,19 @@ function MemberDietSheet({ p, date, mealType, onClose }) {
 }
 function MemberHealth(p){
   const today=getKoreaDateString();
-  const yesterday=getKoreaYesterdayDateString(); // 월/연도 경계·자정 전후에도 안전한 KST 달력일 기준(기존 공용 헬퍼)
   const [sheet,setSheet]=useState(null); // "weight" | "steps" | "condition" | "pain" | "cardio" ("kcal" 시트는 2026-09-11 제거, 식단 기록으로 통합)
   const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
-  const yesterdayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===yesterday)||{};
   const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
-  const yesterdayCardio=(p.cardioLogs||[]).find(l=>l.date===yesterday)||null;
-  // 카드별 열기 — 그룹별 기본 날짜가 다르다: 어제 기록(칼로리·걸음수·유산소)은 어제 값을, 오늘 상태(체중·컨디션·통증)는 오늘 값을 불러와
-  // 채워서 수정(overwrite)할 수 있게 한다. 다른 카드의 입력값이 섞이지 않도록 나머지 필드는 비운다.
-  // 저장 함수(saveCheck/saveCondition/savePain/saveCardioEntry)는 그대로 재사용하고, 여기서 넘기는 date만 항목별 기본값이 다르다 —
+  const todayCardio=(p.cardioLogs||[]).find(l=>l.date===today)||null;
+  // 카드별 열기 — 2026-09-11부터 모든 카드가 오늘 날짜를 기본값으로 연다("오늘 한 것은 오늘 입력"으로 재단순화,
+  // 예전엔 걸음수·유산소만 어제 날짜를 기본값으로 열었다). 기존 값을 불러와 수정(overwrite)할 수 있게 하고,
+  // 다른 카드의 입력값이 섞이지 않도록 나머지 필드는 비운다.
+  // 저장 함수(saveCheck/saveCondition/savePain/saveCardioEntry)는 그대로 재사용하고, 여기서 넘기는 date만 항목별 기본값이다 —
   // 사용자가 시트 안에서 날짜를 직접 바꾸면 그 값이 우선되므로 과거 기록 수정은 그대로 가능하다.
   const open={
     weight:()=>{ p.setForm(f=>({...f,date:today,weight:todayWeight!=null?String(todayWeight):"",kcal:"",steps:""})); setSheet("weight"); },
-    // "어제 총 섭취 칼로리" 직접 입력 시트는 2026-09-11 제거됨 — 칼로리 카드는 이제 탭 동작이 없는 읽기 전용
-    // 요약 카드다(buildYesterdayHealthTiles readOnly:true). 입력은 아래 "식단 기록" 섹션에서만 한다.
-    steps:()=>{ p.setForm(f=>({...f,date:yesterday,steps:yesterdayCheck.steps?String(yesterdayCheck.steps):"",weight:"",kcal:""})); setSheet("steps"); },
+    // 칼로리 카드는 2026-09-11 이 화면에서 완전히 제거됨 — 입력은 아래 "식단 기록" 섹션에서만 한다.
+    steps:()=>{ p.setForm(f=>({...f,date:today,steps:todayCheck.steps?String(todayCheck.steps):"",weight:"",kcal:""})); setSheet("steps"); },
     condition:()=>{ p.setForm(f=>({...f,date:today,condition:todayCheck.condition||""})); setSheet("condition"); },
     pain:()=>{ p.setForm(f=>({...f,date:today,painPart:todayCheck.painPart||"없음",painSide:todayCheck.painSide||"해당 없음",painVas:todayCheck.painVas??0,painMemo:todayCheck.painMemo||""})); setSheet("pain"); },
     cardio:()=>setSheet("cardio"),
@@ -6867,7 +6868,7 @@ function MemberHealth(p){
   const insight=buildHealthInsightSummary(p);
   const motivation=insight.enough?buildHealthMotivation(p):[];
   const [insightOpen,setInsightOpen]=useState(false); // "기록 분석 자세히 보기" — 기본은 반드시 접힘
-  const yesterdayTiles=buildYesterdayHealthTiles(p,yesterday,open);
+  const todayActivityTiles=buildTodayActivityTiles(p,today,open);
   const todayTiles=buildTodayStatusTiles(p,today,open);
   const [justSaved,setJustSaved]=useState(false);
   const [justSavedCondition,setJustSavedCondition]=useState(false);
@@ -6886,20 +6887,20 @@ function MemberHealth(p){
   const submitPain=async()=>{ const noPain=p.form.painPart==="없음"; if(noPain&&String(p.form.painMemo||"").trim()===""){alert("통증 부위나 메모를 입력해주세요.");return;} await p.savePain(); setJustSavedPain(true); setTimeout(()=>setJustSavedPain(false),700); setSheet(null); };
   return <>
     <h1>건강관리</h1>
-    <p className="sub">어제의 생활과 오늘의 몸 상태를 함께 기록해 꾸준한 변화를 만들어가세요.</p>
+    <p className="sub">오늘의 활동과 몸 상태를 기록해 꾸준한 변화를 만들어가세요.</p>
 
     <div className="health-hub">
       <div className="health-block">
-        <div className="health-block-head"><span className="health-block-icon mint"><SjIcon paths={HM_PATHS.clipboard} size={18}/></span><div><b>건강 기록</b><span>어제의 생활과 오늘의 몸 상태를 함께 기록해 보세요.</span></div></div>
+        <div className="health-block-head"><span className="health-block-icon mint"><SjIcon paths={HM_PATHS.clipboard} size={18}/></span><div><b>건강 기록</b><span>오늘의 활동과 몸 상태를 기록해 보세요.</span></div></div>
         <div className="health-daygroups">
           <div className="health-daygroup">
-            <div className="health-daygroup-head"><b>어제 기록</b><span className="hdg-date">{formatKoreanDateLabel(yesterday)}</span><em>어제의 식사·활동</em></div>
+            <div className="health-daygroup-head"><b>오늘 활동</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 활동</em></div>
             <div className="health-daygroup-grid">
-              {yesterdayTiles.map(t=><HealthTileButton key={t.key} t={t}/>)}
+              {todayActivityTiles.map(t=><HealthTileButton key={t.key} t={t}/>)}
             </div>
           </div>
           <div className="health-daygroup">
-            <div className="health-daygroup-head"><b>오늘 상태</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 몸 상태</em></div>
+            <div className="health-daygroup-head"><b>오늘 몸 상태</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 몸 상태</em></div>
             <div className="health-daygroup-grid">
               {todayTiles.map(t=><HealthTileButton key={t.key} t={t}/>)}
             </div>
@@ -6953,8 +6954,8 @@ function MemberHealth(p){
       <PainInput form={p.form} setForm={p.setForm}/>
       <button className={`primary${justSavedPain?" save-success":""}`} onClick={submitPain} disabled={p.painSaving}>{p.painSaving?"저장 중...":justSavedPain?"통증 저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title={yesterdayCardio?"유산소 기록 수정":"유산소 기록"}>
-      <CardioEntryForm key={yesterdayCardio?.id||"new"} p={p} initialDate={yesterday} initialLog={yesterdayCardio} onSaved={()=>setSheet(null)}/>
+    <MemberBottomSheet open={sheet==="cardio"} onClose={()=>setSheet(null)} title={todayCardio?"유산소 기록 수정":"유산소 기록"}>
+      <CardioEntryForm key={todayCardio?.id||"new"} p={p} initialDate={today} initialLog={todayCardio} onSaved={()=>setSheet(null)}/>
     </MemberBottomSheet>
   </>;
 }
@@ -9493,7 +9494,7 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .health-block-icon{display:flex;align-items:center;justify-content:center;width:38px;height:38px;flex-shrink:0;border-radius:14px;background:#F6F7F9;font-size:18px}
 .health-block-head b{display:block;font-size:17px;color:#20242A;letter-spacing:-.2px}
 .health-block-head span{display:block;margin-top:3px;color:#8B949E;font-size:12.5px;font-weight:700}
-/* 건강 기록 — 어제 기록/오늘 상태 2그룹. 모바일은 좌우 1열씩(=칼로리|체중 행 정렬), 700px 이상은 그룹 자체를 패널 카드로 분리(§health-daygroups) */
+/* 건강 기록 — 오늘 활동/오늘 몸 상태 2그룹(둘 다 오늘 날짜). 모바일은 좌우 1열씩, 700px 이상은 그룹 자체를 패널 카드로 분리(§health-daygroups) */
 .health-daygroups{display:grid;grid-template-columns:1fr 1fr;gap:16px;position:relative}
 .health-daygroups::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:#EEF1F4;transform:translateX(-50%)}
 .health-daygroup-head{margin-bottom:12px}

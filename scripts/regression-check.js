@@ -1770,7 +1770,8 @@ const checks = [
     !app.includes('["analysis","유산소 분석"]') &&
     app.includes('function MemberHealth(p)') &&
     app.includes('{key:"cardio",label:"유산소"') &&
-    app.includes('<CardioEntryForm key={yesterdayCardio?.id||"new"} p={p} initialDate={yesterday} initialLog={yesterdayCardio} onSaved={()=>setSheet(null)}/>')
+    // 2026-09-11: 유산소 카드도 오늘 날짜를 기본값으로 연다(과거엔 어제 날짜였음 — "오늘 한 것은 오늘" 원칙으로 재단순화).
+    app.includes('<CardioEntryForm key={todayCardio?.id||"new"} p={p} initialDate={today} initialLog={todayCardio} onSaved={()=>setSheet(null)}/>')
   ],
   ['관리자앱 건강관리 허브: 유산소 탭 연동(최근 기록/주간 요약/Zone2/체중 비교)',
     app.includes('function AdminCardioSection({ member, bodyData, cardioLogs = null })') &&
@@ -2310,12 +2311,13 @@ const checks = [
   ],
 
   // ── 회원앱 건강 탭: 카드 하나 = 입력 항목 하나 재설계 ──
-  // ── 회원앱 건강 탭: 전날 생활(그룹A)/오늘 상태(그룹B) 2그룹 재설계 ──
-  // 2026-09-11 최종 확정: 칼로리 카드는 건강 기록 화면에서 완전히 제거됨(읽기 전용으로도 남기지 않음).
-  // 걸음수/유산소와 같은 카드 모양이라 회원이 계속 입력 가능한 항목으로 오인해 눌러볼 수 있다는 이유.
-  ['건강 탭 카드 순서: 어제 기록 그룹(걸음수·유산소)·오늘 상태 그룹(체중·컨디션·통증) 순서로 각각 배치, 칼로리 카드는 없음',
+  // ── 회원앱 건강 탭: 전날 생활(그룹A)/오늘 상태(그룹B) 2그룹 재설계(2026-08-19) → 오늘 활동/오늘 몸 상태 2그룹으로 재단순화(2026-09-11) ──
+  // 2026-09-11 재단순화: "걸음수·유산소는 어제 날짜 기본값"이 실제 사용성 확인 결과 직관적이지 않았다 —
+  // 이제 회원 입력은 전부 "오늘 한 것은 오늘" 저장하고, D-1↔D 매칭은 분석 단계(buildPrevDayLifestyleRows)에서만 한다.
+  // 같은 날 칼로리 카드는 여전히 완전히 제거된 상태 그대로(걸음수/유산소와 모양이 같아 계속 입력 가능한 항목으로 오인될 수 있다는 이유).
+  ['건강 탭 카드 순서: 오늘 활동 그룹(걸음수·유산소)·오늘 몸 상태 그룹(체중·컨디션·통증) 순서로 각각 배치, 칼로리 카드는 없음',
     (() => {
-      const iY = app.indexOf('function buildYesterdayHealthTiles(p,yesterday,open){');
+      const iY = app.indexOf('function buildTodayActivityTiles(p,today,open){');
       const blockY = app.slice(iY, iY + 900);
       const orderY = ['key:"steps"', 'key:"cardio"'];
       let posY = -1;
@@ -2329,6 +2331,11 @@ const checks = [
       return okY && noKcalTile && okT;
     })()
   ],
+  ['건강 탭 헤더(2026-09-11): "오늘 활동"·"오늘 몸 상태" 두 그룹 모두 같은 오늘 날짜(formatKoreanDateLabel(today))를 보여준다 — "어제 기록"/"어제의 식사·활동" 문구는 제거됨',
+    app.includes('<div className="health-daygroup-head"><b>오늘 활동</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 활동</em></div>') &&
+    app.includes('<div className="health-daygroup-head"><b>오늘 몸 상태</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 몸 상태</em></div>') &&
+    !app.includes('<b>어제 기록</b>') && !app.includes('어제의 식사·활동')
+  ],
   ['건강 탭: HealthTileButton에 더 이상 readOnly 분기가 없다(칼로리 카드 자체가 없어져 불필요해짐)',
     (() => {
       const i = app.indexOf('function HealthTileButton({t}){');
@@ -2336,15 +2343,16 @@ const checks = [
       return !block.includes('t.readOnly') && !block.includes('mv2-today-tile readonly');
     })()
   ],
-  ['건강 탭 기본 날짜: 걸음수 카드는 어제 날짜를 기본값으로 열고, 체중·컨디션·통증 카드는 오늘 날짜를 기본값으로 연다',
+  ['건강 탭 기본 날짜(2026-09-11): 걸음수·유산소·체중·컨디션·통증 카드가 전부 오늘 날짜를 기본값으로 연다(어제 기본값 폐지)',
     (() => {
       const i = app.indexOf('function MemberHealth(p){');
       const block = app.slice(i, app.indexOf('function CardioEntryForm', i));
       return block.includes('weight:()=>{ p.setForm(f=>({...f,date:today,') &&
-        block.includes('steps:()=>{ p.setForm(f=>({...f,date:yesterday,') &&
+        block.includes('steps:()=>{ p.setForm(f=>({...f,date:today,') &&
         block.includes('condition:()=>{ p.setForm(f=>({...f,date:today,') &&
         block.includes('pain:()=>{ p.setForm(f=>({...f,date:today,') &&
-        block.includes('initialDate={yesterday} initialLog={yesterdayCardio}');
+        block.includes('initialDate={today} initialLog={todayCardio}') &&
+        !block.includes('date:yesterday') && !block.includes('initialDate={yesterday}');
     })()
   ],
   // 2026-09-11 1차: "어제 총 섭취 칼로리" 직접 입력 시트 제거, 카드를 읽기 전용으로 전환.
@@ -2360,9 +2368,9 @@ const checks = [
         !block.includes('kcal:()=>{');
     })()
   ],
-  ['건강 탭: buildYesterdayHealthTiles는 걸음수·유산소 2개 항목만 반환하고 칼로리 항목이 없다',
+  ['건강 탭: buildTodayActivityTiles는 걸음수·유산소 2개 항목만 반환하고 칼로리 항목이 없다',
     (() => {
-      const i = app.indexOf('function buildYesterdayHealthTiles(p,yesterday,open){');
+      const i = app.indexOf('function buildTodayActivityTiles(p,today,open){');
       const block = app.slice(i, i + 900);
       return !block.includes('key:"kcal"') &&
         !block.includes('readOnly') &&
@@ -2400,7 +2408,7 @@ const checks = [
   ],
 
   // ── 건강 탭 프리미엄 리디자인(동기부여 대시보드) ──
-  ['건강 탭: 건강 기록 카드 6종이 하나의 health-hub 카드 안에서 어제 기록/오늘 상태 두 그룹으로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
+  ['건강 탭: 건강 기록 카드들이 하나의 health-hub 카드 안에서 오늘 활동/오늘 몸 상태 두 그룹으로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
     (() => {
       const iHub = app.indexOf('<div className="health-hub">');
       const iGroups = app.indexOf('className="health-daygroups"');
@@ -7431,11 +7439,11 @@ const checks = [
     app.includes('.health-daygroup-grid .mv2-today-tile{flex-direction:row;align-items:center;gap:12px;min-height:68px;padding:13px 16px}') &&
     app.includes('.mv2-today-tile b{display:block;font-size:min(19px,4.8vw)')
   ],
-  ['건강 탭: 어제/오늘 데이터 모델은 viewport와 무관하게 하나 — 화면 폭으로 날짜·데이터를 분기하지 않는다(레이아웃만 CSS로 변경)',
+  ['건강 탭: 오늘 활동/오늘 몸 상태 데이터 모델은 viewport와 무관하게 하나 — 화면 폭으로 날짜·데이터를 분기하지 않는다(레이아웃만 CSS로 변경)',
     (() => {
       const block = app.slice(app.indexOf('function MemberHealth(p){'), app.indexOf('function CardioEntryForm'));
       return !block.includes('innerWidth') && !block.includes('matchMedia') && !block.includes('isTablet') &&
-        block.includes('const yesterdayTiles=buildYesterdayHealthTiles(p,yesterday,open);') &&
+        block.includes('const todayActivityTiles=buildTodayActivityTiles(p,today,open);') &&
         block.includes('const todayTiles=buildTodayStatusTiles(p,today,open);');
     })()
   ],
@@ -7660,8 +7668,8 @@ const checks = [
     !app.includes('.calorie-metric-block b{display:block;font-size:15px;font-weight:900;color:#20242A;word-break:break-all}')
   ],
   ['회원앱 줄바꿈: 설명 문구에 <br>을 하드코딩하지 않는다(폭에 따라 자연스럽게 여러 줄이 되도록 CSS로만 처리)',
-    app.includes('<b>건강 기록</b><span>어제의 생활과 오늘의 몸 상태를 함께 기록해 보세요.</span>') &&
-    !app.includes('함께 기록해<br')
+    app.includes('<b>건강 기록</b><span>오늘의 활동과 몸 상태를 기록해 보세요.</span>') &&
+    !app.includes('활동과 몸 상태를 기록해<br')
   ],
 
   // ── 분석 탭 기간: 항상 전체로 시작 ──

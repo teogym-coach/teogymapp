@@ -6572,11 +6572,12 @@ function buildTodayStatusTiles(p,today,open){
     {key:"pain",label:"통증",value:hasPainRecord?(hasActualPain?`${todayCheck.painPart} · VAS ${todayCheck.painVas??0}`:"없음"):"—",hint:hasPainRecord?"기록 완료":"탭해서 입력",done:hasPainRecord,warn:hasActualPain,onClick:open.pain},
   ];
 }
-// 건강 기록 카드 버튼 — 오늘 활동/오늘 몸 상태 두 그룹이 같은 카드 마크업을 공유한다(중복 구현 방지).
+// 건강 기록 카드 버튼 — "오늘 기록" 2열 그리드의 모든 카드가 같은 마크업을 공유한다(중복 구현 방지).
+// t.full: 통증 카드처럼 그리드 양쪽 칸을 모두 차지하는 가로 전체 너비 카드(마지막 줄 단독 배치용).
 function HealthTileButton({t}){
   const ic=HEALTH_TILE_ICONS[t.key];
   return (
-    <button type="button" className={`mv2-today-tile${t.done?" done":""}${t.warn?" warn":""}`} onClick={t.onClick} aria-label={`${t.label} ${t.value==="—"?"미입력":t.value}`}>
+    <button type="button" className={`mv2-today-tile${t.done?" done":""}${t.warn?" warn":""}${t.full?" full":""}`} onClick={t.onClick} aria-label={`${t.label} ${t.value==="—"?"미입력":t.value}`}>
       <span className="mv2-tile-top"><span className="mv2-tile-label">{t.label}</span>{ic&&<i className="mv2-tile-ico" style={{color:ic.color,background:ic.bg}}><SjIcon paths={ic.paths} size={15}/></i>}</span>
       {t.done?<><b>{t.value}</b><em>{t.hint}</em></>:<><em>{t.hint} ›</em><b>{t.value}</b></>}
     </button>
@@ -6870,6 +6871,16 @@ function MemberHealth(p){
   const [insightOpen,setInsightOpen]=useState(false); // "기록 분석 자세히 보기" — 기본은 반드시 접힘
   const todayActivityTiles=buildTodayActivityTiles(p,today,open);
   const todayTiles=buildTodayStatusTiles(p,today,open);
+  // 2026-09-11 재정리: "오늘 활동"/"오늘 몸 상태" 2그룹(날짜 중복 표시)을 없애고 "오늘 기록" 하나로 합친다.
+  // 두 builder 함수(buildTodayActivityTiles/buildTodayStatusTiles)의 결과를 그대로 재사용하고, 표시 순서만
+  // 체중·걸음수·컨디션·유산소·통증으로 재배열한다 — 날짜·저장 로직·클릭 동작은 전혀 건드리지 않는다.
+  const combinedTodayTiles=[
+    todayTiles.find(t=>t.key==="weight"),
+    todayActivityTiles.find(t=>t.key==="steps"),
+    todayTiles.find(t=>t.key==="condition"),
+    todayActivityTiles.find(t=>t.key==="cardio"),
+    (()=>{ const t=todayTiles.find(x=>x.key==="pain"); return t?{...t,full:true}:null; })(),
+  ].filter(Boolean);
   const [justSaved,setJustSaved]=useState(false);
   const [justSavedCondition,setJustSavedCondition]=useState(false);
   const [justSavedPain,setJustSavedPain]=useState(false);
@@ -6892,19 +6903,9 @@ function MemberHealth(p){
     <div className="health-hub">
       <div className="health-block">
         <div className="health-block-head"><span className="health-block-icon mint"><SjIcon paths={HM_PATHS.clipboard} size={18}/></span><div><b>건강 기록</b><span>오늘의 활동과 몸 상태를 기록해 보세요.</span></div></div>
-        <div className="health-daygroups">
-          <div className="health-daygroup">
-            <div className="health-daygroup-head"><b>오늘 활동</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 활동</em></div>
-            <div className="health-daygroup-grid">
-              {todayActivityTiles.map(t=><HealthTileButton key={t.key} t={t}/>)}
-            </div>
-          </div>
-          <div className="health-daygroup">
-            <div className="health-daygroup-head"><b>오늘 몸 상태</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 몸 상태</em></div>
-            <div className="health-daygroup-grid">
-              {todayTiles.map(t=><HealthTileButton key={t.key} t={t}/>)}
-            </div>
-          </div>
+        <div className="health-today-head"><b>오늘 기록</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span></div>
+        <div className="health-today-grid">
+          {combinedTodayTiles.map(t=><HealthTileButton key={t.key} t={t}/>)}
         </div>
         <button type="button" className="health-history-btn" onClick={()=>{p.setWorkoutView?.("calendar"); p.setTab("workout");}}>
           <SjIcon paths={HM_PATHS.barChart} size={16}/> 기록 히스토리 보기 <SjIcon paths={HM_PATHS.chevronRight} size={14}/>
@@ -9494,14 +9495,13 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .health-block-icon{display:flex;align-items:center;justify-content:center;width:38px;height:38px;flex-shrink:0;border-radius:14px;background:#F6F7F9;font-size:18px}
 .health-block-head b{display:block;font-size:17px;color:#20242A;letter-spacing:-.2px}
 .health-block-head span{display:block;margin-top:3px;color:#8B949E;font-size:12.5px;font-weight:700}
-/* 건강 기록 — 오늘 활동/오늘 몸 상태 2그룹(둘 다 오늘 날짜). 모바일은 좌우 1열씩, 700px 이상은 그룹 자체를 패널 카드로 분리(§health-daygroups) */
-.health-daygroups{display:grid;grid-template-columns:1fr 1fr;gap:16px;position:relative}
-.health-daygroups::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:#EEF1F4;transform:translateX(-50%)}
-.health-daygroup-head{margin-bottom:12px}
-.health-daygroup-head b{display:block;font-size:13.5px;color:#20242A;letter-spacing:-.2px}
-.health-daygroup-head .hdg-date{display:block;margin-top:3px;font-size:12px;font-weight:900;color:#0F9488}
-.health-daygroup-head em{display:block;margin-top:2px;font-style:normal;font-size:11px;font-weight:700;color:#8B949E}
-.health-daygroup-grid{display:grid;grid-template-columns:1fr;gap:10px}
+/* 건강 기록 — 2026-09-11: 좌/우 "오늘 활동"·"오늘 몸 상태" 2그룹(날짜 중복 표시)을 "오늘 기록" 단일 헤더 + 2열 카드 그리드로 통합.
+   체중·걸음수·컨디션·유산소 2x2 + 통증 가로 전체너비, 카드 자체는 기존 .mv2-today-tile 스타일 그대로 재사용한다. */
+.health-today-head{margin-bottom:14px}
+.health-today-head b{display:block;font-size:15px;color:#20242A;letter-spacing:-.2px}
+.health-today-head .hdg-date{display:block;margin-top:3px;font-size:12.5px;font-weight:900;color:#0F9488}
+.health-today-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.health-today-grid .mv2-today-tile.full{grid-column:1/-1}
 .health-subcard{background:#F8FAFC;border:1px solid #EEF1F4;border-radius:18px;padding:16px;margin:12px 0}
 .health-subcard.highlight{background:linear-gradient(135deg,#EEF5FF,#F8FAFC);border-color:#D9E7FF}
 .health-subcard-title{display:block;font-size:14.5px;color:#20242A;font-weight:900;margin-bottom:10px}
@@ -9905,17 +9905,6 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .profile-notice-list.empty .notice.soft{margin:0;font-size:13px}
 /* iPad/와이드 — 단순 확대가 아니라 2열 구성 */
 @media(min-width:700px){
-  .mv2-today-grid{grid-template-columns:repeat(3,1fr)}
-  .health-daygroups{gap:18px}
-  .health-daygroups::before{display:none}
-  .health-daygroup{background:#FBFDFD;border:1px solid #EEF1F4;border-radius:20px;padding:16px}
-  /* 그룹 패널 폭(≈350px)에서 카드 3개를 가로로 나누면 라벨·값이 잘려서, 패널 안에서는 카드를 가로형 1열로 배치한다 */
-  .health-daygroup-grid{grid-template-columns:minmax(0,1fr);gap:9px}
-  .health-daygroup-grid .mv2-today-tile{flex-direction:row;align-items:center;gap:12px;min-height:68px;padding:13px 16px}
-  .health-daygroup-grid .mv2-today-tile .mv2-tile-top{flex-direction:row-reverse;justify-content:flex-end;margin-right:auto;min-width:100px}
-  .health-daygroup-grid .mv2-today-tile b{margin:0;font-size:17px;text-align:right;overflow-wrap:anywhere}
-  .health-daygroup-grid .mv2-today-tile em{margin:0;flex-shrink:0}
-  .health-daygroup-grid .mv2-today-tile:not(.done) b{display:none}
   .mv2-analysis-hero-grid{grid-template-columns:repeat(5,1fr)}
   .mv2-profile-stats{grid-template-columns:repeat(5,1fr)}
   .mv2-sheet{max-width:520px;border-radius:26px;bottom:auto;top:50%;transform:translate(-50%,-50%);animation:mv2FadeIn .2s ease}

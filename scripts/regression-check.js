@@ -2331,10 +2331,12 @@ const checks = [
       return okY && noKcalTile && okT;
     })()
   ],
-  ['건강 탭 헤더(2026-09-11): "오늘 활동"·"오늘 몸 상태" 두 그룹 모두 같은 오늘 날짜(formatKoreanDateLabel(today))를 보여준다 — "어제 기록"/"어제의 식사·활동" 문구는 제거됨',
-    app.includes('<div className="health-daygroup-head"><b>오늘 활동</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 활동</em></div>') &&
-    app.includes('<div className="health-daygroup-head"><b>오늘 몸 상태</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span><em>오늘의 몸 상태</em></div>') &&
-    !app.includes('<b>어제 기록</b>') && !app.includes('어제의 식사·활동')
+  // 2026-09-11 3차: "오늘 활동"/"오늘 몸 상태" 2그룹(날짜 중복 표시)을 "오늘 기록" 단일 헤더로 통합.
+  ['건강 탭 헤더(2026-09-11 3차): "오늘 기록" 헤더 하나에 날짜를 한 번만 표시한다 — "오늘 활동"/"오늘 몸 상태"/"어제 기록" 문구는 모두 제거됨',
+    app.includes('<div className="health-today-head"><b>오늘 기록</b><span className="hdg-date">{formatKoreanDateLabel(today)}</span></div>') &&
+    !app.includes('<b>오늘 활동</b>') && !app.includes('<b>오늘 몸 상태</b>') &&
+    !app.includes('<b>어제 기록</b>') && !app.includes('어제의 식사·활동') &&
+    !app.includes('<em>오늘의 활동</em>') && !app.includes('<em>오늘의 몸 상태</em>')
   ],
   ['건강 탭: HealthTileButton에 더 이상 readOnly 분기가 없다(칼로리 카드 자체가 없어져 불필요해짐)',
     (() => {
@@ -2378,6 +2380,20 @@ const checks = [
         block.includes('key:"cardio"');
     })()
   ],
+  // 2026-09-11 3차: 두 builder 함수의 결과(날짜·저장·클릭 로직은 그대로)를 화면 표시 순서만 재배열한다 —
+  // 체중·걸음수·컨디션·유산소 2x2 + 통증(full) 단독 줄. 배치 순서 자체를 실제 소스에서 그대로 확인한다.
+  ['건강 탭: "오늘 기록" 카드 배치 순서는 체중→걸음수→컨디션→유산소→통증(통증만 full:true)이다',
+    (() => {
+      const i = app.indexOf('const combinedTodayTiles=[');
+      if (i === -1) return false;
+      const block = app.slice(i, app.indexOf('].filter(Boolean);', i));
+      const order = ['key==="weight"', 'key==="steps"', 'key==="condition"', 'key==="cardio"', 'key==="pain"'];
+      let pos = -1;
+      const inOrder = order.every(tok => { const idx = block.indexOf(tok); if (idx === -1 || idx <= pos) return false; pos = idx; return true; });
+      return inOrder && block.includes('full:true') &&
+        block.indexOf('full:true') > block.indexOf('key==="pain"');
+    })()
+  ],
   ['건강 탭: 과거 기록 수정(캘린더에서 특정 날짜 선택)은 여전히 그 날짜(selected)를 그대로 쓰고 오늘/어제로 강제되지 않는다',
     app.includes('const openMeasure=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("measure"); };') &&
     app.includes('const openCondition=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("condition"); };') &&
@@ -2408,12 +2424,12 @@ const checks = [
   ],
 
   // ── 건강 탭 프리미엄 리디자인(동기부여 대시보드) ──
-  ['건강 탭: 건강 기록 카드들이 하나의 health-hub 카드 안에서 오늘 활동/오늘 몸 상태 두 그룹으로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
+  ['건강 탭: 건강 기록 카드들이 하나의 health-hub 카드 안에서 "오늘 기록" 단일 그리드로 표시(하위 유산소 탭/최근 기록 등 별도 섹션 없이 개별 시트로 대체)',
     (() => {
       const iHub = app.indexOf('<div className="health-hub">');
-      const iGroups = app.indexOf('className="health-daygroups"');
-      const iGrid = app.indexOf('className="health-daygroup-grid"');
-      return iHub !== -1 && iGroups !== -1 && iGrid !== -1 && iHub < iGroups && iGroups < iGrid && !app.includes('<div className="health-hub-divider"/>');
+      const iHead = app.indexOf('className="health-today-head"');
+      const iGrid = app.indexOf('className="health-today-grid"');
+      return iHub !== -1 && iHead !== -1 && iGrid !== -1 && iHub < iHead && iHead < iGrid && !app.includes('<div className="health-hub-divider"/>');
     })()
   ],
   ['건강 탭: 상단 요약이 체중/이번주 운동/유산소/동적 하이라이트 4종으로 개편, 목표 카드 제거',
@@ -7417,27 +7433,28 @@ const checks = [
     app.includes('.anx-prevday-row .apr-arrow::before{content:"↓"}') &&
     app.includes('@media(min-width:700px){.anx-prevday-row{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:14px;padding:14px 16px}.anx-prevday-row .apr-arrow::before{content:"→"}}')
   ],
-  ['건강 탭 반응형: 어제/오늘 그룹 레이아웃도 새 breakpoint를 만들지 않고 기존 700px(회원앱 공용 max-width 전환 기준)만 재사용한다',
-    app.includes('@media(min-width:700px){.member-page{max-width:760px}') &&
+  // 2026-09-11 3차: 좌/우 "오늘 활동"/"오늘 몸 상태" 2그룹(과 700px 이상에서 쓰던 가로형 1열 패널 변형)을 전부 없애고,
+  // 체중·걸음수·컨디션·유산소·통증 5장을 뷰포트와 무관하게 항상 2열 그리드 하나로 보여준다(사용자 요청 목업과 동일한 2-2-1 배치).
+  // 새 breakpoint를 만들지 않는다는 기존 원칙대로, .health-today-grid에는 media query를 아예 추가하지 않았다.
+  ['건강 탭 반응형(2026-09-11 3차): "오늘 기록" 카드 그리드는 새 breakpoint 없이 모든 화면 폭에서 항상 2열이다(패널 분리·가로형 변형 없음)',
     (() => {
-      // 건강 그룹(.health-daygroup*) 규칙이 들어 있는 media query 조건을 전부 모아, 기존 700px 기준 외에는 없는지 확인한다.
-      const conditions = [];
+      const iDecl = app.indexOf('.health-today-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}');
+      if (iDecl === -1) return false;
+      // .health-today-grid를 오버라이드하는 media query가 없어야 한다(뷰포트별 열 수 분기 없음).
       let i = app.indexOf('@media(');
       while (i !== -1) {
-        const cond = app.slice(i + 7, app.indexOf(')', i));
         const open = app.indexOf('{', i);
         let depth = 0, j = open;
         for (; j < app.length; j++) { if (app[j] === '{') depth++; else if (app[j] === '}') { depth--; if (depth === 0) break; } }
-        if (app.slice(open, j + 1).includes('.health-daygroup')) conditions.push(cond);
+        if (app.slice(open, j + 1).includes('.health-today-grid')) return false;
         i = app.indexOf('@media(', j);
       }
-      return app.includes('.health-daygroups{display:grid') && conditions.length > 0 && conditions.every(c => c === 'min-width:700px');
+      return true;
     })()
   ],
-  ['건강 탭 반응형: 넓은 화면에서는 그룹 패널 안 카드를 가로형 1열로 배치한다(패널 폭 350px 안팎에서 3열로 나누면 라벨·값이 잘림)',
-    app.includes('.health-daygroup-grid{grid-template-columns:minmax(0,1fr);gap:9px}') &&
-    app.includes('.health-daygroup-grid .mv2-today-tile{flex-direction:row;align-items:center;gap:12px;min-height:68px;padding:13px 16px}') &&
-    app.includes('.mv2-today-tile b{display:block;font-size:min(19px,4.8vw)')
+  ['건강 탭: 통증 카드는 .full 클래스로 그리드 양쪽 칸을 모두 차지하는 가로 전체 너비 카드다(마지막 줄 단독 배치)',
+    app.includes('.health-today-grid .mv2-today-tile.full{grid-column:1/-1}') &&
+    app.includes('${t.full?" full":""}')
   ],
   ['건강 탭: 오늘 활동/오늘 몸 상태 데이터 모델은 viewport와 무관하게 하나 — 화면 폭으로 날짜·데이터를 분기하지 않는다(레이아웃만 CSS로 변경)',
     (() => {

@@ -162,6 +162,17 @@ async function openSheet(nutrition, saved, mealType = '아침') {
   saved = [];
   el = await openSheet({ logs: [], dates: {} }, saved);
   check('빈 상태에서는 CTA가 비활성화된다', cta(el).disabled === true, ctaText(el));
+  // 2026-09-11: placeholder에 있던 음식 예시("현미밥 200g" 등)를 회원이 "추천 식단"으로 오해할 수 있어 제거했다.
+  // 새 끼니를 열면 textarea는 완전히 빈 값이어야 하고, 예시 음식명이 placeholder에도 남아있으면 안 된다.
+  check('신규 끼니(저장 기록 없음)를 열면 textarea 값이 완전히 비어 있다',
+    el.querySelector('textarea').value === '', JSON.stringify(el.querySelector('textarea').value));
+  check('placeholder에 "현미밥 200g" 같은 음식 예시가 남아있지 않다(추천 식단 오해 방지)',
+    !(el.querySelector('textarea').placeholder || '').includes('현미밥') &&
+    !(el.querySelector('textarea').placeholder || '').includes('닭가슴살') &&
+    !(el.querySelector('textarea').placeholder || '').includes('계란'),
+    JSON.stringify(el.querySelector('textarea').placeholder));
+  check('신규 끼니 화면에는 "아직 기록이 없어요" 같은 별도 empty-state 안내 박스가 없다',
+    !el.textContent.includes('아직 기록이 없어요'), el.textContent.slice(0, 400));
   await act(async () => { setInput(el.querySelector('textarea'), '현미밥 200g\n닭가슴살 100g\n계란 2개'); });
   check('음식을 입력하면 CTA가 "칼로리 확인하기"로 바뀐다(저장 문구가 아니다)',
     ctaText(el) === '칼로리 확인하기', ctaText(el));
@@ -272,6 +283,8 @@ async function openSheet(nutrition, saved, mealType = '아침') {
   check('기존 저장 항목이 그대로 열리고 출처가 TEO GYM DB로 표시된다',
     valuesOf(el, '.diet-item-name').join('|') === '비빔밥|된장찌개' && el.textContent.includes('TEO GYM DB'),
     el.textContent.slice(0, 500));
+  check('기존 식단을 수정하러 열어도 추가 입력용 textarea는 비어 있다(저장된 항목과 새 입력을 섞지 않음)',
+    el.querySelector('textarea').value === '', JSON.stringify(el.querySelector('textarea').value));
   await act(async () => { el.querySelectorAll('.diet-item-del')[1].click(); });
   await act(async () => { cta(el).click(); });
   check('음식 삭제: 삭제한 항목을 뺀 나머지만 저장된다',

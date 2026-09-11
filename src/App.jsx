@@ -6543,17 +6543,16 @@ const HEALTH_TILE_ICONS={
   pain:{paths:["M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"],color:"#F97316",bg:"#FFF1E7"},
   cardio:{paths:["M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z","M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"],color:"#F26D6D",bg:"#FDEEEE"},
 };
-// 건강 기록 카드 6종 계산 — "카드 하나 = 입력 항목 하나". 회원이 오늘 앱을 열어도 실제로 기록하는 의미 날짜는 항목마다 다르다:
-// 칼로리·걸음수·유산소는 "어제 한 일"(그룹A), 체중·컨디션·통증은 "오늘의 몸 상태"(그룹B) — 그룹별로 조회 기준 날짜를 분리한다.
+// 건강 기록 카드 계산 — "카드 하나 = 입력 항목 하나". 회원이 오늘 앱을 열어도 실제로 기록하는 의미 날짜는 항목마다 다르다:
+// 걸음수·유산소는 "어제 한 일"(그룹A), 체중·컨디션·통증은 "오늘의 몸 상태"(그룹B) — 그룹별로 조회 기준 날짜를 분리한다.
 // 완료 여부·기존값 프리필도 각 그룹의 기준 날짜로 판정한다(그룹A는 어제 기록 유무, 그룹B는 오늘 기록 유무).
+// 칼로리 카드는 2026-09-11 이 화면에서 완전히 제거됨 — 걸음수/유산소와 같은 형태라 회원이 계속 입력 가능한
+// 항목으로 오인해 눌러볼 수 있다는 이유. 칼로리 값 자체(getKcalLogs)·식단 분석·분석 탭 D-1 그래프는 전부 그대로 유지되고,
+// 오직 이 화면에 칼로리 카드를 그리지 않을 뿐이다. 입력은 "식단 기록" 섹션에서만 한다.
 function buildYesterdayHealthTiles(p,yesterday,open){
   const yesterdayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===yesterday)||{};
-  const yesterdayKcal=getKcalLogs(p.nutrition).find(r=>r.date===yesterday)?.kcal;
   const yesterdayCardio=(p.cardioLogs||[]).find(l=>l.date===yesterday)||null;
   return [
-    // 2026-09-11: 칼로리는 입력 시트가 없는 읽기 전용 요약 카드다(readOnly) — 탭 동작도, 입력을 유도하는 문구도 없다.
-    // 실제 입력은 아래 "식단 기록" 섹션에서만 한다. 값은 기존 정책(식단 기록 우선, 없으면 레거시 fallback) 그대로.
-    {key:"kcal",label:"칼로리",value:yesterdayKcal!=null?`${Number(yesterdayKcal).toLocaleString()}kcal`:"—",hint:yesterdayKcal!=null?"어제 기록 섭취":"기록 없음",done:yesterdayKcal!=null,readOnly:true},
     {key:"steps",label:"걸음수",value:yesterdayCheck.steps?`${Number(yesterdayCheck.steps).toLocaleString()}보`:"—",hint:yesterdayCheck.steps?"기록 완료":"탭해서 입력",done:!!yesterdayCheck.steps,onClick:open.steps},
     {key:"cardio",label:"유산소",value:yesterdayCardio?`${getCardioTypes(yesterdayCardio).join(" · ")} · ${yesterdayCardio.durationMinutes}분`:"—",hint:yesterdayCardio?"기록 완료":"탭해서 입력",done:!!yesterdayCardio,onClick:open.cardio},
   ];
@@ -6571,17 +6570,8 @@ function buildTodayStatusTiles(p,today,open){
   ];
 }
 // 건강 기록 카드 버튼 — 어제 기록/오늘 상태 두 그룹이 같은 카드 마크업을 공유한다(중복 구현 방지).
-// t.readOnly: 입력 시트가 없는 순수 요약 카드(예: 칼로리) — 탭 동작·"탭해서 입력" 유도 문구·chevron(›)을 모두 뺀 <div>로 렌더한다.
 function HealthTileButton({t}){
   const ic=HEALTH_TILE_ICONS[t.key];
-  if(t.readOnly){
-    return (
-      <div className={`mv2-today-tile readonly${t.done?" done":""}${t.warn?" warn":""}`} aria-label={`${t.label} ${t.value==="—"?"기록 없음":t.value}`}>
-        <span className="mv2-tile-top"><span className="mv2-tile-label">{t.label}</span>{ic&&<i className="mv2-tile-ico" style={{color:ic.color,background:ic.bg}}><SjIcon paths={ic.paths} size={15}/></i>}</span>
-        <b>{t.value}</b><em>{t.hint}</em>
-      </div>
-    );
-  }
   return (
     <button type="button" className={`mv2-today-tile${t.done?" done":""}${t.warn?" warn":""}`} onClick={t.onClick} aria-label={`${t.label} ${t.value==="—"?"미입력":t.value}`}>
       <span className="mv2-tile-top"><span className="mv2-tile-label">{t.label}</span>{ic&&<i className="mv2-tile-ico" style={{color:ic.color,background:ic.bg}}><SjIcon paths={ic.paths} size={15}/></i>}</span>
@@ -6782,14 +6772,13 @@ function MemberDietSheet({ p, date, mealType, onClose }) {
     onChange={v => patchNutrition(f.id, { [key]: v })} />;
 
   return <div className="diet-sheet">
-    <p className="mv2-sheet-hint">{date} · {mealType}<span>음식과 양을 한 줄에 하나씩 적어주세요.</span></p>
+    {/* 2026-09-11: placeholder에 있던 "현미밥 200g / 닭가슴살 100g / 계란 2개" 예시를 뺐다 —
+        회원이 이걸 "이렇게 먹어야 한다"는 추천 식단으로 오해할 수 있어서다. 안내는 중립적인 문장 하나로만 한다. */}
+    <p className="mv2-sheet-hint">{date} · {mealType}<span>음식과 섭취량을 한 줄에 하나씩 입력해주세요.</span></p>
     <div className="form-line">
       <label>음식 · 섭취량 입력</label>
-      <textarea className="diet-input" rows={3} value={text} onChange={e => setText(e.target.value)}
-        placeholder={"현미밥 200g\n닭가슴살 100g\n계란 2개"} />
+      <textarea className="diet-input" rows={3} value={text} onChange={e => setText(e.target.value)} />
     </div>
-
-    {items.length === 0 && !hasText && <p className="notice soft">아직 기록이 없어요. 위에 음식을 적고 아래 버튼을 눌러주세요.</p>}
 
     {items.length > 0 && <div className="diet-list">
       {items.map(f => {
@@ -9847,9 +9836,6 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-today-tile.done em{color:#0F9488;margin-top:6px}
 .mv2-today-tile.warn{border-color:#FCD9A8;background:#FFFBF3}
 .mv2-today-tile.warn em{color:#B45309}
-/* readOnly — 입력 시트가 없는 순수 요약 카드(예: 칼로리): 탭 가능해 보이는 포인터 커서·눌림 효과를 없앤다. */
-.mv2-today-tile.readonly{cursor:default}
-.mv2-today-tile.readonly:active{transform:none}
 /* 변화분석 목표별 Hero — 밝은 화이트·옅은 민트 그라데이션(구 차콜 Hero 대체) */
 .anx-hero{background:linear-gradient(160deg,#FFFFFF 0%,#F0FBF9 100%);border:1px solid #DCF1EC;border-radius:24px;padding:16px 18px;margin:0 0 14px;box-shadow:0 2px 14px rgba(15,148,136,.06);animation:memberCardIn .22s ease}
 .anx-hero.empty{text-align:center;padding:30px 22px}

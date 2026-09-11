@@ -1886,6 +1886,16 @@ const checks = [
     app.includes("확인하고 저장") &&
     app.includes("표시된 값은 <b>예상값</b>입니다. 확인 후 저장해 주세요.")
   ],
+  // 2026-09-11: placeholder의 음식 예시("현미밥 200g" 등)를 회원이 "추천 식단"으로 오해할 수 있어 제거.
+  // 안내는 중립 문장(음식과 섭취량을 한 줄에 하나씩 입력) 하나만 남기고, "아직 기록이 없어요" empty-state 박스도 없앤다.
+  ["회원앱 식단 기록: textarea placeholder에 음식 예시(현미밥/닭가슴살/계란)가 없고, 안내는 중립 문구 하나뿐이다",
+    app.includes('<textarea className="diet-input" rows={3} value={text} onChange={e => setText(e.target.value)} />') &&
+    !app.includes('placeholder={"현미밥 200g') &&
+    app.includes('<span>음식과 섭취량을 한 줄에 하나씩 입력해주세요.</span>')
+  ],
+  ["회원앱 식단 기록: \"아직 기록이 없어요\" empty-state 안내 박스가 제거됐다(신규 입력 화면을 단순하게 유지)",
+    !app.includes('아직 기록이 없어요')
+  ],
   // 계산 버튼과 저장 버튼이 따로 있으면 회원이 계산을 건너뛰고 저장을 눌러 입력이 사라진다 —
   // CTA 하나가 상태에 따라 "칼로리 확인하기" ↔ "확인하고 저장"으로 바뀌는 구조를 고정한다.
   ["회원앱 식단 기록: 하단 CTA는 하나뿐이고, 계산이 필요한 상태에서는 저장으로 넘어가지 않는다",
@@ -2301,19 +2311,29 @@ const checks = [
 
   // ── 회원앱 건강 탭: 카드 하나 = 입력 항목 하나 재설계 ──
   // ── 회원앱 건강 탭: 전날 생활(그룹A)/오늘 상태(그룹B) 2그룹 재설계 ──
-  ['건강 탭 카드 순서: 어제 기록 그룹(칼로리·걸음수·유산소)·오늘 상태 그룹(체중·컨디션·통증) 순서로 각각 배치',
+  // 2026-09-11 최종 확정: 칼로리 카드는 건강 기록 화면에서 완전히 제거됨(읽기 전용으로도 남기지 않음).
+  // 걸음수/유산소와 같은 카드 모양이라 회원이 계속 입력 가능한 항목으로 오인해 눌러볼 수 있다는 이유.
+  ['건강 탭 카드 순서: 어제 기록 그룹(걸음수·유산소)·오늘 상태 그룹(체중·컨디션·통증) 순서로 각각 배치, 칼로리 카드는 없음',
     (() => {
       const iY = app.indexOf('function buildYesterdayHealthTiles(p,yesterday,open){');
       const blockY = app.slice(iY, iY + 900);
-      const orderY = ['key:"kcal"', 'key:"steps"', 'key:"cardio"'];
+      const orderY = ['key:"steps"', 'key:"cardio"'];
       let posY = -1;
       const okY = iY !== -1 && orderY.every(tok => { const idx = blockY.indexOf(tok); if (idx === -1 || idx <= posY) return false; posY = idx; return true; });
+      const noKcalTile = !blockY.includes('key:"kcal"');
       const iT = app.indexOf('function buildTodayStatusTiles(p,today,open){');
       const blockT = app.slice(iT, iT + 900);
       const orderT = ['key:"weight"', 'key:"condition"', 'key:"pain"'];
       let posT = -1;
       const okT = iT !== -1 && orderT.every(tok => { const idx = blockT.indexOf(tok); if (idx === -1 || idx <= posT) return false; posT = idx; return true; });
-      return okY && okT;
+      return okY && noKcalTile && okT;
+    })()
+  ],
+  ['건강 탭: HealthTileButton에 더 이상 readOnly 분기가 없다(칼로리 카드 자체가 없어져 불필요해짐)',
+    (() => {
+      const i = app.indexOf('function HealthTileButton({t}){');
+      const block = app.slice(i, i + 500);
+      return !block.includes('t.readOnly') && !block.includes('mv2-today-tile readonly');
     })()
   ],
   ['건강 탭 기본 날짜: 걸음수 카드는 어제 날짜를 기본값으로 열고, 체중·컨디션·통증 카드는 오늘 날짜를 기본값으로 연다',
@@ -2327,10 +2347,10 @@ const checks = [
         block.includes('initialDate={yesterday} initialLog={yesterdayCardio}');
     })()
   ],
-  // 2026-09-11: "어제 총 섭취 칼로리" 직접 입력 시트 제거 — 칼로리 카드는 더 이상 폼을 열지 않고 식단 기록 섹션으로 스크롤만 한다.
-  // 2026-09-11 최종 확정: "어제 기록" 칼로리 카드는 스크롤 이동조차 하지 않는 완전한 읽기 전용 요약 카드다.
-  // (스크롤 유도 방식은 "요약 카드인데 탭하면 식단 입력 영역으로 이동해 역할이 섞인다"는 이유로 채택하지 않기로 확정됨)
-  ['건강 탭: 칼로리 카드는 탭 동작이 전혀 없는 읽기 전용 요약 카드다(입력 시트도, 스크롤 이동도 없음)',
+  // 2026-09-11 1차: "어제 총 섭취 칼로리" 직접 입력 시트 제거, 카드를 읽기 전용으로 전환.
+  // 2026-09-11 2차(최종): 실제 프로덕션에서 확인해보니 읽기 전용이어도 걸음수/유산소 카드와 모양이 같아
+  // 회원이 계속 입력 가능한 항목으로 오인해 눌러볼 수 있다는 이유로, 카드 자체를 화면에서 완전히 제거하기로 확정됨.
+  ['건강 탭: 칼로리 카드는 화면에 그려지지 않는다(입력 시트도, 스크롤 이동도, 읽기 전용 표시도 없음)',
     (() => {
       const i = app.indexOf('function MemberHealth(p){');
       const block = app.slice(i, app.indexOf('function CardioEntryForm', i));
@@ -2340,22 +2360,14 @@ const checks = [
         !block.includes('kcal:()=>{');
     })()
   ],
-  ['건강 탭: buildYesterdayHealthTiles의 칼로리 항목은 readOnly:true이고 onClick·"탭해서 입력" 문구가 없다',
+  ['건강 탭: buildYesterdayHealthTiles는 걸음수·유산소 2개 항목만 반환하고 칼로리 항목이 없다',
     (() => {
       const i = app.indexOf('function buildYesterdayHealthTiles(p,yesterday,open){');
-      const kcalLine = app.slice(i, app.indexOf('\n', app.indexOf('{key:"kcal"', i)));
-      return kcalLine.includes('readOnly:true') &&
-        !kcalLine.includes('onClick') &&
-        kcalLine.includes('"기록 없음"') &&
-        !kcalLine.includes('탭해서 입력');
-    })()
-  ],
-  ['건강 탭: HealthTileButton은 readOnly 카드를 <button>이 아닌 <div>로 렌더해 탭 가능하다는 인상을 주지 않는다',
-    (() => {
-      const i = app.indexOf('function HealthTileButton({t}){');
       const block = app.slice(i, i + 900);
-      return block.includes('if(t.readOnly){') &&
-        block.includes('<div className={`mv2-today-tile readonly');
+      return !block.includes('key:"kcal"') &&
+        !block.includes('readOnly') &&
+        block.includes('key:"steps"') &&
+        block.includes('key:"cardio"');
     })()
   ],
   ['건강 탭: 과거 기록 수정(캘린더에서 특정 날짜 선택)은 여전히 그 날짜(selected)를 그대로 쓰고 오늘/어제로 강제되지 않는다',

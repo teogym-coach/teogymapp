@@ -146,15 +146,17 @@ async function openSheet(nutrition, saved, mealType = '아침') {
     ['아침', '점심', '저녁', '간식'].every(m => text.includes(m)) && (text.match(/기록하기/g) || []).length === 4, text.slice(0, 400));
 
   el = await render(React.createElement(MemberDietSection, { key: 'a2', p: makeProps({ logs: [], dates: { [TODAY]: { totalKcal: 1900, memberInputKcal: 1900 } } }, saved) }));
-  check('레거시 총칼로리 기록만 있는 회원: 1,900kcal이 그대로 표시된다', el.textContent.includes('1,900'), el.textContent.slice(0, 300));
+  check('레거시 총칼로리 기록만 있는 회원: 1,900kcal이 그대로 표시되고, 식단 기록이 없다는 안내가 함께 뜬다(2026-09-11 정책 변경)',
+    el.textContent.includes('1,900') && el.textContent.includes('식단 기록이 없어'), el.textContent.slice(0, 400));
 
   el = await render(React.createElement(MemberDietSection, { key: 'a3', p: makeProps({ logs: [], dates: { [TODAY]: { meals: { '점심': [{ id: 'x', name: '비빔밥', cal: 550 }] } } } }, saved) }));
   check('meals만 있는 과거 기록: totalKcal이 없어도 550kcal로 집계된다', el.textContent.includes('550'), el.textContent.slice(0, 400));
 
+  // 2026-09-11 정책 변경: 식단 기록(meals)이 있으면 레거시 직접입력(totalKcal)보다 항상 우선한다(기존엔 반대였음).
   const mixed = { logs: [], dates: { [TODAY]: { totalKcal: 2000, meals: { '점심': [{ id: 'a', name: '비빔밥', cal: 550, carb: 85, protein: 18, fat: 12 }] } } } };
   el = await render(React.createElement(MemberDietSection, { key: 'a4', p: makeProps(mixed, saved) }));
-  check('혼합 회원: 총칼로리(2,000)를 우선 표시하고 식단 합계(550)를 함께 안내한다',
-    el.textContent.includes('2,000') && el.textContent.includes('식단 기록 합계는 550kcal'), el.textContent.slice(0, 600));
+  check('혼합 회원(식단+레거시 총칼로리 혼재): 식단 합계(550)가 레거시 totalKcal(2,000)보다 우선 표시된다',
+    el.textContent.includes('550') && !el.textContent.includes('2,000'), el.textContent.slice(0, 600));
 
   // ══ B. 계산하지 않고 저장을 눌렀을 때(이번 개선의 핵심) ═════════
   saved = [];
@@ -292,8 +294,11 @@ async function openSheet(nutrition, saved, mealType = '아침') {
   check('관리자 식단 분석 / 회원앱 칼로리 그래프 반영: totalKcal이 없어도 meals 합계가 날짜별 칼로리로 잡힌다',
     getKcalLogs({ dates: { [TODAY]: dayMeals } })[0].kcal === 1820,
     JSON.stringify(getKcalLogs({ dates: { [TODAY]: dayMeals } })));
-  check('레거시 총칼로리 기록의 우선순위는 그대로 유지된다',
-    getKcalLogs({ dates: { [TODAY]: { totalKcal: 2000, meals: { '아침': [{ cal: 300 }] } } } })[0].kcal === 2000);
+  // 2026-09-11 정책 변경: 같은 날짜에 식단 기록(meals)이 있으면 레거시 총칼로리(totalKcal)보다 식단 합계가 우선한다.
+  check('식단 기록이 있으면 레거시 총칼로리(totalKcal)보다 식단 합계가 우선한다(신규 정책)',
+    getKcalLogs({ dates: { [TODAY]: { totalKcal: 2000, meals: { '아침': [{ cal: 300 }] } } } })[0].kcal === 300);
+  check('식단 기록이 없는 날짜는 레거시 총칼로리(totalKcal)로 그대로 fallback한다(호환 유지)',
+    getKcalLogs({ dates: { [TODAY]: { totalKcal: 2000 } } })[0].kcal === 2000);
 
   // ══ H. 출처 구분(레거시 역산 포함) ══════════════════════════════
   check('출처 구분: 과거 기록은 source 문자열에서 sourceKind를 역산한다(레거시 호환)',

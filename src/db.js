@@ -1658,7 +1658,9 @@ export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
     activities.push({ type: "weight", label: "체중 입력", value: `${weight}kg`, dateKey });
   }
   if (data.kcal !== undefined && String(data.kcal).trim() !== "") {
-    activities.push({ type: "kcal", label: "칼로리 입력", value: `${Number(data.kcal).toLocaleString()}kcal`, dateKey });
+    // kcal 타입은 이제 dynamic label(App.jsx DYNAMIC_LABEL_TYPES)이라 label이 문장에 그대로 들어간다.
+    // "칼로리 입력"처럼 명사형을 쓰면 "칼로리 입력을 입력했습니다"로 겹치므로 "칼로리"만 남긴다.
+    activities.push({ type: "kcal", label: "칼로리", value: `${Number(data.kcal).toLocaleString()}kcal`, dateKey });
   }
   if (data.steps !== undefined && String(data.steps).trim() !== "") {
     activities.push({ type: "steps", label: "걸음수", value: `${Number(data.steps).toLocaleString()}보`, dateKey });
@@ -1944,9 +1946,15 @@ export async function saveMemberDietMeal(memberId, dateKey, mealType, items = []
     payload.totalKcal = deleteField();
   }
   await setDoc(ref, payload, { merge: true });
-  if (totals.kcal > 0) {
+  // 알림은 "이번에 저장한 끼니" 기준이다(하루 총계 아님) — 아침만 지웠는데 점심 때문에 하루 총계가
+  // 남아 있어 "식단을 입력했습니다"로 잘못 알리는 걸 막는다. label에 끼니 이름을 그대로 실어
+  // feedSentence(App.jsx, DYNAMIC_LABEL_TYPES)가 "{mealType} 식단을 입력했습니다" 문장을 만들게 한다.
+  if (nextItems.length > 0) {
+    const mealKcal = Math.round(nextItems.reduce((sum, f) => sum + (Number(f.cal) || 0), 0));
+    const foodNames = nextItems.map(f => f.name).filter(Boolean).slice(0, 3);
+    const valueParts = [...foodNames, `${mealKcal.toLocaleString()}kcal`];
     await touchMemberActivities(memberId, [{
-      type: "kcal", label: "식단 기록", value: `${totals.kcal.toLocaleString()}kcal`, dateKey,
+      type: "kcal", label: `${mealType} 식단`, value: valueParts.join(" · "), dateKey,
     }]);
   }
   return { meals, dietKcal: totals.kcal, dietProtein: totals.protein, totalKcal: totals.kcal > 0 ? totals.kcal : null };

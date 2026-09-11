@@ -129,7 +129,22 @@ function getProfileAge(profile={},onboarding={}){const profileBirth=parseBirthYe
 function getCalorieProfileBasis(profile={},onboarding={},body=null){const weight=toPositiveNumber(onboarding.currentWeightKg)||toPositiveNumber(onboarding.currentWeight)||toPositiveNumber(onboarding.startingWeightKg)||getLatestBodyWeight(body)?.weight||toPositiveNumber(profile.currentWeight)||toPositiveNumber(profile.weight)||70; const height=toPositiveNumber(onboarding.heightCm)||toPositiveNumber(onboarding.height)||toPositiveNumber(profile.height)||170; const age=getProfileAge(profile,onboarding); const gender=onboarding.gender||profile.gender||"남성"; return {weight,height,age,gender};}
 function initialBmrCalories(profile={},onboarding={},body=null){const {weight,height,age,gender}=getCalorieProfileBasis(profile,onboarding,body); return Math.round(10*weight+6.25*height-5*age+(gender==="여성"?-161:5));}
 function initialMaintenanceCalories(profile={},onboarding={},body=null,checkins=[]){const bmr=initialBmrCalories(profile,onboarding,body); const explicitAct=onboarding.activityLevel&&ACTIVITY_MULT?.[onboarding.activityLevel]; const factor=explicitAct||activityFactorFromProfile(onboarding,checkins); return Math.round(bmr*factor);}
-function getKcalLogs(nutrition={}){const byDate=new Map(); (nutrition?.logs||[]).forEach(l=>{const kcal=toPositiveNumber(l.kcal||l.totalKcal||l.memberInputKcal||l.cal); if(l.date&&kcal)byDate.set(l.date,{date:l.date,kcal,source:l.source||l.sourceType||"log"});}); Object.entries(nutrition?.dates||{}).forEach(([date,d])=>{const explicit=toPositiveNumber(d.totalKcal||d.memberInputKcal||d.kcal||d.cal); const kcal=explicit||toPositiveNumber(sumDayMeals(d).kcal); if(kcal)byDate.set(date,{date,kcal,source:d.source||(explicit?"date":"meals")});}); return [...byDate.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));}
+// 2026-09-11: 식단 기록(meals)이 있는 날짜는 식단 합계가 항상 최우선이다 — 직접입력 totalKcal이 있어도
+// 밀린다(과거엔 반대였음). totalKcal 필드 자체는 식단 저장에서도 쓰이므로 필드명만으로 출처를 구분할 수
+// 없다 — 그래서 meals 실제 존재 여부(hasMealsData)로 "식단 기록이 있는 날"을 직접 판단한다.
+// 끼니 기록이 없는 날짜(레거시 직접입력만 있던 날 포함)에만 totalKcal/memberInputKcal/kcal/cal을 fallback으로 쓴다.
+function getKcalLogs(nutrition={}){
+  const byDate=new Map();
+  (nutrition?.logs||[]).forEach(l=>{const kcal=toPositiveNumber(l.kcal||l.totalKcal||l.memberInputKcal||l.cal); if(l.date&&kcal)byDate.set(l.date,{date:l.date,kcal,source:l.source||l.sourceType||"log"});});
+  Object.entries(nutrition?.dates||{}).forEach(([date,d])=>{
+    const hasMealsData=Object.values(d?.meals||{}).some(list=>Array.isArray(list)&&list.length>0);
+    const dietKcal=hasMealsData?(toPositiveNumber(d.dietKcal)||toPositiveNumber(sumDayMeals(d).kcal)):null;
+    const legacyKcal=toPositiveNumber(d.totalKcal||d.memberInputKcal||d.kcal||d.cal);
+    const kcal=dietKcal||legacyKcal;
+    if(kcal)byDate.set(date,{date,kcal,source:dietKcal?"meals":(d.source||"date")});
+  });
+  return [...byDate.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+}
 // 하루치 식단(meals) 합계 — 관리자 "음식" 탭과 회원앱 "식단 기록"이 같은 nutrition/{YYYY-MM-DD}.meals에 저장하므로 합산은 여기 한 곳에서만 한다.
 // getKcalLogs가 이 값을 총칼로리 필드(totalKcal 등)가 없을 때의 대체값으로 쓴다 — 기존에 음식만 기록돼 분석에서 빠지던 날짜가 그대로 살아난다.
 function sumDayMeals(dayData={}){const meals=dayData?.meals||{}; let kcal=0,carb=0,protein=0,fat=0,count=0; Object.values(meals).forEach(list=>{(Array.isArray(list)?list:[]).forEach(f=>{const c=Number(f?.cal); if(Number.isFinite(c))kcal+=c; const cb=Number(f?.carb); if(Number.isFinite(cb))carb+=cb; const pr=Number(f?.protein??f?.prot); if(Number.isFinite(pr))protein+=pr; const ft=Number(f?.fat); if(Number.isFinite(ft))fat+=ft; count+=1;});}); const r1=v=>Math.round(v*10)/10; return {kcal:Math.round(kcal),carb:r1(carb),protein:r1(protein),fat:r1(fat),count};}
@@ -3658,8 +3673,9 @@ function MemberCalendar(p){
   const openMeasure=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("measure"); };
   const openCondition=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("condition"); };
   const submitMeasure=async()=>{
-    const w=String(p.form.weight??"").trim(), k=String(p.form.kcal??"").trim(), s=String(p.form.steps??"").trim();
-    if(!w&&!k&&!s){ alert("저장할 건강 기록을 입력해주세요."); return; }
+    // "총 섭취 칼로리" 직접 입력은 2026-09-11 제거됨 — 이 시트는 이제 체중·걸음수만 다룬다.
+    const w=String(p.form.weight??"").trim(), s=String(p.form.steps??"").trim();
+    if(!w&&!s){ alert("저장할 건강 기록을 입력해주세요."); return; }
     if(w&&(!Number.isFinite(Number(w))||Number(w)<=0)){ alert("체중은 0보다 큰 숫자로 입력해주세요."); return; }
     await p.saveCheck(); setSheet(null);
   };
@@ -3667,7 +3683,7 @@ function MemberCalendar(p){
     {k:"solo",tint:"solo",icon:"🏋️",label:selDay.attended?"개인 운동 완료됨":"개인 운동 완료 체크",desc:selDay.attended?"이 날은 이미 완료로 기록되어 있어요":"이 날의 운동 완료를 기록해요",disabled:selDay.attended,run:()=>{ setSheet(null); checkDate(selected); }},
     {k:"cardio",tint:"cardio",icon:"🏃",label:"유산소",desc:"러닝 · 자전거 · 등산 등 유산소 기록",run:()=>setSheet("cardio")},
     {k:"weight",tint:"weight",icon:"⚖️",label:"체중",desc:"이 날의 체중을 기록해요",run:openMeasure},
-    {k:"kcal",tint:"kcal",icon:"🔥",label:"칼로리",desc:"총 섭취 칼로리를 기록해요",run:openMeasure},
+    // "칼로리" 메뉴 항목은 2026-09-11 제거됨 — 직접 총칼로리 입력 시트가 없어져 열 곳이 없다. 식단 기록은 건강관리 탭에서 한다.
     {k:"steps",tint:"steps",icon:"👟",label:"걸음 수",desc:"하루 걸음 수를 기록해요",run:openMeasure},
     {k:"memo",tint:"memo",icon:"💬",label:"컨디션 · 메모",desc:"컨디션과 통증 · 메모를 남겨요",run:openCondition},
   ];
@@ -3771,10 +3787,9 @@ function MemberCalendar(p){
         ))}
       </div>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="measure"} onClose={()=>setSheet(null)} title="건강 기록 입력">
+    <MemberBottomSheet open={sheet==="measure"} onClose={()=>setSheet(null)} title="체중 · 걸음수 입력">
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
       <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
-      <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
       <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
       <button className="primary" onClick={submitMeasure} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":"저장"}</button>
     </MemberBottomSheet>
@@ -3832,12 +3847,13 @@ function MemberDayDetail({day,todayKey,prSessionIds,checking,editGate,onCheck,on
     <span className="mv2-calx-row-val">{day.weight}kg</span>
     <span className="mv2-calx-chev" aria-hidden="true">›</span>
   </button>);
-  if(day.kcal!=null) rows.push(<button key="kc" type="button" className="mv2-calx-row" onClick={onEditMeasure} aria-label="칼로리 기록 수정">
+  // 칼로리는 2026-09-11부터 이 화면에서 직접 수정할 수 없다(직접입력 시트 제거) — 값은 식단 기록에서 나온다.
+  // 수정은 건강관리 탭 식단 기록에서만 하므로, 여기서는 편집 버튼이 아닌 읽기 전용 표시로 보여준다.
+  if(day.kcal!=null) rows.push(<div key="kc" className="mv2-calx-row static">
     <span className="mv2-calx-ico kcal" aria-hidden="true">🔥</span>
     <span className="mv2-calx-row-main"><b>칼로리</b></span>
     <span className="mv2-calx-row-val">{Number(day.kcal).toLocaleString()}kcal</span>
-    <span className="mv2-calx-chev" aria-hidden="true">›</span>
-  </button>);
+  </div>);
   if(day.steps) rows.push(<button key="st" type="button" className="mv2-calx-row" onClick={onEditMeasure} aria-label="걸음 수 기록 수정">
     <span className="mv2-calx-ico steps" aria-hidden="true">👟</span>
     <span className="mv2-calx-row-main"><b>걸음 수</b></span>
@@ -6535,7 +6551,9 @@ function buildYesterdayHealthTiles(p,yesterday,open){
   const yesterdayKcal=getKcalLogs(p.nutrition).find(r=>r.date===yesterday)?.kcal;
   const yesterdayCardio=(p.cardioLogs||[]).find(l=>l.date===yesterday)||null;
   return [
-    {key:"kcal",label:"칼로리",value:yesterdayKcal!=null?`${Number(yesterdayKcal).toLocaleString()}kcal`:"—",hint:yesterdayKcal!=null?"기록 완료":"탭해서 입력",done:yesterdayKcal!=null,onClick:open.kcal},
+    // 2026-09-11: 칼로리는 입력 시트가 없는 읽기 전용 요약 카드다(readOnly) — 탭 동작도, 입력을 유도하는 문구도 없다.
+    // 실제 입력은 아래 "식단 기록" 섹션에서만 한다. 값은 기존 정책(식단 기록 우선, 없으면 레거시 fallback) 그대로.
+    {key:"kcal",label:"칼로리",value:yesterdayKcal!=null?`${Number(yesterdayKcal).toLocaleString()}kcal`:"—",hint:yesterdayKcal!=null?"어제 기록 섭취":"기록 없음",done:yesterdayKcal!=null,readOnly:true},
     {key:"steps",label:"걸음수",value:yesterdayCheck.steps?`${Number(yesterdayCheck.steps).toLocaleString()}보`:"—",hint:yesterdayCheck.steps?"기록 완료":"탭해서 입력",done:!!yesterdayCheck.steps,onClick:open.steps},
     {key:"cardio",label:"유산소",value:yesterdayCardio?`${getCardioTypes(yesterdayCardio).join(" · ")} · ${yesterdayCardio.durationMinutes}분`:"—",hint:yesterdayCardio?"기록 완료":"탭해서 입력",done:!!yesterdayCardio,onClick:open.cardio},
   ];
@@ -6553,8 +6571,17 @@ function buildTodayStatusTiles(p,today,open){
   ];
 }
 // 건강 기록 카드 버튼 — 어제 기록/오늘 상태 두 그룹이 같은 카드 마크업을 공유한다(중복 구현 방지).
+// t.readOnly: 입력 시트가 없는 순수 요약 카드(예: 칼로리) — 탭 동작·"탭해서 입력" 유도 문구·chevron(›)을 모두 뺀 <div>로 렌더한다.
 function HealthTileButton({t}){
   const ic=HEALTH_TILE_ICONS[t.key];
+  if(t.readOnly){
+    return (
+      <div className={`mv2-today-tile readonly${t.done?" done":""}${t.warn?" warn":""}`} aria-label={`${t.label} ${t.value==="—"?"기록 없음":t.value}`}>
+        <span className="mv2-tile-top"><span className="mv2-tile-label">{t.label}</span>{ic&&<i className="mv2-tile-ico" style={{color:ic.color,background:ic.bg}}><SjIcon paths={ic.paths} size={15}/></i>}</span>
+        <b>{t.value}</b><em>{t.hint}</em>
+      </div>
+    );
+  }
   return (
     <button type="button" className={`mv2-today-tile${t.done?" done":""}${t.warn?" warn":""}`} onClick={t.onClick} aria-label={`${t.label} ${t.value==="—"?"미입력":t.value}`}>
       <span className="mv2-tile-top"><span className="mv2-tile-label">{t.label}</span>{ic&&<i className="mv2-tile-ico" style={{color:ic.color,background:ic.bg}}><SjIcon paths={ic.paths} size={15}/></i>}</span>
@@ -6586,7 +6613,10 @@ function MemberDietSection({ p }) {
   const dayKcalRow = getKcalLogs(p.nutrition).find(r => r.date === openDate);
   const dayKcal = dayKcalRow?.kcal ?? dietTotals.cal;
   const pct = targetKcal > 0 ? Math.min(100, Math.round(dayKcal / targetKcal * 100)) : 0;
-  const overrideNote = dietTotals.cal > 0 && dayKcal !== dietTotals.cal;
+  // 2026-09-11: 식단 기록(meals)이 있으면 getKcalLogs가 항상 그 합계를 최우선으로 돌려주므로(직접입력보다 우선),
+  // 이 날짜에 음식이 하나도 없는데(dietTotals.cal===0) dayKcal>0이면 과거 방식(레거시 직접입력/totalKcal)의
+  // fallback 값을 보고 있다는 뜻이다 — 그 사실을 알려준다("이 값이 식단 합계보다 우선한다"는 옛 안내는 더 이상 맞지 않다).
+  const usingLegacyKcalFallback = dietTotals.cal === 0 && dayKcal > 0;
   return <div className="health-hub member-diet">
     <div className="health-block-head">
       <span className="health-block-icon mint"><SjIcon paths={HM_PATHS.clipboard} size={18} /></span>
@@ -6608,7 +6638,7 @@ function MemberDietSection({ p }) {
       {dietTotals.cal > 0 && <div className="diet-macros">
         <span>탄 {dietTotals.carb}g</span><span>단 {dietTotals.protein}g</span><span>지 {dietTotals.fat}g</span>
       </div>}
-      {overrideNote && <p className="diet-note">직접 입력한 하루 총칼로리({formatKcalNumber(dayKcal)}kcal)가 우선 표시됩니다. 식단 기록 합계는 {formatKcalNumber(dietTotals.cal)}kcal 입니다.</p>}
+      {usingLegacyKcalFallback && <p className="diet-note">이 날짜는 식단 기록이 없어 과거에 입력했던 총칼로리({formatKcalNumber(dayKcal)}kcal)를 표시합니다. 끼니를 기록하면 그 합계로 바뀝니다.</p>}
     </div>
     <div className="diet-meals">
       {mealTypes.map(mt => {
@@ -6820,11 +6850,10 @@ function MemberDietSheet({ p, date, mealType, onClose }) {
 function MemberHealth(p){
   const today=getKoreaDateString();
   const yesterday=getKoreaYesterdayDateString(); // 월/연도 경계·자정 전후에도 안전한 KST 달력일 기준(기존 공용 헬퍼)
-  const [sheet,setSheet]=useState(null); // "weight" | "kcal" | "steps" | "condition" | "pain" | "cardio"
+  const [sheet,setSheet]=useState(null); // "weight" | "steps" | "condition" | "pain" | "cardio" ("kcal" 시트는 2026-09-11 제거, 식단 기록으로 통합)
   const todayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===today)||{};
   const yesterdayCheck=(p.checkins||[]).find(c=>(c.date||c.id)===yesterday)||{};
   const todayWeight=getBodyWeightRecords(p.body).find(r=>r.date===today)?.weight;
-  const yesterdayKcal=getKcalLogs(p.nutrition).find(r=>r.date===yesterday)?.kcal;
   const yesterdayCardio=(p.cardioLogs||[]).find(l=>l.date===yesterday)||null;
   // 카드별 열기 — 그룹별 기본 날짜가 다르다: 어제 기록(칼로리·걸음수·유산소)은 어제 값을, 오늘 상태(체중·컨디션·통증)는 오늘 값을 불러와
   // 채워서 수정(overwrite)할 수 있게 한다. 다른 카드의 입력값이 섞이지 않도록 나머지 필드는 비운다.
@@ -6832,7 +6861,8 @@ function MemberHealth(p){
   // 사용자가 시트 안에서 날짜를 직접 바꾸면 그 값이 우선되므로 과거 기록 수정은 그대로 가능하다.
   const open={
     weight:()=>{ p.setForm(f=>({...f,date:today,weight:todayWeight!=null?String(todayWeight):"",kcal:"",steps:""})); setSheet("weight"); },
-    kcal:()=>{ p.setForm(f=>({...f,date:yesterday,kcal:yesterdayKcal!=null?String(yesterdayKcal):"",weight:"",steps:""})); setSheet("kcal"); },
+    // "어제 총 섭취 칼로리" 직접 입력 시트는 2026-09-11 제거됨 — 칼로리 카드는 이제 탭 동작이 없는 읽기 전용
+    // 요약 카드다(buildYesterdayHealthTiles readOnly:true). 입력은 아래 "식단 기록" 섹션에서만 한다.
     steps:()=>{ p.setForm(f=>({...f,date:yesterday,steps:yesterdayCheck.steps?String(yesterdayCheck.steps):"",weight:"",kcal:""})); setSheet("steps"); },
     condition:()=>{ p.setForm(f=>({...f,date:today,condition:todayCheck.condition||""})); setSheet("condition"); },
     pain:()=>{ p.setForm(f=>({...f,date:today,painPart:todayCheck.painPart||"없음",painSide:todayCheck.painSide||"해당 없음",painVas:todayCheck.painVas??0,painMemo:todayCheck.painMemo||""})); setSheet("pain"); },
@@ -6857,10 +6887,6 @@ function MemberHealth(p){
     const w=String(p.form.weight??"").trim();
     if(!w){ alert("체중을 입력해주세요."); return; }
     if(!Number.isFinite(Number(w))||Number(w)<=0){ alert("체중은 0보다 큰 숫자로 입력해주세요."); return; }
-    await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); setSheet(null);
-  };
-  const submitKcal=async()=>{
-    if(!String(p.form.kcal??"").trim()){ alert("섭취 칼로리를 입력해주세요."); return; }
     await p.saveCheck(); setJustSaved(true); setTimeout(()=>setJustSaved(false),700); setSheet(null);
   };
   const submitSteps=async()=>{
@@ -6922,12 +6948,7 @@ function MemberHealth(p){
       <InputLine label="체중(kg)" value={p.form.weight} type="number" onChange={v=>p.setForm({...p.form,weight:v})}/>
       <button className={`primary${justSaved?" save-success":""}`} onClick={submitWeight} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
     </MemberBottomSheet>
-    <MemberBottomSheet open={sheet==="kcal"} onClose={()=>setSheet(null)} title="칼로리 입력">
-      <p className="mv2-sheet-hint">어제 드신 총칼로리를 입력해주세요.<span>다른 날짜 기록은 아래 날짜를 바꿔 수정할 수 있어요.</span></p>
-      <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
-      <InputLine label="총 섭취 칼로리(kcal)" value={p.form.kcal} type="number" onChange={v=>p.setForm({...p.form,kcal:v})}/>
-      <button className={`primary${justSaved?" save-success":""}`} onClick={submitKcal} disabled={p.healthSaving}>{p.healthSaving?"저장 중...":justSaved?"저장 완료 ✓":"저장"}</button>
-    </MemberBottomSheet>
+    {/* "어제 총 섭취 칼로리" 직접 입력 시트는 2026-09-11 제거됨 — 식단 기록(끼니별 입력)으로 통합. */}
     <MemberBottomSheet open={sheet==="steps"} onClose={()=>setSheet(null)} title="걸음수 입력">
       <InputLine label="기록 날짜" value={p.form.date} type="date" onChange={v=>p.setForm({...p.form,date:v})}/>
       <InputLine label="걸음수" value={p.form.steps} type="number" onChange={v=>p.setForm({...p.form,steps:v})}/>
@@ -7298,8 +7319,8 @@ const CALORIE_INTAKE_BAND_KCAL=150;   // 목표 ±150kcal는 목표 범위 안�
 const CALORIE_INTAKE_MIN_RECORDS=2;   // 최근 7일 기록이 이보다 적으면 평균으로 단정하지 않는다
 function buildCalorieIntakeSummary({avg7=null,targetKcal=null,goalDirection=null,recentCount=0}={}){
   const avg=toPositiveNumber(avg7), target=toPositiveNumber(targetKcal);
-  if(!target) return {pct:null,diff:null,tone:"unknown",display:"목표 미설정",note:"목표 섭취 칼로리가 설정되면 최근 섭취량과 비교해 볼 수 있어요."};
-  if(!avg||recentCount<CALORIE_INTAKE_MIN_RECORDS) return {pct:null,diff:null,tone:"unknown",display:"기록 부족",note:"최근 7일 섭취 기록이 조금 더 쌓이면 목표와 비교해 볼 수 있어요."};
+  if(!target) return {pct:null,diff:null,tone:"unknown",display:"목표 미설정",note:"목표 섭취 칼로리가 설정되면 최근 기록 섭취와 비교해 볼 수 있어요."};
+  if(!avg||recentCount<CALORIE_INTAKE_MIN_RECORDS) return {pct:null,diff:null,tone:"unknown",display:"기록 부족",note:"최근 7일 기록 섭취가 조금 더 쌓이면 현재 권장량과 비교해 볼 수 있어요."};
   const pct=Math.round(avg/target*100);
   const diff=Math.round(avg-target);
   // 목표 ±150kcal 안이면(목표 유형과 무관하게) 잘 맞춰 먹고 있는 상태로 본다.
@@ -7309,8 +7330,8 @@ function buildCalorieIntakeSummary({avg7=null,targetKcal=null,goalDirection=null
     : goalDeltaTone(goalDirection,diff,CALORIE_INTAKE_BAND_KCAL);
   const gap=Math.abs(100-pct);
   const note=Math.abs(diff)<=CALORIE_INTAKE_BAND_KCAL
-    ? "최근 평균 섭취량이 목표 범위 안에 있어요."
-    : `최근 평균 섭취량이 목표보다 약 ${gap}% ${diff>0?"높아요":"낮아요"}. 체중 흐름과 함께 참고해보세요.`;
+    ? "최근 기록 섭취 평균이 현재 권장량 범위 안에 있어요."
+    : `최근 기록 섭취 평균이 현재 권장량보다 약 ${gap}% ${diff>0?"높아요":"낮아요"}. 체중 흐름과 함께 참고해보세요.`;
   return {pct,diff,tone,display:`${pct}%`,note};
 }
 // 상태 → 한 줄 요약. 데이터가 부족하면(unknown) 잘한다/못한다를 말하지 않고 기록을 더 쌓자고만 안내한다.
@@ -7466,13 +7487,21 @@ function buildWeightTrendBuckets(weights=[],kcalRows=[],granularity="week"){
     const maByDate=new Map(ma.map(x=>[x.date,x.ma7]));
     const weightByDate=new Map(weights.map(w=>[w.date,Number(w.weight)]));
     const kcalByDate=new Map(kcalRows.map(k=>[k.date,Number(k.kcal)]));
-    const dates=[...new Set([...weights.map(w=>w.date),...kcalRows.map(k=>k.date)])].sort();
-    return dates.map(date=>({
-      date, label:weightTrendBucketLabel(date,"day",false),
-      weight: weightByDate.has(date) ? weightByDate.get(date) : null,
-      weightMA7: maByDate.get(date) ?? null,
-      kcal: kcalByDate.has(date) ? Math.round(kcalByDate.get(date)) : null,
-    }));
+    // 2026-09-11: 일별 그래프는 "D일 체중" 옆에 "D-1일 기록 섭취"를 나란히 보여준다(둘 다 같은 날짜였던 기존 방식에서 변경).
+    // row 날짜 집합도 체중 기록일뿐 아니라 "kcal 기록일+1일"까지 포함해야, 체중을 안 적은 날에도 다음 날 막대가 남는다.
+    // nextDate는 prevCalendarDate(위 함수)와 같은 UTC 날짜 연산을 반대 방향으로 쓴 것 — 월/연 경계도 동일하게 안전하다.
+    const nextDate=(dateStr)=>{const d=new Date(`${String(dateStr).slice(0,10)}T00:00:00Z`); if(isNaN(d))return null; d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10);};
+    const dates=[...new Set([...weights.map(w=>w.date),...kcalRows.map(k=>nextDate(k.date)).filter(Boolean)])].sort();
+    return dates.map(date=>{
+      const prevDate=prevCalendarDate(date);
+      const prevKcal=prevDate&&kcalByDate.has(prevDate)?kcalByDate.get(prevDate):null;
+      return {
+        date, label:weightTrendBucketLabel(date,"day",false),
+        weight: weightByDate.has(date) ? weightByDate.get(date) : null,
+        weightMA7: maByDate.get(date) ?? null,
+        kcal: prevKcal!=null ? Math.round(prevKcal) : null,
+      };
+    });
   }
   const buckets=new Map();
   const put=(date,field,value)=>{
@@ -7927,14 +7956,18 @@ function MemberAnalysis(p) {
   // 공통 판단 로직 — 이 화면의 모든 문구·색(기간 리포트·목표 전략·전문 분석 수치)이 이 상태 하나만 참조한다.
   // 선택한 기간 안의 체중 기록으로 계산하므로, 기간을 바꾸면 판정도 같은 기준으로 함께 바뀐다.
   const weightState = buildGoalWeightState(persona, weights);
-  // 목표 대비 섭취 — 최근 7일 기록 수까지 넘겨서 기록이 부족하면 비율을 만들지 않는다(0%/100% 같은 가짜 값 금지).
+  // 현재 권장량 대비 섭취 — 최근 7일 기록 수까지 넘겨서 기록이 부족하면 비율을 만들지 않는다(0%/100% 같은 가짜 값 금지).
+  // 권장 칼로리(target)는 과거 스냅샷이 아니라 "현재" 프로필·최근 기록 기준 재계산값이라, 화면 문구도 "현재 권장량"임을 밝혀야 한다.
   const calorieIntake = buildCalorieIntakeSummary({ avg7, targetKcal: target.value, goalDirection: weightState.goalDirection, recentCount: getRecentKcalLogsByDays(p.nutrition, 7).length });
+  // 화면에 "기록 N일"을 함께 보여주기 위한 표시 전용 값 — 위 recentCount와 같은 계산을 그대로 재사용한다.
+  const kcal7Count = getRecentKcalLogsByDays(p.nutrition, 7).length;
   // 체지방량 — 다이어트·체중 유지 목표는 감소가 좋은 방향, 증량(벌크업) 목표에서는 증가만으로 경고하지 않는다(중립).
   const fatMassTone = persona === "bulk" ? "neutral" : goalDeltaTone("down", fatMassDiff, 0.1);
   const periodReport = buildPeriodReport(persona, { wDiff, workoutCount: periodSessions.length, kcalCount: kcalRows.length, cardioCount: cardioInPeriod.length, cardioMinutes, pain, mmDiff, volumePct, biggestGain: biggestGainPeriod, repEndurance, streak, healthLogCount, weightState });
 
   // ── 재사용 가능한 그래프/카드 조각(기존 계산 그대로) — 목표별로 제목·순서만 다르게 배치한다 ──
-  // 체중은 선 그래프, 섭취 칼로리는 기록이 있을 때만 막대·우측 축·범례를 함께 표시(없으면 노출 안 함).
+  // 체중은 선 그래프, 기록 섭취는 기록이 있을 때만 막대·우측 축·범례를 함께 표시(없으면 노출 안 함).
+  // 일별(day) 뷰에서는 막대가 "D-1일(전날) 기록 섭취"를 D일 체중과 나란히 보여준다(buildWeightTrendBuckets 참고).
   const hasKcalData = kcalRows.length > 0;
   const isDailyTrend = weightTrendGranularity === "day";
   const showWeightLegend = hasKcalData || isDailyTrend;
@@ -7966,9 +7999,10 @@ function MemberAnalysis(p) {
             <XAxis dataKey="label" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} interval={weightTrendTickInterval} />
             <YAxis yAxisId="weight" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kg" domain={["dataMin-2", "dataMax+2"]} />
             {hasKcalData && <YAxis yAxisId="kcal" orientation="right" tick={axTick} tickLine={false} axisLine={{ stroke: "#E8ECF1" }} unit="kcal" />}
-            <Tooltip contentStyle={ttStyle} formatter={(v, n) => [v == null ? "-" : n === "섭취 칼로리" ? `${v}kcal` : `${v}kg`, n]} />
+            <Tooltip contentStyle={ttStyle} formatter={(v, n, entry) => [v == null ? "-" : entry?.dataKey === "kcal" ? `${v}kcal` : `${v}kg`, n]} />
             {showWeightLegend && <Legend wrapperStyle={{ fontSize: 12, fontWeight: 800, color: "#66717C" }} />}
-            {hasKcalData && <Bar yAxisId="kcal" dataKey="kcal" name="섭취 칼로리" fill="#99E2D8" opacity={0.42} radius={[4, 4, 0, 0]} />}
+            {/* 일별 뷰는 이 막대가 "D일" 위치에 있어도 실제로는 D-1일(전날) 기록 섭취다 — buildWeightTrendBuckets의 day 분기 참고. 이름에 그대로 드러낸다. */}
+            {hasKcalData && <Bar yAxisId="kcal" dataKey="kcal" name={isDailyTrend ? "전날 기록 섭취" : "기록 섭취"} fill="#99E2D8" opacity={0.42} radius={[4, 4, 0, 0]} />}
             {isDailyTrend && <Line yAxisId="weight" dataKey="weight" name="실측 체중" stroke="#BFE8E0" strokeWidth={1.5} dot={{ r: 2, fill: "#BFE8E0", strokeWidth: 0 }} connectNulls={false} />}
             <Line yAxisId="weight" dataKey={isDailyTrend ? "weightMA7" : "weight"} name={isDailyTrend ? "7일 평균" : "평균 체중"} stroke="#0F9488" strokeWidth={isDailyTrend ? 3.5 : 3} dot={{ r: isDailyTrend ? 3 : 4, fill: "#0F9488", strokeWidth: 0 }} connectNulls />
           </ComposedChart>
@@ -7983,7 +8017,7 @@ function MemberAnalysis(p) {
         <div className="anx-prevday-list">
           {prevDayLifestyleRows.map(r => {
             const parts = [];
-            if (r.prevKcal != null) parts.push(`섭취 ${r.prevKcal.toLocaleString()}kcal`);
+            if (r.prevKcal != null) parts.push(`기록 섭취 ${r.prevKcal.toLocaleString()}kcal`);
             if (r.prevSteps != null) parts.push(`걸음 ${r.prevSteps.toLocaleString()}보`);
             if (r.prevCardioMinutes) parts.push(`유산소 ${(r.prevCardioTypes || []).join(" · ")} ${r.prevCardioMinutes}분`);
             return (
@@ -8076,11 +8110,12 @@ function MemberAnalysis(p) {
         <>
           <CalorieTrendChart rows={kcalRows} chartRows={kcalRows} />
           <div className="calorie-metric-grid">
-            <div className="calorie-metric-block"><span>목표 칼로리</span><b>{formatKcal(target.value)}</b></div>
-            {/* 최근 7일 평균·목표 대비 섭취는 같은 판정(goalDeltaTone)을 공유해 한 카드 안에서 색이 엇갈리지 않게 한다. */}
-            <div className="calorie-metric-block"><span>최근 7일 평균</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>{formatKcal(avg7)}</b></div>
-            <div className="calorie-metric-block"><span>최근 14일 평균</span><b>{formatKcal(avg14)}</b></div>
-            <div className="calorie-metric-block"><span>목표 대비 섭취</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>{calorieIntake.display}</b></div>
+            {/* 권장 칼로리는 과거 날짜별 snapshot이 아니라 현재 프로필·기록 기준 재계산값이라 "현재"를 라벨에 명시한다. */}
+            <div className="calorie-metric-block"><span>현재 권장 칼로리</span><b>{formatKcal(target.value)}</b></div>
+            {/* 최근 7일 기록 섭취 평균·현재 권장량 대비는 같은 판정(goalDeltaTone)을 공유해 한 카드 안에서 색이 엇갈리지 않게 한다. */}
+            <div className="calorie-metric-block"><span>최근 7일 기록 섭취 평균</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>{formatKcal(avg7)}</b>{kcal7Count > 0 && <small>기록 {kcal7Count}일</small>}</div>
+            <div className="calorie-metric-block"><span>최근 14일 기록 섭취 평균</span><b>{formatKcal(avg14)}</b></div>
+            <div className="calorie-metric-block"><span>현재 권장량 대비</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>{calorieIntake.display}</b></div>
             {/* 수치·부호는 사실 그대로 두고 색(좋음/주의)만 공통 판단 로직에 맡긴다 — 벌크업 회원의 체중 증가가 경고색으로 보이지 않게 한다. */}
             {wDiff !== null && <div className="calorie-metric-block"><span>체중 변화</span><b style={{ color: goalToneColor(weightState.enough ? goalDeltaTone(weightState.goalDirection, wDiff) : "unknown") }}>{wDiff > 0 ? "+" : ""}{wDiff}kg</b></div>}
             {fatMassDiff !== null && <div className="calorie-metric-block"><span>체지방량 변화</span><b style={{ color: goalToneColor(fatMassTone) }}>{fatMassDiff > 0 ? "+" : ""}{fatMassDiff}kg</b></div>}
@@ -8089,7 +8124,7 @@ function MemberAnalysis(p) {
           {calorieFeedback && <div className="change-feedback-item" style={{ marginTop: 10 }}>{calorieFeedback}</div>}
         </>
       ) : (
-        <div className="analysis-empty-state">섭취 칼로리를 기록하면 체중 변화와 연결된 분석을 제공합니다.</div>
+        <div className="analysis-empty-state">기록 섭취를 남기면 체중 변화와 연결된 분석을 제공합니다.</div>
       )}
     </MCard>
   );
@@ -9812,6 +9847,9 @@ body:has(.member-shell),body:has(.member-login){background:#F6F7F9;color:#20242A
 .mv2-today-tile.done em{color:#0F9488;margin-top:6px}
 .mv2-today-tile.warn{border-color:#FCD9A8;background:#FFFBF3}
 .mv2-today-tile.warn em{color:#B45309}
+/* readOnly — 입력 시트가 없는 순수 요약 카드(예: 칼로리): 탭 가능해 보이는 포인터 커서·눌림 효과를 없앤다. */
+.mv2-today-tile.readonly{cursor:default}
+.mv2-today-tile.readonly:active{transform:none}
 /* 변화분석 목표별 Hero — 밝은 화이트·옅은 민트 그라데이션(구 차콜 Hero 대체) */
 .anx-hero{background:linear-gradient(160deg,#FFFFFF 0%,#F0FBF9 100%);border:1px solid #DCF1EC;border-radius:24px;padding:16px 18px;margin:0 0 14px;box-shadow:0 2px 14px rgba(15,148,136,.06);animation:memberCardIn .22s ease}
 .anx-hero.empty{text-align:center;padding:30px 22px}
@@ -13855,7 +13893,11 @@ const TODAY_FEED_TYPES = ["memo","pain","soreness","rpe","condition","weight","c
 const ACTIVITY_PARTICLE = { memo:"를", pain:"을", soreness:"을", rpe:"를", condition:"을", weight:"을", cardio:"를", kcal:"를", goal_update:"을", steps:"를", personalWorkout:"을", personalWorkoutRpe:"를", personalWorkoutSoreness:"을", onboarding:"을", profile_update:"를" };
 // goal_update는 회원이 "운동 목적"/"집중관리 부위" 등 서로 다른 항목을 바꿀 수 있어 타입 하나로는 문장에 항목명을 못 담는다 —
 // 이 타입만 ACTIVITY_LABEL 대신 이벤트별 item.label(예: "운동 목적")을 그대로 문장에 사용하고, 조사(을/를)도 그 라벨 기준으로 계산한다.
-const DYNAMIC_LABEL_TYPES = new Set(["goal_update"]);
+// kcal도 2026-09-11부터 동일하게 동적 라벨이다 — 회원앱 식단 기록이 저장 시점에 label을 "아침 식단"처럼
+// 끼니 이름으로 실어 보내(db.js saveMemberDietMeal), 알림 문장이 "칼로리를 입력했습니다"가 아니라
+// "아침 식단을 입력했습니다"로 끼니를 보여준다. 레거시 직접입력 경로(saveMemberHealthInputs)는 label을 "칼로리"로
+// 보내 기존과 같은 문장을 유지한다.
+const DYNAMIC_LABEL_TYPES = new Set(["goal_update", "kcal"]);
 // 기본 동사(신규 저장 기준) — 개인운동 RPE/근육통 등 "수정" 케이스는 touchMemberActivities 호출부가
 // activity.verb를 직접 실어 보내 이 기본값을 덮어쓴다(feedSentence 참고).
 const ACTIVITY_VERB = { goal_update: "변경했습니다", personalWorkout: "기록했습니다", personalWorkoutRpe: "기록했습니다", personalWorkoutSoreness: "기록했습니다", onboarding: "제출했습니다", profile_update: "수정했습니다" };

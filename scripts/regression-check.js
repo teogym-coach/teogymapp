@@ -212,6 +212,23 @@ function kcalLogsScenario(name, fn) {
   catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
 }
 
+// ── 알림 피드 문장(feedSentence): 실제 실행 시나리오 검증 ──
+// 2026-09-11: kcal 타입이 DYNAMIC_LABEL_TYPES에 추가되어 "아침 식단을 입력했습니다"처럼 끼니가 문장에 드러난다.
+// 동시에 RPE·근육통·통증·체중·유산소 등 기존 타입의 문장은 절대 바뀌면 안 된다 — 원본 함수를 그대로 실행해 확인한다.
+let feedSentenceLib = null;
+try {
+  const sliceConsts = app.slice(app.indexOf('const ACTIVITY_PRIORITY'), app.indexOf('// 오늘 입력 피드 클릭 시 이동할 화면'));
+  const sliceFeedSentence = app.slice(app.indexOf('function feedSentence(item) {'), app.indexOf('// 알림 Drawer 필터'));
+  feedSentenceLib = new Function(`${sliceConsts}\n${sliceFeedSentence}\nreturn { feedSentence, DYNAMIC_LABEL_TYPES, ACTIVITY_LABEL };`)();
+} catch (e) {
+  console.error('[regression] 알림 피드 문장 헬퍼 추출 실패:', e.message);
+}
+function feedSentenceScenario(name, fn) {
+  if (!feedSentenceLib) return [name, false];
+  try { return [name, !!fn(feedSentenceLib)]; }
+  catch (e) { console.error(`[regression] 시나리오 "${name}" 실행 오류:`, e.message); return [name, false]; }
+}
+
 // ── 2:1 회원별 개인화(종목 대상 only · 회원별 운동 부위 · 회원 한 명분 기록 변환): 실제 실행 시나리오 검증 ──
 // "나눠서 기록"이 실제로 쓰는 원본 함수를 그대로 슬라이스해 실행한다 — A 전용 종목이 B 기록/분석에 섞이는
 // 사고를 문자열 검사가 아니라 실행 결과로 막는다.
@@ -1854,8 +1871,14 @@ const checks = [
     db.includes("Number(cur.totalKcal) > 0 && Number(cur.totalKcal) === Number(cur.dietKcal)") &&
     db.includes("payload.totalKcal = deleteField();")
   ],
-  ["회원앱 식단 기록: 알림 피드는 기존 kcal 타입을 재사용한다(신규 타입 추가 없음)",
-    db.includes('type: "kcal", label: "식단 기록"')
+  // 2026-09-11: 알림 문장에 끼니(아침/점심/저녁/간식)가 드러나도록 label을 동적으로 바꿨다.
+  // activity type은 여전히 "kcal" 하나(신규 타입 추가 없음) — label만 mealType 기준으로 매번 달라진다.
+  ["회원앱 식단 기록: 알림 피드는 기존 kcal 타입을 재사용한다(신규 타입 추가 없음, label은 끼니별 동적)",
+    db.includes('type: "kcal", label: `${mealType} 식단`')
+  ],
+  ["회원앱 식단 기록: 알림은 하루 총계가 아니라 이번에 저장한 끼니만의 kcal·음식명(최대 3개)을 담는다",
+    db.includes("const mealKcal = Math.round(nextItems.reduce((sum, f) => sum + (Number(f.cal) || 0), 0));") &&
+    db.includes("const foodNames = nextItems.map(f => f.name).filter(Boolean).slice(0, 3);")
   ],
   ["회원앱 식단 기록: 자동 예상 → 회원 확인·수정 → 저장 흐름(추정값 자동 확정 저장 금지)",
     app.includes("function MemberDietSheet(") &&
@@ -2293,22 +2316,70 @@ const checks = [
       return okY && okT;
     })()
   ],
-  ['건강 탭 기본 날짜: 칼로리·걸음수·유산소 카드는 어제 날짜를 기본값으로 열고, 체중·컨디션·통증 카드는 오늘 날짜를 기본값으로 연다',
+  ['건강 탭 기본 날짜: 걸음수 카드는 어제 날짜를 기본값으로 열고, 체중·컨디션·통증 카드는 오늘 날짜를 기본값으로 연다',
     (() => {
       const i = app.indexOf('function MemberHealth(p){');
       const block = app.slice(i, app.indexOf('function CardioEntryForm', i));
       return block.includes('weight:()=>{ p.setForm(f=>({...f,date:today,') &&
-        block.includes('kcal:()=>{ p.setForm(f=>({...f,date:yesterday,') &&
         block.includes('steps:()=>{ p.setForm(f=>({...f,date:yesterday,') &&
         block.includes('condition:()=>{ p.setForm(f=>({...f,date:today,') &&
         block.includes('pain:()=>{ p.setForm(f=>({...f,date:today,') &&
         block.includes('initialDate={yesterday} initialLog={yesterdayCardio}');
     })()
   ],
+  // 2026-09-11: "어제 총 섭취 칼로리" 직접 입력 시트 제거 — 칼로리 카드는 더 이상 폼을 열지 않고 식단 기록 섹션으로 스크롤만 한다.
+  // 2026-09-11 최종 확정: "어제 기록" 칼로리 카드는 스크롤 이동조차 하지 않는 완전한 읽기 전용 요약 카드다.
+  // (스크롤 유도 방식은 "요약 카드인데 탭하면 식단 입력 영역으로 이동해 역할이 섞인다"는 이유로 채택하지 않기로 확정됨)
+  ['건강 탭: 칼로리 카드는 탭 동작이 전혀 없는 읽기 전용 요약 카드다(입력 시트도, 스크롤 이동도 없음)',
+    (() => {
+      const i = app.indexOf('function MemberHealth(p){');
+      const block = app.slice(i, app.indexOf('function CardioEntryForm', i));
+      return !block.includes('setSheet("kcal")') &&
+        !block.includes('총 섭취 칼로리(kcal)') &&
+        !block.includes('scrollIntoView') &&
+        !block.includes('kcal:()=>{');
+    })()
+  ],
+  ['건강 탭: buildYesterdayHealthTiles의 칼로리 항목은 readOnly:true이고 onClick·"탭해서 입력" 문구가 없다',
+    (() => {
+      const i = app.indexOf('function buildYesterdayHealthTiles(p,yesterday,open){');
+      const kcalLine = app.slice(i, app.indexOf('\n', app.indexOf('{key:"kcal"', i)));
+      return kcalLine.includes('readOnly:true') &&
+        !kcalLine.includes('onClick') &&
+        kcalLine.includes('"기록 없음"') &&
+        !kcalLine.includes('탭해서 입력');
+    })()
+  ],
+  ['건강 탭: HealthTileButton은 readOnly 카드를 <button>이 아닌 <div>로 렌더해 탭 가능하다는 인상을 주지 않는다',
+    (() => {
+      const i = app.indexOf('function HealthTileButton({t}){');
+      const block = app.slice(i, i + 900);
+      return block.includes('if(t.readOnly){') &&
+        block.includes('<div className={`mv2-today-tile readonly');
+    })()
+  ],
   ['건강 탭: 과거 기록 수정(캘린더에서 특정 날짜 선택)은 여전히 그 날짜(selected)를 그대로 쓰고 오늘/어제로 강제되지 않는다',
     app.includes('const openMeasure=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("measure"); };') &&
     app.includes('const openCondition=()=>{ p.setForm(f=>({...f,date:selected})); setSheet("condition"); };') &&
     app.includes('<CardioEntryForm key={selected} p={p} initialDate={selected} onSaved={()=>setSheet(null)}/>')
+  ],
+  // 2026-09-11: 캘린더 "+" 메뉴·측정 시트에서도 "총 섭취 칼로리" 직접 입력 진입점을 없앤다(죽은 링크 방지).
+  ['캘린더: "+" 메뉴에 칼로리 항목이 없고, 측정 시트("건강 기록 입력")에도 총 섭취 칼로리 입력칸이 없다',
+    (() => {
+      const i = app.indexOf('function MemberCalendar(p){');
+      const block = app.slice(i, app.indexOf('function MemberDayDetail'));
+      return !block.includes('{k:"kcal",tint:"kcal"') &&
+        !block.includes('총 섭취 칼로리(kcal)') &&
+        block.includes('title="체중 · 걸음수 입력"');
+    })()
+  ],
+  ['캘린더 날짜 상세: 칼로리 행은 더 이상 수정 버튼이 아니라 읽기 전용 표시다(누르면 열리는 시트에 칼로리 입력칸이 없어졌기 때문)',
+    (() => {
+      const i = app.indexOf('function MemberDayDetail(');
+      const block = app.slice(i, app.indexOf('function MemberHomeHero'));
+      return block.includes('if(day.kcal!=null) rows.push(<div key="kc" className="mv2-calx-row static">') &&
+        !block.includes('onClick={onEditMeasure} aria-label="칼로리 기록 수정"');
+    })()
   ],
   ['최근 건강 기록 카드 제거: 건강 탭 입력 카드 영역에는 조회 전용 최근 기록 카드가 없음(RecentHealthRecords/buildRecentHealthRecords 삭제)',
     !app.includes('function RecentHealthRecords(') &&
@@ -3307,9 +3378,12 @@ const checks = [
     db.includes('dateKey: a.dateKey || todayKey, at: now + i,')
   ],
   ['목표 관리 피드: goal_update는 항목별 문장(예: "운동 목적을 변경했습니다")을 위해 item.label/조사를 동적으로 계산',
-    app.includes('const DYNAMIC_LABEL_TYPES = new Set(["goal_update"]);') &&
     app.includes('function koreanParticleEulReul(word)') &&
     app.includes('item.verb || ACTIVITY_VERB[item.type] || "입력했습니다"')
+  ],
+  // 2026-09-11: kcal도 동적 라벨 대상에 추가됨(끼니 표시). goal_update 케이스는 그대로 유지되는지 함께 확인한다.
+  ['알림 피드: DYNAMIC_LABEL_TYPES는 goal_update·kcal 둘 다 포함한다(신규 타입 추가 없이 기존 두 값만)',
+    app.includes('const DYNAMIC_LABEL_TYPES = new Set(["goal_update", "kcal"]);')
   ],
   ['목표 관리 피드 이동: goal_update 클릭 시 회원 상세(hub)로 이동 — 전용 관리자 화면이 없어 최소 기준(상세 이동) 충족',
     app.includes('goal_update: { targetScreen: "hub" }')
@@ -7005,17 +7079,41 @@ const checks = [
     const byDate = Object.fromEntries(lib.weightMovingAverage7(weights).map(m => [m.date, m.ma7]));
     return byDate['2026-08-01'] === 80 && byDate['2026-08-03'] === 81 && byDate['2026-08-10'] === 79;
   }),
-  wtScenario('체중 추이 버킷(1개월=day): 원본 weights/kcalRows 배열을 mutate하지 않고 실측값+7일 이동평균+칼로리를 날짜별로 합친다', lib => {
+  // 2026-09-11 정책 변경: 일별(day) 버킷의 kcal은 더 이상 같은 날짜 값이 아니라 "D-1(전날)" 값이다.
+  // D일 체중 옆에 D-1일 기록 섭취를 나란히 보여주기 위함(buildWeightTrendBuckets day 분기 참고).
+  wtScenario('체중 추이 버킷(1개월=day, D-1 정렬): 원본 weights/kcalRows 배열을 mutate하지 않고, kcal은 하루 뒤(D) 자리에 표시된다', lib => {
     const weights = [{ date: '2026-08-01', weight: 80 }, { date: '2026-08-02', weight: 81 }];
     const kcalRows = [{ date: '2026-08-02', kcal: 1800 }, { date: '2026-08-03', kcal: 1700 }];
     const before = [JSON.stringify(weights), JSON.stringify(kcalRows)];
     const pts = lib.buildWeightTrendBuckets(weights, kcalRows, 'day');
     const byDate = Object.fromEntries(pts.map(p => [p.date, p]));
     return before[0] === JSON.stringify(weights) && before[1] === JSON.stringify(kcalRows) &&
-      pts.length === 3 &&
+      pts.length === 4 &&
       byDate['2026-08-01'].weight === 80 && byDate['2026-08-01'].kcal === null &&
-      byDate['2026-08-02'].weight === 81 && byDate['2026-08-02'].kcal === 1800 &&
-      byDate['2026-08-03'].weight === null && byDate['2026-08-03'].weightMA7 === null && byDate['2026-08-03'].kcal === 1700;
+      byDate['2026-08-02'].weight === 81 && byDate['2026-08-02'].kcal === null &&
+      (byDate['2026-08-03'].weight === null || byDate['2026-08-03'].weight === undefined) && byDate['2026-08-03'].weightMA7 == null && byDate['2026-08-03'].kcal === 1800 &&
+      (byDate['2026-08-04'].weight === null || byDate['2026-08-04'].weight === undefined) && byDate['2026-08-04'].kcal === 1700;
+  }),
+  wtScenario('체중 추이 버킷 D-1 정렬: 월 경계에서도 안전하다(10/1 체중 자리에 9/30 기록 섭취)', lib => {
+    const pts = lib.buildWeightTrendBuckets([{ date: '2026-10-01', weight: 70 }], [{ date: '2026-09-30', kcal: 2000 }], 'day');
+    const row = pts.find(p => p.date === '2026-10-01');
+    return !!row && row.kcal === 2000 && row.weight === 70;
+  }),
+  wtScenario('체중 추이 버킷 D-1 정렬: 연 경계에서도 안전하다(2027-01-01 체중 자리에 2026-12-31 기록 섭취)', lib => {
+    const pts = lib.buildWeightTrendBuckets([{ date: '2027-01-01', weight: 70 }], [{ date: '2026-12-31', kcal: 1900 }], 'day');
+    const row = pts.find(p => p.date === '2027-01-01');
+    return !!row && row.kcal === 1900 && row.weight === 70;
+  }),
+  wtScenario('체중 추이 버킷 D-1 정렬: 전날 기록이 없으면 0으로 채우지 않고 null이다', lib => {
+    const pts = lib.buildWeightTrendBuckets([{ date: '2026-08-05', weight: 75 }], [], 'day');
+    const row = pts.find(p => p.date === '2026-08-05');
+    return !!row && row.kcal === null;
+  }),
+  wtScenario('체중 추이 버킷: 일별(day) 외 granularity(week)는 D-1 이동 없이 기존처럼 같은 기간 값을 그대로 평균한다', lib => {
+    const weights = [{ date: '2026-08-03', weight: 80 }];
+    const kcalRows = [{ date: '2026-08-03', kcal: 2000 }];
+    const pts = lib.buildWeightTrendBuckets(weights, kcalRows, 'week');
+    return pts.length === 1 && pts[0].kcal === 2000;
   }),
   wtScenario('체중 추이 버킷(주간 이상): 기록이 있는 날짜만 평균에 포함하고 기록 없는 날을 0으로 계산하지 않는다(NaN도 없음)', lib => {
     const weights = [
@@ -7217,14 +7315,55 @@ const checks = [
       return rows.length === 1 && rows[0].kcal === 1000 && rows[0].source === 'meals';
     }
   ),
-  kcalLogsScenario('식단 호환: 직접 입력한 하루 총칼로리(totalKcal)가 있으면 그 값이 우선한다(기존 우선순위 유지)',
+  // 2026-09-11 정책 변경: 식단 기록(meals)이 있는 날짜는 직접입력(totalKcal/memberInputKcal)보다 식단 합계가 항상 우선한다.
+  // totalKcal 필드는 식단 저장에서도 쓰이므로 필드명만으로 출처를 구분할 수 없어 meals 존재 여부로 판단한다 — [[project 조사 보고서]] 3번 항목.
+  kcalLogsScenario('식단 우선순위(신규): 같은 날짜에 식단 기록(meals)이 있으면 직접입력 totalKcal보다 식단 합계가 우선한다',
     lib => {
       const rows = lib.getKcalLogs({ dates: { '2026-09-04': { totalKcal: 2000, meals: { '아침': [{ cal: 300 }] } } } });
-      return rows.length === 1 && rows[0].kcal === 2000;
+      return rows.length === 1 && rows[0].kcal === 300 && rows[0].source === 'meals';
+    }
+  ),
+  kcalLogsScenario('식단 우선순위(신규): memberInputKcal(회원 직접입력)이 있어도 같은 날 meals가 있으면 식단 합계가 우선한다',
+    lib => {
+      const rows = lib.getKcalLogs({ dates: { '2026-09-06': { memberInputKcal: 1700, meals: { '저녁': [{ cal: 500 }] } } } });
+      return rows.length === 1 && rows[0].kcal === 500 && rows[0].source === 'meals';
+    }
+  ),
+  kcalLogsScenario('식단 우선순위(신규): meals가 없는 날짜는 기존처럼 totalKcal 등 레거시 값으로 fallback한다(호환 유지)',
+    lib => {
+      const rows = lib.getKcalLogs({ dates: { '2026-09-07': { totalKcal: 1800 } } });
+      return rows.length === 1 && rows[0].kcal === 1800 && rows[0].source !== 'meals';
     }
   ),
   kcalLogsScenario('식단 호환: 기록이 없는 회원은 빈 배열 — 가짜 값을 만들지 않는다',
     lib => lib.getKcalLogs({}).length === 0 && lib.getKcalLogs({ dates: { '2026-09-05': { meals: {} } } }).length === 0
+  ),
+
+  // ── 관리자 알림 문장(2026-09-11): "칼로리를 입력했습니다" → "{끼니} 식단을 입력했습니다" ──
+  feedSentenceScenario('알림 문장: 아침 식단 저장은 "아침 식단을 입력했습니다"로 끼니가 드러난다',
+    lib => lib.feedSentence({ type: 'kcal', label: '아침 식단', value: '415kcal' }) === '아침 식단을 입력했습니다'
+  ),
+  feedSentenceScenario('알림 문장: 점심/저녁/간식도 각각 끼니 이름 그대로 문장에 들어간다',
+    lib => ['점심', '저녁', '간식'].every(m =>
+      lib.feedSentence({ type: 'kcal', label: `${m} 식단`, value: '1kcal' }) === `${m} 식단을 입력했습니다`)
+  ),
+  feedSentenceScenario('알림 문장: 아침/점심/저녁/간식 외 레거시 mealType(예: "운동 전")도 저장된 label을 그대로 문장에 쓴다',
+    lib => lib.feedSentence({ type: 'kcal', label: '운동 전 식단', value: '1kcal' }) === '운동 전 식단을 입력했습니다'
+  ),
+  feedSentenceScenario('알림 문장: kcal 타입은 DYNAMIC_LABEL_TYPES에 포함되어 label이 고정 문자열("칼로리")로 대체되지 않는다',
+    lib => lib.DYNAMIC_LABEL_TYPES.has('kcal') && lib.ACTIVITY_LABEL.kcal === '칼로리'
+  ),
+  feedSentenceScenario('알림 문장 불변: RPE·근육통·통증·체중·유산소·걸음수·컨디션 문장은 kcal 변경과 무관하게 그대로다',
+    lib => lib.feedSentence({ type: 'rpe', label: 'RPE', value: '9' }) === 'RPE를 입력했습니다' &&
+      lib.feedSentence({ type: 'soreness', label: '근육통', value: '심함' }) === '근육통을 입력했습니다' &&
+      lib.feedSentence({ type: 'pain', label: '통증', value: '무릎' }) === '통증을 입력했습니다' &&
+      lib.feedSentence({ type: 'weight', label: '체중', value: '70kg' }) === '체중을 입력했습니다' &&
+      lib.feedSentence({ type: 'cardio', label: '유산소', value: '30분' }) === '유산소를 입력했습니다' &&
+      lib.feedSentence({ type: 'steps', label: '걸음수', value: '5000보' }) === '걸음수를 입력했습니다' &&
+      lib.feedSentence({ type: 'condition', label: '컨디션', value: '좋음' }) === '컨디션을 입력했습니다'
+  ),
+  feedSentenceScenario('알림 문장 불변: goal_update(항목별 동적 라벨)도 기존과 동일하게 동작한다',
+    lib => lib.feedSentence({ type: 'goal_update', label: '운동 목적', value: 'A → B' }) === '운동 목적을 변경했습니다'
   ),
   kcalLogsScenario('식단 합계: 같은 날 여러 끼(아침·점심·저녁·간식)를 모두 더해 하루 총 kcal을 만든다',
     lib => {
@@ -7541,10 +7680,11 @@ const checks = [
     lib => lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: 'up', recentCount: 5 }).tone === 'good' &&
       lib.buildCalorieIntakeSummary({ avg7: 3000, targetKcal: 2125, goalDirection: null, recentCount: 5 }).tone === 'neutral'
   ),
-  calorieIntakeScenario('목표 대비 섭취: 목표 ±150kcal 안이면 목표 범위 안내로 표시한다',
+  // 2026-09-11: 권장 칼로리는 과거 스냅샷이 아니라 현재 기준 재계산값이라 note 문구도 "현재 권장량"으로 명시한다.
+  calorieIntakeScenario('현재 권장량 대비 섭취: ±150kcal 안이면 권장 범위 안내로 표시한다',
     lib => {
       const r = lib.buildCalorieIntakeSummary({ avg7: 2200, targetKcal: 2125, goalDirection: 'down', recentCount: 5 });
-      return r.tone === 'good' && r.note.includes('목표 범위 안');
+      return r.tone === 'good' && r.note.includes('현재 권장량 범위 안');
     }
   ),
   calorieIntakeScenario('목표 대비 섭취: 목표 칼로리가 없거나 비정상이면 비율을 만들지 않고 중립 상태로 안내한다',
@@ -7562,14 +7702,15 @@ const checks = [
         one.pct === null && one.display === '기록 부족' && one.tone === 'unknown';
     }
   ),
-  ['섭취와 체중 변화 카드: "목표 달성률" 라벨을 쓰지 않고 "목표 대비 섭취"와 설명 문구를 함께 보여준다',
-    app.includes('<span>목표 대비 섭취</span>') &&
+  // 2026-09-11: "목표 대비 섭취" → "현재 권장량 대비"로 라벨 변경(권장 칼로리가 과거 스냅샷이 아니라 현재 재계산값임을 명시).
+  ['섭취와 체중 변화 카드: "목표 달성률" 라벨을 쓰지 않고 "현재 권장량 대비"와 설명 문구를 함께 보여준다',
+    app.includes('<span>현재 권장량 대비</span>') &&
     app.includes('<p className="calorie-intake-note">{calorieIntake.note}</p>') &&
     !app.includes('<span>목표 달성률</span>')
   ],
-  ['섭취와 체중 변화 카드: 최근 7일 평균·목표 대비 섭취 색이 같은 판정(goalDeltaTone 기반 tone)을 공유해 카드 안에서 결론이 엇갈리지 않는다',
+  ['섭취와 체중 변화 카드: 최근 7일 기록 섭취 평균·현재 권장량 대비 색이 같은 판정(goalDeltaTone 기반 tone)을 공유해 카드 안에서 결론이 엇갈리지 않는다',
     app.includes('const calorieIntake = buildCalorieIntakeSummary({ avg7, targetKcal: target.value, goalDirection: weightState.goalDirection, recentCount: getRecentKcalLogsByDays(p.nutrition, 7).length });') &&
-    app.includes('<div className="calorie-metric-block"><span>최근 7일 평균</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>') &&
+    app.includes('<div className="calorie-metric-block"><span>최근 7일 기록 섭취 평균</span><b style={{ color: goalToneColor(calorieIntake.tone) }}>') &&
     !app.includes('color: calorieDiff !== null && Math.abs(calorieDiff) <= 150 ? "#16A34A" : "#F97316"')
   ],
   calorieIntakeScenario('결론 일관성: 다이어트 회원(체중 +4kg / 섭취 목표 초과)이면 체중 판정과 섭취 판정이 모두 warn으로 같은 방향을 가리킨다',
@@ -7623,7 +7764,7 @@ const checks = [
     app.includes('{!goalProgress?"목표 미설정":')
   ],
   ['관리자앱: 목표 달성률은 체중 목표 진행률이므로 "달성률" 표현을 유지하고, 칼로리 섭취 비율에는 이 표현을 쓰지 않는다',
-    app.includes('<span>목표 대비 섭취</span>') &&
+    app.includes('<span>현재 권장량 대비</span>') &&
     !app.includes('<span>목표 달성률</span>') &&
     app.includes('function getWeightGoalProgress(')
   ],

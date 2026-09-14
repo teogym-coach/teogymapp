@@ -7270,20 +7270,21 @@ const checks = [
       const muscleSlice = app.slice(app.indexOf('const EX_MUSCLE_SUGGEST'), app.indexOf('function normalizeToKoreaDateKey'));
       const fn = new Function(
         `${funcSlice}\nfunction getLearnedFuncPreset(){return null;}\n${muscleSlice}\n` +
-        'return { suggestFuncExPreset, suggestEquipment, suggestMuscle, isStanceOnlyName };'
+        'return { suggestFuncExPreset, suggestEquipment, suggestMuscle, suggestRecordUnit, isStanceOnlyName, isStanceOnlyExerciseName };'
       );
       libs = fn();
     } catch (e) { console.error('[regression] 자세명/동작명 자동분류 — 슬라이스 추출 실패:', e.message); }
     // updateEx의 name 변경 처리 순서(①func preset ②기구 키워드 ③동작 키워드)를 그대로 흉내 낸다.
-    const classify = (name, prev = {}) => {
+    // classifications를 넘기면 Firestore 학습 데이터가 있는 시나리오(요청 항목 ⑨)까지 재현할 수 있다.
+    const classify = (name, prev = {}, classifications = {}) => {
       const equipment0 = prev.equipment ?? '바벨', muscleTop0 = prev.muscleTop ?? '가슴';
       try {
         const preset = libs.suggestFuncExPreset(name);
         if (preset) return { equipment: '기능', muscleTop: '기능', funcCategory: preset.category, funcTool: preset.tool || null };
         let equipment = equipment0, muscleTop = muscleTop0;
-        const sugEq = libs.suggestEquipment(name, {});
+        const sugEq = libs.suggestEquipment(name, classifications);
         if (sugEq) equipment = sugEq;
-        const sug = libs.suggestMuscle(name, {});
+        const sug = libs.suggestMuscle(name, classifications);
         if (sug) muscleTop = sug.top;
         return { equipment, muscleTop, funcCategory: null, funcTool: null };
       } catch (e) { console.error(`[regression] classify("${name}") 실행 오류:`, e.message); return null; }
@@ -7326,6 +7327,17 @@ const checks = [
           return noneOf(a).equipment === '덤벨' && a.muscleTop === '어깨'
             && b.equipment === '바벨' && b.muscleTop === '가슴'
             && c.equipment === '케이블' && c.muscleTop === '등';
+        })()
+      ],
+      ['자동분류 우선순위 ⑨ 학습 데이터 방어(실제 프로덕션 재현): 트레이너가 과거에 "하프닐링"이라는 미완성 이름 상태에서 기구/부위를 직접 선택해 exerciseClassifications에 학습돼 있어도, "하프닐링"만 입력하면 그 학습값이 재사용되지 않는다 — suggestEquipment/suggestMuscle/suggestRecordUnit 모두 자세명뿐인 이름에서는 학습 데이터 조회 자체를 건너뛴다(isStanceOnlyExerciseName 가드)',
+        (() => {
+          if (!libs) return false;
+          const badLearned = { '하프닐링': { equipment: '덤벨', muscleTop: '가슴', muscleSub: '가운데가슴', unitType: 'step' } };
+          return libs.suggestEquipment('하프닐링', badLearned) === null
+            && libs.suggestMuscle('하프닐링', badLearned) === null
+            && libs.suggestRecordUnit('하프닐링', badLearned) === null
+            && libs.isStanceOnlyExerciseName('하프닐링') === true
+            && libs.isStanceOnlyExerciseName('하프닐링 원암 덤벨') === false;
         })()
       ],
       ['자세명 modifier 판별(isStanceOnlyName): "하프닐링"/"톨니링"/"스플릿 스탠스"/"b스탠스"/"스태거드 스탠스" 단독 또는 서로 결합된 입력은 자세명만 있는 것으로 판단되고, 자세명+실제 동작명(예: "하프닐링 로우")은 더 이상 자세명 전용으로 판단되지 않는다',

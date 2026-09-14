@@ -21266,6 +21266,22 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
           u.muscleSub = mSubs(fallbackTop)[0] || u.muscleSub;
           u.partAutoAssigned = true;
         }
+        // "하프닐링 케이블 로우 DB 프레스" 명시적 override — 과거에 기능운동 자동분류 버그로 잘못
+        // 저장된 기록을 다시 열어도 기구=케이블/부위=어깨로 정상 표시되도록 로드 시점에도 동일하게 보정한다
+        // (이미 정상값이면 아무 변화 없음, Firestore 재저장 전까지는 저장값을 건드리지 않음).
+        if (isDualWeightEx(u)) {
+          u.equipment = "케이블";
+          u.muscleTop = "어깨";
+          u.muscleSub = mSubs("어깨")[0] || u.muscleSub;
+          if ((u.sets||[]).some(s => s.recordType === "function")) {
+            u.sets = (u.sets||[]).map(s => ({
+              weight: s.weight || "", reps: s.reps || "",
+              volume: (parseFloat(s.weight)||0) * (parseInt(s.reps)||0),
+              recordType: "weightReps",
+              ...(s.dbWeight !== undefined ? {dbWeight: s.dbWeight} : {}),
+            }));
+          }
+        }
         return u;
       });
       // 2:1 세션 편집: B회원 운동 데이터(memberBExercises) → m2 필드로 복원
@@ -21585,6 +21601,30 @@ function updateEx(ei, key, val) {
         if (!ex._unitManual && u.equipment !== "기능") {
           const sugUnit = suggestRecordUnit(val, classifications);
           if (sugUnit) u.unitType = sugUnit;
+        }
+        // ── 명시적 운동별 override: "하프닐링 케이블 로우 DB 프레스"는 이름에 "하프닐링"이 포함돼
+        // 위 기능운동 자동 추천(FUNC_EX_MAP의 "하프닐링" 키워드, 가동성 카테고리)에 걸려 타이핑 도중
+        // 기능운동(기구=기능/부위=기능)으로 잘못 전환될 수 있다. 이 자동 전환은 한번 걸리면 이후 글자를
+        // 더 입력해 이름이 완성돼도(WEIGHT_BLOCKLIST가 "케이블 로우"를 그제서야 감지해도) 스스로 되돌리는
+        // 로직이 없어 그대로 굳어버리므로, 최종 이름이 이 운동과 정확히 일치할 때 기구=케이블/부위=어깨로
+        // 명시적으로 되돌린다. 다른 "하프닐링" 운동(이름이 다름)은 이 override에 걸리지 않아 기존
+        // FUNC_EX_MAP 자동분류를 그대로 유지한다 — 전체 "하프닐링" 키워드 매핑 자체는 손대지 않는다.
+        if (isDualWeightEx(u)) {
+          u.equipment = "케이블";
+          u.muscleTop = "어깨";
+          u.muscleSub = mSubs("어깨")[0] || u.muscleSub;
+          u._autoEquip = false;
+          u._autoSuggest = false;
+          // 위에서 기능운동 세트 형식(recordType:"function")으로 이미 전환됐다면 일반 웨이트 세트로
+          // 되돌린다 — 입력해 둔 weight/reps/dbWeight 값은 보존하고 volume만 다시 계산한다.
+          if (u.sets.some(s => s.recordType === "function")) {
+            u.sets = u.sets.map(s => ({
+              weight: s.weight || "", reps: s.reps || "",
+              volume: (parseFloat(s.weight)||0) * (parseInt(s.reps)||0),
+              recordType: "weightReps",
+              ...(s.dbWeight !== undefined ? {dbWeight: s.dbWeight} : {}),
+            }));
+          }
         }
         // ── 이중 중량(케이블+덤벨) 특례: 운동명이 대상 운동으로 바뀌면 각 세트에 덤벨 중량
         // 입력칸(dbWeight)을 추가하고, 대상 운동에서 다른 운동으로 바뀌면 dbWeight를 제거해

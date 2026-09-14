@@ -7187,6 +7187,49 @@ const checks = [
     db.includes('dbWeight: set.dbWeight || "",')
   ],
 
+  // ── "하프닐링 케이블 로우 DB 프레스" 부위 override — 기능운동 자동분류 오분류 방지(2026-09-14) ──
+  ['하프닐링 자동분류 버그 재현: "하프닐링"만 입력된 시점에는 기존 FUNC_EX_MAP(가동성) 자동분류가 여전히 정상 동작한다 — 다른 "하프닐링" 운동(그로인 스트레칭 등)의 기존 자동분류는 이번 작업으로 건드리지 않았다',
+    (() => {
+      try {
+        const slice = app.slice(app.indexOf('const FUNC_EX_MAP'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
+        const fn = new Function(`${slice}\nfunction getLearnedFuncPreset(){return null;}\nreturn { suggestFuncExPreset };`);
+        const { suggestFuncExPreset } = fn();
+        const preset = suggestFuncExPreset('하프닐링');
+        return !!preset && preset.category === '가동성';
+      } catch (e) { console.error('[regression] 하프닐링 자동분류 재현 시나리오 오류:', e.message); return false; }
+    })()
+  ],
+  ['하프닐링 부위 override: updateEx의 name 처리에서 isDualWeightEx(u)일 때 기구를 "케이블", 부위를 "어깨"로 명시적으로 되돌리고, 기능운동 세트 형식(recordType:"function")으로 이미 전환돼 있었다면 weightReps로 복원한다(weight/dbWeight 값 보존)',
+    app.includes('// ── 명시적 운동별 override: "하프닐링 케이블 로우 DB 프레스"는 이름에 "하프닐링"이 포함돼')
+    && app.includes('u.equipment = "케이블";')
+    && app.includes('u.muscleTop = "어깨";')
+    && app.includes('u.muscleSub = mSubs("어깨")[0] || u.muscleSub;')
+    && app.includes('...(s.dbWeight !== undefined ? {dbWeight: s.dbWeight} : {}),')
+  ],
+  ['하프닐링 부위 override 실행 순서: 부위/기구 override 블록이 이중 중량(dbWeight 부여/제거) 블록보다 먼저 실행돼, override가 세트를 weightReps로 되돌린 "다음"에 dbWeight가 정상적으로 얹힌다',
+    (() => {
+      const overrideIdx = app.indexOf('// ── 명시적 운동별 override: "하프닐링 케이블 로우 DB 프레스"는 이름에 "하프닐링"이 포함돼');
+      const dbWeightIdx = app.indexOf('const wasDualW = isDualWeightEx(ex);');
+      return overrideIdx !== -1 && dbWeightIdx !== -1 && overrideIdx < dbWeightIdx;
+    })()
+  ],
+  ['하프닐링 부위 override(수업일지 재조회 시): 과거 저장 기록을 다시 열 때도(editData 로드) 기구=케이블/부위=어깨로 정규화하고, 기능운동 세트 형식이었다면 weightReps로 되돌린다 — 이미 정상값이면 아무 변화가 없다(강제 마이그레이션 아님)',
+    app.includes('// "하프닐링 케이블 로우 DB 프레스" 명시적 override — 과거에 기능운동 자동분류 버그로 잘못')
+    && app.includes('if ((u.sets||[]).some(s => s.recordType === "function")) {')
+  ],
+  ['하프닐링 부위 override는 dbWeight/isDualWeightEx 판별 로직 자체를 바꾸지 않는다: 이중 중량 판별은 여전히 운동명 정확 일치(isDualWeightEx)만으로 이뤄진다',
+    (() => {
+      try {
+        const slice = app.slice(app.indexOf('const DUAL_WEIGHT_EXERCISE_NAME'), app.indexOf('// ─── 운동 분류 상수 ───'));
+        const fn = new Function(`${slice}\nreturn { DUAL_WEIGHT_EXERCISE_NAME, isDualWeightEx };`);
+        const { DUAL_WEIGHT_EXERCISE_NAME, isDualWeightEx } = fn();
+        return DUAL_WEIGHT_EXERCISE_NAME === '하프닐링 케이블 로우 DB 프레스'
+          && isDualWeightEx({ name: '하프닐링 케이블 로우 DB 프레스' }) === true
+          && isDualWeightEx({ name: '하프닐링 그로인 스트레칭' }) === false;
+      } catch (e) { console.error('[regression] 하프닐링 override 판별 불변 시나리오 오류:', e.message); return false; }
+    })()
+  ],
+
   // ── 회원앱 분석 탭 "체중 추이" 그래프 집계(2026-08-18) — 원본 데이터는 그대로 두고 그래프 표시용 배열만 기간별로 평균 집계 ──
   wtScenario('체중 추이 집계 단위: 1개월=일별, 3개월=기록량과 무관하게 항상 주간, 6개월=span 기준 주간→2주 자동 전환, 1년=월간', lib =>
     lib.pickWeightTrendGranularity('1m', 200) === 'day' &&

@@ -760,7 +760,14 @@ function stripStanceModifiers(name) {
 }
 // 자세 키워드를 제거하고 남은 글자가 2자 미만이면(=실제 동작을 가리키는 부분이 없으면) "자세명만
 // 입력된 상태"로 보고, 이 이름으로는 기구/카테고리/도구 자동분류를 아예 시도하지 않는다.
+// 타이핑 중간 단계(예: "하프닐링"을 다 입력하기 전 "하프닐")도 자세 키워드의 접두사면 먼저 자세명으로
+// 판단한다 — 실제 프로덕션에서 이 미완성 단계 이름으로 학습된 기구/부위 데이터(exerciseClassifications)가
+// 있으면, 완성 전에 그 학습값이 먼저 적용돼버리고 이후 완성해도 한번 적용된 값은 되돌지 않기 때문이다
+// (2026-09-15, 실제 재현 확인: "하프닐"만으로 이미 기구=덤벨이 학습돼 있던 계정에서 발생).
 function isStanceOnlyName(name) {
+  const raw = (name || "").toLowerCase().replace(/[\s\-]/g, "");
+  if (!raw) return true;
+  if (STANCE_MODIFIER_KEYWORDS.some(k => k.toLowerCase().replace(/[\s\-]/g, "").startsWith(raw))) return true;
   return stripStanceModifiers(name).length < 2;
 }
 
@@ -20731,13 +20738,17 @@ function getAutoEquipmentByName(name) {
 // 자세명(하프닐링 등)만 있는 이름인지 판별 — App.jsx 상단 isStanceOnlyName과 같은 목록·같은 로직이지만,
 // regression-check.js가 suggestEquipment/suggestRecordUnit/suggestMuscle을 각각 독립 슬라이스로 추출해
 // 실행하므로(위 isStanceOnlyName은 FUNC_EX_MAP 슬라이스에만 있어 여기서는 참조 불가) 그대로 인라인한다.
-// 실제 원인: 트레이너가 과거에 "하프닐링"이라는 미완성 이름 상태에서 기구를 직접 선택해 학습(classifications)
-// 됐을 수 있는데, 이 가드가 없으면 학습 데이터 우선순위(1순위) 때문에 자세명만 입력해도 그 학습값이 그대로
-// 재사용돼 기구/부위/기록단위가 바뀌어 버린다(2026-09-15, 실제 프로덕션에서 재현 확인).
+// 실제 원인: 트레이너가 과거에 "하프닐"처럼 "하프닐링"을 다 입력하기 전 미완성 이름 상태에서 기구를 직접
+// 선택해 exerciseClassifications에 학습돼 있었고, 이 가드가 "완성된 키워드"만 걸러내면 그 미완성 단계에서
+// 먼저 학습값이 적용되고 이후 완성해도(가드가 뒤늦게 막아도) 한번 적용된 값은 되돌지 않는다(sticky) — 그래서
+// 타이핑 중간 단계도 자세 키워드의 접두사면 먼저 자세명으로 판단한다(2026-09-15, 실제 프로덕션에서 재현 확인).
 function isStanceOnlyExerciseName(name) {
-  let n = (name || "").toLowerCase().replace(/[\s\-]/g, "");
-  ["하프닐링","half kneeling","톨니링","tall kneeling","스플릿 스탠스","split stance","b스탠스","스태거드 스탠스","staggered stance"]
-    .forEach(k => { const nk = k.toLowerCase().replace(/[\s\-]/g, ""); if (nk) n = n.split(nk).join(""); });
+  const keywords = ["하프닐링","half kneeling","톨니링","tall kneeling","스플릿 스탠스","split stance","b스탠스","스태거드 스탠스","staggered stance"];
+  const raw = (name || "").toLowerCase().replace(/[\s\-]/g, "");
+  if (!raw) return true;
+  if (keywords.some(k => k.toLowerCase().replace(/[\s\-]/g, "").startsWith(raw))) return true;
+  let n = raw;
+  keywords.forEach(k => { const nk = k.toLowerCase().replace(/[\s\-]/g, ""); if (nk) n = n.split(nk).join(""); });
   return n.length < 2;
 }
 function suggestEquipment(name, classifications) {

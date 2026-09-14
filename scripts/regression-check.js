@@ -7340,6 +7340,20 @@ const checks = [
             && libs.isStanceOnlyExerciseName('하프닐링 원암 덤벨') === false;
         })()
       ],
+      ['자동분류 우선순위 ⑩ 타이핑 중간(미완성) 단계 학습 데이터 방어 — 실제 프로덕션 재현 사고: "하프닐링"을 다 입력하기 전 "하프닐"(3글자, 아직 자세 키워드가 완성되지 않은 접두사) 상태에서 트레이너가 과거에 기구를 직접 선택해 그 미완성 이름으로 학습돼 있어도, 그 학습값이 재사용되지 않는다 — 접두사 판정이 없으면 "하프닐" 단계에서 먼저 학습값이 적용되고 "하프닐링" 완성 후에도 sticky하게 남는다(2026-09-15 재현·수정)',
+        (() => {
+          if (!libs) return false;
+          const badLearned = { '하프닐': { equipment: '덤벨', muscleTop: '가슴' } };
+          return libs.suggestEquipment('하프닐', badLearned) === null
+            && libs.suggestMuscle('하프닐', badLearned) === null
+            && libs.isStanceOnlyExerciseName('하프닐') === true
+            && libs.isStanceOnlyExerciseName('하') === true
+            && libs.isStanceOnlyExerciseName('하프') === true
+            && libs.isStanceOnlyExerciseName('톨니') === true
+            && libs.isStanceOnlyExerciseName('그로인') === false
+            && libs.isStanceOnlyExerciseName('하프스쿼트') === false;
+        })()
+      ],
       ['자세명 modifier 판별(isStanceOnlyName): "하프닐링"/"톨니링"/"스플릿 스탠스"/"b스탠스"/"스태거드 스탠스" 단독 또는 서로 결합된 입력은 자세명만 있는 것으로 판단되고, 자세명+실제 동작명(예: "하프닐링 로우")은 더 이상 자세명 전용으로 판단되지 않는다',
         libs !== null
         && libs.isStanceOnlyName('하프닐링') === true

@@ -671,12 +671,16 @@ const FUNC_EX_MAP = [
   { keys:["마사지 스틱","마사지스틱"], category:"조직이완", tool:"마사지 스틱" },
   // 가동성
   { keys:["오픈북"],      category:"가동성",   bodyParts:["흉추"], tool:"맨몸" },
-  { keys:["그로인","groin","하프닐링"], category:"가동성", bodyParts:["고관절"], tool:"맨몸" },
+  // "하프닐링"(half-kneeling)은 자세/포지션이지 동작명이 아니므로 단독 키워드로 넣지 않는다 — "하프닐링 케이블 로우"처럼
+  // 실제 동작명(로우/프레스 등)과 결합되면 그 동작명 규칙(WEIGHT_BLOCKLIST 등)을 따라야 하고, 그로인 스트레칭류만
+  // "그로인"/"groin" 키워드로 판별한다(그로인 스트레칭 자체가 하프닐링 자세로 수행돼도 이 키워드만으로 충분히 매칭됨).
+  { keys:["그로인","groin"], category:"가동성", bodyParts:["고관절"], tool:"맨몸" },
   { keys:["힙 플렉서","장요근 스트레칭"], category:"가동성", bodyParts:["장요근"], tool:"맨몸" },
   { keys:["90/90","90 90"], category:"가동성", bodyParts:["고관절"], tool:"맨몸" },
   { keys:["월 슬라이드","wall slide"], category:"가동성", bodyParts:["견갑 주변"], tool:"맨몸" },
   { keys:["캣카우","cat cow","고양이"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
   { keys:["흉추 회전","토라식"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
+  { keys:["윈드밀","windmill"], category:"가동성", bodyParts:["흉추"], tool:"맨몸" },
   // 코어
   { keys:["데드버그","dead bug"],        category:"코어", bodyParts:["요추"], tool:"맨몸" },
   { keys:["플랭크","plank"],             category:"코어", bodyParts:["요추"], tool:"맨몸" },
@@ -733,6 +737,33 @@ const FUNC_BODY_KEYWORD_MAP = [
   { keys:["족저근막","plantar"], body:"족저근막" },
 ];
 
+// ── 자세/포지션 키워드 — 실제 동작명이 아니라 신체 자세(포지션)를 나타내는 수식어이므로, 이 단어들만
+// 입력됐거나(또는 이 단어 + 아직 완성되지 않은 나머지만 있는) 상태에서는 기구/카테고리(funcCategory)/
+// 도구를 절대 자동 변경하지 않는다("하프닐링" 자동분류 오분류 수정, 2026-09-15). 실제 동작명(로우/프레스/
+// 스트레칭 등)이 함께 들어오면 이 키워드들은 자동으로 제거되고 남은 글자로 정상 분류가 진행된다.
+const STANCE_MODIFIER_KEYWORDS = [
+  "하프닐링", "half kneeling",
+  "톨니링", "tall kneeling",
+  "스플릿 스탠스", "split stance",
+  "b스탠스",
+  "스태거드 스탠스", "staggered stance",
+];
+// 슬라이스 독립 실행(회귀 테스트)을 위해 외부 normalizeExName을 참조하지 않고 자체 정규화한다 — 로직은
+// 동일(공백/하이픈 제거 + 소문자화)하되 특수문자 제거 범위만 더 단순하다(자세 키워드 매칭 목적에는 충분).
+function stripStanceModifiers(name) {
+  let n = (name || "").toLowerCase().replace(/[\s\-]/g, "");
+  STANCE_MODIFIER_KEYWORDS.forEach(k => {
+    const nk = k.toLowerCase().replace(/[\s\-]/g, "");
+    if (nk) n = n.split(nk).join("");
+  });
+  return n;
+}
+// 자세 키워드를 제거하고 남은 글자가 2자 미만이면(=실제 동작을 가리키는 부분이 없으면) "자세명만
+// 입력된 상태"로 보고, 이 이름으로는 기구/카테고리/도구 자동분류를 아예 시도하지 않는다.
+function isStanceOnlyName(name) {
+  return stripStanceModifiers(name).length < 2;
+}
+
 // 학습 데이터 (localStorage)
 const FUNC_LEARN_KEY = "tg_func_ex_learn_v1";
 function loadFuncLearn() {
@@ -761,6 +792,9 @@ function getLearnedFuncPreset(name) {
 // 통합 기능 운동 자동 추천
 function suggestFuncExPreset(name) {
   if (!name || name.trim().length < 2) return null;
+  // ── 0순위: 자세명(하프닐링/톨니링/스플릿 스탠스 등)만 입력됐거나 그 자세명 + 미완성 글자만 있는
+  // 상태에서는 기능운동 분류를 절대 시도하지 않는다 — 자세는 동작이 아니라 modifier이기 때문이다.
+  if (isStanceOnlyName(name)) return null;
   const n = name.toLowerCase();
 
   // ── 푸쉬업 예외 처리 — 일반 "푸쉬업"은 맨몸 웨이트 운동(가슴)이지 기능 운동이 아니다.

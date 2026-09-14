@@ -7151,10 +7151,10 @@ const checks = [
       } catch (e) { console.error('[regression] 이중 중량 판별 시나리오 오류:', e.message); return false; }
     })()
   ],
-  ['이중 중량 운동명이 기능운동으로 오분류되지 않는다: "하프닐링 케이블 로우 DB 프레스"는 "하프닐링"(가동성 기능운동 키워드)을 포함하지만 WEIGHT_BLOCKLIST의 "케이블 로우"가 먼저 걸려 일반 웨이트 운동으로 유지된다',
+  ['이중 중량 운동명이 기능운동으로 오분류되지 않는다: "하프닐링 케이블 로우 DB 프레스"는 WEIGHT_BLOCKLIST의 "케이블 로우"가 걸려 일반 웨이트 운동으로 유지된다("하프닐링"은 2026-09-14 수정 이후 FUNC_EX_MAP 단독 키워드가 아니므로 이 시점에는 아예 후보에도 오르지 않는다)',
     (() => {
       try {
-        const slice = app.slice(app.indexOf('function suggestFuncExPreset'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
+        const slice = app.slice(app.indexOf('const FUNC_EX_MAP'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
         const fn = new Function(`${slice}\nfunction getLearnedFuncPreset(){return null;}\nreturn { suggestFuncExPreset };`);
         const { suggestFuncExPreset } = fn();
         return suggestFuncExPreset('하프닐링 케이블 로우 DB 프레스') === null;
@@ -7187,18 +7187,47 @@ const checks = [
     db.includes('dbWeight: set.dbWeight || "",')
   ],
 
-  // ── "하프닐링 케이블 로우 DB 프레스" 부위 override — 기능운동 자동분류 오분류 방지(2026-09-14) ──
-  ['하프닐링 자동분류 버그 재현: "하프닐링"만 입력된 시점에는 기존 FUNC_EX_MAP(가동성) 자동분류가 여전히 정상 동작한다 — 다른 "하프닐링" 운동(그로인 스트레칭 등)의 기존 자동분류는 이번 작업으로 건드리지 않았다',
-    (() => {
-      try {
-        const slice = app.slice(app.indexOf('const FUNC_EX_MAP'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
-        const fn = new Function(`${slice}\nfunction getLearnedFuncPreset(){return null;}\nreturn { suggestFuncExPreset };`);
-        const { suggestFuncExPreset } = fn();
-        const preset = suggestFuncExPreset('하프닐링');
-        return !!preset && preset.category === '가동성';
-      } catch (e) { console.error('[regression] 하프닐링 자동분류 재현 시나리오 오류:', e.message); return false; }
-    })()
-  ],
+  // ── 운동명 자동분류: "하프닐링"(자세/포지션)을 기능운동 단독 키워드에서 분리(2026-09-14) ──
+  // FUNC_EX_MAP 슬라이스는 공통으로 재사용 — 아래 6건 모두 같은 슬라이스+함수 정의로 suggestFuncExPreset을 실제 실행해 검증한다.
+  ...(() => {
+    let funcPresetLib = null;
+    try {
+      const slice = app.slice(app.indexOf('const FUNC_EX_MAP'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
+      const fn = new Function(`${slice}\nfunction getLearnedFuncPreset(){return null;}\nreturn { suggestFuncExPreset };`);
+      funcPresetLib = fn();
+    } catch (e) { console.error('[regression] 자세명/동작명 분리 — FUNC_EX_MAP 슬라이스 추출 실패:', e.message); }
+    const preset = (name) => { try { return funcPresetLib ? funcPresetLib.suggestFuncExPreset(name) : undefined; } catch (e) { console.error(`[regression] suggestFuncExPreset("${name}") 실행 오류:`, e.message); return undefined; } };
+    return [
+      ['① "하프닐링"만 입력 → 기능운동으로 강제분류되지 않는다("하프닐링"은 자세 modifier일 뿐 FUNC_EX_MAP 단독 키워드가 아니므로 preset이 null)',
+        funcPresetLib !== null && preset('하프닐링') === null
+      ],
+      ['② "하프닐링 케이블 로우" → 기능운동으로 오분류되지 않는다(WEIGHT_BLOCKLIST의 "케이블 로우"/"로우"가 실제 동작명 기준으로 걸러 일반 웨이트 운동 유지)',
+        funcPresetLib !== null && preset('하프닐링 케이블 로우') === null
+      ],
+      ['③ "하프닐링 원암 덤벨 숄더프레스" → 기능운동으로 오분류되지 않는다(WEIGHT_BLOCKLIST의 "숄더프레스"가 실제 동작명 기준으로 걸러 일반 웨이트 운동 유지)',
+        funcPresetLib !== null && preset('하프닐링 원암 덤벨 숄더프레스') === null
+      ],
+      ['④ "하프닐링 팔로프 프레스" → 실제 동작명(프레스) 기준으로 분류된다 — WEIGHT_BLOCKLIST의 "프레스"가 걸려 기능운동으로 오분류되지 않고, 팔로프 프레스 전용 자동분류 규칙은 없으므로(범위 밖) 일반 웨이트 운동으로 유지된다',
+        funcPresetLib !== null && preset('하프닐링 팔로프 프레스') === null
+      ],
+      ['⑤ "하프닐링 힙 플렉서 스트레칭" → 기존 가동성(장요근) 규칙이 정상 동작한다 — "하프닐링"을 빼고 "힙 플렉서 스트레칭"만 입력해도 완전히 같은 결과가 나와, 자세명 유무가 분류에 영향을 주지 않음을 증명한다',
+        (() => {
+          if (!funcPresetLib) return false;
+          const withPose = preset('하프닐링 힙 플렉서 스트레칭');
+          const withoutPose = preset('힙 플렉서 스트레칭');
+          return !!withPose && !!withoutPose
+            && withPose.category === '가동성' && withoutPose.category === '가동성'
+            && withPose.bodyParts.includes('장요근') && withoutPose.bodyParts.includes('장요근');
+        })()
+      ],
+      ['⑥ 기존 대표 기능운동 자동분류는 이번 수정 이후에도 그대로 유지된다: 폼롤러(조직이완)·플랭크(코어)·그로인 스트레칭("하프닐링" 없이, 가동성)',
+        funcPresetLib !== null
+        && preset('폼롤러')?.category === '조직이완'
+        && preset('플랭크')?.category === '코어'
+        && preset('그로인 스트레칭')?.category === '가동성'
+      ],
+    ];
+  })(),
   ['하프닐링 부위 override: updateEx의 name 처리에서 isDualWeightEx(u)일 때 기구를 "케이블", 부위를 "어깨"로 명시적으로 되돌리고, 기능운동 세트 형식(recordType:"function")으로 이미 전환돼 있었다면 weightReps로 복원한다(weight/dbWeight 값 보존)',
     app.includes('// ── 명시적 운동별 override: "하프닐링 케이블 로우 DB 프레스"는 이름에 "하프닐링"이 포함돼')
     && app.includes('u.equipment = "케이블";')
@@ -7229,6 +7258,86 @@ const checks = [
       } catch (e) { console.error('[regression] 하프닐링 override 판별 불변 시나리오 오류:', e.message); return false; }
     })()
   ],
+
+  // ── 자세명 vs 동작명 자동분류 개선(2026-09-15) — suggestFuncExPreset/suggestEquipment/suggestMuscle을
+  // 실제 슬라이스로 추출해 updateEx의 "이름 변경 시 기구/부위 자동 추천" 핵심 순서(①기능운동 프리셋
+  // →②기구 키워드→③동작 키워드)를 그대로 흉내 낸 시뮬레이터로 실행 검증한다. 새 카드(수동 플래그 없음)
+  // 기준이며, _equipManual/_muscleManual 가드는 updateEx 실 코드에 이미 있고 이번 수정에서 건드리지 않았다.
+  ...(() => {
+    let libs = null;
+    try {
+      const funcSlice = app.slice(app.indexOf('const FUNC_EX_MAP'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
+      const muscleSlice = app.slice(app.indexOf('const EX_MUSCLE_SUGGEST'), app.indexOf('function normalizeToKoreaDateKey'));
+      const fn = new Function(
+        `${funcSlice}\nfunction getLearnedFuncPreset(){return null;}\n${muscleSlice}\n` +
+        'return { suggestFuncExPreset, suggestEquipment, suggestMuscle, isStanceOnlyName };'
+      );
+      libs = fn();
+    } catch (e) { console.error('[regression] 자세명/동작명 자동분류 — 슬라이스 추출 실패:', e.message); }
+    // updateEx의 name 변경 처리 순서(①func preset ②기구 키워드 ③동작 키워드)를 그대로 흉내 낸다.
+    const classify = (name, prev = {}) => {
+      const equipment0 = prev.equipment ?? '바벨', muscleTop0 = prev.muscleTop ?? '가슴';
+      try {
+        const preset = libs.suggestFuncExPreset(name);
+        if (preset) return { equipment: '기능', muscleTop: '기능', funcCategory: preset.category, funcTool: preset.tool || null };
+        let equipment = equipment0, muscleTop = muscleTop0;
+        const sugEq = libs.suggestEquipment(name, {});
+        if (sugEq) equipment = sugEq;
+        const sug = libs.suggestMuscle(name, {});
+        if (sug) muscleTop = sug.top;
+        return { equipment, muscleTop, funcCategory: null, funcTool: null };
+      } catch (e) { console.error(`[regression] classify("${name}") 실행 오류:`, e.message); return null; }
+    };
+    const noneOf = (r) => r; // 가독성용 별칭
+    return [
+      ['자동분류 우선순위 ① 입력 중간 단계("하"→"하프"→"하프닐"→"하프닐링") — 매 단계 기구/부위가 기존값 그대로 유지된다(요청 6번 Case A)',
+        libs !== null && ['하','하프','하프닐','하프닐링'].every(step => {
+          const r = classify(step, { equipment:'바벨', muscleTop:'가슴' });
+          return r && r.equipment === '바벨' && r.muscleTop === '가슴' && r.funcCategory === null;
+        })
+      ],
+      ['자동분류 우선순위 ② "하프닐링 원암 덤벨" — 기구는 즉시 "덤벨"로 바뀌고 부위(카테고리)는 기존값을 그대로 유지한다(요청 6번 Case B)',
+        (() => { if (!libs) return false; const r = classify('하프닐링 원암 덤벨', { equipment:'바벨', muscleTop:'가슴' }); return !!r && r.equipment === '덤벨' && r.muscleTop === '가슴'; })()
+      ],
+      ['자동분류 우선순위 ③ "하프닐링 원암 덤벨 숄더프레스" — 기구=덤벨, 부위(카테고리)=어깨로 동작명 기준 분류된다(요청 6번 Case C)',
+        (() => { if (!libs) return false; const r = classify('하프닐링 원암 덤벨 숄더프레스', { equipment:'바벨', muscleTop:'가슴' }); return !!r && r.equipment === '덤벨' && r.muscleTop === '어깨'; })()
+      ],
+      ['자동분류 우선순위 ④ "하프닐링 케이블" — 기구는 즉시 "케이블"로 바뀌고 부위는 기존값을 유지한다(요청 6번 Case D)',
+        (() => { if (!libs) return false; const r = classify('하프닐링 케이블', { equipment:'바벨', muscleTop:'가슴' }); return !!r && r.equipment === '케이블' && r.muscleTop === '가슴'; })()
+      ],
+      ['자동분류 우선순위 ⑤ "하프닐링 케이블 로우" — 기구=케이블, 부위=등으로 동작명 기준 분류된다(요청 6번 Case E)',
+        (() => { if (!libs) return false; const r = classify('하프닐링 케이블 로우', { equipment:'바벨', muscleTop:'가슴' }); return !!r && r.equipment === '케이블' && r.muscleTop === '등'; })()
+      ],
+      ['자동분류 우선순위 ⑥ "하프닐링 윈드밀" — 기능운동(가동성)으로 분류되고 도구=맨몸(funcTool), 카테고리=가동성(funcCategory)이 된다(요청 6번 Case F — 기구 필드 자체는 이 앱의 기존 구조상 기능운동은 항상 "기능"으로 고정되고, 실제 사용 도구는 별도 필드 funcTool에 "맨몸"으로 저장된다)',
+        (() => { if (!libs) return false; const r = classify('하프닐링 윈드밀', { equipment:'바벨', muscleTop:'가슴' }); return !!r && r.equipment === '기능' && r.funcCategory === '가동성' && r.funcTool === '맨몸'; })()
+      ],
+      ['자동분류 우선순위 ⑦ 기존 대표 기능운동(폼롤러→조직이완, 플랭크→코어, 그로인 스트레칭→가동성)은 이번 수정 이후에도 정상 분류된다(회귀 없음)',
+        libs !== null
+        && classify('폼롤러').funcCategory === '조직이완'
+        && classify('플랭크').funcCategory === '코어'
+        && classify('그로인 스트레칭').funcCategory === '가동성'
+      ],
+      ['자동분류 우선순위 ⑧ 기존 덤벨/바벨/케이블 운동(자세명 없이) 자동분류는 회귀 없이 그대로 동작한다: 덤벨 숄더프레스→덤벨/어깨, 바벨 벤치프레스→바벨/가슴, 케이블 로우→케이블/등',
+        (() => {
+          if (!libs) return false;
+          const a = classify('덤벨 숄더프레스', { equipment:'바벨', muscleTop:'가슴' });
+          const b = classify('바벨 벤치프레스', { equipment:'덤벨', muscleTop:'등' });
+          const c = classify('케이블 로우', { equipment:'바벨', muscleTop:'가슴' });
+          return noneOf(a).equipment === '덤벨' && a.muscleTop === '어깨'
+            && b.equipment === '바벨' && b.muscleTop === '가슴'
+            && c.equipment === '케이블' && c.muscleTop === '등';
+        })()
+      ],
+      ['자세명 modifier 판별(isStanceOnlyName): "하프닐링"/"톨니링"/"스플릿 스탠스"/"b스탠스"/"스태거드 스탠스" 단독 또는 서로 결합된 입력은 자세명만 있는 것으로 판단되고, 자세명+실제 동작명(예: "하프닐링 로우")은 더 이상 자세명 전용으로 판단되지 않는다',
+        libs !== null
+        && libs.isStanceOnlyName('하프닐링') === true
+        && libs.isStanceOnlyName('톨니링') === true
+        && libs.isStanceOnlyName('하프닐링 b스탠스') === true
+        && libs.isStanceOnlyName('하프닐링 로우') === false
+        && libs.isStanceOnlyName('그로인') === false
+      ],
+    ];
+  })(),
 
   // ── 회원앱 분석 탭 "체중 추이" 그래프 집계(2026-08-18) — 원본 데이터는 그대로 두고 그래프 표시용 배열만 기간별로 평균 집계 ──
   wtScenario('체중 추이 집계 단위: 1개월=일별, 3개월=기록량과 무관하게 항상 주간, 6개월=span 기준 주간→2주 자동 전환, 1년=월간', lib =>

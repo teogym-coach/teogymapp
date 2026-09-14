@@ -2279,7 +2279,7 @@ const checks = [
     })()
   ],
   ['수업일지: 세트 표가 운동 유형별 열 자동 구성(중량/반복/시간, 값 있는 열만 표시) — 중량 열은 기록 단위(kg/단)에 따라 라벨·표기가 바뀐다',
-    app.includes('recordUnit!=="bodyweight" && sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:getWeightColumnLabel(recordUnit)') &&
+    app.includes('recordUnit!=="bodyweight" && sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:dualW?"케이블":getWeightColumnLabel(recordUnit)') &&
     app.includes('sets.some(x=>toPositiveNumber(x.reps))&&{key:"reps",label:"반복"') &&
     app.includes('sets.some(getSetDurationValue)&&{key:"dur",label:"시간"')
   ],
@@ -7129,6 +7129,62 @@ const checks = [
   ],
   ['회원앱 노출: db.js가 세션 exercises를 publicExercise로 걸러낼 때 unitType 필드를 화이트리스트에 포함해 회원 화면에도 전달된다',
     db.includes('const SESSION_PUBLIC_FIELDS = new Set(["name", "sets", "feedback", "muscleTop", "muscleSub", "equipment", "unitType",')
+  ],
+
+  // ── 이중 중량(케이블+덤벨) 특례 — "하프닐링 케이블 로우 DB 프레스" 전용(2026-09-14) ──
+  ['이중 중량 판별: isDualWeightEx는 운동명이 정확히 "하프닐링 케이블 로우 DB 프레스"일 때만 true — "+" 변형/다른 운동/빈 이름은 전부 false, 운동명에 "+" 기호를 쓰지 않는다',
+    (() => {
+      try {
+        const slice = app.slice(app.indexOf('const DUAL_WEIGHT_EXERCISE_NAME'), app.indexOf('// ─── 운동 분류 상수 ───'));
+        const fn = new Function(`${slice}\nreturn { DUAL_WEIGHT_EXERCISE_NAME, isDualWeightEx };`);
+        const { DUAL_WEIGHT_EXERCISE_NAME, isDualWeightEx } = fn();
+        return DUAL_WEIGHT_EXERCISE_NAME === '하프닐링 케이블 로우 DB 프레스'
+          && !DUAL_WEIGHT_EXERCISE_NAME.includes('+')
+          && isDualWeightEx({ name: '하프닐링 케이블 로우 DB 프레스' }) === true
+          && isDualWeightEx({ name: ' 하프닐링 케이블 로우 DB 프레스 ' }) === true // 앞뒤 공백은 trim 허용
+          && isDualWeightEx({ name: '하프닐링 케이블 로우 + DB 프레스' }) === false
+          && isDualWeightEx({ name: '하프닐링케이블로우DB프레스' }) === false // 공백 없앤 변형까지 매칭하면 다른 표기와 충돌 위험 — 정확 일치만 허용
+          && isDualWeightEx({ name: '벤치프레스' }) === false
+          && isDualWeightEx({ name: '' }) === false
+          && isDualWeightEx({}) === false
+          && isDualWeightEx(null) === false;
+      } catch (e) { console.error('[regression] 이중 중량 판별 시나리오 오류:', e.message); return false; }
+    })()
+  ],
+  ['이중 중량 운동명이 기능운동으로 오분류되지 않는다: "하프닐링 케이블 로우 DB 프레스"는 "하프닐링"(가동성 기능운동 키워드)을 포함하지만 WEIGHT_BLOCKLIST의 "케이블 로우"가 먼저 걸려 일반 웨이트 운동으로 유지된다',
+    (() => {
+      try {
+        const slice = app.slice(app.indexOf('function suggestFuncExPreset'), app.indexOf('// 기능 운동을 카테고리별로 그룹핑'));
+        const fn = new Function(`${slice}\nfunction getLearnedFuncPreset(){return null;}\nreturn { suggestFuncExPreset };`);
+        const { suggestFuncExPreset } = fn();
+        return suggestFuncExPreset('하프닐링 케이블 로우 DB 프레스') === null;
+      } catch (e) { console.error('[regression] 이중 중량 기능운동 오분류 시나리오 오류:', e.message); return false; }
+    })()
+  ],
+  ['이중 중량 UI: 대상 운동일 때만 관리자 입력 화면에 "케이블kg"/"덤벨kg" 입력칸 2개가 보이고, 세트 추가 시에도 dbWeight 필드가 함께 생성된다(다른 운동은 기존 입력칸 1개 그대로)',
+    app.includes('const newSet = isFuncEx(ex) ? mkFuncSet() : (isDualWeightEx(ex) ? {...mkSet(), dbWeight:""} : mkSet());')
+    && app.includes('const h1 = dualW2 ? "케이블kg" :')
+    && app.includes('const headers = dualW2 ? ["SET",h1,"덤벨kg","횟수","볼륨",""] : ["SET",h1,"횟수","볼륨",""];')
+    && app.includes('{dualWRow && <input value={row.dbWeight||""} onChange={e => updateSet(ei,si,"dbWeight",e.target.value)}')
+  ],
+  ['이중 중량 운동 변경 회귀 방지: 운동명이 대상 운동으로 바뀌면 각 세트에 dbWeight를 부여하고, 대상 운동에서 다른 운동으로 바뀌면 dbWeight를 제거해 일반 운동에 이중 중량 값이 잘못 남지 않는다',
+    app.includes('const wasDualW = isDualWeightEx(ex);')
+    && app.includes('const isDualW  = isDualWeightEx(u);')
+    && app.includes('u.sets = u.sets.map(s => ({...s, dbWeight: s.dbWeight ?? ""}));')
+    && app.includes('u.sets = u.sets.map(s => { const {dbWeight, ...rest} = s; return rest; });')
+  ],
+  ['이중 중량 조회: 관리자앱 수업일지 조회(SessionReportModal)·저장 미리보기(SummaryCard)·회원전용앱(ExerciseAccordionRow) 3곳 모두 대상 운동일 때 "케이블"/"덤벨" 라벨이 붙은 열로 구분 표시한다(라벨 없이 숫자만 두 개 표시하지 않음)',
+    app.includes('const rptHeaders = dualWRpt ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP2),"횟수","볼륨"];')
+    && app.includes('const cardHeaders = dualWCard ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP),"횟수","볼륨"];')
+    && app.includes('{key:"weight",label:dualW?"케이블":getWeightColumnLabel(recordUnit)')
+    && app.includes('{key:"dbWeight",label:"덤벨",fmt:x=>formatRecordValue(x.dbWeight,"kg")||"–"}')
+  ],
+  ['이중 중량 과거 데이터 호환: getFilledSets가 dbWeight만 있는 세트도 유효 세트로 인식하고, dbWeight가 아예 없는 과거 기록은 케이블(weight) 열만 정상 표시된다(undefined/null 노출 없음)',
+    app.includes('function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume||x.dbWeight));}')
+    && app.includes('dualW && sets.some(x=>toPositiveNumber(x.dbWeight))&&{key:"dbWeight",label:"덤벨"')
+  ],
+  ['이중 중량 회원앱 노출: db.js가 세션 exercises를 publicSet으로 걸러낼 때 dbWeight 필드도 화이트리스트에 포함해 회원 화면에 덤벨 중량이 전달된다(durationSec과 동일하게 운동 무관 항상 통과)',
+    db.includes('dbWeight: set.dbWeight || "",')
   ],
 
   // ── 회원앱 분석 탭 "체중 추이" 그래프 집계(2026-08-18) — 원본 데이터는 그대로 두고 그래프 표시용 배열만 기간별로 평균 집계 ──

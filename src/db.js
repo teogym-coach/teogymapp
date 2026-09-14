@@ -742,6 +742,9 @@ function publicSet(set = {}) {
     weight: set.weight || "",
     reps: set.reps || "",
     durationSec: set.durationSec || "",
+    // dbWeight — "하프닐링 케이블 로우 DB 프레스" 전용 두 번째 중량(덤벨). 다른 운동은 이 필드를 쓰지 않으므로
+    // 항상 빈 문자열로 정규화돼도 영향이 없다(durationSec과 동일한 패턴 — 운동별 분기 없이 항상 화이트리스트 통과).
+    dbWeight: set.dbWeight || "",
     volume: set.volume || 0,
     recordType: set.recordType || "weightReps",
   };

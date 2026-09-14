@@ -43,6 +43,16 @@ import {
   getMemberPersonaMap, migrateMemberPersonaToPrivate,
 } from "./db";
 
+// ── 이중 중량 특례 ─────────────────────────────────────────────
+// "하프닐링 케이블 로우 DB 프레스"는 케이블 로우 중량 + 덤벨 프레스 중량을 한 세트에서
+// 동시에 쓰는 유일한 운동이라 세트당 중량 입력이 2개(케이블=기존 weight, 덤벨=신규 dbWeight) 필요하다.
+// 운동 식별자 체계가 따로 없어(canonicalExerciseKey 관련 주석 참고) 정확한 운동명 문자열 일치로만
+// 판별한다 — 다른 운동은 이 판별식에 걸리지 않으므로 절대 영향을 받지 않는다.
+const DUAL_WEIGHT_EXERCISE_NAME = "하프닐링 케이블 로우 DB 프레스";
+function isDualWeightEx(ex) {
+  return !!(ex && String(ex.name || "").trim() === DUAL_WEIGHT_EXERCISE_NAME);
+}
+
 // ─── 운동 분류 상수 ───
 const EQUIP_LIST   = ["바벨","덤벨","케이블","머신","맨몸","기능"];
 const EQUIP_COLOR  = {바벨:"#7c6fff",덤벨:"#5EEAD4",케이블:"#f97316",머신:"#ffd166",맨몸:"#94a3b8",기능:"#22c55e"};
@@ -8571,7 +8581,7 @@ function getMemberFacingMuscleTop(ex){
 // exerciseMatchesPart: 정규화된 값(팔=이두+삼두 통합) 비교에 더해, 원본 값(이두/삼두처럼 normalizeWorkoutPart가 뭉개는 하위 구분)도 함께 비교한다.
 // 미는/당기는 콤보 분할("가슴 · 어깨 · 삼두"/"등 · 이두")에서 이두·삼두를 구분해 추천할 수 있도록 추가된 것으로, 기존 매칭 결과는 그대로 유지하고 새 매칭만 더한다.
 function exerciseMatchesPart(e,part){const memberTop=getMemberFacingMuscleTop(e); const vals=[memberTop,e.type,e.movementPurpose,e.funcCategory,e.funcBodyPart,e.equipment].map(normalizeWorkoutPart); const rawVals=[memberTop,e.type]; const parts=Array.isArray(part)?part:[part]; return vals.some(v=>parts.includes(v))||rawVals.some(v=>parts.includes(v))||parts.some(p=>String(e.name||"").includes(p));}
-function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume));}
+function getFilledSets(e){return (e.sets||[]).filter(x=>x&&(x.weight||x.reps||x.durationSec||x.volume||x.dbWeight));}
 function isTrainerMarkedExercise(e){return !!(e.isFavorite||e.favorite||e.isRecommended||e.recommended||e.memberAppRecommended);}
 
 // ── RPE 읽기 — "운동별 RPE"와 "세션 전체 RPE"는 저장 위치도 의미도 다르므로 함수를 분리해 둔다 ──────────
@@ -9426,10 +9436,12 @@ function ExerciseAccordionRow({e,weight,exKey,openKeys,toggleOpen,comparisonInde
   const comparison=comparisonIndex?.getComparison?.("pt",sessionId,e)||null;
   const summary=weight?summarizeTopSet(e):formatAssistExerciseDose(e);
   const recordUnit=getRecordUnit(e); // "kg"(기본)|"step"(단)|"bodyweight"(맨몸) — 관리자가 수업일지에서 선택한 기록 단위 그대로 표시
+  const dualW=isDualWeightEx(e); // 이중 중량(케이블+덤벨) 특례 — 과거 기록에 dbWeight가 없으면 그 열은 자동으로 빠지고 케이블(weight) 하나만 정상 표시된다(fallback)
   // 운동 유형에 따라 표의 열을 자동 구성 — 값이 있는 열만 표시(웨이트: 세트·중량·반복 / 맨몸: 세트·반복 / 시간: 세트·시간)
   // recordUnit이 "bodyweight"면 weight 값을 쓰지 않으므로(맨몸 운동) 이 열은 자동으로 빠진다.
   const cols=[
-    recordUnit!=="bodyweight" && sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:getWeightColumnLabel(recordUnit),fmt:x=>formatRecordValue(x.weight,recordUnit)||"–"},
+    recordUnit!=="bodyweight" && sets.some(x=>toPositiveNumber(x.weight))&&{key:"weight",label:dualW?"케이블":getWeightColumnLabel(recordUnit),fmt:x=>formatRecordValue(x.weight,recordUnit)||"–"},
+    dualW && sets.some(x=>toPositiveNumber(x.dbWeight))&&{key:"dbWeight",label:"덤벨",fmt:x=>formatRecordValue(x.dbWeight,"kg")||"–"},
     sets.some(x=>toPositiveNumber(x.reps))&&{key:"reps",label:"반복",fmt:x=>{const r=toPositiveNumber(x.reps); return r?`${r}회`:"–";}},
     sets.some(getSetDurationValue)&&{key:"dur",label:"시간",fmt:x=>{const d=getSetDurationValue(x); return d?formatSetDurationLabel(d):"–";}},
   ].filter(Boolean);
@@ -21574,6 +21586,16 @@ function updateEx(ei, key, val) {
           const sugUnit = suggestRecordUnit(val, classifications);
           if (sugUnit) u.unitType = sugUnit;
         }
+        // ── 이중 중량(케이블+덤벨) 특례: 운동명이 대상 운동으로 바뀌면 각 세트에 덤벨 중량
+        // 입력칸(dbWeight)을 추가하고, 대상 운동에서 다른 운동으로 바뀌면 dbWeight를 제거해
+        // 일반 운동에 이중 중량 값이 잘못 남지 않게 한다.
+        const wasDualW = isDualWeightEx(ex);
+        const isDualW  = isDualWeightEx(u);
+        if (!wasDualW && isDualW) {
+          u.sets = u.sets.map(s => ({...s, dbWeight: s.dbWeight ?? ""}));
+        } else if (wasDualW && !isDualW) {
+          u.sets = u.sets.map(s => { const {dbWeight, ...rest} = s; return rest; });
+        }
       }
 
       // ── equipment 직접 변경 시: 학습 기록 + 수동 플래그 ───────────────
@@ -21740,7 +21762,8 @@ function updateEx(ei, key, val) {
   function addSet(ei) {
     setExercises(prev => prev.map((ex,i) => {
       if (i!==ei) return ex;
-      return {...ex, ...freezeM2SetsIfUntouched(ex), sets:[...ex.sets, isFuncEx(ex) ? mkFuncSet() : mkSet()]};
+      const newSet = isFuncEx(ex) ? mkFuncSet() : (isDualWeightEx(ex) ? {...mkSet(), dbWeight:""} : mkSet());
+      return {...ex, ...freezeM2SetsIfUntouched(ex), sets:[...ex.sets, newSet]};
     }));
   }
   function removeSet(ei, si) {
@@ -22694,27 +22717,34 @@ function updateEx(ei, key, val) {
                 {(() => {
                   const exType2 = getExerciseType(ex.name);
                   const unit2 = getRecordUnit(ex);
-                  const h1 = unit2==="step" ? "단" : unit2==="bodyweight" ? "맨몸" :
+                  const dualW2 = isDualWeightEx(ex);
+                  const h1 = dualW2 ? "케이블kg" : unit2==="step" ? "단" : unit2==="bodyweight" ? "맨몸" :
                     (exType2==="assist" ? "보조kg" : exType2==="bodyweight" ? "추가kg" : "무게kg");
+                  const gridCols = dualW2 ? "24px 1fr 1fr 1fr 56px 18px" : "24px 1fr 1fr 56px 18px";
+                  const headers = dualW2 ? ["SET",h1,"덤벨kg","횟수","볼륨",""] : ["SET",h1,"횟수","볼륨",""];
+                  const volColIdx = dualW2 ? 4 : 3;
                   return (
-                    <div className="set-grid-header" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,marginBottom:3,width:"100%"}}>
-                      {["SET",h1,"횟수","볼륨",""].map((h,i) => <Mo key={i} c="#475569" s={9} className={i===3?"vol-col":""} style={{textAlign:"center",fontWeight:700}}>{h}</Mo>)}
+                    <div className="set-grid-header" style={{display:"grid",gridTemplateColumns:gridCols,gap:4,marginBottom:3,width:"100%"}}>
+                      {headers.map((h,i) => <Mo key={i} c="#475569" s={9} className={i===volColIdx?"vol-col":""} style={{textAlign:"center",fontWeight:700}}>{h}</Mo>)}
                     </div>
                   );
                 })()}
                 {ex.sets.map((row, si) => {
                   const exTypeRow = getExerciseType(ex.name);
                   const unitRow = getRecordUnit(ex);
+                  const dualWRow = isDualWeightEx(ex);
                   const latestRec2 = getLatestBodyWeight(bodyData, sessionDate);
                   const mbwRow = bodyWeight || latestRec2?.weight || "";
                   const realWRow  = (exTypeRow==="assist" && unitRow==="kg") ? getRealWeight(row.weight, exTypeRow, mbwRow) : null;
+                  const rowGridCols = dualWRow ? "24px 1fr 1fr 1fr 56px 18px" : "24px 1fr 1fr 56px 18px";
                   return (
                     <div key={si} style={{marginBottom:3}}>
-                      <div className="set-grid-row" style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 56px 18px",gap:4,alignItems:"center",width:"100%"}}>
+                      <div className="set-grid-row" style={{display:"grid",gridTemplateColumns:rowGridCols,gap:4,alignItems:"center",width:"100%"}}>
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94A3B8",background:"#F1F3F6",borderRadius:4,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>{si+1}</div>
                         {unitRow==="bodyweight"
                           ? <div style={{textAlign:"center",height:42,display:"flex",alignItems:"center",justifyContent:"center",color:"#94A3B8",fontSize:15,fontWeight:800}}>–</div>
                           : <input value={row.weight} onChange={e => updateSet(ei,si,"weight",e.target.value)} placeholder="0" style={{textAlign:"center",height:42,padding:"0 4px",fontSize:17,fontWeight:800,color:"#0F172A",borderRadius:7}} />}
+                        {dualWRow && <input value={row.dbWeight||""} onChange={e => updateSet(ei,si,"dbWeight",e.target.value)} placeholder="0" style={{textAlign:"center",height:42,padding:"0 4px",fontSize:17,fontWeight:800,color:"#0F172A",borderRadius:7}} />}
                         <input value={row.reps}   onChange={e => updateSet(ei,si,"reps",  e.target.value)} placeholder="0" style={{textAlign:"center",height:42,padding:"0 4px",fontSize:17,fontWeight:800,color:"#0F172A",borderRadius:7}} />
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#0F9488",textAlign:"center",height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(57,199,184,.06)",borderRadius:5}}>
                           {row.volume>0 ? row.volume.toLocaleString() : "—"}
@@ -23243,17 +23273,29 @@ function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity,
                     </div>
                   </div>
                   <div style={{padding:"6px 12px"}}>
-                    <div style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
-                      {["SET",getWeightColumnLabel(unitP),"횟수","볼륨"].map((h,i) => <Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
-                    </div>
-                    {(ex.sets||[]).map((row,si) => (
-                      <div key={si} style={{display:"grid",gridTemplateColumns:"30px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
-                        <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
-                        <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{unitP==="bodyweight"?"—":(row.weight||"—")}</Mo>
-                        <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                        <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
-                      </div>
-                    ))}
+                    {(() => {
+                      const dualWCard = isDualWeightEx(ex);
+                      const cardCols = dualWCard ? "30px 1fr 1fr 1fr 1fr" : "30px 1fr 1fr 1fr";
+                      const cardHeaders = dualWCard ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP),"횟수","볼륨"];
+                      return (
+                        <div style={{display:"grid",gridTemplateColumns:cardCols,gap:4,marginBottom:4}}>
+                          {cardHeaders.map((h,i) => <Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                        </div>
+                      );
+                    })()}
+                    {(ex.sets||[]).map((row,si) => {
+                      const dualWCard = isDualWeightEx(ex);
+                      const cardCols = dualWCard ? "30px 1fr 1fr 1fr 1fr" : "30px 1fr 1fr 1fr";
+                      return (
+                        <div key={si} style={{display:"grid",gridTemplateColumns:cardCols,gap:4,marginBottom:3}}>
+                          <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
+                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{unitP==="bodyweight"?"—":(row.weight||"—")}</Mo>
+                          {dualWCard && <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.dbWeight||"—"}</Mo>}
+                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
+                          <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -26000,17 +26042,29 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
                   </div>
                   <div style={{padding:"6px 12px"}}>
                     <div>
-                      <div style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:4,marginBottom:4}}>
-                        {["SET",getWeightColumnLabel(unitP2),"횟수","볼륨"].map((h,i)=><Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
-                      </div>
-                      {(ex.sets||[]).map((row,si)=>(
-                        <div key={si} style={{display:"grid",gridTemplateColumns:"24px 1fr 1fr 1fr",gap:4,marginBottom:3}}>
-                          <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
-                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{unitP2==="bodyweight"?"—":(row.weight||"—")}</Mo>
-                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                          <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
-                        </div>
-                      ))}
+                      {(() => {
+                        const dualWRpt = isDualWeightEx(ex);
+                        const rptCols = dualWRpt ? "24px 1fr 1fr 1fr 1fr" : "24px 1fr 1fr 1fr";
+                        const rptHeaders = dualWRpt ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP2),"횟수","볼륨"];
+                        return (
+                          <div style={{display:"grid",gridTemplateColumns:rptCols,gap:4,marginBottom:4}}>
+                            {rptHeaders.map((h,i)=><Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
+                          </div>
+                        );
+                      })()}
+                      {(ex.sets||[]).map((row,si)=>{
+                        const dualWRpt = isDualWeightEx(ex);
+                        const rptCols = dualWRpt ? "24px 1fr 1fr 1fr 1fr" : "24px 1fr 1fr 1fr";
+                        return (
+                          <div key={si} style={{display:"grid",gridTemplateColumns:rptCols,gap:4,marginBottom:3}}>
+                            <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
+                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{unitP2==="bodyweight"?"—":(row.weight||"—")}</Mo>
+                            {dualWRpt && <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.dbWeight||"—"}</Mo>}
+                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
+                            <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

@@ -20797,6 +20797,7 @@ const EXERCISE_LIBRARY = [
   { names:["케이블플라이"],                                      equipment:"케이블", muscleTop:"가슴",     muscleSub:"가운데가슴" },
   { names:["라잉트라이셉스익스텐션"],                             equipment:"바벨",  barbellKind:"이지바", muscleTop:"팔-삼두근", muscleSub:"전체" },
   { names:["케이블프레스다운","프레스다운"],                      equipment:"케이블", muscleTop:"팔-삼두근", muscleSub:"전체" },
+  { names:["스퀴시더버그"],                                      equipment:"덤벨",  muscleTop:"하체",     muscleSub:"둔근" },
 ];
 const EXERCISE_LIBRARY_BY_NAME = new Map();
 EXERCISE_LIBRARY.forEach(entry => entry.names.forEach(n => EXERCISE_LIBRARY_BY_NAME.set(normalizeExName(n), entry)));

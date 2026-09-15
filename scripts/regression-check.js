@@ -7465,6 +7465,23 @@ const checks = [
             && libs.isStanceOnlyExerciseName('하프스쿼트') === false;
         })()
       ],
+      ['자동분류: "스퀴시 더 버그"는 EXERCISE_LIBRARY 정확 일치로 기구=덤벨/부위=하체/세부=둔근이 되고, 기능운동으로 분류되지 않는다(띄어쓰기 변형 "스퀴시더버그"도 동일)',
+        (() => {
+          if (!libs) return false;
+          return ['스퀴시 더 버그', '스퀴시더버그'].every(name => {
+            const r = classify(name, { equipment:'바벨', muscleTop:'가슴' });
+            const m = libs.suggestMuscle(name, {});
+            return !!r && r.funcCategory === null && r.equipment === '덤벨' && r.muscleTop === '하체'
+              && !!m && m.sub === '둔근' && libs.suggestFuncExPreset(name) === null;
+          });
+        })()
+      ],
+      ['자동분류: "스퀴시 더 버그" 타이핑 중간 단계(한글 조합 중 자모 포함)에서는 기구/부위/기능운동 어느 것도 자동 변경되지 않는다 — 부분 문자열로 다른 운동에 오매칭되지 않음',
+        libs !== null && ['스','스ㅋ','스쿠','스퀴','스퀴ㅅ','스퀴시','스퀴시 ','스퀴시 ㄷ','스퀴시 더','스퀴시 더 ','스퀴시 더 ㅂ','스퀴시 더 버','스퀴시 더 벅'].every(step => {
+          const r = classify(step, { equipment:'바벨', muscleTop:'가슴' });
+          return !!r && r.equipment === '바벨' && r.muscleTop === '가슴' && r.funcCategory === null;
+        })
+      ],
       ['자세명 modifier 판별(isStanceOnlyName): "하프닐링"/"톨니링"/"스플릿 스탠스"/"b스탠스"/"스태거드 스탠스" 단독 또는 서로 결합된 입력은 자세명만 있는 것으로 판단되고, 자세명+실제 동작명(예: "하프닐링 로우")은 더 이상 자세명 전용으로 판단되지 않는다',
         libs !== null
         && libs.isStanceOnlyName('하프닐링') === true

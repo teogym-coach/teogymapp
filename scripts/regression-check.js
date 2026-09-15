@@ -5744,13 +5744,82 @@ const checks = [
         fn.includes('finally { setLoading(false); }');
     })()
   ],
-  ['수업일지 전송: 핵심 저장(refreshSessionsForMember 이전의 publishSession) 실패는 즉시 실패로 처리하고, 뒤이은 목록 재조회 실패는 별도 catch로 흡수해 "전송 완료" 처리를 뒤집지 않는다',
+  ['수업일지 전송: 핵심 저장(목록 반영 이전의 publishSession) 실패는 즉시 실패로 처리하고, 뒤이은 목록 반영 실패는 별도 catch로 흡수해 "전송 완료" 처리를 뒤집지 않는다',
     (() => {
       const fn = app.slice(app.indexOf('async function handlePublishSession'), app.indexOf('async function handleUnpublishSession'));
       const publishIdx = fn.indexOf('withTimeout(publishPromise');
-      const refreshIdx = fn.indexOf('withTimeout(refreshSessionsForMember');
+      const refreshIdx = fn.indexOf('await applySingleSessionChange(');
       const refreshCatchIdx = fn.indexOf('catch(refreshErr)');
       return publishIdx >= 0 && refreshIdx > publishIdx && refreshCatchIdx > refreshIdx;
+    })()
+  ],
+
+  // ── 수업일지 저장·전송 지연/무한 로딩 근본 원인 수정(2026-09-15) ──
+  // 원인: 저장·전송 성공 뒤 getSessions(전체 세션 + 세션마다 memberFeedback 서브컬렉션 조회 = N+1)를 다시 부르고,
+  // lastSession·PT 잔여·체중 동기화 write까지 전부 순차 await한 뒤에야 로딩을 풀었다(뒤쪽 단계엔 상한도 없었다).
+  ['수업일지 저장·전송 지연 원인 제거: handleSaveSession/handlePublishSession이 성공 뒤 getSessions·refreshSessionsForMember(N+1 전체 재조회)를 부르지 않고 applySingleSessionChange(단건)로 반영한다',
+    (() => {
+      const save = app.slice(app.indexOf('async function handleSaveSession'), app.indexOf('function resumeDraft2_1'));
+      const pub = app.slice(app.indexOf('async function handlePublishSession'), app.indexOf('async function handleUnpublishSession'));
+      return save.includes('await applySingleSessionChange(') && pub.includes('await applySingleSessionChange(') &&
+        !/getSessions\(|refreshSessionsForMember\(/.test(save) && !/getSessions\(|refreshSessionsForMember\(/.test(pub);
+    })()
+  ],
+  ['수업일지 저장: 쓰기 성공 뒤 목록 반영 실패는 catch(refreshErr)로 흡수하고 항상 회원 상세로 전환한다(성공을 실패로 뒤집어 작성 화면에 남기면 재클릭 시 addSession 중복 문서 생성)',
+    (() => {
+      const save = app.slice(app.indexOf('async function handleSaveSession'), app.indexOf('function resumeDraft2_1'));
+      const write = save.indexOf('await withTimeout(writePromise');
+      const apply = save.indexOf('await applySingleSessionChange(');
+      const refreshCatch = save.indexOf('catch(refreshErr)');
+      const hub = save.indexOf('setScreen("hub");');
+      return write > -1 && apply > write && refreshCatch > apply && hub > refreshCatch &&
+        save.includes('finally { setLoading(false); }');
+    })()
+  ],
+  ['수업일지 저장: lastSession·PT 잔여·체중 동기화는 화면 전환 뒤 병렬(Promise.all)로 흘려보내고 개별 await으로 로딩을 붙잡지 않는다',
+    (() => {
+      const save = app.slice(app.indexOf('async function handleSaveSession'), app.indexOf('function resumeDraft2_1'));
+      const hub = save.indexOf('setScreen("hub");');
+      const tasks = save.indexOf('const postSaveTasks = [];');
+      return tasks > hub && save.includes('Promise.all(postSaveTasks).catch(') && !save.includes('await Promise.all(postSaveTasks)') &&
+        (save.match(/postSaveTasks\.push\(/g) || []).length === 3 &&
+        // 목록을 확정하지 못했으면 PT 잔여 캐시는 쓰지 않는다
+        save.includes('if (newSessions && sessionConfirmed) {');
+    })()
+  ],
+  ['수업일지 전송: PT 잔여 동기화는 서버 재확인(confirmed)일 때만, await 없이 실행해 전송 완료 표시를 붙잡지 않는다',
+    (() => {
+      const pub = app.slice(app.indexOf('async function handlePublishSession'), app.indexOf('async function handleUnpublishSession'));
+      return pub.includes('if (confirmed) {') && pub.includes('syncPtBalanceAfterSessionChange(member.id, fresh);') &&
+        !pub.includes('await syncPtBalanceAfterSessionChange');
+    })()
+  ],
+  ['applySingleSessionChange: 단건 getSession만 읽고 memberFeedback은 메모리 값 유지, 전체 목록 미로드 시에만 기존 전체 재조회로 폴백, 회원 전환 시 setSessions 차단',
+    (() => {
+      const fn = app.slice(app.indexOf('async function applySingleSessionChange'), app.indexOf('// ── PT 잔여 캐시 동기화 (공용)'));
+      return fn.includes('withTimeout(getSession(memberId, sessionId), 10000') &&
+        fn.includes('if (!memberDataLoaded || memberId !== member?.id) {') &&
+        fn.includes('refreshSessionsForMember(memberId)') &&
+        fn.includes('memberFeedback: prev.memberFeedback ?? null') &&
+        fn.includes('if (memberDataReqIdRef.current === reqIdAtStart) setSessions(next);') &&
+        fn.includes('return { sessions: next, confirmed: !!fresh };');
+    })()
+  ],
+  ['db.js getSession: 세션 문서 1건만 getDoc으로 읽고 getSessions와 같은 normalizeSessionForRead로 정규화한다(memberFeedback 서브컬렉션 조회 없음)',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function getSession('), db.indexOf('export async function getRecentSessions'));
+      return fn.includes('getDoc(doc(db, "members", memberId, "sessions", sessionId))') &&
+        fn.includes('normalizeSessionForRead(snap.data())') && !fn.includes('attachSessionMemberFeedback') && !fn.includes('getDocs');
+    })()
+  ],
+  ['db.js publishSession: 소유권 확인과 completedAt 확인 읽기는 동시에 시작하되, updateDoc은 소유권 확인 await 뒤에만 실행된다',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function publishSession'), db.indexOf('export async function sendPairSession'));
+      const pre = fn.indexOf('const prevSnapPromise = getDoc(ref).then(snap => ({ snap }), error => ({ error }));');
+      const verify = fn.indexOf('await verifyMemberOwnership(memberId);');
+      const read = fn.indexOf('await prevSnapPromise;');
+      const write = fn.indexOf('await updateDoc(ref, {');
+      return pre > -1 && verify > pre && read > verify && write > read;
     })()
   ],
   ['수업일지 전송 상태 격리: HubScreen이 회원 전환 시(member.id 변경) 전송 중·전송 실패·미리보기 상태를 초기화하고, 언마운트 후에는 setState하지 않는다',
@@ -8839,6 +8908,7 @@ function runRenderTests() {
     ['회원앱 하루 권장 칼로리 고정·목표체중·하한선', path.join(root, 'tests', 'render', 'member-calorie-target.test.js')],
     ['관리자 건강관리 허브 대시보드·식단 분석', path.join(root, 'tests', 'render', 'health-hub-dashboard.test.js')],
     ['개인운동 카드 근육통 D+1/D+2 창 제한 제거(당일·D+3 이후도 항상 입력·수정)', path.join(root, 'tests', 'render', 'member-personal-workout-soreness-window.test.js')],
+    ['관리자 수업일지 저장·회원 전송 흐름(N+1 재조회 제거·로딩 해제·중복 방지)', path.join(root, 'tests', 'render', 'session-save-publish-flow.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

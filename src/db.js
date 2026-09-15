@@ -833,6 +833,17 @@ export async function getSessions(memberId) {
   return attachSessionMemberFeedback(memberId, sessions);
 }
 
+// 세션 문서 1건만 읽는다(관리자앱 저장·전송 직후 목록 갱신용).
+// getSessions는 전체 세션 조회 + 세션마다 memberFeedback 서브컬렉션 조회(N+1)라 기록이 쌓일수록 느려진다.
+// 정규화는 getSessions와 동일하고, memberFeedback은 붙이지 않는다(저장·전송은 그 서브컬렉션을 바꾸지 않으므로
+// 호출부가 메모리에 이미 가진 값을 그대로 잇는다).
+export async function getSession(memberId, sessionId) {
+  requireUid();
+  const snap = await getDoc(doc(db, "members", memberId, "sessions", sessionId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...normalizeSessionForRead(snap.data()) };
+}
+
 // 회원 목록 카드 표시용 — 최근 n개만 읽어 Firestore read 절약
 // getSessions(전량)과 달리 memberFeedback 없이 기본 정보만 반환
 export async function getRecentSessions(memberId, n = 5) {
@@ -1014,9 +1025,13 @@ export async function markMemberNotificationRead(memberId, notificationId) {
 // 그 자체로 전송 성공으로 확정한다. 알림 생성은 회원이 일지를 확인하는 데 필수가 아닌 부가 작업이므로
 // await하지 않고 별도로 흘려보내며, 실패해도 전송 자체(핵심 저장)에는 영향을 주지 않는다.
 export async function publishSession(memberId, sessionId) {
+  const ref = doc(db, "members", memberId, "sessions", sessionId);
+  // 소유권 확인(members 문서)과 아래 completedAt 확인(세션 문서)은 서로 독립된 읽기라 동시에 시작한다(왕복 1회 절약).
+  // 쓰기(updateDoc)는 여전히 소유권 확인이 통과한 뒤에만 실행된다. 읽기 실패는 여기서 값으로 받아 두어
+  // 소유권 확인이 먼저 실패해도 처리되지 않은 rejection이 남지 않는다.
+  const prevSnapPromise = getDoc(ref).then(snap => ({ snap }), error => ({ error }));
   await verifyMemberOwnership(memberId);
   dbLog("publishSession", `memberId=${memberId} sessionId=${sessionId}`);
-  const ref = doc(db, "members", memberId, "sessions", sessionId);
   // ── completedAt: "이 수업이 실제로 완료된 시점"을 딱 한 번만 남기는 필드 ──
   // publishedAt은 unpublishSession()에서 null로 지워지고 재공개 때 새 시각으로 덮이므로
   // "완료 시점"의 기준이 될 수 없다. createdAt도 안 된다 — 초안을 미리 만들어 두고 나중에 완료하면
@@ -1025,7 +1040,8 @@ export async function publishSession(memberId, sessionId) {
   // PT 잔여의 중복 차감과 과거 수업 소급 차감을 동시에 막는다).
   let completedAtPatch = {};
   try {
-    const prevSnap = await getDoc(ref);
+    const { snap: prevSnap, error: prevReadError } = await prevSnapPromise;
+    if (prevReadError) throw prevReadError;
     const prev = prevSnap.exists() ? prevSnap.data() : null;
     // 이 필드 도입 이전에 이미 공개된 기록은 그때의 publishedAt을 완료 시각으로 승계한다.
     if (prev && !prev.completedAt) completedAtPatch = { completedAt: prev.publishedAt || serverTimestamp() };

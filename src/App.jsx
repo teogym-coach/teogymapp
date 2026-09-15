@@ -16,7 +16,7 @@ import {
 } from "firebase/auth";
 import {
   getMembers, addMember, updateMember, deleteMember,
-  getSessions, addSession, updateSession, deleteSession, publishSession, unpublishSession, setSessionJournalDeferred,
+  getSessions, getSession, addSession, updateSession, deleteSession, publishSession, unpublishSession, setSessionJournalDeferred,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition, saveMemberDietMeal,
   getAssessments, saveAssessment, saveAssessments, getCorrectionSummaries, saveCorrectionSummary,
@@ -10545,6 +10545,10 @@ export default function App() {
   const [memberSessionsError, setMemberSessionsError] = useState(null);
   // 최신 회원 상세 요청만 화면에 반영(회원 A→B 빠른 전환 시 늦게 도착한 A 응답이 B 화면을 덮어쓰지 않도록)
   const memberDataReqIdRef = useRef(0);
+  // 수업일지 저장·전송 진행 중 요청 — 같은 대상에 대한 두 번째 호출은 새 write를 만들지 않고 진행 중인 결과를 함께 기다린다.
+  // (화면 쪽 가드 중 state 기반인 것은 같은 프레임 안의 연속 탭을 막지 못해 전송·회원 알림이 두 번 생길 수 있었다)
+  const sessionSaveInFlightRef = useRef(null);
+  const sessionPublishInFlightRef = useRef(new Map());
   const [memberPersonalSorenessMap, setMemberPersonalSorenessMap] = useState({}); // workoutId → 근육통(위와 같은 카드에서 조회만)
   const [liveMembersById, setLiveMembersById] = useState({}); // 회원 카드 실시간 배지/최근활동용 오버레이 (기존 members 로딩 흐름과 별개)
   const [notificationReads, setNotificationReads] = useState(null); // 트레이너 본인의 "오늘 회원 입력 피드" 읽음 상태 ({date, readEventIds})
@@ -11308,6 +11312,13 @@ export default function App() {
     }
   }
   async function handleSaveSession(d) {
+    if (sessionSaveInFlightRef.current) return sessionSaveInFlightRef.current;
+    const run = saveSessionOnce(d);
+    sessionSaveInFlightRef.current = run;
+    try { return await run; }
+    finally { if (sessionSaveInFlightRef.current === run) sessionSaveInFlightRef.current = null; }
+  }
+  async function saveSessionOnce(d) {
     console.log("[TEO GYM] handleSaveSession — memberId:", member?.id, "data:", d?.sessionNo);
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       const offlineErr = new Error("인터넷 연결이 원활하지 않습니다. 연결 후 다시 저장해주세요.");
@@ -11315,6 +11326,7 @@ export default function App() {
       throw offlineErr;
     }
     setLoading(true);
+    const reqIdAtStart = memberDataReqIdRef.current;
     try {
       const now = new Date().toISOString();
       const payload = { ...d, updatedAt: now };
@@ -11327,42 +11339,68 @@ export default function App() {
         ? updateSession(member.id, editSess.id, payload)
         : addSession(member.id, { ...payload, createdAt: now });
       writePromise.catch(() => {}); // 타임아웃 처리 후 늦게 도착하는 응답이 unhandled rejection을 남기지 않도록
-      await withTimeout(writePromise, 20000, "저장이 지연되고 있습니다. 잠시 후 목록에서 실제로 저장되었는지 확인한 뒤 필요하면 다시 시도해주세요.");
+      const writeResult = await withTimeout(writePromise, 20000, "저장이 지연되고 있습니다. 잠시 후 목록에서 실제로 저장되었는지 확인한 뒤 필요하면 다시 시도해주세요.");
+      const savedSessionId = isEditSave ? editSess.id : writeResult?.id;
       showToast(isEditSave ? "수업 수정 완료 ✓" : "수업 저장 완료 ✓");
       setEditSess(null);
-      const newSessions = await getSessions(member.id);
-      setSessions(newSessions);
-      setSessionsMap(prev => ({...prev, [member.id]: newSessions}));
+
+      // ── 여기부터는 서버 저장이 이미 확인된 뒤의 작업이다 ──
+      // 이전에는 이 자리에서 getSessions 전체 재조회(전체 세션 + 세션마다 memberFeedback 조회, N+1)와 아래 후속 write 3종을
+      // 전부 순차 await한 뒤에야 화면을 넘겨, 기록이 쌓인 회원일수록 "저장 중"이 수 초~무한정 이어졌다.
+      // 이제는 바뀐 문서 1건만 반영하고 곧바로 화면을 넘긴다. 이 구간에서 어떤 오류가 나도 저장 실패로 뒤집지 않는다
+      // (예전엔 이 구간 조회가 실패하면 저장 실패 토스트와 함께 editSess가 비워진 채 작성 화면에 남아, 다시 누르면
+      //  addSession으로 같은 수업 문서가 하나 더 생길 수 있었다 — 이제는 쓰기 성공 뒤 항상 회원 상세로 넘어간다).
+      let newSessions = null; // null = 믿을 수 있는 최신 목록을 만들지 못함 → 목록 기반 후속 캐시는 건너뜀
+      let sessionConfirmed = false;
+      try {
+        ({ sessions: newSessions, confirmed: sessionConfirmed } = await applySingleSessionChange(
+          member.id, savedSessionId, isEditSave ? payload : { ...payload, createdAt: now }, reqIdAtStart));
+      } catch(refreshErr) {
+        console.warn("[TEO GYM] 저장 후 목록 반영 실패(저장 자체는 이미 완료됨):", refreshErr?.message);
+      }
+      setScreen("hub");
+
+      // ── 후속 동기화(홈 표시용 캐시·체중 기록) ──
+      // 세 작업은 서로 다른 필드·문서를 쓰는 독립 작업이라 동시에 실행하고, 화면 전환·로딩 해제를 기다리게 하지 않는다.
+      // 각자 실패해도 경고만 남기고 이미 끝난 수업 저장을 되돌리지 않는다.
+      const saveMemberId = member.id;
+      const postSaveTasks = [];
       // 수업 날짜·회차(0회차 전환)·상태를 고쳐 차감 대상 자체가 바뀔 수 있으므로 저장 뒤에도 잔여를 다시 맞춘다.
-      await syncPtBalanceAfterSessionChange(member.id, newSessions);
+      // 서버에서 다시 읽은 값으로 목록을 맞춘 경우에만 캐시를 쓴다(단건 읽기 실패 시엔 회원 상세 자동 보정에 맡김).
+      if (newSessions && sessionConfirmed) {
+        postSaveTasks.push((async () => { await syncPtBalanceAfterSessionChange(member.id, newSessions); })());
+      }
       const todayStr = new Date().toISOString().split("T")[0];
-      const sorted   = [...newSessions].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+      const sorted   = [...(newSessions || [])].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
       const last     = sorted[0];
       // 오늘 수업 여부 재계산 (날짜가 변경될 수 있으므로 반드시 갱신)
-      const hasTodaySession = newSessions.some(s => s.date === todayStr);
-      if (last && member.id) {
+      const hasTodaySession = (newSessions || []).some(s => s.date === todayStr);
+      // 목록을 확정하지 못했으면(newSessions===null) 최근 수업·오늘 수업 배지를 추정으로 덮어쓰지 않는다(다음 조회 때 맞춰짐).
+      if (newSessions && last && saveMemberId) {
         const lastParts = (last.exercises||[])
           .map(e=>e.muscleTop).filter(Boolean)
           .filter((v,i,a)=>a.indexOf(v)===i).slice(0,3);
-        try {
-          await updateMember(member.id, {
-            lastSessionDate:  last.date || "",
-            lastSessionParts: lastParts,
-            lastSessionNo:    last.sessionNo || "",
-          });
-          setMembers(prev => prev.map(m => m.id === member.id
-            ? { ...m,
-                lastSessionDate:  last.date || "",
-                lastSessionParts: lastParts,
-                lastSessionNo:    last.sessionNo || "",
-                _todaySession:    hasTodaySession, // 오늘 수업 배지 즉시 갱신
-              }
-            : m
-          ));
-        } catch(e) { console.warn("[TEO GYM] lastSession 업데이트 실패:", e.message); }
-      } else {
+        postSaveTasks.push((async () => {
+          try {
+            await updateMember(saveMemberId, {
+              lastSessionDate:  last.date || "",
+              lastSessionParts: lastParts,
+              lastSessionNo:    last.sessionNo || "",
+            });
+            setMembers(prev => prev.map(m => m.id === saveMemberId
+              ? { ...m,
+                  lastSessionDate:  last.date || "",
+                  lastSessionParts: lastParts,
+                  lastSessionNo:    last.sessionNo || "",
+                  _todaySession:    hasTodaySession, // 오늘 수업 배지 즉시 갱신
+                }
+              : m
+            ));
+          } catch(e) { console.warn("[TEO GYM] lastSession 업데이트 실패:", e.message); }
+        })());
+      } else if (newSessions) {
         // 세션이 없거나 last가 없을 때도 todaySession 갱신
-        setMembers(prev => prev.map(m => m.id === member.id
+        setMembers(prev => prev.map(m => m.id === saveMemberId
           ? { ...m, _todaySession: hasTodaySession }
           : m
         ));
@@ -11372,30 +11410,32 @@ export default function App() {
       const sessWeight = d.bodyWeight ? String(d.bodyWeight).trim() : "";
       const sessDate   = d.date || "";
       if (sessWeight && sessDate && parseFloat(sessWeight) > 0) {
-        try {
-          const currentBD = bodyData || {};
-          const existingRecords = currentBD.records || [];
-          const sameDateRec = existingRecords.find(r => r.date === sessDate);
-          let updatedRecords;
-          if (sameDateRec) {
-            // 같은 날짜 기록이 있으면 체중만 업데이트
-            updatedRecords = existingRecords.map(r =>
-              r.date === sessDate ? {...r, weight: sessWeight, updatedAt: new Date().toISOString()} : r
-            );
-          } else {
-            // 없으면 새 레코드 추가
-            updatedRecords = [
-              ...existingRecords,
-              { id:"r"+Date.now(), date:sessDate, weight:sessWeight, updatedAt: new Date().toISOString() }
-            ];
-          }
-          const newBD = { ...currentBD, records: updatedRecords };
-          const saved = await saveBodyCheck(member.id, newBD);
-          setBodyData(saved || newBD);
-        } catch(e) { console.warn("[TEO GYM] 체중 바디체크 동기화 실패:", e.message); }
+        postSaveTasks.push((async () => {
+          try {
+            const currentBD = bodyData || {};
+            const existingRecords = currentBD.records || [];
+            const sameDateRec = existingRecords.find(r => r.date === sessDate);
+            let updatedRecords;
+            if (sameDateRec) {
+              // 같은 날짜 기록이 있으면 체중만 업데이트
+              updatedRecords = existingRecords.map(r =>
+                r.date === sessDate ? {...r, weight: sessWeight, updatedAt: new Date().toISOString()} : r
+              );
+            } else {
+              // 없으면 새 레코드 추가
+              updatedRecords = [
+                ...existingRecords,
+                { id:"r"+Date.now(), date:sessDate, weight:sessWeight, updatedAt: new Date().toISOString() }
+              ];
+            }
+            const newBD = { ...currentBD, records: updatedRecords };
+            const saved = await saveBodyCheck(saveMemberId, newBD);
+            // 그 사이 다른 회원으로 전환됐거나 회원 데이터를 새로 읽기 시작했다면 그쪽 결과를 덮어쓰지 않는다.
+            if (memberDataReqIdRef.current === reqIdAtStart) setBodyData(saved || newBD);
+          } catch(e) { console.warn("[TEO GYM] 체중 바디체크 동기화 실패:", e.message); }
+        })());
       }
-
-      setScreen("hub");
+      Promise.all(postSaveTasks).catch(e => console.warn("[TEO GYM] 저장 후속 동기화 오류(저장 자체는 이미 완료됨):", e?.message));
     } catch(e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }
@@ -11418,6 +11458,49 @@ export default function App() {
     setSessions(newSessions);
     setSessionsMap(prev => ({...prev, [memberId]: newSessions}));
     return newSessions;
+  }
+
+  // 저장·전송처럼 "세션 문서 1건"만 바뀐 직후 전용 목록 갱신.
+  // refreshSessionsForMember(getSessions)는 전체 세션 + 세션마다 memberFeedback 서브컬렉션 조회(N+1)라,
+  // 기록이 쌓인 회원일수록 이미 끝난 저장·전송을 "저장 중/전송 중"으로 오래 붙잡던 원인이었다.
+  // 여기서는 바뀐 문서 1건만 다시 읽어 현재 목록에 끼워 넣는다(순서는 getSessions의 orderBy("sessionNo")와 동일).
+  // memberFeedback은 회원앱이 쓰는 서브컬렉션이라 저장·전송이 바꾸지 않으므로 메모리의 기존 값을 그대로 잇는다.
+  // 단건 읽기가 실패·지연돼도 핵심 쓰기는 이미 서버 확인까지 끝났으므로 실패로 뒤집지 않고, 방금 쓴 값(fallback)으로
+  // 목록을 맞추되 confirmed=false를 돌려줘 호출부가 추정값으로 캐시(PT 잔여 등)를 쓰지 않게 한다.
+  // reqIdAtStart — 작업 시작 뒤 다른 회원으로 전환됐거나 회원 데이터를 새로 읽기 시작했다면 화면 목록은 그쪽 결과에 맡긴다.
+  async function applySingleSessionChange(memberId, sessionId, fallback, reqIdAtStart) {
+    // 회원 상세 데이터를 아직 다 읽지 못했으면(진입 직후·조회 실패) 끼워 넣을 기준 목록 자체가 없으므로,
+    // 빈 목록에 1건만 넣어 잔여·최근 수업을 잘못 계산하지 않도록 이 경우에만 기존처럼 전체를 다시 읽는다.
+    if (!memberDataLoaded || memberId !== member?.id) {
+      const full = await withTimeout(refreshSessionsForMember(memberId), 15000, "목록 새로고침이 지연되고 있습니다.");
+      return { sessions: full, confirmed: true };
+    }
+    let fresh = null;
+    try {
+      fresh = await withTimeout(getSession(memberId, sessionId), 10000, "수업 기록 확인이 지연되고 있습니다.");
+    } catch(e) {
+      console.warn("[TEO GYM] 변경된 수업 기록 단건 확인 실패(저장·전송 자체는 이미 완료됨):", e?.message);
+    }
+    const base = sessions || [];
+    const prev = base.find(x => x.id === sessionId) || null;
+    const feedbackFields = prev
+      ? { memberFeedback: prev.memberFeedback ?? null, memberFeedbackList: prev.memberFeedbackList || [] }
+      : { memberFeedback: null, memberFeedbackList: [] };
+    const nextSession = fresh
+      ? { ...fresh, ...feedbackFields, id: sessionId }
+      : { ...(prev || {}), ...(fallback || {}), ...feedbackFields, id: sessionId };
+    // Firestore 정렬 규칙과 동일하게: 숫자 sessionNo → 문자열 sessionNo 순, 같은 값이면 문서 ID 오름차순.
+    const rank = v => (typeof v === "number" ? 0 : typeof v === "string" ? 1 : 2);
+    const cmp = (a, b) => {
+      const ra = rank(a.sessionNo), rb = rank(b.sessionNo);
+      if (ra !== rb) return ra - rb;
+      if (a.sessionNo !== b.sessionNo) return a.sessionNo < b.sessionNo ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    };
+    const next = [...base.filter(x => x.id !== sessionId), nextSession].sort(cmp);
+    if (memberDataReqIdRef.current === reqIdAtStart) setSessions(next);
+    setSessionsMap(p => ({...p, [memberId]: next}));
+    return { sessions: next, confirmed: !!fresh };
   }
 
   // ── PT 잔여 캐시 동기화 (공용) ──────────────────────────────
@@ -11457,21 +11540,41 @@ export default function App() {
   // 부가 작업으로 취급해 실패/지연이 있어도 "전송 완료" 처리 자체를 뒤집지 않는다.
   async function handlePublishSession(s) {
     if (!member?.id || !s?.id) return;
+    const key = `${member.id}/${s.id}`;
+    const running = sessionPublishInFlightRef.current.get(key);
+    if (running) return running;
+    const run = publishSessionOnce(s);
+    sessionPublishInFlightRef.current.set(key, run);
+    try { return await run; }
+    finally { if (sessionPublishInFlightRef.current.get(key) === run) sessionPublishInFlightRef.current.delete(key); }
+  }
+  async function publishSessionOnce(s) {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       const offlineErr = new Error("인터넷 연결이 원활하지 않습니다. 연결 후 다시 전송해주세요.");
       showToast(offlineErr.message, "err");
       throw offlineErr;
     }
     setLoading(true);
+    const reqIdAtStart = memberDataReqIdRef.current;
     try {
       const publishPromise = publishSession(member.id, s.id);
       publishPromise.catch(() => {}); // 타임아웃으로 먼저 실패 처리된 뒤 늦게 도착하는 응답이 unhandled rejection을 남기지 않도록
       await withTimeout(publishPromise, 15000, "전송이 지연되고 있습니다. 인터넷 연결을 확인한 후 다시 시도해주세요.");
+      // 여기까지 오면 공개 write가 서버에서 확인된 것 = 전송 완료.
+      // 이전에는 전체 목록 재조회(getSessions N+1, 최대 15초)와 PT 잔여 동기화까지 끝나야 버튼이 풀렸다.
+      // 이제는 바뀐 문서 1건만 반영하고, PT 잔여 캐시는 기다리지 않는다(실패해도 전송 결과에 영향 없음).
       try {
-        const fresh = await withTimeout(refreshSessionsForMember(member.id), 15000, "목록 새로고침이 지연되고 있습니다.");
-        await syncPtBalanceAfterSessionChange(member.id, fresh);
+        const nowIso = new Date().toISOString();
+        const { sessions: fresh, confirmed } = await applySingleSessionChange(member.id, s.id, {
+          status: "published", isPublished: true, publishedAt: nowIso,
+          completedAt: s.completedAt || s.publishedAt || nowIso, journalSendDeferred: false,
+        }, reqIdAtStart);
+        // 서버에서 다시 읽은 값(실제 completedAt)일 때만 잔여 캐시를 쓴다 — 추정값으로 차감 캐시를 만들지 않는다.
+        if (confirmed) {
+          syncPtBalanceAfterSessionChange(member.id, fresh);
+        }
       } catch(refreshErr) {
-        console.warn("[TEO GYM] 전송 후 세션 목록 새로고침 실패(핵심 전송은 이미 완료됨):", refreshErr.message);
+        console.warn("[TEO GYM] 전송 후 세션 목록 반영 실패(핵심 전송은 이미 완료됨):", refreshErr.message);
       }
       showToast("회원에게 전송 완료 ✓");
     } catch(e) {

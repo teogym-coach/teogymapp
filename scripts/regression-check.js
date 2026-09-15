@@ -5822,6 +5822,48 @@ const checks = [
       return pre > -1 && verify > pre && read > verify && write > read;
     })()
   ],
+
+  // ── 체중 기록(bodyCheck/main.records) 유실 방지(2026-09-15) ──
+  // 원인: saveBodyCheck가 화면 bodyData 사본으로 문서를 통째로 교체(setDoc)했고, getBodyCheck는 조회 실패를 null로 삼켜
+  // 조회 실패·미로드·일부 로드·오래된 화면에서 저장하면 Firestore의 다른 체중 기록이 지워졌다. 회원앱 경로는 읽기→쓰기 사이 경합.
+  ['체중 유실 방지: saveBodyCheck는 문서 교체(setDoc) 없이 runTransaction 안에서 최신 문서를 읽고 base 대비 바뀐 항목만 병합한다',
+    (() => {
+      const fn = db.slice(db.indexOf('export async function saveBodyCheck('), db.indexOf('const PROFILE_FIELD_ACTIVITY_LABELS'));
+      return fn.includes('await runTransaction(db, async (tx) => {') && fn.includes('const snap = await tx.get(ref);') &&
+        fn.includes('mergeBodyList(fresh.records, base ? (base.records || []) : null, data?.records, { uniqueByDate: true })') &&
+        fn.includes('mergeBodyGoal(fresh.goal, base ? (base.goal || {}) : null, data?.goal)') &&
+        fn.includes('if (snap.exists()) tx.update(ref, { ...merged, updatedAt: serverTimestamp() });') &&
+        !fn.includes('setDoc(') && !fn.includes('getDoc(ref)');
+    })()
+  ],
+  ['체중 유실 방지: 관리자앱 saveBodyCheck 호출부(회원정보 수정·수업일지 체중·목표관리·건강허브·바디체크)와 회원앱 온보딩이 모두 base를 넘긴다(신규 회원 등록만 문서가 없어 제외)',
+    (() => {
+      const calls = app.match(/saveBodyCheck\([^\n]*/g) || [];
+      const withBase = calls.filter(c => /\{ ?base: /.test(c));
+      return calls.length === 7 && withBase.length === 5 &&
+        app.includes('await saveBodyCheck(memberId, { goal: autoGoal, records: autoRecords });') &&
+        app.includes('}, { base: body || null })); // base 기준으로 초기 체중 1건만 병합');
+    })()
+  ],
+  ['체중 유실 방지: 회원앱 체중 쓰기(건강 입력·프로필 현재 체중·날짜 기록 삭제)는 읽기와 쓰기를 같은 트랜잭션에서 처리한다',
+    (() => {
+      const health = db.slice(db.indexOf('export async function saveMemberHealthInputs'), db.indexOf('function upsertRecordByDate('));
+      const del = db.slice(db.indexOf('export async function deleteMemberHealthRecord'), db.indexOf('export async function getMemberCheckins'));
+      const profile = db.slice(db.indexOf('export async function saveMemberProfileFields'), db.indexOf('export async function saveMemberProfileFields') + 9000);
+      return health.includes('await runTransaction(db, async (tx) => {') && health.includes('const bodySnap = hasWeight ? await tx.get(bodyRef) : null;') && !health.includes('writeBatch(db)') &&
+        del.includes('await runTransaction(db, async (tx) => {') && del.includes('const bodySnap = await tx.get(bodyRef);') && !del.includes('writeBatch(db)') &&
+        profile.includes('const snap = await tx.get(bodyRef);') && profile.includes('tx.set(bodyRef, clean(payload), { merge: true });');
+    })()
+  ],
+  ['체중 동기화 UX: 수업일지 저장 후 체중 반영 실패·지연을 별도 안내하고, 실패 시 화면 bodyData를 반영된 것처럼 바꾸지 않는다',
+    (() => {
+      const save = app.slice(app.indexOf('async function handleSaveSession'), app.indexOf('function resumeDraft2_1'));
+      return save.includes('showToast("수업일지는 저장됐지만 체중 기록 반영에 실패했습니다. 바디체크에서 체중을 다시 입력해주세요.", "err");') &&
+        save.includes('if (!weightSyncSettled) showToast("수업일지는 저장됐지만 체중 기록 반영이 지연되고 있습니다.') &&
+        save.includes('if (saved && memberDataReqIdRef.current === reqIdAtStart) setBodyData(saved);') &&
+        !save.includes('setBodyData(saved || newBD)');
+    })()
+  ],
   ['수업일지 전송 상태 격리: HubScreen이 회원 전환 시(member.id 변경) 전송 중·전송 실패·미리보기 상태를 초기화하고, 언마운트 후에는 setState하지 않는다',
     (() => {
       const hub = app.slice(app.indexOf('function HubScreen('), app.indexOf('function HistoryScreen('));
@@ -8909,6 +8951,7 @@ function runRenderTests() {
     ['관리자 건강관리 허브 대시보드·식단 분석', path.join(root, 'tests', 'render', 'health-hub-dashboard.test.js')],
     ['개인운동 카드 근육통 D+1/D+2 창 제한 제거(당일·D+3 이후도 항상 입력·수정)', path.join(root, 'tests', 'render', 'member-personal-workout-soreness-window.test.js')],
     ['관리자 수업일지 저장·회원 전송 흐름(N+1 재조회 제거·로딩 해제·중복 방지)', path.join(root, 'tests', 'render', 'session-save-publish-flow.test.js')],
+    ['체중 기록 유실 방지(조회 실패·stale 화면·동시 쓰기에서 bodyCheck 병합 저장)', path.join(root, 'tests', 'render', 'body-weight-records-safety.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

@@ -2962,7 +2962,7 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
             id: "onboarding_start", date: today,
             weight: d.currentWeightKg || d.startingWeightKg, note: "온보딩 초기 체중",
           }),
-        }));
+        }, { base: body || null })); // base 기준으로 초기 체중 1건만 병합 — body 조회 실패(null)여도 관리자가 먼저 쓴 기록 보존
       }
       await withOnboardingTimeout(Promise.resolve(onDone()));
     } catch (e) {
@@ -11193,8 +11193,8 @@ export default function App() {
       if (sv.weight && bodyData) {
         try {
           const updatedGoal = { ...bodyData.goal, currentWeight: sv.weight };
-          await saveBodyCheck(member.id, { ...bodyData, goal: updatedGoal });
-          setBodyData(prev => ({ ...prev, goal: updatedGoal }));
+          const saved = await saveBodyCheck(member.id, { ...bodyData, goal: updatedGoal }, { base: bodyData });
+          setBodyData(saved);
         } catch(e) { console.warn("bodyCheck goal 동기화 실패:", e); }
       }
       showToast("수정 완료 ✓");
@@ -11411,7 +11411,15 @@ export default function App() {
       const sessDate   = d.date || "";
       if (sessWeight && sessDate && parseFloat(sessWeight) > 0) {
         postSaveTasks.push((async () => {
+          // 수업일지는 이미 저장 완료 안내가 나간 상태다. 체중 반영은 별도 결과이므로, 실패하면 따로 알리고
+          // 오래 걸리면 "지연"을 알린다(취소는 되지 않으므로 실패라고 단정하지 않음). 로딩은 여기서 붙잡지 않는다.
+          let weightSyncSettled = false;
+          const slowWeightTimer = setTimeout(() => {
+            if (!weightSyncSettled) showToast("수업일지는 저장됐지만 체중 기록 반영이 지연되고 있습니다. 잠시 후 바디체크에서 확인해주세요.", "err");
+          }, 20000);
           try {
+            // 아래 newBD는 화면 bodyData 사본 + 이번 체중이다. saveBodyCheck는 base(=사본의 기준)와 비교해 바뀐 기록만
+            // 최신 Firestore 문서에 병합하므로, bodyData가 비었거나(조회 실패·미로드) 오래돼도 기존 기록을 지우지 않는다.
             const currentBD = bodyData || {};
             const existingRecords = currentBD.records || [];
             const sameDateRec = existingRecords.find(r => r.date === sessDate);
@@ -11429,10 +11437,15 @@ export default function App() {
               ];
             }
             const newBD = { ...currentBD, records: updatedRecords };
-            const saved = await saveBodyCheck(saveMemberId, newBD);
+            const saved = await saveBodyCheck(saveMemberId, newBD, { base: bodyData || null });
+            weightSyncSettled = true;
             // 그 사이 다른 회원으로 전환됐거나 회원 데이터를 새로 읽기 시작했다면 그쪽 결과를 덮어쓰지 않는다.
-            if (memberDataReqIdRef.current === reqIdAtStart) setBodyData(saved || newBD);
-          } catch(e) { console.warn("[TEO GYM] 체중 바디체크 동기화 실패:", e.message); }
+            if (saved && memberDataReqIdRef.current === reqIdAtStart) setBodyData(saved);
+          } catch(e) {
+            weightSyncSettled = true;
+            console.warn("[TEO GYM] 체중 바디체크 동기화 실패:", e.message);
+            showToast("수업일지는 저장됐지만 체중 기록 반영에 실패했습니다. 바디체크에서 체중을 다시 입력해주세요.", "err");
+          } finally { clearTimeout(slowWeightTimer); }
         })());
       }
       Promise.all(postSaveTasks).catch(e => console.warn("[TEO GYM] 저장 후속 동기화 오류(저장 자체는 이미 완료됨):", e?.message));
@@ -11855,7 +11868,7 @@ export default function App() {
             <ConsultReportView member={member} onClose={()=>setScreen("hub")} showClose={false} />
           </div>
         )}
-        {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
+        {screen==="goal_manage" && member && <GoalManageScreen member={member} sessions={sessions} bodyData={bodyData} onBack={() => setScreen("hub")} showToast={showToast} onSaveBodyData={async d => { try { const saved = await saveBodyCheck(member.id, d, { base: bodyData }); setBodyData(saved || d); } catch(e) { showToast(e.message || "저장 실패", "err"); }}} />}
         {screen==="ai_routine" && member && <AIRoutineScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="routine_recommend" && member && <RoutineRecommendScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} showToast={showToast} />}
         {/* 관리자 추천 루틴(routine_recommend)과 이름·화면 모두 분리 — 이쪽은 회원앱이 자동 생성하는 루틴을 그대로 보여주는 조회 전용 화면이다 */}
@@ -11866,7 +11879,7 @@ export default function App() {
         {screen==="strength"   && member && <StrengthScreen  member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="exerciseAnalysis" && member && <ExerciseAnalysisScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} />}
         {screen==="correction" && <CorrectionScreen sessions={sessions} loading={loading||memberDataLoading} onBack={() => setScreen("hub")} />}
-        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d);setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} initialTab={healthHubInitialTab} />}
+        {screen==="healthhub"  && member && <HealthHubScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} onSaveBodyData={async d=>{try{const saved=await saveBodyCheck(member.id,d,{ base: bodyData });setBodyData(saved||d);showToast("저장 완료 ✓");}catch(e){showToast(e.message||"저장 실패","err");}}} onSaveNutrition={async d=>{try{await saveNutrition(member.id,d);setNutritionData(d);}catch(e){showToast(e.message||"저장 실패","err");}}} showToast={showToast} onBack={()=>setScreen("hub")} targetCal={getGoalCalorieRecommendation(estimateMaintenance(member,bodyData?.goal||{},bodyData,nutritionData,[],sessions),bodyData?.goal?.goal||member?.goal||nutritionData?.goal).value} initialTab={healthHubInitialTab} />}
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "hub")} onSelectMember={goHub} />}
@@ -11880,7 +11893,8 @@ export default function App() {
         {screen==="bodycheck"  && member && (() => { console.log("[TEO GYM] BodyCheckScreen — memberId:", member.id, "bodyData:", !!bodyData); return true; })() && <BodyCheckScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} bodyData={bodyData} onSaveBodyData={async d => {
             try {
               console.log("[TEO GYM] saveBodyCheck — memberId:", member.id, d);
-              const saved = await saveBodyCheck(member.id, d);
+              // base: 화면이 d를 만들 때 기준으로 삼은 bodyData — 바뀐 기록만 최신 Firestore 문서에 병합(기존 기록 유실 방지)
+              const saved = await saveBodyCheck(member.id, d, { base: bodyData });
               const result = saved || d;
               console.log("[TEO GYM] saveBodyCheck OK:", result);
               setBodyData(result);

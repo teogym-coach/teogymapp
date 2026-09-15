@@ -31,7 +31,7 @@
 // ═══════════════════════════════════════════════════
 import {
   collection, doc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit, deleteField,
+  query, where, orderBy, serverTimestamp, getDoc, setDoc, writeBatch, limit, deleteField, runTransaction,
   onSnapshot, documentId,
 } from "firebase/firestore";
 import { db, auth } from "./firebase-config";
@@ -1142,27 +1142,93 @@ export async function getBodyCheck(memberId) {
   }
 }
 
-export async function saveBodyCheck(memberId, data) {
+// ── bodyCheck 병합 저장 도우미 ─────────────────────────
+// 화면들은 "로드해 둔 bodyData 전체 사본 + 이번 변경"을 넘긴다. 예전에는 그 사본으로 문서를 통째로 교체(setDoc)해서
+// 화면 bodyData가 비었거나(조회 실패는 getBodyCheck가 null로 삼킴)·일부만 있거나·오래됐으면 Firestore의 다른 기록이 지워졌다.
+// 이제는 base(화면이 사본을 만들 때 기준으로 삼은 bodyData)와 next를 비교해 "이번에 실제로 바뀐 항목"만 골라
+// 트랜잭션 안에서 읽은 최신 문서에 적용한다. base가 없으면(null) 삭제 의도를 알 수 없으므로 추가·수정만 적용한다.
+function bodyValueEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every(k => Object.prototype.hasOwnProperty.call(b, k) && bodyValueEqual(a[k], b[k]));
+}
+function bodyItemKey(item) {
+  if (item && item.id !== undefined && item.id !== null && item.id !== "") return `id:${item.id}`;
+  return `raw:${JSON.stringify(item)}`;
+}
+// uniqueByDate — 체중 기록(records)은 모든 입력 경로가 "날짜당 1건"(upsertBodyRecord·upsertRecordByDate)이므로,
+// 바뀐 기록과 같은 날짜인데 이 화면이 모르던 기록(다른 기기·회원앱이 먼저 쓴 것)은 중복으로 남기지 않고 한 건으로 합친다.
+// 합칠 때 기존 기록의 필드는 유지하고 이번 입력에 들어 있는 필드만 덮는다(나중 저장이 그 날짜 값을 정한다).
+function mergeBodyList(freshList, baseList, nextList, { uniqueByDate = false } = {}) {
+  const fresh = Array.isArray(freshList) ? freshList : [];
+  if (!Array.isArray(nextList)) return fresh; // 이번 저장이 이 목록을 다루지 않음
+  const hasBase = Array.isArray(baseList);
+  const baseByKey = new Map((hasBase ? baseList : []).map(r => [bodyItemKey(r), r]));
+  const nextKeys = new Set(nextList.map(bodyItemKey));
+  const removedKeys = new Set(hasBase ? [...baseByKey.keys()].filter(k => !nextKeys.has(k)) : []);
+  const changed = nextList.filter(r => { const b = baseByKey.get(bodyItemKey(r)); return !b || !bodyValueEqual(b, r); });
+  let result = fresh.filter(r => !removedKeys.has(bodyItemKey(r)));
+  for (const item of changed) {
+    const key = bodyItemKey(item);
+    // 같은 id라도 이 화면이 모르던(base에 없던) 다른 날짜 기록이면 id 우연 충돌("r"+Date.now())로 보고 합치지 않는다.
+    const sameKnownItem = r => bodyItemKey(r) === key && (baseByKey.has(key) || !uniqueByDate || r?.date === item?.date);
+    const absorbed = result.filter(r => sameKnownItem(r)
+      || (uniqueByDate && item?.date && r?.date === item.date && !nextKeys.has(bodyItemKey(r))));
+    const merged = Object.assign({}, ...absorbed);
+    for (const [k, v] of Object.entries(item || {})) {
+      if (v === undefined || v === null) delete merged[k]; // 기존 clean() 저장과 같게 빈 값은 필드 제거
+      else merged[k] = clean(v);
+    }
+    const at = absorbed.length ? result.indexOf(absorbed[0]) : result.length;
+    result = result.filter(r => !absorbed.includes(r));
+    result.splice(Math.min(at, result.length), 0, merged);
+  }
+  if (uniqueByDate) result = [...result].sort((a, b) => String(b?.date || "").localeCompare(String(a?.date || "")));
+  return result;
+}
+function mergeBodyGoal(freshGoal, baseGoal, nextGoal) {
+  const result = { ...(freshGoal && typeof freshGoal === "object" ? freshGoal : {}) };
+  if (!nextGoal || typeof nextGoal !== "object") return result;
+  const hasBase = !!baseGoal && typeof baseGoal === "object";
+  const keys = new Set([...Object.keys(nextGoal), ...(hasBase ? Object.keys(baseGoal) : [])]);
+  for (const k of keys) {
+    const nv = nextGoal[k];
+    if (hasBase && bodyValueEqual(baseGoal[k], nv)) continue; // 이번에 안 바뀐 값은 최신 문서 값을 유지
+    if (nv === undefined || nv === null) { if (hasBase) delete result[k]; }
+    else result[k] = clean(nv);
+  }
+  return result;
+}
+
+// opts.base — 호출 화면이 data를 만들 때 기준으로 삼은 bodyData(보통 App state의 bodyData). 없으면 추가·수정만 반영.
+export async function saveBodyCheck(memberId, data, opts = {}) {
   try {
     await verifyMemberProfileAccess(memberId);
     dbLog("saveBodyCheck", `memberId=${memberId}`);
-    const ref     = doc(db, "members", memberId, "bodyCheck", "main");
-    const payload = {
-      goal:      clean(data.goal)    || {},
-      records:   clean(data.records) || [],
-      inbody:    clean(data.inbody)  || [],
-      updatedAt: serverTimestamp(),
-    };
-    await setDoc(ref, payload);
-    const saved = await getDoc(ref);
-    const d = saved.data();
-    const result = {
-      goal:    d.goal    || {},
-      records: (d.records || []).map(r => ({ ...r })),
-      inbody:  (d.inbody  || []).map(r => ({ ...r })),
-    };
+    const ref  = doc(db, "members", memberId, "bodyCheck", "main");
+    const base = opts.base && typeof opts.base === "object" ? opts.base : null;
+    const result = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const fresh = snap.exists() ? (snap.data() || {}) : {};
+      const merged = {
+        goal:    mergeBodyGoal(fresh.goal, base ? (base.goal || {}) : null, data?.goal),
+        records: mergeBodyList(fresh.records, base ? (base.records || []) : null, data?.records, { uniqueByDate: true }),
+        inbody:  mergeBodyList(fresh.inbody, base ? (base.inbody || []) : null, data?.inbody),
+      };
+      // update는 goal/records/inbody/updatedAt만 바꾸고 회원앱이 쓴 최상위 필드(currentWeight 등)는 그대로 둔다.
+      if (snap.exists()) tx.update(ref, { ...merged, updatedAt: serverTimestamp() });
+      else tx.set(ref, { ...merged, updatedAt: serverTimestamp() });
+      return merged;
+    });
     dbLog("saveBodyCheck", `완료: records=${result.records.length}`);
-    return result;
+    return {
+      goal:    result.goal || {},
+      records: (result.records || []).map(r => ({ ...r })),
+      inbody:  (result.inbody || []).map(r => ({ ...r })),
+    };
   } catch(e) {
     console.error("[DB] saveBodyCheck error:", e.message, `memberId=${memberId}`);
     throw new Error("바디체크 저장 실패: " + e.message);
@@ -1281,18 +1347,22 @@ export async function saveMemberProfileFields(memberId, data = {}, opts = {}) {
   if (Object.keys(bodyCheckPayload).length) {
     try {
       const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
-      const snap = await getDoc(bodyRef);
-      const current = snap.exists() ? snap.data() : {};
-      if (currentWeight !== null) {
-        bodyCheckPayload.records = clean(upsertRecordByDate(current.records || [], {
-          id: `member_${today}`,
-          date: today,
-          weight: currentWeight,
-          source: "memberProfile",
-        }));
-      }
-      bodyCheckPayload.updatedAt = serverTimestamp();
-      await setDoc(bodyRef, clean(bodyCheckPayload), { merge: true });
+      // 읽기→쓰기 사이에 관리자가 다른 체중 기록을 저장해도 덮어쓰지 않도록 트랜잭션으로 최신 records 기준 upsert한다.
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(bodyRef);
+        const current = snap.exists() ? snap.data() : {};
+        const payload = { ...bodyCheckPayload };
+        if (currentWeight !== null) {
+          payload.records = clean(upsertRecordByDate(current.records || [], {
+            id: `member_${today}`,
+            date: today,
+            weight: currentWeight,
+            source: "memberProfile",
+          }));
+        }
+        payload.updatedAt = serverTimestamp();
+        tx.set(bodyRef, clean(payload), { merge: true });
+      });
       results.push("체중 기록 저장 성공");
     } catch (e) {
       console.error("[DB:saveMemberProfileFields] bodyCheck write failed", { path: `members/${memberId}/bodyCheck/main`, code: e?.code, message: e?.message, memberId });
@@ -1623,54 +1693,58 @@ export async function markNotificationEventsRead(trainerUid, todayKey, eventIds 
 
 export async function saveMemberHealthInputs(memberId, dateKey, data = {}) {
   requireUid();
-  const batch = writeBatch(db);
   const now = serverTimestamp();
   const weight = data.weight === undefined || data.weight === null || String(data.weight).trim() === ""
     ? null
     : Number(String(data.weight).trim());
+  const hasWeight = weight !== null && Number.isFinite(weight) && weight > 0;
+  const hasKcal = data.kcal !== undefined && String(data.kcal).trim() !== "";
 
-  if (weight !== null && Number.isFinite(weight) && weight > 0) {
+  // 기존 writeBatch(원자적 일괄 쓰기)를 트랜잭션으로 바꿔, 읽은 bodyCheck·nutrition/meta가 커밋 전에 다른 곳에서
+  // 바뀌면(예: 관리자가 같은 순간 체중 기록 추가) 최신 값으로 다시 계산한다. 저장 필드·형식은 그대로다.
+  await runTransaction(db, async (tx) => {
     const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
-    const snap = await getDoc(bodyRef);
-    const current = snap.exists() ? snap.data() : {};
-    batch.set(bodyRef, {
-      goal: current.goal || {},
-      inbody: current.inbody || [],
-      records: clean(upsertRecordByDate(current.records || [], {
-        id: `member_${dateKey}`,
-        date: dateKey,
-        weight,
-        note: "회원앱 직접 입력",
-      })),
-      updatedAt: now,
-    }, { merge: true });
-  }
-
-  if (data.kcal !== undefined && String(data.kcal).trim() !== "") {
     const metaRef = doc(db, "members", memberId, "nutrition", "meta");
-    const dateRef = doc(db, "members", memberId, "nutrition", dateKey);
-    const metaSnap = await getDoc(metaRef);
-    const meta = metaSnap.exists() ? metaSnap.data() : {};
-    batch.set(metaRef, {
-      goal: meta.goal || "체중 감량",
-      favFoods: clean(meta.favFoods) || [],
-      logs: clean(upsertRecordByDate(meta.logs || [], { id: dateKey, date: dateKey, kcal: data.kcal, source: "member-app" })),
-      updatedAt: now,
-    });
-    batch.set(dateRef, {
-      totalKcal: Number(data.kcal) || data.kcal,
-      memberInputKcal: Number(data.kcal) || data.kcal,
-      source: "member-app",
-      updatedAt: now,
-    }, { merge: true });
-  }
+    const bodySnap = hasWeight ? await tx.get(bodyRef) : null;
+    const metaSnap = hasKcal ? await tx.get(metaRef) : null;
 
-  if (data.steps !== undefined && String(data.steps).trim() !== "") {
-    const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
-    batch.set(checkRef, { steps: data.steps, date: dateKey, updatedAt: now, createdBy: auth.currentUser.uid }, { merge: true });
-  }
+    if (hasWeight) {
+      const current = bodySnap.exists() ? bodySnap.data() : {};
+      tx.set(bodyRef, {
+        goal: current.goal || {},
+        inbody: current.inbody || [],
+        records: clean(upsertRecordByDate(current.records || [], {
+          id: `member_${dateKey}`,
+          date: dateKey,
+          weight,
+          note: "회원앱 직접 입력",
+        })),
+        updatedAt: now,
+      }, { merge: true });
+    }
 
-  await batch.commit();
+    if (hasKcal) {
+      const dateRef = doc(db, "members", memberId, "nutrition", dateKey);
+      const meta = metaSnap.exists() ? metaSnap.data() : {};
+      tx.set(metaRef, {
+        goal: meta.goal || "체중 감량",
+        favFoods: clean(meta.favFoods) || [],
+        logs: clean(upsertRecordByDate(meta.logs || [], { id: dateKey, date: dateKey, kcal: data.kcal, source: "member-app" })),
+        updatedAt: now,
+      });
+      tx.set(dateRef, {
+        totalKcal: Number(data.kcal) || data.kcal,
+        memberInputKcal: Number(data.kcal) || data.kcal,
+        source: "member-app",
+        updatedAt: now,
+      }, { merge: true });
+    }
+
+    if (data.steps !== undefined && String(data.steps).trim() !== "") {
+      const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
+      tx.set(checkRef, { steps: data.steps, date: dateKey, updatedAt: now, createdBy: auth.currentUser.uid }, { merge: true });
+    }
+  });
 
   const activities = [];
   if (weight !== null && Number.isFinite(weight) && weight > 0) {
@@ -2146,31 +2220,31 @@ export async function saveMemberCheckin(memberId, dateKey, data) {
 
 export async function deleteMemberHealthRecord(memberId, dateKey) {
   requireUid();
-  const batch = writeBatch(db);
-  const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
-  batch.delete(checkRef);
+  // 읽은 records/logs에서 해당 날짜만 빼고 다시 쓰는 구조라, 그 사이 다른 날짜 기록이 추가되면 지워지지 않도록 트랜잭션으로 처리한다.
+  await runTransaction(db, async (tx) => {
+    const checkRef = doc(db, "members", memberId, "memberCheckins", dateKey);
+    const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
+    const metaRef = doc(db, "members", memberId, "nutrition", "meta");
+    const bodySnap = await tx.get(bodyRef);
+    const metaSnap = await tx.get(metaRef);
 
-  const bodyRef = doc(db, "members", memberId, "bodyCheck", "main");
-  const bodySnap = await getDoc(bodyRef);
-  if (bodySnap.exists()) {
-    const current = bodySnap.data() || {};
-    batch.set(bodyRef, {
-      records: clean((current.records || []).filter(r => r.date !== dateKey && r.id !== `member_${dateKey}`)),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  }
-
-  const metaRef = doc(db, "members", memberId, "nutrition", "meta");
-  const metaSnap = await getDoc(metaRef);
-  if (metaSnap.exists()) {
-    const meta = metaSnap.data() || {};
-    batch.set(metaRef, {
-      logs: clean((meta.logs || []).filter(r => r.date !== dateKey && r.id !== dateKey)),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  }
-  batch.delete(doc(db, "members", memberId, "nutrition", dateKey));
-  await batch.commit();
+    tx.delete(checkRef);
+    if (bodySnap.exists()) {
+      const current = bodySnap.data() || {};
+      tx.set(bodyRef, {
+        records: clean((current.records || []).filter(r => r.date !== dateKey && r.id !== `member_${dateKey}`)),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+    if (metaSnap.exists()) {
+      const meta = metaSnap.data() || {};
+      tx.set(metaRef, {
+        logs: clean((meta.logs || []).filter(r => r.date !== dateKey && r.id !== dateKey)),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+    tx.delete(doc(db, "members", memberId, "nutrition", dateKey));
+  });
 }
 
 export async function getMemberCheckins(memberId, max = 30) {

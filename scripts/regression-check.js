@@ -8969,6 +8969,7 @@ function runRenderTests() {
     ['개인운동 카드 근육통 D+1/D+2 창 제한 제거(당일·D+3 이후도 항상 입력·수정)', path.join(root, 'tests', 'render', 'member-personal-workout-soreness-window.test.js')],
     ['관리자 수업일지 저장·회원 전송 흐름(N+1 재조회 제거·로딩 해제·중복 방지)', path.join(root, 'tests', 'render', 'session-save-publish-flow.test.js')],
     ['체중 기록 유실 방지(조회 실패·stale 화면·동시 쓰기에서 bodyCheck 병합 저장)', path.join(root, 'tests', 'render', 'body-weight-records-safety.test.js')],
+    ['히스토리 실제 운동명 전체 표시·관리자 상세 밝은 톤·공유 카드 보존·0kg 표시', path.join(root, 'tests', 'render', 'history-exercise-display.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

@@ -1409,6 +1409,12 @@ const OB2_INTENSITY = ["천천히 배우고 싶음","적당한 강도 선호","�
 
 // 상담 유입 — "처음 발견"과 "상담 결정"을 분리해서 받는다(기존 단일 "어디서 보고 오셨어요?" 질문 대체).
 // 표시 문구가 아니라 안정적인 value로 저장해 나중에 라벨 문구를 바꿔도 과거 응답 집계가 깨지지 않게 한다.
+// 당근/숨고 — 실제 회원이 "당근을 보고 왔다"고 말했는데 이 목록에 항목 자체가 없어 어쩔 수 없이
+// 다른 채널(네이버 검색 등)을 고른 사례가 있었다. value는 상담 등록/회원 프로필이 쓰는
+// ACQUISITION_CHANNEL_OPTIONS의 daangn/soomgo를 그대로 재사용한다 — 같은 채널이 화면마다 다른 값으로
+// 저장되면 유입 분석에서 다시 쪼개져 집계되므로, 새 코드값을 만들지 않고 기존 값을 맞춰 쓴다.
+// 위치는 순서를 대대적으로 바꾸지 않고 "운동닥터"(다른 제3자 플랫폼) 바로 옆에 자연스럽게 끼워 넣었다
+// (모바일 실측 결과 13→15개로 늘어나도 스크롤 없이 한 화면에 다 보인다).
 const ACQUISITION_FIRST_TOUCH_OPTIONS = [
   { value: "naver_search", label: "네이버 검색" },
   { value: "naver_place", label: "네이버 플레이스" },
@@ -1420,10 +1426,17 @@ const ACQUISITION_FIRST_TOUCH_OPTIONS = [
   { value: "claude", label: "Claude" },
   { value: "perplexity", label: "Perplexity" },
   { value: "workout_doctor", label: "운동닥터" },
+  { value: "daangn", label: "당근" },
+  { value: "soomgo", label: "숨고" },
   { value: "referral", label: "지인 소개" },
   { value: "walk_by", label: "주변을 지나가다가" },
   { value: "other", label: "기타" },
 ];
+// 여기에는 "당근"·"숨고" 자체를 넣지 않는다 — firstTouch(어디서 처음 알았나)와 달리 이 질문은
+// "무엇을 보고 상담을 신청하기로 결정했나"를 묻는다. 당근 광고는 상담 결정의 '접점'이 되는 경우가
+// 드물고(광고 클릭 → 실제 결정은 대개 후기/상담/가격 등을 본 뒤 이뤄짐), 그런 구체적 접점이 이미
+// 이 목록 자체로 표현돼 있다. 당근에서 광고만 보고 바로 상담을 결정했다면 "기타"로 남기고,
+// 원인이 무엇인지는 firstTouch=당근 값으로 이미 구분된다(두 질문이 서로 다른 축을 담당).
 const ACQUISITION_DECISION_TOUCH_OPTIONS = [
   { value: "naver_place_review", label: "네이버 플레이스 후기" },
   { value: "naver_blog_post", label: "네이버 블로그 글" },
@@ -1464,8 +1477,11 @@ const ACQ_AI_CHANNEL = "AI 검색";
 const ACQ_AI_UNSPECIFIED = "세부 출처 미기재";
 const ACQ_AI_OTHER = "기타 AI 검색";
 
-// 표준 채널 라벨 — 회원 프로필 수정 화면(방문계기 탭)의 선택지를 기준으로 삼고,
-// 상담 등록/온보딩에만 있는 값(네이버 검색·운동닥터·당근·숨고)을 뒤에 덧붙인다.
+// 표준 채널 라벨 — 회원 프로필 수정 화면(방문계기 탭, ACQUISITION_CHANNEL_OPTIONS와 동일)의 선택지를
+// 기준으로 삼고, 그 화면에 없는 값("운동닥터" — 온보딩·상담 등록에서만 쓰는 채널)을 뒤에 덧붙인다.
+// ※ 네이버 검색·당근·숨고는 원래도 ACQUISITION_CHANNEL_OPTIONS에 포함돼 있었다(과거 이 주석이
+//   "온보딩에만 있는 값"으로 잘못 적어 두었던 항목들 — 실제로는 온보딩 firstTouch에 당근·숨고 자체가
+//   빠져 있었고, 그게 이번 사전 문진 유입 오답 사례의 원인이었다. 지금은 firstTouch에도 추가했다).
 const ACQ_CANONICAL_CHANNELS = [
   "네이버 블로그", "네이버 플레이스", "네이버 검색", "인스타그램", "유튜브",
   ACQ_AI_CHANNEL, "지인 소개", "기존 회원 소개", "지나가다 발견", "엘리베이터 광고", "간판", "카카오 지도",
@@ -1530,7 +1546,8 @@ const ACQ_ONBOARDING_CHANNEL = {
   naver_search: "네이버 검색", naver_place: "네이버 플레이스", naver_blog: "네이버 블로그",
   instagram: "인스타그램", youtube: "유튜브",
   chatgpt: ACQ_AI_CHANNEL, gemini: ACQ_AI_CHANNEL, claude: ACQ_AI_CHANNEL, perplexity: ACQ_AI_CHANNEL,
-  workout_doctor: "운동닥터", referral: "지인 소개", walk_by: "지나가다 발견", other: "기타",
+  workout_doctor: "운동닥터", daangn: "당근", soomgo: "숨고",
+  referral: "지인 소개", walk_by: "지나가다 발견", other: "기타",
 };
 // 온보딩에서 AI를 고른 경우의 세부 출처(AI 검색 상세 카드용)
 const ACQ_ONBOARDING_AI_SOURCE = {
@@ -3036,7 +3053,11 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
           <Ob2Chips options={ACQUISITION_FIRST_TOUCH_OPTIONS} value={v.acquisition.firstTouch}
             onPick={x => setV1("acquisition", "firstTouch", x)}/>
         </Ob2Q>
-        <div className="ob2-hint">예: ChatGPT에서 처음 알게 된 뒤 네이버 후기를 확인했다면, 여기서는 “ChatGPT”를 선택해주세요.</div>
+        {/* 당근 같은 광고·지인소개 채널로 먼저 접한 뒤 네이버로 재검색하는 여정이 실제로 있다(이 채널이
+            firstTouch에 없어 회원이 "네이버 검색"을 고른 사례로 발견됨). 기존 ChatGPT 예시에 당근을
+            병기해 "처음 접한 채널 vs 이후 재검색"을 온라인·로컬 두 경우 모두로 일반화했다 — 문구는
+            기존보다 오히려 짧다(61자→54자). */}
+        <div className="ob2-hint">예: 당근·ChatGPT에서 먼저 보고 네이버로 다시 검색했어도, 처음 발견한 쪽을 선택해주세요.</div>
         {v.acquisition.firstTouch === "other" && <div className="ob2-cond">
           <Ob2Q label="기타 경로">
             <input className="ob2-input" value={v.acquisition.firstTouchOther}

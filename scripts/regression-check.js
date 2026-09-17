@@ -375,7 +375,7 @@ const ptSession = (over = {}) => ({
 let acquisitionLib = null;
 try {
   const sliceAcq = app.slice(app.indexOf('const ACQUISITION_FIRST_TOUCH_OPTIONS'), app.indexOf('// 온보딩 v2의 세부 목표(12종)'));
-  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER, ACQ_CANONICAL_CHANNELS, ACQUISITION_CHANNEL_OPTIONS, acqSourceTimestampMs, acqPickNewerCandidate, acqSourceOriginLabel };`)();
+  acquisitionLib = new Function(`${sliceAcq}\nreturn { normalizeMemberAcquisitionData, normalizeAcquisitionChannel, normalizeAiSourceList, buildAcquisitionRows, summarizeAcquisitionRows, acqDelta, buildAcquisitionPeriod, inAcqRange, getAcquisitionDate, buildAcquisitionBuckets, buildAcquisitionInsights, buildAcquisitionActions, maskAcquisitionName, ACQ_UNKNOWN, ACQ_AI_CHANNEL, ACQ_AI_UNSPECIFIED, ACQ_AI_OTHER, ACQ_CANONICAL_CHANNELS, ACQUISITION_CHANNEL_OPTIONS, ACQUISITION_FIRST_TOUCH_OPTIONS, ACQUISITION_DECISION_TOUCH_OPTIONS, ACQ_ONBOARDING_CHANNEL, acqSourceTimestampMs, acqPickNewerCandidate, acqSourceOriginLabel };`)();
 } catch (e) {
   console.error('[regression] 유입 분석 정규화 로직 추출 실패:', e.message);
 }
@@ -6559,6 +6559,86 @@ const checks = [
     L.normalizeAcquisitionChannel('지인 소개') !== L.normalizeAcquisitionChannel('기존 회원 소개') &&
     L.normalizeAcquisitionChannel('소개') === '소개' // 모호한 값은 alias 매핑 없이 원문 그대로 유지(임의 분류 금지)
   ),
+
+  // ── 사전 문진 firstTouch 당근·숨고 누락 수정 — 실제 사례(회원이 "당근에서 봤다"고 말했지만
+  // 문진엔 당근이 없어 네이버 검색을 대신 고름) 재발 방지. value는 ACQUISITION_CHANNEL_OPTIONS의
+  // daangn/soomgo를 그대로 재사용한다(같은 채널이 화면마다 다른 값으로 쪼개져 집계되지 않도록). ──
+  acqScenario('firstTouch 선택지: 당근·숨고가 상담 등록/회원 프로필(ACQUISITION_CHANNEL_OPTIONS)과 동일한 value로 존재한다',
+    L => {
+      const first = L.ACQUISITION_FIRST_TOUCH_OPTIONS.find(o => o.label === '당근');
+      const channel = L.ACQUISITION_CHANNEL_OPTIONS.find(o => o.label === '당근');
+      const firstS = L.ACQUISITION_FIRST_TOUCH_OPTIONS.find(o => o.label === '숨고');
+      const channelS = L.ACQUISITION_CHANNEL_OPTIONS.find(o => o.label === '숨고');
+      return !!first && !!channel && first.value === channel.value && first.value === 'daangn'
+        && !!firstS && !!channelS && firstS.value === channelS.value && firstS.value === 'soomgo';
+    }
+  ),
+  acqScenario('firstTouch=당근 선택·저장 → 유입 분석까지 "당근"으로 정확히 집계된다(ACQ_ONBOARDING_CHANNEL 명시 매핑)', L => {
+    const r = L.normalizeMemberAcquisitionData({ survey: {} }, {
+      v2: { updatedAt: '2026-09-18T00:00:00.000Z', acquisition: { firstTouch: 'daangn' } },
+    });
+    return r.sources.length === 1 && r.sources[0] === '당근' && L.ACQ_ONBOARDING_CHANNEL.daangn === '당근';
+  }),
+  acqScenario('firstTouch=숨고 선택·저장 → 유입 분석까지 "숨고"로 정확히 집계된다', L => {
+    const r = L.normalizeMemberAcquisitionData({ survey: {} }, {
+      v2: { updatedAt: '2026-09-18T00:00:00.000Z', acquisition: { firstTouch: 'soomgo' } },
+    });
+    return r.sources.length === 1 && r.sources[0] === '숨고' && L.ACQ_ONBOARDING_CHANNEL.soomgo === '숨고';
+  }),
+  acqScenario('실제 사례 재현: 당근에서 최초 발견 후 네이버 플레이스 후기로 재확인해도, firstTouch=당근과 decisionTouch=네이버 후기가 서로 다른 축으로 분리 유지된다(섞이지 않음)', L => {
+    const r = L.normalizeMemberAcquisitionData({ survey: {} }, {
+      v2: {
+        updatedAt: '2026-09-18T00:00:00.000Z',
+        acquisition: { firstTouch: 'daangn', decisionTouch: 'naver_place_review' },
+      },
+    });
+    return r.sources.length === 1 && r.sources[0] === '당근' // 유입 경로는 당근 하나만(네이버가 섞여 들어가지 않음)
+      && r.decisionTouch === '네이버 플레이스 후기' // 상담 결정 접점은 별도로 보존
+      && !r.sources.includes('네이버 플레이스'); // 두 축이 합쳐지지 않는다
+  }),
+  acqScenario('당근·숨고 추가가 기존 채널(네이버 검색/플레이스/블로그, ChatGPT/Gemini/Claude/Perplexity, 운동닥터, 지인 소개, 지나가다가)의 저장·집계를 건드리지 않는다', L => {
+    const codes = ['naver_search', 'naver_place', 'naver_blog', 'chatgpt', 'gemini', 'claude', 'perplexity', 'workout_doctor', 'referral', 'walk_by'];
+    return codes.every(code => {
+      const r = L.normalizeMemberAcquisitionData({ survey: {} }, {
+        v2: { updatedAt: '2026-09-18T00:00:00.000Z', acquisition: { firstTouch: code } },
+      });
+      return r.hasAny && r.sources.length === 1 && r.sources[0];
+    });
+  }),
+  acqScenario('선택지 순서: 당근·숨고는 기존 12개 순서를 흩뜨리지 않고 "운동닥터" 바로 뒤(11·12번째)에 삽입됐다', L => {
+    const labels = L.ACQUISITION_FIRST_TOUCH_OPTIONS.map(o => o.label);
+    return labels.length === 15
+      && labels.slice(0, 10).join(',') === ['네이버 검색','네이버 플레이스','네이버 블로그','인스타그램','유튜브','ChatGPT','Gemini','Claude','Perplexity','운동닥터'].join(',')
+      && labels[10] === '당근' && labels[11] === '숨고'
+      && labels.slice(12).join(',') === ['지인 소개','주변을 지나가다가','기타'].join(',');
+  }),
+  // 화이트리스트 기반 정합성 가드 — "각 화면 의미가 다르면 억지로 통일하지 않는다"는 이번 조사 결론을
+  // 코드로 강제한다. 여기 없는 새로운 불일치가 생기면(다음에 또 다른 채널이 한쪽에만 추가되는 실수)
+  // 이 테스트가 실패해 알려준다. 통과시키려고 무작정 화이트리스트를 늘리지 말고, 실제로 그 채널이
+  // firstTouch(처음 발견 경로)로도 의미가 있는지 먼저 판단할 것.
+  acqScenario('정합성 가드: ACQUISITION_CHANNEL_OPTIONS(상담 등록·회원 프로필)와 ACQUISITION_FIRST_TOUCH_OPTIONS(사전 문진)의 차이가 알려진 항목으로만 한정된다', L => {
+    // 라벨 문구가 달라도 같은 채널이면(예: "지나가다 발견" ≒ "주변을 지나가다가") 표준 채널로 걸러야
+    // 실제 "채널 자체가 없는" 진짜 누락만 남는다 — 순수 라벨 문자열 비교는 표기 차이를 누락으로 오판한다.
+    // firstTouch는 실제 저장·집계 때 라벨이 아니라 value가 ACQ_ONBOARDING_CHANNEL을 거쳐 정규화되므로
+    // (normalizeMemberAcquisitionData와 동일한 경로), 여기서도 같은 경로로 비교해야 정확하다.
+    const norm = (l) => L.normalizeAcquisitionChannel(l);
+    const channelNorm = new Set(L.ACQUISITION_CHANNEL_OPTIONS.map(o => norm(o.label)));
+    const firstNorm = new Set(L.ACQUISITION_FIRST_TOUCH_OPTIONS.map(o => norm(L.ACQ_ONBOARDING_CHANNEL[o.value] || o.label)));
+    // channel에는 있는데 firstTouch에 없는 것 — 오프라인/기타 채널 4종(대표 마케팅 판단이 필요해 이번엔 보류)
+    const onlyInChannel = [...channelNorm].filter(l => !firstNorm.has(l) && l !== 'AI 검색' && l !== '기타');
+    const expectedOnlyInChannel = ['기존 회원 소개', '엘리베이터 광고', '간판', '카카오 지도'];
+    // firstTouch에는 있는데 channel에 없는 것 — ChatGPT/Gemini/Claude/Perplexity는 정규화되면 모두
+    // "AI 검색"으로 합쳐져 channel의 ai_search와 일치하므로 차이가 아니다(설계 의도가 다를 뿐 집계는 합류).
+    // 순수하게 남는 진짜 차이는 "운동닥터"(온보딩·상담 등록에만 있고 channel 프리셋에는 없음) 하나뿐이다.
+    const onlyInFirst = [...firstNorm].filter(l => !channelNorm.has(l) && l !== '기타');
+    const expectedOnlyInFirst = ['운동닥터'];
+    return onlyInChannel.sort().join(',') === expectedOnlyInChannel.sort().join(',')
+      && onlyInFirst.sort().join(',') === expectedOnlyInFirst.sort().join(',');
+  }),
+  acqScenario('의도된 분리: decisionTouch(상담 결정 접점)에는 당근·숨고를 넣지 않는다 — "어디서 알았나"가 아니라 "무엇을 보고 결정했나"를 묻는 질문이라 채널명이 아닌 접점 단위로 구성돼 있다',
+    L => !L.ACQUISITION_DECISION_TOUCH_OPTIONS.some(o => o.label === '당근' || o.label === '숨고')
+  ),
+
   acqScenario('AI 세부 출처: "모름"은 특정 AI가 아니라 세부 출처 미기재로 집계된다(기타 AI 검색과 구분)', L => {
     const rows = L.buildAcquisitionRows({ members: [
       { id: 'a', name: 'A', startDate: '2026-08-01', survey: { visitRoutes: [L.ACQ_AI_CHANNEL], visitAiTool: '모름' } },

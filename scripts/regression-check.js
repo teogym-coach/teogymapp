@@ -550,7 +550,9 @@ try {
   const sliceOwner = app.slice(app.indexOf('const OWNER_LEGACY_NAME'), app.indexOf('// 회원 상세(HubScreen)·수업일지 작성 화면의 "회원 연동 기능"'));
   const sliceNext = app.slice(app.indexOf('function getMemberNextSessionInfo'), app.indexOf('// 오늘 완료 회원 카드에서'));
   const slicePersona = app.slice(app.indexOf('const PERSONA_TRIGGER_OPTIONS = ['), app.indexOf('// 홈 "수업일지 미전송" — 예약'));
-  personaLib = new Function(`${sliceOwner}\n${sliceNext}\n${slicePersona}\nreturn { PERSONA_CORE_QUESTIONS, PERSONA_EXTRA_QUESTIONS, PERSONA_TRIGGER_OPTIONS, PERSONA_SELECTION_OPTIONS, getPersonaEntry, hasPersonaAnswer, hasPersonaConfirmedAnswer, getPersonaProgress, personaMissingLabel, personaCategoryLabel, isPersonaTargetMember, isPersonaAskTargetMember, buildPersonaPendingList, getPersonaCoverage, buildPersonaStats, personaAgeBand, personaGender, buildOnboardingPersonaSeed, PERSONA_SOURCE_ONBOARDING, PERSONA_SOURCE_ADMIN, OB2_PT_CAUSE_OPTIONS, OB2_JOIN_REASON_OPTIONS, OB2_JOIN_REASON_MAX, PERSONA_ONBOARDING_GOAL_TO_TRIGGER, buildPersonaAcquisitionCross };`)();
+  // selectMembersNeedingPersonaSeed가 온보딩 상태 미러 판정(getOnboardingStatusFromMember)을 쓰므로 함께 자른다.
+  const sliceObStatus = app.slice(app.indexOf('const ONBOARDING_STATUS_LABEL = {'), app.indexOf('const DEFAULT_ADMIN_EMAIL'));
+  personaLib = new Function(`${sliceOwner}\n${sliceNext}\n${sliceObStatus}\n${slicePersona}\nreturn { PERSONA_CORE_QUESTIONS, PERSONA_EXTRA_QUESTIONS, PERSONA_TRIGGER_OPTIONS, PERSONA_SELECTION_OPTIONS, getPersonaEntry, hasPersonaAnswer, hasPersonaConfirmedAnswer, getPersonaProgress, personaMissingLabel, personaCategoryLabel, isPersonaTargetMember, isPersonaAskTargetMember, buildPersonaPendingList, getPersonaCoverage, buildPersonaStats, personaAgeBand, personaGender, buildOnboardingPersonaSeed, PERSONA_SOURCE_ONBOARDING, PERSONA_SOURCE_ADMIN, OB2_PT_CAUSE_OPTIONS, OB2_JOIN_REASON_OPTIONS, OB2_JOIN_REASON_MAX, PERSONA_ONBOARDING_GOAL_TO_TRIGGER, buildPersonaAcquisitionCross, selectMembersNeedingPersonaSeed, getOnboardingStatusFromMember };`)();
 } catch (e) {
   console.error('[regression] 고객 페르소나 헬퍼 추출 실패:', e.message);
 }
@@ -8581,6 +8583,31 @@ const checks = [
         && s.selection.rows.some(r => r.value === 'owner_class' && r.count === 1);
     }
   ),
+  // weight_gain은 V1에서 라벨이 "체중 증가"였다가 "다이어트·체중감량"으로 바뀐 값이다(코드값은 기존 데이터
+  // 호환 때문에 그대로 유지). 내부 이름만 보고 "체중을 늘리려는 회원"으로 잘못 매핑·집계하는 사고를 막는다.
+  personaScenario('코드값 의미 고정: weight_gain = 감량, 체중을 늘리려는 회원은 muscle_gain이다(이름 때문에 뒤집히지 않게)',
+    lib => {
+      const label = (v) => lib.personaCategoryLabel('ptTrigger', v);
+      const byGoal = lib.PERSONA_ONBOARDING_GOAL_TO_TRIGGER;
+      return label('weight_gain') === '다이어트·체중감량'      // 화면 라벨은 감량
+        && label('muscle_gain') === '근육 증가·벌크업'
+        && byGoal['체지방 감량'] === 'weight_gain'             // 감량 목표 → weight_gain
+        && byGoal['근육 증가'] === 'muscle_gain'               // 증량 목표 → muscle_gain (weight_gain 아님)
+        && byGoal['근력 증가'] === 'muscle_gain'
+        // 감량/증량이 같은 코드로 합쳐지면 안 된다
+        && byGoal['체지방 감량'] !== byGoal['근육 증가'];
+    }
+  ),
+  personaScenario('코드값 의미 고정: V1에 저장된 weight_gain 기존 데이터도 지금 화면에서 그대로 읽힌다(집계 누락 없음)',
+    lib => {
+      // V1 기간(라벨이 "체중 증가"였을 때) 대표가 기록한 형태 그대로
+      const m = personaMock('v1legacy', { persona: { ptTrigger: personaEntry('weight_gain', '체중이 확 늘어서') } });
+      const e = lib.getPersonaEntry(m, 'ptTrigger');
+      const stats = lib.buildPersonaStats([m]);
+      return e.category === 'weight_gain' && e.rawText === '체중이 확 늘어서'
+        && stats.trigger.rows.some(r => r.value === 'weight_gain' && r.count === 1);
+    }
+  ),
   personaScenario('신규 코드값 안전성: 새로 추가한 stress_relief가 라벨 표에 있고 기존 화면을 깨뜨리지 않는다',
     lib => {
       const m = personaMock('newCode', { persona: { ptTrigger: personaEntry('stress_relief', '') } });
@@ -8633,11 +8660,68 @@ const checks = [
     app.includes('문진 자동반영</span>}') &&
     app.includes('if (personaFilter === "draft") return personaPendingList.filter(r => r.progress.hasDraft);')
   ],
-  ['회원 목록 로드: 페르소나 초안은 유입 분석이 쓰던 같은 조회를 재사용하고 결과를 함께 공유한다(중복 조회 금지)',
-    app.includes('const onboardingMap = await getMemberAcquisitionOnboardingMap(ids);') &&
-    app.includes('setAcquisitionOnboardingById(onboardingMap);') &&
-    app.includes('acquisitionOnboardingLoadedRef.current = true;') &&
+  // 회원 수에 비례해 무조건 N건을 읽으면 회원이 늘수록 홈 로드가 무거워진다.
+  // 조회량이 "회원 수"가 아니라 "확인 대기 인원"에 비례하도록 대상을 좁힌 구조를 고정한다.
+  ['회원 목록 로드: 페르소나 초안은 실제로 필요한 회원만 읽는다(공용 selector 사용)',
+    app.includes('const needSeed = selectMembersNeedingPersonaSeed(mbs, personaById);') &&
+    app.includes('const onboardingMap = await getMemberAcquisitionOnboardingMap(needSeed);') &&
     app.includes('const seed = buildOnboardingPersonaSeed(onboardingMap[m.id]);')
+  ],
+  // 조회 대상 선별을 실제로 실행해 확인한다 — 문자열 검사만으로는 "몇 명을 읽는지"를 보장할 수 없다.
+  ...[
+    ['초안 조회 대상: 문진 완료 + 페르소나 미확정 회원만 읽는다(확정 완료·문진 미제출·대표/테스트 계정 제외)', lib => {
+      const done = personaEntry('pain', '');
+      const members = [
+        { id: 'need1', name: 'need1', status: 'active', onboardingStatus: 'completed' },                       // 대상
+        { id: 'need2', name: 'need2', status: 'active', onboardingStatus: 'needs_update' },                    // 대상(변경 확인 필요도 v2가 있다)
+        { id: 'half', name: 'half', status: 'active', onboardingStatus: 'completed' },                          // 대상(한 문항만 확정)
+        { id: 'confirmed', name: 'confirmed', status: 'active', onboardingStatus: 'completed' },                // 제외(2문항 확정)
+        { id: 'notSubmitted', name: 'notSubmitted', status: 'active', onboardingStatus: 'account_created' },    // 제외(문진 제출 전)
+        { id: 'invited', name: 'invited', status: 'active', onboardingStatus: 'invited' },                      // 제외
+        { id: 'legacyM', name: 'legacyM', status: 'active', onboardingStatus: 'legacy' },                       // 제외(v2 자체가 없음)
+        { id: '대표', name: '대표', status: 'active', onboardingStatus: 'completed', isOwner: true },            // 제외
+        { id: '테스트', name: '테스트', status: 'active', onboardingStatus: 'completed', isTestMember: true },    // 제외
+      ];
+      const personaById = {
+        confirmed: { ptTrigger: done, selectionReason: done },
+        half: { ptTrigger: done },
+      };
+      return lib.selectMembersNeedingPersonaSeed(members, personaById).join(',') === 'need1,need2,half';
+    }],
+    ['초안 조회 대상: 대표가 확인 완료를 처리할수록 조회 대상이 줄어든다(회원 수가 아니라 대기 인원에 비례)', lib => {
+      const done = personaEntry('pain', '');
+      const members = Array.from({ length: 300 }, (_, i) => ({ id: 'm' + i, name: 'm' + i, status: 'active', onboardingStatus: 'completed' }));
+      const none = lib.selectMembersNeedingPersonaSeed(members, {});
+      // 300명 중 297명을 확인 완료 처리한 상태
+      const mostDone = Object.fromEntries(members.slice(0, 297).map(m => [m.id, { ptTrigger: done, selectionReason: done }]));
+      const few = lib.selectMembersNeedingPersonaSeed(members, mostDone);
+      return none.length === 300 && few.length === 3;
+    }],
+    ['초안 조회 대상: 온보딩 상태 미러가 없는 기존 회원은 온보딩 문서를 추가로 읽지 않고 제외된다', lib => {
+      // 미러가 없으면 기존 헬퍼가 members 필드만으로 판정한다(온보딩 문서 조회 없음).
+      const members = [{ id: 'noMirror', name: 'noMirror', status: 'active', memberUid: 'uid1' }];
+      return lib.selectMembersNeedingPersonaSeed(members, {}).length === 0
+        && lib.getOnboardingStatusFromMember(members[0]) === 'account_created';
+    }],
+  ].map(([n, f]) => personaScenario(n, f)),
+  // 부분 집합을 유입 분석 맵에 넣고 "로드 완료"로 표시하면 유입 분석이 일부 회원을 잃는다(조용한 집계 누락).
+  ['회원 목록 로드: 축소된 초안 조회 결과를 유입 분석 맵에 넣거나 로드 완료로 표시하지 않는다',
+    (() => {
+      const i = app.indexOf('// 사전 문진 → 페르소나 초안 —');
+      if (i < 0) return false;
+      const slice = app.slice(i, app.indexOf('const loadPairSessions = useCallback'));
+      return !slice.includes('setAcquisitionOnboardingById(')
+        && !slice.includes('acquisitionOnboardingLoadedRef.current = true;');
+    })()
+  ],
+  ['페르소나 분석: 전 회원 유입 응답은 화면 진입 시 유입 분석과 같은 로더로 1회만 가져온다(중복 조회 금지)',
+    app.includes('onLoadOnboarding={loadAcquisitionOnboarding}') &&
+    app.includes('if (members.length) onLoadOnboarding?.(members);') &&
+    app.includes('if (acquisitionOnboardingLoadedRef.current) return;')
+  ],
+  ['온보딩 맵 조회: 회원 수가 늘어도 한 번에 수백 건을 동시에 던지지 않도록 묶어서 보낸다',
+    db.includes('const ONBOARDING_MAP_CHUNK = 25;') &&
+    db.includes('entries.push(...await Promise.all(ids.slice(i, i + ONBOARDING_MAP_CHUNK).map(readOne)));')
   ],
   ['페르소나 분석: 유입 경로 × 등록 결정 이유 카드가 있고 유입 정규화는 공용 selector를 재사용한다',
     app.includes('title="유입 경로 × 등록 결정 이유"') &&

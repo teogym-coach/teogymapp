@@ -2308,12 +2308,15 @@ export async function getMemberOnboarding(memberId) {
 // normalizeMemberAcquisitionData가 v2.updatedAt을 "온보딩 후보의 timestamp"로 읽어 프로필(survey)과
 // 우선순위를 겨루기 때문에, 여기에 값을 채우면 기존 유입 분석의 최종 선택 결과가 바뀐다.
 // 유입 집계 동작은 종전 그대로 두고, 페르소나 초안의 "문진 제출일" 표시에만 쓴다.
+// 회원 수가 늘어도 한 번에 수백 건을 동시에 던지지 않도록 묶어서 보낸다.
+// 결과는 전부 모아 반환하므로 호출부 동작은 동시 실행일 때와 완전히 같다(순서·내용 불변).
+const ONBOARDING_MAP_CHUNK = 25;
 export async function getMemberAcquisitionOnboardingMap(memberIds = []) {
   requireUid();
   const ids = Array.from(new Set((memberIds || []).filter(Boolean).map(String)));
   if (!ids.length) return {};
   dbLog("getMemberAcquisitionOnboardingMap", `${ids.length}명 온보딩 유입·목표 응답 조회`);
-  const entries = await Promise.all(ids.map(async (id) => {
+  const readOne = async (id) => {
     try {
       const snap = await getDoc(doc(db, "members", id, "memberOnboarding", "main"));
       if (!snap.exists()) return null;
@@ -2330,7 +2333,12 @@ export async function getMemberAcquisitionOnboardingMap(memberIds = []) {
       console.warn("[DB:getMemberAcquisitionOnboardingMap] skip:", { memberId: id, code: e?.code, message: e?.message });
       return null;
     }
-  }));
+  };
+  const entries = [];
+  for (let i = 0; i < ids.length; i += ONBOARDING_MAP_CHUNK) {
+    // eslint-disable-next-line no-await-in-loop
+    entries.push(...await Promise.all(ids.slice(i, i + ONBOARDING_MAP_CHUNK).map(readOne)));
+  }
   return Object.fromEntries(entries.filter(Boolean));
 }
 

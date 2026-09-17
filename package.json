@@ -19,7 +19,8 @@
     "eject": "react-scripts eject",
     "regression": "node scripts/regression-check.js",
     "icons": "node scripts/generate-icons.js",
-    "test:rules": "npm install --prefix tests/rules && firebase emulators:exec --only firestore \"npx mocha --timeout 30000 --exit tests/rules/firestore.rules.test.mjs\""
+    "test:rules": "npm install --prefix tests/rules && firebase emulators:exec --only firestore \"npx mocha --timeout 30000 --exit tests/rules/firestore.rules.test.mjs\"",
+    "test:persona-sync": "firebase emulators:exec --only firestore \"npx mocha --timeout 40000 --exit tests/rules/onboarding-persona-sync.e2e.mjs\""
   },
   "eslintConfig": {
     "extends": [

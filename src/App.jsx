@@ -10864,6 +10864,8 @@ export default function App() {
     // 홈 "페르소나 확인 필요" 집계용 — 고객 페르소나는 관리자 전용이라 members 문서가 아니라
     // members/{id}/private/admin 에만 저장된다(회원이 자기 문서를 읽어도 절대 내려가지 않는다).
     // 초기 배포에서 members 문서에 저장됐던 값이 남아 있으면 여기서 1회만 private으로 옮기고 원본을 지운다.
+    // 바로 아래 "페르소나 초안" 단계가 이 결과를 그대로 재사용한다(확정된 회원은 초안을 읽을 필요가 없다).
+    let personaById = {};
     try {
       const legacy = mbs.filter(m => m.persona && Object.keys(m.persona).length > 0);
       if (legacy.length > 0) {
@@ -10872,9 +10874,10 @@ export default function App() {
       }
       const personaMap = await getMemberPersonaMap(mbs.map(m => m.id));
       if (isStale()) return;
+      personaById = Object.fromEntries(mbs.map(m => [m.id, personaMap[m.id] ?? (legacy.find(x => x.id === m.id)?.persona || null)]));
       // members state의 각 회원 객체에 persona를 붙여둔다 — 홈·분석 화면의 기존 헬퍼가 그대로 동작한다.
       setMembers(prev => prev.map(m => {
-        const persona = personaMap[m.id] ?? (legacy.find(x => x.id === m.id)?.persona || null);
+        const persona = personaById[m.id];
         return persona ? { ...m, persona } : (m.persona ? { ...m, persona: undefined } : m);
       }));
     } catch (e) {
@@ -10882,16 +10885,25 @@ export default function App() {
     }
 
     // 사전 문진 → 페르소나 초안 — 홈 "페르소나 확인 필요"가 "물어봐야 할 회원"과 "확인만 하면 되는 회원"을
-    // 구분하려면 회원별 문진 응답이 필요하다. 유입 분석이 쓰던 조회 함수를 그대로 재사용하고(같은 문서 1건 읽기),
-    // 결과를 acquisitionOnboardingById에도 함께 넣어 유입 분석 화면 진입 시 재조회가 일어나지 않게 한다.
-    // 실패해도 기존 동작(확정값 기준 집계)이 그대로 유지되도록 조용히 넘어간다.
+    // 구분하려면 회원별 문진 응답이 필요하다. 다만 전 회원을 매번 읽으면 회원이 늘수록 홈 로드가 무거워지므로,
+    // 실제로 초안이 필요한 회원만 골라서 읽는다(회원 수가 아니라 "확인 대기 인원"에 비례하는 조회량).
+    //
+    //   ① 핵심 2문항이 모두 확정된 회원  → getPersonaEntry가 확정값을 먼저 쓰므로 초안이 쓰일 일이 없다.
+    //   ② 문진을 아직 제출하지 않은 회원  → v2 자체가 없어 초안이 생길 수 없다.
+    //      (판정은 온보딩 문서를 읽지 않는 기존 헬퍼 getOnboardingStatusFromMember 재사용)
+    //
+    // 대표가 확인 완료를 처리할수록 ①이 늘어 조회량은 0에 수렴한다.
+    // 미러(onboardingStatus)가 동기화에 실패한 회원은 ②로 걸러져 홈 목록에서 초안 배지를 놓칠 수 있지만,
+    // 회원 상세는 그 회원의 온보딩 문서를 직접 읽어 초안을 만들므로 데이터가 사라지는 것이 아니라
+    // "홈 힌트만 빠지는" 수준이다(그 회원은 미기록으로 남아 어차피 대표가 열어보게 된다).
+    //
+    // 유입 분석용 맵(acquisitionOnboardingById)은 전 회원이 필요하므로 여기서 채우지 않는다 —
+    // 부분 집합을 넣고 로드 완료로 표시하면 유입 분석이 일부 회원을 잃는다.
     try {
-      const ids = mbs.filter(isRegularAdminMember).map(m => m.id).filter(Boolean);
-      if (ids.length) {
-        const onboardingMap = await getMemberAcquisitionOnboardingMap(ids);
+      const needSeed = selectMembersNeedingPersonaSeed(mbs, personaById);
+      if (needSeed.length) {
+        const onboardingMap = await getMemberAcquisitionOnboardingMap(needSeed);
         if (isStale()) return;
-        setAcquisitionOnboardingById(onboardingMap);
-        acquisitionOnboardingLoadedRef.current = true;
         setMembers(prev => prev.map(m => {
           const seed = buildOnboardingPersonaSeed(onboardingMap[m.id]);
           return seed ? { ...m, personaSeed: seed } : (m.personaSeed ? { ...m, personaSeed: undefined } : m);
@@ -11934,11 +11946,12 @@ export default function App() {
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "hub")} onSelectMember={goHub} />}
-        {/* 페르소나 분석 — 회원 목록 로드 때 이미 붙여 둔 persona(확정값)·personaSeed(사전 문진 초안)와
-            온보딩 유입 응답만 읽는다(이 화면에서의 추가 Firestore 조회 없음).
+        {/* 페르소나 분석 — 회원 목록 로드 때 이미 붙여 둔 persona(확정값)·personaSeed(사전 문진 초안)를 쓴다.
+            "유입 경로 × 등록 결정 이유" 교차만 전 회원의 유입 응답이 필요하므로, 유입 분석과 같은 로더를
+            화면 진입 시 1회 호출한다(loadedRef가 있어 유입 분석과 중복 조회되지 않는다).
             회원 클릭 시 기존 goHub 흐름 그대로 회원 상세로 이동 */}
         {screen==="persona" && <PersonaAnalyticsScreen members={members.map(m => liveMembersById[m.id] ? {...m, ...liveMembersById[m.id]} : m)}
-          onboardingById={acquisitionOnboardingById}
+          onboardingById={acquisitionOnboardingById} onLoadOnboarding={loadAcquisitionOnboarding}
           setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast}
           onOpenMember={id=>{ const target = members.find(m=>m.id===id); if (target) goHub(target, {scrollTarget:"hub-sec-persona"}); }}
           onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "home")} />}
@@ -14706,6 +14719,13 @@ const PERSONA_SOURCE_ONBOARDING = "onboarding";
 
 // 사전 문진 운동 목표(OB2_GOAL_OPTIONS의 한글 라벨) → 페르소나 ptTrigger 코드.
 // 회귀 스크립트가 이 구간을 통째로 잘라 실행하므로 매핑표를 이 안에 둔다(self-contained 유지).
+//
+// ※ "체지방 감량" → weight_gain 은 오타가 아니다.
+//   weight_gain은 페르소나 V1(2026-08-24~09-03)에서 라벨이 "체중 증가"였다 — "체중이 늘어서 PT를 시작했다"는
+//   계기를 뜻했고, 지금 라벨("다이어트·체중감량")과 가리키는 회원은 같다(체중이 늘어 → 빼려고 PT).
+//   코드값을 바꾸면 그 기간에 저장된 기존 데이터가 집계에서 사라지므로 값은 그대로 두고 라벨만 바꿨다.
+//   체중을 "늘리려는" 회원은 weight_gain이 아니라 muscle_gain(근육 증가·벌크업)으로 간다 —
+//   이 두 줄의 의미가 뒤집히지 않도록 회귀 테스트로 고정해 두었다.
 const PERSONA_ONBOARDING_GOAL_TO_TRIGGER = {
   "체지방 감량": "weight_gain",
   "근력 증가": "muscle_gain",
@@ -15010,6 +15030,20 @@ function buildPersonaAcquisitionCross(rows = []) {
         .sort((a, b2) => b2.count - a.count || a.label.localeCompare(b2.label, "ko")),
     }))
     .sort((a, b) => b.members - a.members || a.channel.localeCompare(b.channel, "ko"));
+}
+
+// 사전 문진 초안을 실제로 읽어야 하는 회원만 고른다 — 조회량이 "회원 수"가 아니라 "확인 대기 인원"에
+// 비례하게 만드는 필터다(회원이 50 → 300명으로 늘어도 확인이 끝난 회원은 다시 읽지 않는다).
+//   ① 핵심 2문항이 모두 확정된 회원  → getPersonaEntry가 확정값을 먼저 쓰므로 초안이 쓰일 일이 없다
+//   ② 문진을 아직 제출하지 않은 회원  → v2가 없어 초안이 생길 수 없다(온보딩 문서를 읽지 않고 미러로 판정)
+// personaById: { [memberId]: persona 맵 | null } — 바로 앞 단계에서 이미 읽어 둔 확정값을 그대로 재사용한다.
+function selectMembersNeedingPersonaSeed(members = [], personaById = {}) {
+  return (members || []).filter(m => {
+    if (!m?.id || !isPersonaTargetMember(m)) return false;
+    if (PERSONA_CORE_QUESTIONS.every(q => hasPersonaConfirmedAnswer({ persona: personaById[m.id] }, q.key))) return false;
+    const st = getOnboardingStatusFromMember(m);
+    return st === "completed" || st === "needs_update";
+  }).map(m => m.id);
 }
 
 // 표본이 적을 때 과도한 결론을 내리지 않도록 하는 안내 기준(분석 화면에서만 사용).
@@ -20432,13 +20466,17 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
           <span style={{fontSize:12.5,fontWeight:800,color:DB.text,fontFamily:DB.font}}>{q.label}</span>
           {core && !e && <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.13)",color:"#B45309",fontFamily:DB.font}}>미기록</span>}
           {isDraft && <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(47,115,246,.12)",color:"#2F73F6",fontFamily:DB.font}}>사전문진 · 확인 필요</span>}
-          <button type="button" onClick={()=>openPersonaModal(q.key)} style={{marginLeft:"auto",border:e?`1px solid ${DB.border}`:"1px solid transparent",background:e?DB.card:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:e?DB.sub:"#fff",cursor:"pointer",fontFamily:DB.font,flexShrink:0}}>{e?"수정":"기록하기"}</button>
-          {isDraft && (
-            <button type="button" disabled={personaSaving} onClick={()=>confirmPersonaSeed(q.key)}
-              style={{border:"1px solid transparent",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:800,color:"#fff",cursor:personaSaving?"default":"pointer",fontFamily:DB.font,flexShrink:0,opacity:personaSaving?0.6:1}}>
-              {personaSaving?"저장 중...":"확인 완료"}
-            </button>
-          )}
+          {/* 버튼 두 개는 한 덩어리로 묶는다 — 각각에 marginLeft:auto를 주면 좁은 화면(360px)에서
+              둘이 따로 줄바꿈돼 한쪽만 오른쪽 끝에 붙는 들쭉날쭉한 배치가 된다. */}
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+            <button type="button" onClick={()=>openPersonaModal(q.key)} style={{border:e?`1px solid ${DB.border}`:"1px solid transparent",background:e?DB.card:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:e?DB.sub:"#fff",cursor:"pointer",fontFamily:DB.font,flexShrink:0,whiteSpace:"nowrap"}}>{e?"수정":"기록하기"}</button>
+            {isDraft && (
+              <button type="button" disabled={personaSaving} onClick={()=>confirmPersonaSeed(q.key)}
+                style={{border:"1px solid transparent",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:800,color:"#fff",cursor:personaSaving?"default":"pointer",fontFamily:DB.font,flexShrink:0,whiteSpace:"nowrap",opacity:personaSaving?0.6:1}}>
+                {personaSaving?"저장 중...":"확인 완료"}
+              </button>
+            )}
+          </div>
         </div>
         <div style={{fontSize:11,color:DB.faint,lineHeight:1.55,fontFamily:DB.font,marginBottom:e?8:0,wordBreak:"keep-all"}}>{q.question}</div>
         {!e ? (
@@ -29196,7 +29234,7 @@ function PersonaBarRow({ label, count, pct, total, onClick, active }) {
   );
 }
 
-function PersonaAnalyticsScreen({ members = [], onboardingById = {}, onBack, onOpenMember, setScreen, loadMembers, loadPairSessions, showToast }) {
+function PersonaAnalyticsScreen({ members = [], onboardingById = {}, onLoadOnboarding, onBack, onOpenMember, setScreen, loadMembers, loadPairSessions, showToast }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState("all");
   const [ageFilter, setAgeFilter] = useState("all");
@@ -29220,6 +29258,11 @@ function PersonaAnalyticsScreen({ members = [], onboardingById = {}, onBack, onO
     if (!members.length) loadMembers?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 유입 경로 × 등록 결정 이유 교차에만 필요한 전 회원 유입 응답 — 회원 목록이 준비된 뒤 1회 요청한다.
+  // 유입 분석 화면과 같은 로더라 둘 중 먼저 들어간 쪽에서만 실제 조회가 일어난다.
+  useEffect(() => {
+    if (members.length) onLoadOnboarding?.(members);
+  }, [members, onLoadOnboarding]);
 
   // 대상 회원(대표 계정·테스트 계정 제외)에 화면 필터를 적용한 모집단.
   // 종료 회원도 장기 페르소나 데이터라 기본(전체)에 포함한다 — 홈 질문 대상 목록과는 기준이 다르다(의도된 차이).

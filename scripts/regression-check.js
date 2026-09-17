@@ -6605,18 +6605,46 @@ const checks = [
       return r.hasAny && r.sources.length === 1 && r.sources[0];
     });
   }),
-  acqScenario('선택지 순서: 당근·숨고는 기존 12개 순서를 흩뜨리지 않고 "운동닥터" 바로 뒤(11·12번째)에 삽입됐다', L => {
+  acqScenario('선택지 순서: 당근·숨고·간판·엘리베이터 광고·카카오 지도는 기존 순서를 흩뜨리지 않고 "운동닥터" 바로 뒤에 로컬/오프라인 채널 그룹으로 삽입됐다', L => {
     const labels = L.ACQUISITION_FIRST_TOUCH_OPTIONS.map(o => o.label);
-    return labels.length === 15
+    return labels.length === 18
       && labels.slice(0, 10).join(',') === ['네이버 검색','네이버 플레이스','네이버 블로그','인스타그램','유튜브','ChatGPT','Gemini','Claude','Perplexity','운동닥터'].join(',')
-      && labels[10] === '당근' && labels[11] === '숨고'
-      && labels.slice(12).join(',') === ['지인 소개','주변을 지나가다가','기타'].join(',');
+      && labels.slice(10, 15).join(',') === ['당근','숨고','간판','엘리베이터 광고','카카오 지도'].join(',')
+      && labels.slice(15).join(',') === ['지인 소개','주변을 지나가다가','기타'].join(',');
   }),
+  acqScenario('선택지 순서: 상담 등록/회원 프로필에도 "운동닥터"가 카카오 지도 뒤·당근 앞에 자연스럽게 삽입됐다(기존 15개 순서 유지)', L => {
+    const labels = L.ACQUISITION_CHANNEL_OPTIONS.map(o => o.label);
+    return labels.length === 16
+      && labels.slice(0, 11).join(',') === ['네이버 검색','네이버 블로그','네이버 플레이스','인스타그램','유튜브',L.ACQ_AI_CHANNEL,'지인 소개','기존 회원 소개','지나가다 발견','엘리베이터 광고','간판'].join(',')
+      && labels[11] === '카카오 지도' && labels[12] === '운동닥터' && labels[13] === '당근' && labels[14] === '숨고' && labels[15] === '기타';
+  }),
+  acqScenario('firstTouch=간판/엘리베이터 광고/카카오 지도 선택·저장 → 유입 분석까지 각각 정확한 채널명으로 집계된다', L => {
+    const cases = [['signage', '간판'], ['elevator_ad', '엘리베이터 광고'], ['kakao_map', '카카오 지도']];
+    return cases.every(([code, label]) => {
+      const r = L.normalizeMemberAcquisitionData({ survey: {} }, {
+        v2: { updatedAt: '2026-09-18T00:00:00.000Z', acquisition: { firstTouch: code } },
+      });
+      return r.sources.length === 1 && r.sources[0] === label && L.ACQ_ONBOARDING_CHANNEL[code] === label;
+    });
+  }),
+  acqScenario('간판과 "주변을 지나가다가"(walk_by)는 서로 다른 채널로 각각 집계된다(합쳐지지 않음)', L => {
+    const signage = L.normalizeMemberAcquisitionData({ survey: {} }, { v2: { updatedAt: '2026-09-18T00:00:00.000Z', acquisition: { firstTouch: 'signage' } } });
+    const walkBy = L.normalizeMemberAcquisitionData({ survey: {} }, { v2: { updatedAt: '2026-09-18T00:00:00.000Z', acquisition: { firstTouch: 'walk_by' } } });
+    return signage.sources[0] === '간판' && walkBy.sources[0] === '지나가다 발견' && signage.sources[0] !== walkBy.sources[0];
+  }),
+  acqScenario('상담 등록/회원 프로필에서 "운동닥터"를 선택해도 기존 저장 방식(label 문자열 그대로 visitRoutes)을 그대로 따른다', L => {
+    const opt = L.ACQUISITION_CHANNEL_OPTIONS.find(o => o.value === 'workout_doctor');
+    return !!opt && opt.label === '운동닥터' && L.normalizeAcquisitionChannel('운동닥터') === '운동닥터';
+  }),
+  acqScenario('의도적 미포함: "기존 회원 소개"는 firstTouch에 넣지 않았다(회원이 "지인이 기존 회원인지"까지 구분해 답할 필요는 없고, 상담 단계에서 대표가 더 정확히 파악·기록한다)',
+    L => !L.ACQUISITION_FIRST_TOUCH_OPTIONS.some(o => o.value === 'existing_member_referral')
+      && L.ACQUISITION_CHANNEL_OPTIONS.some(o => o.value === 'existing_member_referral') // 상담 등록 화면에는 계속 남아 있어야 한다(대표가 구분 입력)
+  ),
   // 화이트리스트 기반 정합성 가드 — "각 화면 의미가 다르면 억지로 통일하지 않는다"는 이번 조사 결론을
   // 코드로 강제한다. 여기 없는 새로운 불일치가 생기면(다음에 또 다른 채널이 한쪽에만 추가되는 실수)
   // 이 테스트가 실패해 알려준다. 통과시키려고 무작정 화이트리스트를 늘리지 말고, 실제로 그 채널이
   // firstTouch(처음 발견 경로)로도 의미가 있는지 먼저 판단할 것.
-  acqScenario('정합성 가드: ACQUISITION_CHANNEL_OPTIONS(상담 등록·회원 프로필)와 ACQUISITION_FIRST_TOUCH_OPTIONS(사전 문진)의 차이가 알려진 항목으로만 한정된다', L => {
+  acqScenario('정합성 가드: ACQUISITION_CHANNEL_OPTIONS(상담 등록·회원 프로필)와 ACQUISITION_FIRST_TOUCH_OPTIONS(사전 문진)의 차이가 알려진 항목("기존 회원 소개" 단 하나)으로만 한정된다', L => {
     // 라벨 문구가 달라도 같은 채널이면(예: "지나가다 발견" ≒ "주변을 지나가다가") 표준 채널로 걸러야
     // 실제 "채널 자체가 없는" 진짜 누락만 남는다 — 순수 라벨 문자열 비교는 표기 차이를 누락으로 오판한다.
     // firstTouch는 실제 저장·집계 때 라벨이 아니라 value가 ACQ_ONBOARDING_CHANNEL을 거쳐 정규화되므로
@@ -6624,14 +6652,18 @@ const checks = [
     const norm = (l) => L.normalizeAcquisitionChannel(l);
     const channelNorm = new Set(L.ACQUISITION_CHANNEL_OPTIONS.map(o => norm(o.label)));
     const firstNorm = new Set(L.ACQUISITION_FIRST_TOUCH_OPTIONS.map(o => norm(L.ACQ_ONBOARDING_CHANNEL[o.value] || o.label)));
-    // channel에는 있는데 firstTouch에 없는 것 — 오프라인/기타 채널 4종(대표 마케팅 판단이 필요해 이번엔 보류)
+    // channel에는 있는데 firstTouch에 없는 것 — "기존 회원 소개" 하나만 남아야 한다(의도적 미포함:
+    // firstTouch는 회원이 스스로 답하는 질문이라 "소개해준 사람이 기존 회원인지"까지 구분하라고 요구하지
+    // 않는다 — "지인 소개"로 답해도 정보 손실이 적고, 이 구분은 상담 단계에서 대표가 더 정확히 파악한다).
+    // 엘리베이터 광고·간판·카카오 지도·운동닥터는 이번에 firstTouch/channel 양쪽에 채워 넣어 더 이상
+    // 차이가 아니다 — 이 목록이 늘어나면(예: 또 다른 채널이 firstTouch에만 추가되는 실수) 실패로 알려준다.
     const onlyInChannel = [...channelNorm].filter(l => !firstNorm.has(l) && l !== 'AI 검색' && l !== '기타');
-    const expectedOnlyInChannel = ['기존 회원 소개', '엘리베이터 광고', '간판', '카카오 지도'];
+    const expectedOnlyInChannel = ['기존 회원 소개'];
     // firstTouch에는 있는데 channel에 없는 것 — ChatGPT/Gemini/Claude/Perplexity는 정규화되면 모두
     // "AI 검색"으로 합쳐져 channel의 ai_search와 일치하므로 차이가 아니다(설계 의도가 다를 뿐 집계는 합류).
-    // 순수하게 남는 진짜 차이는 "운동닥터"(온보딩·상담 등록에만 있고 channel 프리셋에는 없음) 하나뿐이다.
+    // "운동닥터"는 이번에 channel에도 추가해 더 이상 차이가 아니다 — 이제 순수한 차이는 0개여야 한다.
     const onlyInFirst = [...firstNorm].filter(l => !channelNorm.has(l) && l !== '기타');
-    const expectedOnlyInFirst = ['운동닥터'];
+    const expectedOnlyInFirst = [];
     return onlyInChannel.sort().join(',') === expectedOnlyInChannel.sort().join(',')
       && onlyInFirst.sort().join(',') === expectedOnlyInFirst.sort().join(',');
   }),

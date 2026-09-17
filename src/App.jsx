@@ -1409,12 +1409,19 @@ const OB2_INTENSITY = ["천천히 배우고 싶음","적당한 강도 선호","�
 
 // 상담 유입 — "처음 발견"과 "상담 결정"을 분리해서 받는다(기존 단일 "어디서 보고 오셨어요?" 질문 대체).
 // 표시 문구가 아니라 안정적인 value로 저장해 나중에 라벨 문구를 바꿔도 과거 응답 집계가 깨지지 않게 한다.
-// 당근/숨고 — 실제 회원이 "당근을 보고 왔다"고 말했는데 이 목록에 항목 자체가 없어 어쩔 수 없이
-// 다른 채널(네이버 검색 등)을 고른 사례가 있었다. value는 상담 등록/회원 프로필이 쓰는
-// ACQUISITION_CHANNEL_OPTIONS의 daangn/soomgo를 그대로 재사용한다 — 같은 채널이 화면마다 다른 값으로
+// 당근/숨고/간판/엘리베이터 광고/카카오 지도 — 상담 등록·회원 프로필(ACQUISITION_CHANNEL_OPTIONS)에는
+// 있었지만 이 목록엔 없어서, 회원이 실제로 그 채널로 왔어도 표현할 방법이 없었던 것들을 채워 넣었다.
+// value는 전부 ACQUISITION_CHANNEL_OPTIONS와 동일한 값을 재사용한다 — 같은 채널이 화면마다 다른 값으로
 // 저장되면 유입 분석에서 다시 쪼개져 집계되므로, 새 코드값을 만들지 않고 기존 값을 맞춰 쓴다.
-// 위치는 순서를 대대적으로 바꾸지 않고 "운동닥터"(다른 제3자 플랫폼) 바로 옆에 자연스럽게 끼워 넣었다
-// (모바일 실측 결과 13→15개로 늘어나도 스크롤 없이 한 화면에 다 보인다).
+//
+// "기존 회원 소개"(existing_member_referral)는 의도적으로 추가하지 않았다 — "지인 소개"와 값 자체는
+// canonical하게 분리돼 있지만(ACQ_TREND_PRESET에서 실제로 추이를 나눠 봄), firstTouch는 회원이
+// "처음 알게 된 경로"를 스스로 답하는 질문이라 "그 지인이 테오짐 기존 회원인지 아닌지"까지 회원에게
+// 구분해서 답하라고 요구하는 건 과한 질문이다. 이 구분은 상담 단계에서 대표가 자연스럽게 파악해
+// 상담 등록 화면(이미 존재)에 기록하는 편이 더 정확하다. "지인 소개"로 답해도 정보 손실이 적다.
+//
+// 위치는 순서를 대대적으로 바꾸지 않고 "운동닥터"(다른 제3자 플랫폼) 바로 뒤에 로컬/오프라인 채널
+// 그룹으로 묶어 자연스럽게 끼워 넣었다(모바일 실측 결과는 아래 함수 근처 주석 참고).
 const ACQUISITION_FIRST_TOUCH_OPTIONS = [
   { value: "naver_search", label: "네이버 검색" },
   { value: "naver_place", label: "네이버 플레이스" },
@@ -1428,6 +1435,9 @@ const ACQUISITION_FIRST_TOUCH_OPTIONS = [
   { value: "workout_doctor", label: "운동닥터" },
   { value: "daangn", label: "당근" },
   { value: "soomgo", label: "숨고" },
+  { value: "signage", label: "간판" },
+  { value: "elevator_ad", label: "엘리베이터 광고" },
+  { value: "kakao_map", label: "카카오 지도" },
   { value: "referral", label: "지인 소개" },
   { value: "walk_by", label: "주변을 지나가다가" },
   { value: "other", label: "기타" },
@@ -1477,11 +1487,13 @@ const ACQ_AI_CHANNEL = "AI 검색";
 const ACQ_AI_UNSPECIFIED = "세부 출처 미기재";
 const ACQ_AI_OTHER = "기타 AI 검색";
 
-// 표준 채널 라벨 — 회원 프로필 수정 화면(방문계기 탭, ACQUISITION_CHANNEL_OPTIONS와 동일)의 선택지를
-// 기준으로 삼고, 그 화면에 없는 값("운동닥터" — 온보딩·상담 등록에서만 쓰는 채널)을 뒤에 덧붙인다.
-// ※ 네이버 검색·당근·숨고는 원래도 ACQUISITION_CHANNEL_OPTIONS에 포함돼 있었다(과거 이 주석이
-//   "온보딩에만 있는 값"으로 잘못 적어 두었던 항목들 — 실제로는 온보딩 firstTouch에 당근·숨고 자체가
-//   빠져 있었고, 그게 이번 사전 문진 유입 오답 사례의 원인이었다. 지금은 firstTouch에도 추가했다).
+// 표준 채널 라벨 — 회원 프로필 수정 화면(방문계기 탭, ACQUISITION_CHANNEL_OPTIONS)의 선택지와
+// 완전히 동일하다(둘을 따로 관리하면 또 한쪽에만 채널이 빠지는 실수가 반복된다 — 실제로 "운동닥터"가
+// 온보딩·상담 등록에만 있고 회원 프로필에는 없던 반대 방향 누락이 있었고, "당근·숨고"는 온보딩
+// firstTouch에만 없어서 회원이 "네이버 검색"으로 잘못 답한 실제 사례가 있었다. 두 사고 모두 이 표를
+// 기준으로 통일하는 방식으로 해결했다). 새 채널을 추가할 땐 이 표와 ACQUISITION_CHANNEL_OPTIONS와
+// ACQUISITION_FIRST_TOUCH_OPTIONS 세 곳 모두를 함께 확인할 것 — 회귀의 "정합성 가드" 시나리오가
+// 세 목록 사이에 알려지지 않은 차이가 생기면 실패로 알려준다.
 const ACQ_CANONICAL_CHANNELS = [
   "네이버 블로그", "네이버 플레이스", "네이버 검색", "인스타그램", "유튜브",
   ACQ_AI_CHANNEL, "지인 소개", "기존 회원 소개", "지나가다 발견", "엘리베이터 광고", "간판", "카카오 지도",
@@ -1530,6 +1542,7 @@ const ACQUISITION_CHANNEL_OPTIONS = [
   { value: "elevator_ad", label: "엘리베이터 광고" },
   { value: "signage", label: "간판" },
   { value: "kakao_map", label: "카카오 지도" },
+  { value: "workout_doctor", label: "운동닥터" },
   { value: "daangn", label: "당근" },
   { value: "soomgo", label: "숨고" },
   { value: "other", label: "기타" },
@@ -1547,6 +1560,7 @@ const ACQ_ONBOARDING_CHANNEL = {
   instagram: "인스타그램", youtube: "유튜브",
   chatgpt: ACQ_AI_CHANNEL, gemini: ACQ_AI_CHANNEL, claude: ACQ_AI_CHANNEL, perplexity: ACQ_AI_CHANNEL,
   workout_doctor: "운동닥터", daangn: "당근", soomgo: "숨고",
+  signage: "간판", elevator_ad: "엘리베이터 광고", kakao_map: "카카오 지도",
   referral: "지인 소개", walk_by: "지나가다 발견", other: "기타",
 };
 // 온보딩에서 AI를 고른 경우의 세부 출처(AI 검색 상세 카드용)

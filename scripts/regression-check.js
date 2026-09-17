@@ -550,7 +550,7 @@ try {
   const sliceOwner = app.slice(app.indexOf('const OWNER_LEGACY_NAME'), app.indexOf('// 회원 상세(HubScreen)·수업일지 작성 화면의 "회원 연동 기능"'));
   const sliceNext = app.slice(app.indexOf('function getMemberNextSessionInfo'), app.indexOf('// 오늘 완료 회원 카드에서'));
   const slicePersona = app.slice(app.indexOf('const PERSONA_TRIGGER_OPTIONS = ['), app.indexOf('// 홈 "수업일지 미전송" — 예약'));
-  personaLib = new Function(`${sliceOwner}\n${sliceNext}\n${slicePersona}\nreturn { PERSONA_CORE_QUESTIONS, PERSONA_EXTRA_QUESTIONS, PERSONA_TRIGGER_OPTIONS, PERSONA_SELECTION_OPTIONS, getPersonaEntry, hasPersonaAnswer, getPersonaProgress, personaMissingLabel, personaCategoryLabel, isPersonaTargetMember, isPersonaAskTargetMember, buildPersonaPendingList, getPersonaCoverage, buildPersonaStats, personaAgeBand, personaGender };`)();
+  personaLib = new Function(`${sliceOwner}\n${sliceNext}\n${slicePersona}\nreturn { PERSONA_CORE_QUESTIONS, PERSONA_EXTRA_QUESTIONS, PERSONA_TRIGGER_OPTIONS, PERSONA_SELECTION_OPTIONS, getPersonaEntry, hasPersonaAnswer, hasPersonaConfirmedAnswer, getPersonaProgress, personaMissingLabel, personaCategoryLabel, isPersonaTargetMember, isPersonaAskTargetMember, buildPersonaPendingList, getPersonaCoverage, buildPersonaStats, personaAgeBand, personaGender, buildOnboardingPersonaSeed, PERSONA_SOURCE_ONBOARDING, PERSONA_SOURCE_ADMIN, OB2_PT_CAUSE_OPTIONS, OB2_JOIN_REASON_OPTIONS, OB2_JOIN_REASON_MAX, PERSONA_ONBOARDING_GOAL_TO_TRIGGER, buildPersonaAcquisitionCross };`)();
 } catch (e) {
   console.error('[regression] 고객 페르소나 헬퍼 추출 실패:', e.message);
 }
@@ -570,6 +570,21 @@ const personaFixture = () => [
   personaMock('테스트', { isTestMember: true }),
   personaMock('대표', { isOwner: true }),
 ];
+// 사전 문진 1건(memberOnboarding/main)의 실제 모양 — 페르소나 초안 파생이 읽는 v2.goals / v2.acquisition만 담는다.
+// over로 넘긴 섹션은 병합이 아니라 통째로 교체한다 — "그 항목만 답한 회원"을 정확히 재현하기 위해서다
+// (병합이면 지정하지 않은 기본 답변이 남아 "미응답" 케이스를 검증할 수 없다).
+const onboardingMock = (over = {}) => ({
+  onboardingUpdatedAt: '2026-09-10T00:00:00.000Z',
+  v2: {
+    updatedAt: '2026-09-10T00:00:00.000Z',
+    goals: 'goals' in over ? over.goals : { ptCause: 'solo_fail', list: ['체지방 감량', '건강 관리'], primary: '체지방 감량', detail: '3개월 안에 5kg 빼고 싶어요' },
+    acquisition: 'acquisition' in over ? over.acquisition : { firstTouch: 'naver_search', decisionTouch: 'naver_place_review', joinReasons: ['review', 'owner_class'], joinReasonOther: '' },
+  },
+});
+// 문진 초안만 있고 관리자 확정은 없는 회원 — 홈 목록에 "문진 자동반영 · 확인 필요"로 남아야 하는 상태.
+const seededMember = (id) => personaMock(id, {
+  personaSeed: personaLib ? personaLib.buildOnboardingPersonaSeed(onboardingMock()) : null,
+});
 
 const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('addSession(member.id, { ...payload, createdAt: now })') && app.includes('updateSession(member.id, editSess.id, payload)') && app.includes('await withTimeout(writePromise')],
@@ -6597,9 +6612,30 @@ const checks = [
     !app.includes("const legacyRoutes = Array.isArray(member?.survey?.visitRoutes)")
   ],
   ['유입 분석: 온보딩 유입 응답은 기존 memberOnboarding/main을 읽기만 하고 새 컬렉션·필드를 만들지 않는다',
-    db.includes('export async function getMemberAcquisitionOnboardingMap') &&
-    db.includes('const acquisition = snap.data()?.v2?.acquisition;') &&
-    !db.includes('collection(db, "acquisition")')
+    (() => {
+      const i = db.indexOf('export async function getMemberAcquisitionOnboardingMap');
+      if (i < 0) return false;
+      const slice = db.slice(i, db.indexOf('const MEMBER_ONBOARDING_WRITABLE_FIELDS'));
+      return slice.includes('doc(db, "members", id, "memberOnboarding", "main")')
+        && slice.includes('const acquisition = v2?.acquisition;')
+        // 페르소나 초안 파생을 위해 같은 문서의 v2.goals까지 함께 읽는다(추가 문서 조회 없음)
+        && slice.includes('const goals = v2?.goals;')
+        // 읽기 전용 — 이 함수는 어떤 쓰기도 하지 않는다
+        && !/setDoc\(|updateDoc\(|addDoc\(|deleteDoc\(/.test(slice)
+        && !db.includes('collection(db, "acquisition")');
+    })()
+  ],
+  // 유입 집계의 최종 출처 선택(normalizeMemberAcquisitionData)은 온보딩 후보의 timestamp로 v2.updatedAt을 본다.
+  // 페르소나 초안용으로 제출 시각이 필요해졌지만 여기에 값을 채우면 기존 유입 분석 결과가 바뀌므로,
+  // 최상위 onboardingUpdatedAt으로 따로 내려보낸다. 이 분리가 깨지면 과거 유입 집계가 조용히 달라진다.
+  ['유입 분석: 페르소나 초안용 제출 시각은 v2.updatedAt이 아니라 최상위 onboardingUpdatedAt으로 분리해 내려준다(기존 유입 집계 결과 불변)',
+    (() => {
+      const i = db.indexOf('export async function getMemberAcquisitionOnboardingMap');
+      if (i < 0) return false;
+      const slice = db.slice(i, db.indexOf('const MEMBER_ONBOARDING_WRITABLE_FIELDS'));
+      return slice.includes('payload.onboardingUpdatedAt = v2.updatedAt;')
+        && !slice.includes('payload.v2.updatedAt');
+    })()
   ],
   ['유입 분석: 대표(TEO)·테스트 회원 제외 규칙(isRegularAdminMember)을 기존 그대로 유지',
     (() => {
@@ -8393,6 +8429,273 @@ const checks = [
     }
   ),
 
+  // ── 사전 문진 → 페르소나 초안 동기화 ──────────────────────────────
+  // 회원 사전 문진(memberOnboarding/main.v2)의 답변을 페르소나 코드로 "읽을 때마다" 변환한다.
+  // Firestore에 쓰지 않으므로 관리자 확정값이 문진 때문에 덮어써지는 상황이 구조적으로 생기지 않는다.
+  personaScenario('문진 동기화: 사전 문진을 완료하면 핵심 2문항 초안이 페르소나 코드로 자동 생성된다',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock());
+      return seed.ptTrigger.category === 'solo_fail'            // 회원이 고른 PT 계기가 주 이유
+        && seed.ptTrigger.secondaryCategory === 'weight_gain'   // 최우선 목표("체지방 감량")가 보조 이유
+        && seed.ptTrigger.rawText === '3개월 안에 5kg 빼고 싶어요'
+        && seed.selectionReason.category === 'review'           // 등록 이유 첫 번째
+        && seed.selectionReason.secondaryCategory === 'owner_class'
+        && seed.ptTrigger.source === lib.PERSONA_SOURCE_ONBOARDING;
+    }
+  ),
+  personaScenario('문진 동기화: PT 계기를 건너뛰면 운동 목표 변환값이 주 이유로 올라가고 보조 이유는 비워둔다(같은 값 중복 표시 금지)',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock({ goals: { list: ['통증 개선'], primary: '통증 개선' } }));
+      return seed.ptTrigger.category === 'pain' && seed.ptTrigger.secondaryCategory === '';
+    }
+  ),
+  personaScenario('문진 동기화: 문진 응답이 없는 항목은 추론하지 않고 미기록으로 남는다',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock({ acquisition: { firstTouch: 'naver_search' } }));
+      return !seed.selectionReason && seed.ptTrigger.category === 'solo_fail';
+    }
+  ),
+  personaScenario('문진 동기화: 문진이 아예 없는 회원은 초안이 null이고 기존과 똑같이 미기록으로 남는다',
+    lib => lib.buildOnboardingPersonaSeed(null) === null && lib.buildOnboardingPersonaSeed({}) === null
+  ),
+  personaScenario('문진 동기화: 등록 결정 이유(복수)는 3개째 이후도 extraCategories로 보존된다(선택값 유실 금지)',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock({
+        acquisition: { joinReasons: ['review', 'owner_class', 'price'] },
+      }));
+      return seed.selectionReason.category === 'review'
+        && seed.selectionReason.secondaryCategory === 'owner_class'
+        && seed.selectionReason.extraCategories.join(',') === 'price';
+    }
+  ),
+  personaScenario('문진 동기화: "기타" 자유입력은 카테고리로 요약되지 않고 rawText 원문으로 그대로 보존된다',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock({
+        acquisition: { joinReasons: ['other'], joinReasonOther: '친구가 3개월 만에 달라진 걸 직접 봐서' },
+      }));
+      return seed.selectionReason.category === 'other'
+        && seed.selectionReason.rawText === '친구가 3개월 만에 달라진 걸 직접 봐서';
+    }
+  ),
+  personaScenario('문진 동기화: 페르소나 선택지에 없는 값이 문진에 들어와도 그대로 통과시키지 않는다(오염된 코드값 차단)',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock({
+        goals: { ptCause: 'not_a_real_code', list: ['체지방 감량'], primary: '체지방 감량' },
+        acquisition: { joinReasons: ['review', 'not_a_real_code'] },
+      }));
+      return seed.ptTrigger.category === 'weight_gain'            // 잘못된 계기 코드는 버리고 목표 변환값 사용
+        && seed.selectionReason.category === 'review'
+        && seed.selectionReason.secondaryCategory === '';         // 잘못된 값이 보조 이유로 새지 않음
+    }
+  ),
+  personaScenario('문진 동기화: 문진 목표 12종이 모두 페르소나 trigger 코드로 변환된다(빠진 목표가 other로 뭉개지지 않음)',
+    lib => {
+      const goals = ['체지방 감량','근력 증가','근육 증가','체형 교정','자세 개선','통증 개선','건강 관리','체력 증가','바디프로필','재활 목적','스트레스 해소','기타'];
+      return goals.every(g => {
+        const code = lib.PERSONA_ONBOARDING_GOAL_TO_TRIGGER[g];
+        return !!code && lib.PERSONA_TRIGGER_OPTIONS.some(o => o.value === code);
+      });
+    }
+  ),
+
+  // ── 초안(문진 자동반영) vs 확인 완료(관리자) 상태 분리 ────────────
+  personaScenario('상태 분리: 문진 초안만 있는 회원은 "확인 완료"가 아니라 홈 목록에 남고 draft로 표시된다',
+    lib => {
+      const m = seededMember('draftOnly');
+      const p = lib.getPersonaProgress(m);
+      return p.completed === 0 && p.done === false && p.hasDraft === true
+        && p.draft.length === 2
+        && lib.personaMissingLabel(p.missing, p.draft) === '문진 자동반영 · 확인 필요';
+    }
+  ),
+  personaScenario('상태 분리: 초안이라도 회원 상세·분석에서는 답변으로 읽힌다(대표가 다시 입력할 필요 없음)',
+    lib => {
+      const m = seededMember('draftOnly');
+      const e = lib.getPersonaEntry(m, 'selectionReason');
+      return e.category === 'review' && e.confirmed === false && e.source === lib.PERSONA_SOURCE_ONBOARDING
+        && lib.hasPersonaAnswer(m, 'selectionReason') === true
+        && lib.hasPersonaConfirmedAnswer(m, 'selectionReason') === false;
+    }
+  ),
+  personaScenario('상태 분리: 관리자가 확인 완료(persona 확정 저장)하면 홈 "페르소나 확인 필요" 목록에서 빠진다',
+    lib => {
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock());
+      const m = personaMock('confirmed', {
+        personaSeed: seed,
+        persona: { ptTrigger: personaEntry('solo_fail', ''), selectionReason: personaEntry('review', '') },
+      });
+      const p = lib.getPersonaProgress(m);
+      return p.done === true && p.hasDraft === false
+        && lib.buildPersonaPendingList([m], {}, new Set(), '2026-09-17').length === 0;
+    }
+  ),
+  personaScenario('충돌 방지: 관리자 확정값이 있으면 회원이 문진을 다시 고쳐도 확정값이 그대로 유지된다(확인 필요로 되돌아가지 않음)',
+    lib => {
+      // 관리자는 pain으로 확정했는데, 회원이 나중에 문진 목표를 "체지방 감량"으로 바꾼 상황
+      const changedSeed = lib.buildOnboardingPersonaSeed(onboardingMock({
+        goals: { ptCause: '', list: ['체지방 감량'], primary: '체지방 감량', detail: '' },
+      }));
+      const m = personaMock('adminWins', {
+        personaSeed: changedSeed,
+        persona: { ptTrigger: personaEntry('pain', '허리가 계속 아파서'), selectionReason: personaEntry('owner_class', '') },
+      });
+      const e = lib.getPersonaEntry(m, 'ptTrigger');
+      return e.category === 'pain' && e.rawText === '허리가 계속 아파서' && e.confirmed === true
+        && lib.getPersonaProgress(m).done === true;
+    }
+  ),
+  personaScenario('충돌 방지: 한쪽만 확정된 회원은 확정 항목은 유지하고 나머지 초안만 확인 대상으로 남는다',
+    lib => {
+      const m = personaMock('halfDone', {
+        personaSeed: lib.buildOnboardingPersonaSeed(onboardingMock()),
+        persona: { ptTrigger: personaEntry('pain', '') },
+      });
+      const p = lib.getPersonaProgress(m);
+      return p.completed === 1 && p.draft.join(',') === 'selectionReason'
+        && lib.getPersonaEntry(m, 'ptTrigger').category === 'pain'
+        && lib.getPersonaEntry(m, 'selectionReason').confirmed === false;
+    }
+  ),
+  personaScenario('기존 데이터 유지: 문진을 한 적 없는 기존 회원의 페르소나·확인 상태는 종전과 완전히 동일하다',
+    lib => {
+      const before = lib.buildPersonaStats(personaFixture());
+      const progress = lib.getPersonaProgress(personaMock('done', {
+        persona: { ptTrigger: personaEntry('pain', '허리가 계속 아파서'), selectionReason: personaEntry('owner_class', '대표님이 직접 봐주셔서') },
+      }));
+      return before.total === 4 && before.bothCount === 1 && progress.done === true && progress.hasDraft === false;
+    }
+  ),
+  personaScenario('분석 반영: 문진 초안도 카테고리 집계·교차 분석에 들어가 유입 데이터가 쌓인다',
+    lib => {
+      const rows = [
+        personaMock('s1', { personaSeed: lib.buildOnboardingPersonaSeed(onboardingMock()) }),
+        personaMock('s2', { personaSeed: lib.buildOnboardingPersonaSeed(onboardingMock({
+          goals: { ptCause: 'how_to', list: ['근육 증가'], primary: '근육 증가', detail: '' },
+          acquisition: { joinReasons: ['owner_class'] },
+        })) }),
+      ];
+      const s = lib.buildPersonaStats(rows);
+      return s.triggerCount === 2 && s.selectionCount === 2 && s.bothCount === 2
+        && s.cross.length === 2
+        && s.trigger.rows.some(r => r.value === 'solo_fail' && r.count === 1)
+        && s.selection.rows.some(r => r.value === 'owner_class' && r.count === 1);
+    }
+  ),
+  personaScenario('신규 코드값 안전성: 새로 추가한 stress_relief가 라벨 표에 있고 기존 화면을 깨뜨리지 않는다',
+    lib => {
+      const m = personaMock('newCode', { persona: { ptTrigger: personaEntry('stress_relief', '') } });
+      return lib.personaCategoryLabel('ptTrigger', 'stress_relief') === '스트레스 해소'
+        && lib.getPersonaEntry(m, 'ptTrigger').category === 'stress_relief'
+        && lib.getPersonaProgress(m).completed === 1;
+    }
+  ),
+  personaScenario('질문 분리 유지: 문진의 상담 신청 접점(decisionTouch)은 페르소나 선택 이유로 복사되지 않는다',
+    lib => {
+      // 상담 접점만 있고 등록 이유는 고르지 않은 회원 — 선택 이유는 여전히 미기록이어야 한다
+      const seed = lib.buildOnboardingPersonaSeed(onboardingMock({
+        acquisition: { firstTouch: 'naver_search', decisionTouch: 'naver_place_review' },
+      }));
+      return !seed.selectionReason;
+    }
+  ),
+
+  // ── 관리자 화면 배선 (초안 표시 · 확인 완료 · 분석) ──────────────
+  ['페르소나 화면: 초안은 회원 상세에서 ob(사전 문진)로부터 매번 파생한다(저장하지 않음)',
+    app.includes('const personaSeed = buildOnboardingPersonaSeed(ob);') &&
+    app.includes('const personaMember = { ...member, persona: livePersona || null, personaSeed };')
+  ],
+  ['페르소나 화면: 초안 항목에 "사전문진 · 확인 필요" 배지와 "확인 완료" 버튼이 함께 표시된다',
+    app.includes('사전문진 · 확인 필요') &&
+    app.includes('const isDraft = !!e && !e.confirmed;') &&
+    app.includes('onClick={()=>confirmPersonaSeed(q.key)}')
+  ],
+  ['페르소나 화면: "확인 완료"는 문진 값을 한 글자도 바꾸지 않고 그대로 확정 저장한다',
+    (() => {
+      const i = app.indexOf('const confirmPersonaSeed = async (key) => {');
+      if (i < 0) return false;
+      const slice = app.slice(i, app.indexOf('const personaChip = (label, active, onClick)'));
+      return slice.includes('category: seed.category || ""')
+        && slice.includes('secondaryCategory: seed.secondaryCategory || ""')
+        && slice.includes('rawText: seed.rawText || ""')
+        && slice.includes('extraCategories: Array.isArray(seed.extraCategories) ? seed.extraCategories : []')
+        && slice.includes('source: PERSONA_SOURCE_ONBOARDING')
+        && slice.includes('confirmedAt: now')
+        // 확정 저장도 기존 저장 경로(updateMember + persona 맵 교체)를 그대로 재사용한다
+        && slice.includes('await updateMember(member.id, { persona: nextPersona });');
+    })()
+  ],
+  ['페르소나 화면: 관리자 수정 저장은 이미 확정된 항목의 최초 기록 시각·확인 시각을 덮어쓰지 않는다',
+    app.includes('confirmedAt: prevConfirmed?.confirmedAt || now,') &&
+    app.includes('const prev = prevConfirmed ? getPersonaEntry({ persona: livePersona }, key) : (personaSeed?.[key] || null);')
+  ],
+  ['홈 목록: 문진 초안 회원은 목록에 남고 "문진 자동반영" 배지 + 전용 필터로 구분된다',
+    app.includes('{row.progress.hasDraft && <span') &&
+    app.includes('문진 자동반영</span>}') &&
+    app.includes('if (personaFilter === "draft") return personaPendingList.filter(r => r.progress.hasDraft);')
+  ],
+  ['회원 목록 로드: 페르소나 초안은 유입 분석이 쓰던 같은 조회를 재사용하고 결과를 함께 공유한다(중복 조회 금지)',
+    app.includes('const onboardingMap = await getMemberAcquisitionOnboardingMap(ids);') &&
+    app.includes('setAcquisitionOnboardingById(onboardingMap);') &&
+    app.includes('acquisitionOnboardingLoadedRef.current = true;') &&
+    app.includes('const seed = buildOnboardingPersonaSeed(onboardingMap[m.id]);')
+  ],
+  ['페르소나 분석: 유입 경로 × 등록 결정 이유 카드가 있고 유입 정규화는 공용 selector를 재사용한다',
+    app.includes('title="유입 경로 × 등록 결정 이유"') &&
+    app.includes('buildPersonaAcquisitionCross(filteredMembers.map(m => {') &&
+    app.includes('const acq = normalizeMemberAcquisitionData(m, onboardingById[m.id]);') &&
+    app.includes('onboardingById={acquisitionOnboardingById}')
+  ],
+  ['사전 문진 화면: 신규 2문항은 기존 단계 안에 들어가고 저장 필드도 기존 v2 맵 안이다(새 컬렉션·단계 없음)',
+    app.includes('setV1("goals", "ptCause"') &&
+    app.includes('joinReasons: [...cur, x]') &&
+    app.includes('acquisition.joinReasons = joinReasons;') &&
+    // 단계 목록 자체가 늘어나지 않았는지 — STEPS 배열 문구는 종전 그대로여야 한다
+    app.includes('"통증 · 불편 부위", "병력 · 주의사항", "운동 가능 일정", "운동 성향", "최종 확인",')
+  ],
+  ['사전 문진 화면: 등록 결정 이유 상한(3개)은 화면과 저장 정리(ob2Finalize) 양쪽에서 함께 강제된다',
+    app.includes('if (cur.length >= OB2_JOIN_REASON_MAX) return p;') &&
+    app.includes('asArr(acquisition.joinReasons).slice(0, OB2_JOIN_REASON_MAX)')
+  ],
+  ['사전 문진 선택지: 회원 화면 선택지를 따로 만들지 않고 페르소나 taxonomy에서 파생한다(코드값 불일치 차단)',
+    app.includes('const OB2_PT_CAUSE_OPTIONS = PERSONA_TRIGGER_OPTIONS.filter(o => o.group === "cause");') &&
+    app.includes('const OB2_JOIN_REASON_OPTIONS = PERSONA_SELECTION_OPTIONS;')
+  ],
+
+  // ── 유입 경로 × 등록 결정 이유 (광고비 판단용 교차 집계) ──────────
+  personaScenario('유입 교차: 유입 경로와 등록 이유를 서로 다른 축으로 집계한다(하나의 "유입경로" 값으로 섞지 않음)',
+    lib => {
+      const rows = [
+        { channel: '네이버 검색', reasons: ['review', 'owner_class'] },
+        { channel: '네이버 검색', reasons: ['review'] },
+        { channel: '인스타그램', reasons: ['content'] },
+      ];
+      const cross = lib.buildPersonaAcquisitionCross(rows);
+      const naver = cross.find(c => c.channel === '네이버 검색');
+      return cross.length === 2
+        && naver.members === 2
+        && naver.reasons.find(r => r.value === 'review').count === 2   // 네이버 유입 2명 중 2명이 후기
+        && naver.reasons.find(r => r.value === 'review').pct === 100
+        && naver.reasons.find(r => r.value === 'owner_class').count === 1
+        && cross[0].channel === '네이버 검색';                          // 인원 많은 채널이 먼저
+    }
+  ),
+  personaScenario('유입 교차: 한 회원이 같은 이유를 중복으로 갖고 있어도 두 번 세지 않는다',
+    lib => {
+      const cross = lib.buildPersonaAcquisitionCross([{ channel: '지인 소개', reasons: ['referral', 'referral'] }]);
+      return cross[0].members === 1 && cross[0].reasons.length === 1 && cross[0].reasons[0].count === 1;
+    }
+  ),
+  personaScenario('유입 교차: 유입 경로나 등록 이유 한쪽이 비면 분모에 넣지 않는다(미입력이 비율을 왜곡하지 않음)',
+    lib => {
+      const cross = lib.buildPersonaAcquisitionCross([
+        { channel: '', reasons: ['review'] },
+        { channel: '유튜브', reasons: [] },
+        { channel: '유튜브', reasons: ['price'] },
+      ]);
+      return cross.length === 1 && cross[0].channel === '유튜브' && cross[0].members === 1;
+    }
+  ),
+
   // ── 관리자 최상위 레이아웃 분기(화면 전체 축소 방지) ──────────────
   // 문자열 포함 여부가 아니라 조건식 자체를 실제로 실행해 화면별 결과를 확인한다.
   // AdminSidebar로 사이드바까지 스스로 그리는 화면이 이 목록에서 빠지면 maxWidth:820 래퍼가
@@ -8970,6 +9273,7 @@ function runRenderTests() {
     ['관리자 수업일지 저장·회원 전송 흐름(N+1 재조회 제거·로딩 해제·중복 방지)', path.join(root, 'tests', 'render', 'session-save-publish-flow.test.js')],
     ['체중 기록 유실 방지(조회 실패·stale 화면·동시 쓰기에서 bodyCheck 병합 저장)', path.join(root, 'tests', 'render', 'body-weight-records-safety.test.js')],
     ['히스토리 실제 운동명 전체 표시·관리자 상세 밝은 톤·공유 카드 보존·0kg 표시', path.join(root, 'tests', 'render', 'history-exercise-display.test.js')],
+    ['회원앱 사전 문진 신규 2문항(등록 결정 이유·PT 시작 계기) 입력·저장·페르소나 변환', path.join(root, 'tests', 'render', 'member-onboarding-persona-sync.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

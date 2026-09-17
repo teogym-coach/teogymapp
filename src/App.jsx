@@ -2797,6 +2797,10 @@ function ob2Finalize(v = {}) {
   if (!asArr(health.conditions).includes("기타")) health.conditionEtc = "";
   if (acquisition.firstTouch !== "other") acquisition.firstTouchOther = "";
   if (acquisition.decisionTouch !== "other") acquisition.decisionTouchOther = "";
+  // 등록 결정 이유(복수) — "기타"를 해제했다면 직접 입력도 함께 정리하고, 개수 상한을 한 번 더 강제한다.
+  const joinReasons = asArr(acquisition.joinReasons).slice(0, OB2_JOIN_REASON_MAX);
+  acquisition.joinReasons = joinReasons;
+  if (!joinReasons.includes("other")) acquisition.joinReasonOther = "";
   return {...v, goals, pain, health, experience, acquisition};
 }
 function MemberOnboarding({profile, body, existing, onDone, mode = "create", onCancel}) {
@@ -2839,14 +2843,14 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
   const [v, setV] = useState(() => {
     const src = draft?.v || savedV2 || {};
     return {
-      goals: {list: [], primary: "", detail: "", shootDate: "", rehabNote: "", ...(src.goals || {})},
+      goals: {list: [], primary: "", detail: "", shootDate: "", rehabNote: "", ptCause: "", ...(src.goals || {})},
       experience: {level: "", duration: "", prevPT: "", prevPTSatisfaction: "", ...(src.experience || {})},
       lifestyle: {meals: "", lateSnack: "", alcohol: "", water: "", delivery: "", sleep: "", stress: "", ...(src.lifestyle || {})},
       pain: {parts: [], worst: "", situation: "", onset: "", trigger: "", ...(src.pain || {})},
       health: {conditions: [], conditionEtc: "", hasSurgery: "", surgery: "", hasMedication: "", medication: "", caution: "", ...(src.health || {})},
       schedule: {preferTime: [], weekCount: "", targetPeriod: "", note: "", ...(src.schedule || {})},
       preferences: {weakParts: [], styles: [], intensity: "", ...(src.preferences || {})},
-      acquisition: {firstTouch: "", firstTouchOther: "", decisionTouch: "", decisionTouchOther: "", ...(src.acquisition || {})},
+      acquisition: {firstTouch: "", firstTouchOther: "", decisionTouch: "", decisionTouchOther: "", joinReasons: [], joinReasonOther: "", ...(src.acquisition || {})},
     };
   });
 
@@ -3055,6 +3059,26 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
               onChange={e => setV1("acquisition", "decisionTouchOther", e.target.value)} placeholder="직접 입력해주세요"/>
           </Ob2Q>
         </div>}
+        {/* 등록 결정 이유 — 위의 "상담 신청 결정"과 다른 질문이다(상담을 받으러 온 이유 vs 실제로 등록한 이유). */}
+        <Ob2Q label={<>테오짐에 <b>등록하기로 결정한 이유</b>는 무엇인가요?</>} hint={`복수 선택 가능 · 최대 ${OB2_JOIN_REASON_MAX}개`}>
+          <Ob2Chips multi options={OB2_JOIN_REASON_OPTIONS} value={asArr(v.acquisition.joinReasons)}
+            onPick={x => {
+              setError("");
+              setV(p => {
+                const cur = asArr(p.acquisition.joinReasons);
+                if (cur.includes(x)) return {...p, acquisition: {...p.acquisition, joinReasons: cur.filter(y => y !== x)}};
+                if (cur.length >= OB2_JOIN_REASON_MAX) return p;
+                return {...p, acquisition: {...p.acquisition, joinReasons: [...cur, x]}};
+              });
+            }}/>
+        </Ob2Q>
+        <div className="ob2-hint">가장 크게 작용한 순서대로 골라주세요. 광고를 줄이고 실제로 도움이 된 부분에 집중하는 데 쓰입니다.</div>
+        {asArr(v.acquisition.joinReasons).includes("other") && <div className="ob2-cond">
+          <Ob2Q label="기타 등록 이유">
+            <input className="ob2-input" value={v.acquisition.joinReasonOther}
+              onChange={e => setV1("acquisition", "joinReasonOther", e.target.value)} placeholder="직접 입력해주세요"/>
+          </Ob2Q>
+        </div>}
       </>}
 
       {step === 3 && <>
@@ -3064,6 +3088,11 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
         {goalList.length > 0 && <Ob2Q label="가장 우선순위가 높은 목표 1개">
           <Ob2Chips options={goalList} value={v.goals.primary} onPick={x => setV1("goals", "primary", v.goals.primary === x ? "" : x)}/>
         </Ob2Q>}
+        {/* 목표(무엇을 원하나)와 계기(왜 하필 지금 PT인가)는 다른 축이라 목표 답변으로 추론할 수 없다. */}
+        <Ob2Q label="PT를 받아보기로 한 계기는 무엇인가요?" hint="선택 · 가장 가까운 것 1개">
+          <Ob2Chips options={OB2_PT_CAUSE_OPTIONS} value={v.goals.ptCause}
+            onPick={x => setV1("goals", "ptCause", v.goals.ptCause === x ? "" : x)}/>
+        </Ob2Q>
         <Ob2Q label="구체적인 목표" hint="예: 3개월 안에 5kg 감량, 통증 없이 계단 오르기">
           <textarea className="ob2-area" value={v.goals.detail} onChange={e => setV1("goals", "detail", e.target.value)}
             placeholder="자유롭게 적어주세요 (선택)"/>
@@ -3246,7 +3275,9 @@ function MemberOnboarding({profile, body, existing, onDone, mode = "create", onC
           {sumRow("기본", [d.gender, d.heightCm && `${d.heightCm}cm`, d.currentWeightKg && `${d.currentWeightKg}kg`].filter(Boolean).join(" · "))}
           {sumRow("최초 발견", v.acquisition.firstTouch === "other" ? v.acquisition.firstTouchOther : acquisitionLabel(ACQUISITION_FIRST_TOUCH_OPTIONS, v.acquisition.firstTouch))}
           {sumRow("상담 결정", v.acquisition.decisionTouch === "other" ? v.acquisition.decisionTouchOther : acquisitionLabel(ACQUISITION_DECISION_TOUCH_OPTIONS, v.acquisition.decisionTouch))}
+          {sumRow("등록 이유", joined(asArr(v.acquisition.joinReasons).map(r => r === "other" ? (v.acquisition.joinReasonOther || "기타") : acquisitionLabel(OB2_JOIN_REASON_OPTIONS, r))))}
           {sumRow("최우선 목표", v.goals.primary)}
+          {sumRow("PT 계기", acquisitionLabel(OB2_PT_CAUSE_OPTIONS, v.goals.ptCause))}
           {sumRow("전체 목표", joined(goalList))}
           {sumRow("구체적 목표", v.goals.detail)}
           {sumRow("운동 경험", [v.experience.level, v.experience.duration].filter(Boolean).join(" · "))}
@@ -10849,6 +10880,26 @@ export default function App() {
     } catch (e) {
       console.warn("[TEO GYM] loadMembers — 고객 페르소나 조회 실패:", e?.message);
     }
+
+    // 사전 문진 → 페르소나 초안 — 홈 "페르소나 확인 필요"가 "물어봐야 할 회원"과 "확인만 하면 되는 회원"을
+    // 구분하려면 회원별 문진 응답이 필요하다. 유입 분석이 쓰던 조회 함수를 그대로 재사용하고(같은 문서 1건 읽기),
+    // 결과를 acquisitionOnboardingById에도 함께 넣어 유입 분석 화면 진입 시 재조회가 일어나지 않게 한다.
+    // 실패해도 기존 동작(확정값 기준 집계)이 그대로 유지되도록 조용히 넘어간다.
+    try {
+      const ids = mbs.filter(isRegularAdminMember).map(m => m.id).filter(Boolean);
+      if (ids.length) {
+        const onboardingMap = await getMemberAcquisitionOnboardingMap(ids);
+        if (isStale()) return;
+        setAcquisitionOnboardingById(onboardingMap);
+        acquisitionOnboardingLoadedRef.current = true;
+        setMembers(prev => prev.map(m => {
+          const seed = buildOnboardingPersonaSeed(onboardingMap[m.id]);
+          return seed ? { ...m, personaSeed: seed } : (m.personaSeed ? { ...m, personaSeed: undefined } : m);
+        }));
+      }
+    } catch (e) {
+      console.warn("[TEO GYM] loadMembers — 사전 문진 페르소나 초안 조회 실패:", e?.message);
+    }
   }, []);
 
   const loadPairSessions = useCallback(async () => {
@@ -11883,8 +11934,11 @@ export default function App() {
         {screen==="soreness"   && member && <SorenessScreen member={member} sessions={sessions} onBack={() => setScreen("hub")} onSaveSession={async (sid, d) => { await updateSession(member.id, sid, d); setSessions(await getSessions(member.id)); }} showToast={showToast} />}
         {screen==="memberInputTrend" && member && <MemberInputTrendScreen member={member} sessions={sessions} bodyData={bodyData} nutritionData={nutritionData} cardioLogs={cardioLogs} loading={loading} initialDate={trendInitialDate} initialType={trendInitialType} onBack={() => setScreen("hub")} showToast={showToast} />}
         {screen==="memberInputStatus" && <MemberInputStatusScreen members={members} liveMembersById={liveMembersById} onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "hub")} onSelectMember={goHub} />}
-        {/* 페르소나 분석 — members/{id}.persona만 읽는다(추가 조회 없음). 회원 클릭 시 기존 goHub 흐름 그대로 회원 상세로 이동 */}
+        {/* 페르소나 분석 — 회원 목록 로드 때 이미 붙여 둔 persona(확정값)·personaSeed(사전 문진 초안)와
+            온보딩 유입 응답만 읽는다(이 화면에서의 추가 Firestore 조회 없음).
+            회원 클릭 시 기존 goHub 흐름 그대로 회원 상세로 이동 */}
         {screen==="persona" && <PersonaAnalyticsScreen members={members.map(m => liveMembersById[m.id] ? {...m, ...liveMembersById[m.id]} : m)}
+          onboardingById={acquisitionOnboardingById}
           setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast}
           onOpenMember={id=>{ const target = members.find(m=>m.id===id); if (target) goHub(target, {scrollTarget:"hub-sec-persona"}); }}
           onBack={()=>setScreen(analyticsReturn === "report" ? "report" : "home")} />}
@@ -13174,9 +13228,12 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
   const personaVisibleRows = useMemo(() => {
     if (personaFilter === "done") return personaDoneList;
     if (personaFilter === "both") return personaPendingList.filter(r => r.progress.completed === 0);
+    // 사전 문진에서 초안이 들어와 "물어볼 필요 없이 확인만 하면 되는" 회원만 추린다.
+    if (personaFilter === "draft") return personaPendingList.filter(r => r.progress.hasDraft);
     if (personaFilter === "ptTrigger" || personaFilter === "selectionReason") return personaPendingList.filter(r => r.progress.missing.includes(personaFilter));
     return personaPendingList;
   }, [personaFilter, personaPendingList, personaDoneList]);
+  const personaDraftCount = useMemo(() => personaPendingList.filter(r => r.progress.hasDraft).length, [personaPendingList]);
   const SEARCH_STATUS_LABEL = { active:"진행중", paused:"휴식중", ended:"종료", waiting:"수업 대기" };
 
   // 검색 결과 드롭다운 — 데스크톱 검색창(768px 이상)과 모바일 인라인 검색창(768px 미만)이 완전히 동일한 JSX를
@@ -13516,7 +13573,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={appUsageCheckRows.length} unit="명" title="회원앱 확인 필요" desc="최근 이용 흔적이나 입력이 뜸해요" doneDesc="모든 회원이 앱을 꾸준히 이용하고 있어요" cta="확인하기" onClick={scrollToSection("home-appusage-check")} />
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={reviewPendingList.length} unit="명" title="후기 미작성" desc="아직 후기가 완료되지 않았어요" doneDesc="모든 회원의 후기가 완료됐어요" cta="확인하기" onClick={scrollToSection("home-review-pending")} />
             <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc3} tone="amber" count={ptRenewalNoticeList.length} unit="명" title="재등록 안내 필요" desc="PT 잔여 횟수가 얼마 남지 않았어요" doneDesc="재등록 안내가 필요한 회원이 없어요" cta="확인하기" onClick={scrollToSection("home-pt-renewal")} />
-            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="mint" count={personaPendingList.length} unit="명" title="페르소나 확인 필요" desc={personaTodayRows.length?`오늘 만나는 회원 ${personaTodayRows.length}명에게 물어볼 수 있어요`:"수업 중 자연스럽게 여쭤보세요"} doneDesc="모든 회원의 핵심 질문이 기록됐어요" cta="확인하기" onClick={scrollToSection("home-persona-pending")} />
+            <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="mint" count={personaPendingList.length} unit="명" title="페르소나 확인 필요" desc={personaDraftCount?`${personaDraftCount}명은 사전 문진 답변이 자동 반영돼 확인만 하면 돼요`:(personaTodayRows.length?`오늘 만나는 회원 ${personaTodayRows.length}명에게 물어볼 수 있어요`:"수업 중 자연스럽게 여쭤보세요")} doneDesc="모든 회원의 핵심 질문이 확인 완료됐어요" cta="확인하기" onClick={scrollToSection("home-persona-pending")} />
             {onboardingPendingList.length > 0 && (
               <TodayActionCard isWide={isWide} compact={landscapeWide} icon={sc6} tone="amber" count={onboardingPendingList.length} unit="명" title="사전 문진 미완료" desc="회원앱 문진이 아직 끝나지 않았어요" doneDesc="모든 회원의 사전 문진이 완료됐어요" cta="확인하기" onClick={scrollToSection("home-onboarding-pending")} />
             )}
@@ -13819,7 +13876,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
         {/* ═══ 페르소나 확인 필요 — 아직 핵심 2문항을 못 물어본 회원. 오늘 만나는 회원이 항상 맨 위 ═══ */}
         <TodayListCard id="home-persona-pending" isWide={isWide} accentColor={DB.mintSoft}
           title="페르소나 확인 필요" count={personaVisibleRows.length} unit="명"
-          captionText={`핵심 질문 완료 ${personaCoverage.done} / ${personaCoverage.total}명${personaCoverage.total?` (${personaCoverage.pct}%)`:""} · 미완료 ${personaPendingList.length}명`}
+          captionText={`핵심 질문 확인 완료 ${personaCoverage.done} / ${personaCoverage.total}명${personaCoverage.total?` (${personaCoverage.pct}%)`:""} · 미완료 ${personaPendingList.length}명${personaDraftCount?` (문진 자동반영 ${personaDraftCount}명은 확인만 하면 됩니다)`:""}`}
           emptyText={personaFilter==="done" ? "아직 핵심 질문을 모두 기록한 회원이 없습니다" : "모든 회원의 핵심 질문이 기록됐습니다"}
           headerExtra={
             <>
@@ -13829,7 +13886,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                   <div style={{display:"grid",gap:3}}>
                     {personaTodayRows.slice(0,4).map(r => (
                       <div key={r.member.id} style={{fontFamily:DB.font,fontSize:12,color:DB.text,fontWeight:700}}>
-                        {r.member.name} <span style={{color:DB.sub,fontWeight:600}}>— {personaMissingLabel(r.progress.missing)}</span>
+                        {r.member.name} <span style={{color:DB.sub,fontWeight:600}}>— {personaMissingLabel(r.progress.missing, r.progress.draft)}</span>
                       </div>
                     ))}
                     {personaTodayRows.length > 4 && (
@@ -13839,7 +13896,7 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                 </div>
               )}
               <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"8px 0 2px"}}>
-                {[["all",`전체 미완료 ${personaPendingList.length}`],["both","둘 다 미입력"],["ptTrigger","PT 시작 계기"],["selectionReason","테오짐 선택 이유"],["done",`완료 ${personaDoneList.length}`]].map(([k,l]) => (
+                {[["all",`전체 미완료 ${personaPendingList.length}`],...(personaDraftCount?[["draft",`문진 자동반영 ${personaDraftCount}`]]:[]),["both","둘 다 미입력"],["ptTrigger","PT 시작 계기"],["selectionReason","테오짐 선택 이유"],["done",`확인 완료 ${personaDoneList.length}`]].map(([k,l]) => (
                   <button key={k} type="button" onClick={()=>setPersonaFilter(k)} style={{
                     padding:"5px 11px",borderRadius:999,cursor:"pointer",fontFamily:DB.font,fontSize:11.5,fontWeight:personaFilter===k?800:700,
                     border:personaFilter===k?"1px solid transparent":`1px solid ${DB.border}`,
@@ -13857,10 +13914,12 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
               <div style={{fontFamily:DB.font,fontWeight:700,fontSize:14,color:DB.text,letterSpacing:"-.2px",display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                 {row.member.name} 회원
                 {row.isToday && <span style={{fontFamily:DB.font,fontWeight:800,fontSize:10,padding:"2px 8px",borderRadius:999,background:DB.mintTintStrong,color:DB.mintSoft}}>오늘 수업</span>}
+                {/* 사전 문진에서 초안이 들어온 회원 — 물어볼 필요 없이 열어서 확인만 하면 되는 대상 */}
+                {row.progress.hasDraft && <span style={{fontFamily:DB.font,fontWeight:800,fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(47,115,246,.12)",color:"#2F73F6"}}>문진 자동반영</span>}
                 <span style={{fontFamily:DB.font,fontWeight:700,fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(15,23,42,.05)",color:DB.sub}}>{MEMBER_STATUS_LABEL[row.status]||row.status}</span>
               </div>
               <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,marginTop:2}}>
-                {row.progress.done ? `핵심 질문 완료 (${row.progress.completed}/${row.progress.total})` : `${row.progress.completed}/${row.progress.total} · 남은 질문: ${personaMissingLabel(row.progress.missing)}`}
+                {row.progress.done ? `핵심 질문 완료 (${row.progress.completed}/${row.progress.total})` : `${row.progress.completed}/${row.progress.total} · ${row.progress.hasDraft ? "" : "남은 질문: "}${personaMissingLabel(row.progress.missing, row.progress.draft)}`}
                 {!row.isToday && row.nextDate ? ` · 다음 수업 ${formatMonthDayKo(row.nextDate)}` : ""}
               </div>
             </div>
@@ -14534,6 +14593,9 @@ const PERSONA_TRIGGER_OPTIONS = [
   { value: "fitness_drop", label: "체력 저하", group: "goal" },
   { value: "pain", label: "통증·불편함 개선", group: "goal" },
   { value: "event", label: "바디프로필·대회 등 특정 목표", group: "goal" },
+  // 사전 문진 목표(OB2_GOAL_OPTIONS)의 "스트레스 해소"에 대응하는 값이 없어 other로 뭉개지던 것을 신설.
+  // 기존 저장값에는 이 코드가 존재하지 않으므로 과거 데이터에 아무 영향이 없다(추가만).
+  { value: "stress_relief", label: "스트레스 해소", group: "goal" },
   { value: "solo_fail", label: "혼자 운동하다 실패", group: "cause" },
   { value: "how_to", label: "운동 방법을 모름", group: "cause" },
   { value: "habit", label: "운동 습관을 만들고 싶음", group: "cause" },
@@ -14626,9 +14688,91 @@ function personaCategoryLabel(key, value) {
   return personaOptionLabel(personaQuestionByKey(key)?.options, value);
 }
 
-// 저장된 답변 1건 정규화 — 카테고리도 원문도 없으면 "미입력"(null)으로 본다.
-function getPersonaEntry(member, key) {
-  const raw = member?.persona?.[key];
+// ── 사전 문진 → 페르소나 초안 파생 ──────────────────────────────
+// 회원앱 사전 문진(members/{id}/memberOnboarding/main.v2)의 답변을 페르소나 코드로 "읽을 때마다 변환"한다.
+// Firestore에 저장하지 않는 이유는 두 가지다.
+//   1) 권한 — persona 원본은 members/{id}/private/admin 이고 이 경로는 트레이너만 write 할 수 있다
+//      (firestore.rules). 회원이 문진을 제출하는 시점에 회원 앱이 페르소나를 쓰는 것은 불가능하다.
+//   2) 충돌 방지 — 저장하지 않으면 관리자 확정값을 문진이 덮어쓰는 사고가 구조적으로 일어날 수 없다.
+//      회원이 문진을 몇 번을 고쳐도 바뀌는 것은 이 파생값(초안)뿐이다.
+//
+// 상태는 셋으로 나뉜다.
+//   · 미기록   — persona[key]도 초안도 없음
+//   · 초안     — 문진 응답에서 파생됨. 홈 "페르소나 확인 필요"에 계속 남는다(대표 확인 전).
+//   · 확인완료 — persona[key]가 있음. 대표가 직접 입력했거나 초안을 확인 완료 처리한 상태.
+// "확인 완료"를 위한 별도 플래그는 만들지 않는다 — 초안을 persona[key]로 확정 저장하는 것이 곧 확인 완료다.
+// 덕분에 기존 회원(persona[key]가 이미 있는 회원)은 마이그레이션 없이 그대로 확인 완료로 유지된다.
+const PERSONA_SOURCE_ONBOARDING = "onboarding";
+
+// 사전 문진 운동 목표(OB2_GOAL_OPTIONS의 한글 라벨) → 페르소나 ptTrigger 코드.
+// 회귀 스크립트가 이 구간을 통째로 잘라 실행하므로 매핑표를 이 안에 둔다(self-contained 유지).
+const PERSONA_ONBOARDING_GOAL_TO_TRIGGER = {
+  "체지방 감량": "weight_gain",
+  "근력 증가": "muscle_gain",
+  "근육 증가": "muscle_gain",
+  "체형 교정": "body_correction",
+  "자세 개선": "body_correction",
+  "통증 개선": "pain",
+  "재활 목적": "pain",
+  "건강 관리": "health",
+  "체력 증가": "health",
+  "바디프로필": "event",
+  "스트레스 해소": "stress_relief",
+  "기타": "other",
+};
+function personaValidOption(options, value) {
+  const v = String(value || "").trim();
+  return v && (options || []).some(o => o.value === v) ? v : "";
+}
+// 회원앱 사전 문진이 그대로 렌더하는 선택지 — 페르소나 taxonomy에서 파생시켜 두 화면의 코드값을 강제로 일치시킨다
+// (문진에 별도 선택지를 새로 만들면 변환표가 또 하나 생기고 라벨이 어긋나기 시작한다).
+// 문진 화면(MemberOnboarding)은 이 파일 앞쪽에 있지만 컴포넌트 렌더는 모듈 평가가 끝난 뒤라 참조에 문제가 없다.
+const OB2_PT_CAUSE_OPTIONS = PERSONA_TRIGGER_OPTIONS.filter(o => o.group === "cause");
+const OB2_JOIN_REASON_OPTIONS = PERSONA_SELECTION_OPTIONS;
+// 등록 결정 이유는 복수 선택이지만 개수를 열어두면 "다 좋아서" 전부 고르게 되어 집계가 무의미해진다.
+const OB2_JOIN_REASON_MAX = 3;
+// 사전 문진 1건 → 핵심 2문항 초안. 응답이 없으면 그 항목은 null(미기록)로 남긴다 — 추론하지 않는다.
+function buildOnboardingPersonaSeed(onboarding) {
+  const v2 = onboarding?.v2;
+  if (!v2 || typeof v2 !== "object") return null;
+  const goals = v2.goals || {};
+  const acq = v2.acquisition || {};
+  const at = onboarding.onboardingUpdatedAt || v2.updatedAt || "";
+  const seed = {};
+
+  // ① PT 시작 계기 — 회원이 직접 고른 "계기"(ptCause)가 주 이유, 운동 목표에서 변환한 값이 보조 이유.
+  //    계기 문항에 답하지 않았으면 목표 변환값이 주 이유로 올라간다.
+  const causeCode = personaValidOption(PERSONA_TRIGGER_OPTIONS, goals.ptCause);
+  const goalSource = String(goals.primary || "").trim() || (Array.isArray(goals.list) ? String(goals.list[0] || "").trim() : "");
+  const goalCode = PERSONA_ONBOARDING_GOAL_TO_TRIGGER[goalSource] || "";
+  const triggerCategory = causeCode || goalCode;
+  const triggerSecondary = causeCode && goalCode && goalCode !== causeCode ? goalCode : "";
+  const triggerRaw = String(goals.detail || "").trim();
+  if (triggerCategory || triggerRaw) {
+    seed.ptTrigger = {
+      category: triggerCategory, secondaryCategory: triggerSecondary, rawText: triggerRaw,
+      extraCategories: [], source: PERSONA_SOURCE_ONBOARDING, createdAt: at, updatedAt: at, updatedBy: "",
+    };
+  }
+
+  // ② 테오짐 선택 이유 — 문진의 "등록 결정 이유"(복수 최대 3개)를 순서 그대로 주/보조/추가로 나눈다.
+  //    상담 신청 접점(decisionTouch)은 질문도 시점도 다르므로 여기에 절대 섞지 않는다.
+  const reasons = (Array.isArray(acq.joinReasons) ? acq.joinReasons : [])
+    .map(r => personaValidOption(PERSONA_SELECTION_OPTIONS, r))
+    .filter(Boolean);
+  const uniqueReasons = reasons.filter((r, i) => reasons.indexOf(r) === i);
+  const reasonOther = String(acq.joinReasonOther || "").trim();
+  if (uniqueReasons.length || reasonOther) {
+    seed.selectionReason = {
+      category: uniqueReasons[0] || "", secondaryCategory: uniqueReasons[1] || "",
+      rawText: reasonOther, extraCategories: uniqueReasons.slice(2),
+      source: PERSONA_SOURCE_ONBOARDING, createdAt: at, updatedAt: at, updatedBy: "",
+    };
+  }
+  return Object.keys(seed).length ? seed : null;
+}
+
+function normalizePersonaEntry(raw, { confirmed, fallbackSource }) {
   if (!raw || typeof raw !== "object") return null;
   const category = String(raw.category || "").trim();
   const secondaryCategory = String(raw.secondaryCategory || "").trim();
@@ -14636,32 +14780,59 @@ function getPersonaEntry(member, key) {
   if (!category && !rawText) return null;
   return {
     category, secondaryCategory, rawText,
-    source: String(raw.source || "").trim() || PERSONA_SOURCE_ADMIN,
+    // 복수 선택(등록 결정 이유 3개째 이후)을 잃지 않기 위한 보존 필드 — 없으면 빈 배열이라 기존 동작 그대로다.
+    extraCategories: Array.isArray(raw.extraCategories) ? raw.extraCategories.map(v => String(v || "").trim()).filter(Boolean) : [],
+    source: String(raw.source || "").trim() || fallbackSource,
     createdAt: raw.createdAt || "",
     updatedAt: raw.updatedAt || raw.createdAt || "",
     updatedBy: raw.updatedBy || "",
+    confirmedAt: raw.confirmedAt || "",
+    confirmed,
   };
+}
+// 저장된 답변 1건 정규화 — 카테고리도 원문도 없으면 "미입력"(null)으로 본다.
+// 관리자 확정값(persona)이 있으면 언제나 그 값이고, 없을 때만 사전 문진 초안(personaSeed)으로 내려간다.
+function getPersonaEntry(member, key) {
+  const confirmedEntry = normalizePersonaEntry(member?.persona?.[key], { confirmed: true, fallbackSource: PERSONA_SOURCE_ADMIN });
+  if (confirmedEntry) return confirmedEntry;
+  return normalizePersonaEntry(member?.personaSeed?.[key], { confirmed: false, fallbackSource: PERSONA_SOURCE_ONBOARDING });
 }
 function hasPersonaAnswer(member, key) {
   return !!getPersonaEntry(member, key);
 }
+// 관리자가 확인 완료한 답변만 — 홈 "페르소나 확인 필요" 목록의 제외 기준이다.
+function hasPersonaConfirmedAnswer(member, key) {
+  return !!normalizePersonaEntry(member?.persona?.[key], { confirmed: true, fallbackSource: PERSONA_SOURCE_ADMIN });
+}
 // 핵심 질문 진행 상태 — 완료 여부를 Firestore에 따로 저장하지 않고 항상 답변 존재 여부로만 계산한다
 // (완료 플래그를 문서에 두면 답변 수정·삭제 때 값이 어긋나므로 파생 필드를 아예 만들지 않는다).
+// "완료"의 기준은 관리자 확인 완료(persona[key])다. 사전 문진 초안만 있는 항목은 missing에 남되
+// draft에도 함께 담아, 목록에서 "문진 자동반영 · 확인 필요"로 구분해 보여줄 수 있게 한다.
 function getPersonaProgress(member) {
-  const missing = PERSONA_CORE_QUESTIONS.filter(q => !hasPersonaAnswer(member, q.key)).map(q => q.key);
+  const missing = PERSONA_CORE_QUESTIONS.filter(q => !hasPersonaConfirmedAnswer(member, q.key)).map(q => q.key);
+  const draft = missing.filter(key => !!member?.personaSeed?.[key] && hasPersonaAnswer(member, key));
   return {
     completed: PERSONA_CORE_QUESTIONS.length - missing.length,
     total: PERSONA_CORE_QUESTIONS.length,
     missing,
+    draft,
+    hasDraft: draft.length > 0,
     done: missing.length === 0,
   };
 }
 // "다음에 무엇을 물어봐야 하는가"를 회원 카드 한 줄로 — 목록·회원 상세가 같은 문구를 쓴다.
-function personaMissingLabel(missing) {
+// 사전 문진에서 초안이 들어온 항목은 "물어볼 것"이 아니라 "확인할 것"이므로 문구를 나눈다.
+function personaMissingLabel(missing, draft) {
   const list = missing || [];
+  const drafts = draft || [];
   if (!list.length) return "완료";
-  if (list.length >= PERSONA_CORE_QUESTIONS.length) return "두 질문 모두";
-  return PERSONA_CORE_QUESTIONS.find(q => q.key === list[0])?.label || "";
+  const label = (key) => PERSONA_CORE_QUESTIONS.find(q => q.key === key)?.label || "";
+  if (drafts.length >= list.length) {
+    return list.length >= PERSONA_CORE_QUESTIONS.length ? "문진 자동반영 · 확인 필요" : `${label(list[0])} · 문진 자동반영 확인 필요`;
+  }
+  const askFirst = list.find(key => !drafts.includes(key));
+  if (list.length >= PERSONA_CORE_QUESTIONS.length && !drafts.length) return "두 질문 모두";
+  return drafts.length ? `${label(askFirst)} · 나머지는 문진 자동반영` : label(list[0]);
 }
 
 // 페르소나 수집 대상 — 대표 개인 운동기록 계정·테스트 계정은 기존 공용 판정(isRegularAdminMember)으로 제외한다.
@@ -14810,6 +14981,37 @@ function buildPersonaStats(members) {
     },
   };
 }
+// 유입 경로 × 등록 결정 이유 교차 — "어디서 알게 됐는가"와 "왜 여기로 정했는가"는 끝까지 다른 축으로 둔다.
+// 이 함수는 채널 문자열과 이유 코드 배열만 받는 순수 집계다(유입 정규화는 화면에서 공용 selector로 끝내고 넘긴다).
+// rows: [{ channel, reasons: [코드, ...] }] — channel이 비었거나 이유가 없는 회원은 분모에서 제외한다.
+function buildPersonaAcquisitionCross(rows = []) {
+  const map = new Map();
+  (rows || []).forEach(r => {
+    const channel = String(r?.channel || "").trim();
+    const reasons = (r?.reasons || []).map(v => String(v || "").trim()).filter(Boolean);
+    const unique = reasons.filter((v, i) => reasons.indexOf(v) === i);
+    if (!channel || !unique.length) return;
+    if (!map.has(channel)) map.set(channel, { channel, members: 0, reasonMap: new Map() });
+    const bucket = map.get(channel);
+    bucket.members += 1;
+    // 한 회원이 같은 이유로 두 번 세어지지 않도록 회원 단위로 중복을 먼저 제거한다.
+    unique.forEach(v => bucket.reasonMap.set(v, (bucket.reasonMap.get(v) || 0) + 1));
+  });
+  return [...map.values()]
+    .map(b => ({
+      channel: b.channel,
+      members: b.members,
+      reasons: [...b.reasonMap.entries()]
+        .map(([value, count]) => ({
+          value, label: personaOptionLabel(PERSONA_SELECTION_OPTIONS, value), count,
+          // 분모는 "그 채널로 들어온 회원 수" — 복수 선택이라 합계는 100%를 넘을 수 있다.
+          pct: Math.round((count / b.members) * 1000) / 10,
+        }))
+        .sort((a, b2) => b2.count - a.count || a.label.localeCompare(b2.label, "ko")),
+    }))
+    .sort((a, b) => b.members - a.members || a.channel.localeCompare(b.channel, "ko"));
+}
+
 // 표본이 적을 때 과도한 결론을 내리지 않도록 하는 안내 기준(분석 화면에서만 사용).
 const PERSONA_SMALL_SAMPLE = 10;
 
@@ -18512,6 +18714,9 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
             <div>
               {line("최초 발견", acquisitionText(ACQUISITION_FIRST_TOUCH_OPTIONS, ac.firstTouch, ac.firstTouchOther))}
               {line("상담 결정", acquisitionText(ACQUISITION_DECISION_TOUCH_OPTIONS, ac.decisionTouch, ac.decisionTouchOther))}
+              {line("등록 이유", (Array.isArray(ac.joinReasons) ? ac.joinReasons : [])
+                .map(r => r === "other" ? (ac.joinReasonOther || "기타") : (acquisitionLabel(OB2_JOIN_REASON_OPTIONS, r) || r))
+                .filter(Boolean).join(", "))}
               {line("유입 채널", acqSummary.sources.join(", ") || ACQ_UNKNOWN)}
               {acqSummary.selectedSource && (
                 <div style={{fontFamily:DB.font,fontSize:10.5,color:DB.faint,fontWeight:600,marginTop:-4,marginBottom:4,paddingLeft:88}}>
@@ -18520,6 +18725,7 @@ function OnboardingSummaryCard({ member, onboarding, onPatch, showToast }) {
               )}
               {line("최우선 목표", g.primary)}
               {line("보조 목표", asArr(g.list).filter(x => x !== g.primary).join(", "))}
+              {line("PT 계기", acquisitionLabel(OB2_PT_CAUSE_OPTIONS, g.ptCause))}
               {line("구체적 목표", g.detail)}
               {line("운동 경험", [ex.level, ex.duration].filter(Boolean).join(" · "))}
               {line("이전 PT", [ex.prevPT, ex.prevPTSatisfaction].filter(Boolean).join(" · "))}
@@ -18684,7 +18890,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const [showAllMsgs, setShowAllMsgs] = useState(false);
   // ── 고객 페르소나(TEO GYM PERSONA) — 관리자 전용 입력 상태 ──
   const [personaModal, setPersonaModal] = useState(null); // 입력 중인 질문 key(null이면 모달 닫힘)
-  const [personaForm, setPersonaForm] = useState({ category:"", secondaryCategory:"", rawText:"" });
+  const [personaForm, setPersonaForm] = useState({ category:"", secondaryCategory:"", rawText:"", extraCategories:[] });
   const [personaSaving, setPersonaSaving] = useState(false);
   const [showPersonaContext, setShowPersonaContext] = useState(false); // 기존 데이터 참고(성별·목표·유입 등) 접기
   const [showPersonaExtra, setShowPersonaExtra] = useState(false);     // 선택 항목(만족·개선 등) 접기
@@ -20098,14 +20304,21 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   // 갱신하므로 member.persona가 항상 최신이다. liveMembersById 폴백은 초기 배포에서 members 문서에 남아있던
   // 레거시 값을 마이그레이션 전까지 놓치지 않기 위한 안전장치일 뿐이다.
   const livePersona = member.persona ?? liveMembersById[member.id]?.persona ?? null;
-  const personaMember = { ...member, persona: livePersona || null };
+  // 사전 문진 초안 — 저장하지 않고 화면을 그릴 때마다 회원의 문진 응답(ob)에서 파생한다.
+  // 관리자 확정값(livePersona)이 있는 항목은 getPersonaEntry가 그쪽을 먼저 돌려주므로 초안이 이길 일이 없다.
+  const personaSeed = buildOnboardingPersonaSeed(ob);
+  const personaMember = { ...member, persona: livePersona || null, personaSeed };
   const personaProgress = getPersonaProgress(personaMember);
   // 기존 유입 데이터 — 유입 분석과 완전히 같은 공용 selector를 그대로 쓴다(복사 저장 금지, 읽기만).
   const personaAcq = normalizeMemberAcquisitionData(member, ob);
 
+  // 초안(사전 문진 파생)이 있으면 그 값을 그대로 채워 연다 — 대표는 확인하고 저장만 하면 확인 완료가 된다.
   const openPersonaModal = (key) => {
     const cur = getPersonaEntry(personaMember, key);
-    setPersonaForm({ category: cur?.category || "", secondaryCategory: cur?.secondaryCategory || "", rawText: cur?.rawText || "" });
+    setPersonaForm({
+      category: cur?.category || "", secondaryCategory: cur?.secondaryCategory || "", rawText: cur?.rawText || "",
+      extraCategories: cur?.extraCategories || [],
+    });
     setPersonaModal(key);
   };
   // 저장 — members/{id}.persona 맵 하나만 갱신한다. 전체 회원 reload 없이
@@ -20120,15 +20333,21 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     setPersonaSaving(true);
     try {
       const now = new Date().toISOString();
-      const prev = getPersonaEntry(personaMember, key);
+      // 확정 저장 = 확인 완료. 이미 확정값이 있으면 그 이력(출처·최초 기록 시각)을 그대로 이어쓰고,
+      // 초안만 있던 항목이면 출처를 "onboarding"으로 남겨 나중에도 문진에서 온 답이라는 사실이 보인다.
+      const prevConfirmed = livePersona?.[key];
+      const prev = prevConfirmed ? getPersonaEntry({ persona: livePersona }, key) : (personaSeed?.[key] || null);
       const entry = {
         category,
         secondaryCategory: String(personaForm.secondaryCategory || "").trim(),
         rawText, // 회원이 실제로 한 말 — 카테고리로 요약해 버리지 않고 항상 원문 그대로 보존한다.
+        // 등록 결정 이유 3개째 이후 — 문진 복수 선택을 확정 저장에서도 잃지 않는다.
+        extraCategories: (personaForm.extraCategories || []).filter(v => v && v !== category && v !== personaForm.secondaryCategory),
         source: prev?.source || PERSONA_SOURCE_ADMIN,
         createdAt: prev?.createdAt || now,
         updatedAt: now,
         updatedBy: auth.currentUser?.uid || "",
+        confirmedAt: prevConfirmed?.confirmedAt || now,
       };
       const nextPersona = { ...(livePersona || {}), [key]: entry, updatedAt: now };
       await updateMember(member.id, { persona: nextPersona });
@@ -20160,6 +20379,34 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     } finally { setPersonaSaving(false); }
   };
 
+  // 초안 원클릭 확인 완료 — 모달을 열지 않고 문진 파생값을 그대로 확정 저장한다(값은 한 글자도 바꾸지 않는다).
+  const confirmPersonaSeed = async (key) => {
+    const seed = personaSeed?.[key];
+    if (personaSaving || !seed) return;
+    setPersonaSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const entry = {
+        category: seed.category || "",
+        secondaryCategory: seed.secondaryCategory || "",
+        rawText: seed.rawText || "",
+        extraCategories: Array.isArray(seed.extraCategories) ? seed.extraCategories : [],
+        source: PERSONA_SOURCE_ONBOARDING,
+        createdAt: seed.createdAt || now,
+        updatedAt: now,
+        updatedBy: auth.currentUser?.uid || "",
+        confirmedAt: now,
+      };
+      const nextPersona = { ...(livePersona || {}), [key]: entry, updatedAt: now };
+      await updateMember(member.id, { persona: nextPersona });
+      onMemberPatch({ persona: nextPersona });
+      showToast?.(`${personaQuestionByKey(key)?.label || "페르소나"} 확인 완료로 기록했습니다.`);
+    } catch(e) {
+      console.error(e);
+      showToast?.("저장 실패: " + (e?.message || "오류"), "err");
+    } finally { setPersonaSaving(false); }
+  };
+
   const personaChip = (label, active, onClick) => (
     <button key={label} type="button" onClick={onClick} style={{
       borderRadius:999, padding:"7px 13px", minHeight:36, fontSize:12.5, fontWeight:active?800:700, fontFamily:DB.font, cursor:"pointer",
@@ -20177,29 +20424,43 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   // 질문 1건 표시 — 답변이 없으면 "아직 기록되지 않았습니다 + 기록하기", 있으면 카테고리·원문·수정일.
   const personaAnswerBlock = (q, { core = false } = {}) => {
     const e = getPersonaEntry(personaMember, q.key);
+    // 초안 = 사전 문진에서 자동으로 들어왔지만 대표가 아직 확인하지 않은 상태.
+    const isDraft = !!e && !e.confirmed;
     return (
-      <div key={q.key} style={{border:`1px solid ${DB.border}`,borderRadius:DB.radiusSm,background:DB.bg,padding:"12px 13px",marginBottom:8}}>
+      <div key={q.key} style={{border:`1px solid ${isDraft?"rgba(47,115,246,.32)":DB.border}`,borderRadius:DB.radiusSm,background:isDraft?"rgba(47,115,246,.04)":DB.bg,padding:"12px 13px",marginBottom:8}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:e?6:4}}>
           <span style={{fontSize:12.5,fontWeight:800,color:DB.text,fontFamily:DB.font}}>{q.label}</span>
           {core && !e && <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.13)",color:"#B45309",fontFamily:DB.font}}>미기록</span>}
+          {isDraft && <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:999,background:"rgba(47,115,246,.12)",color:"#2F73F6",fontFamily:DB.font}}>사전문진 · 확인 필요</span>}
           <button type="button" onClick={()=>openPersonaModal(q.key)} style={{marginLeft:"auto",border:e?`1px solid ${DB.border}`:"1px solid transparent",background:e?DB.card:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:700,color:e?DB.sub:"#fff",cursor:"pointer",fontFamily:DB.font,flexShrink:0}}>{e?"수정":"기록하기"}</button>
+          {isDraft && (
+            <button type="button" disabled={personaSaving} onClick={()=>confirmPersonaSeed(q.key)}
+              style={{border:"1px solid transparent",background:`linear-gradient(135deg,${DB.mint},${DB.mintSoft})`,borderRadius:10,padding:"6px 12px",fontSize:11.5,fontWeight:800,color:"#fff",cursor:personaSaving?"default":"pointer",fontFamily:DB.font,flexShrink:0,opacity:personaSaving?0.6:1}}>
+              {personaSaving?"저장 중...":"확인 완료"}
+            </button>
+          )}
         </div>
         <div style={{fontSize:11,color:DB.faint,lineHeight:1.55,fontFamily:DB.font,marginBottom:e?8:0,wordBreak:"keep-all"}}>{q.question}</div>
         {!e ? (
           <div style={{fontSize:12,fontWeight:700,color:DB.faint,fontFamily:DB.font,marginTop:6}}>아직 기록되지 않았습니다</div>
         ) : (
           <>
-            {(e.category || e.secondaryCategory) && (
+            {(e.category || e.secondaryCategory || e.extraCategories.length > 0) && (
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:e.rawText?7:0}}>
                 {e.category && <span style={{fontSize:11,fontWeight:800,padding:"3px 10px",borderRadius:999,background:DB.mintTintStrong,color:DB.mintSoft,fontFamily:DB.font}}>{personaCategoryLabel(q.key, e.category)}</span>}
                 {e.secondaryCategory && <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:999,background:"rgba(15,23,42,.05)",color:DB.sub,fontFamily:DB.font}}>{personaCategoryLabel(q.key, e.secondaryCategory)} (보조)</span>}
+                {e.extraCategories.map(v => (
+                  <span key={v} style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:999,background:"rgba(15,23,42,.05)",color:DB.sub,fontFamily:DB.font}}>{personaCategoryLabel(q.key, v)}</span>
+                ))}
               </div>
             )}
             {e.rawText && (
               <div style={{fontSize:12.5,lineHeight:1.7,color:DB.text,fontFamily:DB.font,whiteSpace:"pre-line",wordBreak:"keep-all"}}>“{e.rawText}”</div>
             )}
             <div style={{fontSize:10.5,color:DB.faint,fontFamily:DB.font,marginTop:7}}>
-              기록 {formatCompactDate(e.createdAt)}{e.updatedAt && e.updatedAt !== e.createdAt ? ` · 수정 ${formatCompactDate(e.updatedAt)}` : ""} · 대표 직접 입력
+              {e.source === PERSONA_SOURCE_ONBOARDING
+                ? `회원 사전 문진 응답${e.createdAt ? ` · ${formatCompactDate(e.createdAt)}` : ""}${e.confirmed ? ` · 확인 완료 ${formatCompactDate(e.confirmedAt || e.updatedAt)}` : " · 대표 확인 전"}`
+                : `기록 ${formatCompactDate(e.createdAt)}${e.updatedAt && e.updatedAt !== e.createdAt ? ` · 수정 ${formatCompactDate(e.updatedAt)}` : ""} · 대표 직접 입력`}
             </div>
           </>
         )}
@@ -20214,11 +20475,13 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               <span style={{fontSize:10.5,fontWeight:800,padding:"3px 10px",borderRadius:999,fontFamily:DB.font,
                 background:personaProgress.done?DB.mintTintStrong:"rgba(245,158,11,.13)",
                 color:personaProgress.done?DB.mintSoft:"#B45309"}}>
-                {personaProgress.done ? "핵심 질문 완료" : `핵심 질문 ${personaProgress.completed}/${personaProgress.total} 완료`}
+                {personaProgress.done ? "핵심 질문 확인 완료" : `핵심 질문 ${personaProgress.completed}/${personaProgress.total} 확인 완료`}
               </span>
             </div>
             <div style={{fontSize:11.5,color:DB.faint,lineHeight:1.6,marginBottom:10,fontFamily:DB.font,wordBreak:"keep-all"}}>
-              수업 중 자연스럽게 여쭤보고 기록하는 항목입니다. 회원앱에는 표시되지 않습니다.
+              {personaProgress.hasDraft
+                ? "회원이 사전 문진에서 답한 내용이 자동으로 채워져 있습니다. 내용을 확인하고 “확인 완료”를 누르면 기록으로 확정됩니다(문진을 다시 수정해도 확정값은 바뀌지 않습니다)."
+                : "수업 중 자연스럽게 여쭤보고 기록하는 항목입니다. 회원앱에는 표시되지 않습니다."}
             </div>
 
             {PERSONA_CORE_QUESTIONS.map(q => personaAnswerBlock(q, { core:true }))}
@@ -28933,7 +29196,7 @@ function PersonaBarRow({ label, count, pct, total, onClick, active }) {
   );
 }
 
-function PersonaAnalyticsScreen({ members = [], onBack, onOpenMember, setScreen, loadMembers, loadPairSessions, showToast }) {
+function PersonaAnalyticsScreen({ members = [], onboardingById = {}, onBack, onOpenMember, setScreen, loadMembers, loadPairSessions, showToast }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState("all");
   const [ageFilter, setAgeFilter] = useState("all");
@@ -28941,6 +29204,7 @@ function PersonaAnalyticsScreen({ members = [], onBack, onOpenMember, setScreen,
   const [quoteKey, setQuoteKey] = useState("ptTrigger");
   const [quoteAnonymous, setQuoteAnonymous] = useState(false);
   const [crossOpen, setCrossOpen] = useState({});
+  const [acqCrossOpen, setAcqCrossOpen] = useState({});
   const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
   useEffect(() => {
     const h = () => setWinW(window.innerWidth);
@@ -28967,6 +29231,17 @@ function PersonaAnalyticsScreen({ members = [], onBack, onOpenMember, setScreen,
     return true;
   }), [members, statusFilter, genderFilter, ageFilter]);
   const stats = useMemo(() => buildPersonaStats(filteredMembers), [filteredMembers]);
+  // 유입 경로 × 등록 결정 이유 — 유입 정규화는 유입 분석과 완전히 같은 공용 selector를 재사용하고,
+  // 등록 이유는 페르소나 selectionReason(확정값 우선, 없으면 문진 초안)에서 복수 선택까지 모두 읽는다.
+  const acquisitionCross = useMemo(() => buildPersonaAcquisitionCross(filteredMembers.map(m => {
+    const acq = normalizeMemberAcquisitionData(m, onboardingById[m.id]);
+    const e = getPersonaEntry(m, "selectionReason");
+    return {
+      channel: acq.sources[0] || (acq.otherSource ? ACQ_UNKNOWN : ""),
+      reasons: e ? [e.category, e.secondaryCategory, ...e.extraCategories] : [],
+    };
+  })), [filteredMembers, onboardingById]);
+  const acquisitionCrossTotal = useMemo(() => acquisitionCross.reduce((n, c) => n + c.members, 0), [acquisitionCross]);
   const ageBands = useMemo(() => {
     const set = new Set((members || []).filter(isPersonaTargetMember).map(personaAgeBand).filter(Boolean));
     return [...set].sort();
@@ -29093,6 +29368,37 @@ function PersonaAnalyticsScreen({ members = [], onBack, onOpenMember, setScreen,
                       {c.reasons.map(r => <PersonaBarRow key={r.value} label={r.label} count={r.count} pct={r.pct} total={c.count} />)}
                       {c.count < PERSONA_SMALL_SAMPLE && (
                         <div style={{ fontSize: 10.5, color: DB.faint, fontWeight: 700, padding: "4px 8px 0" }}>표본 {c.count}명 — 참고용</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </AcqCard>
+
+        {/* ═══ 4-2. 유입 경로 × 등록 결정 이유 — 광고비 판단의 핵심 ═══ */}
+        {/* "어디서 알게 됐는가"(유입)와 "왜 여기로 정했는가"(등록 이유)는 끝까지 다른 축이다.
+            네이버로 들어온 사람이 실제로는 후기 때문에 등록했는지, 상담 때문이었는지를 이 표에서만 알 수 있다. */}
+        <AcqCard title="유입 경로 × 등록 결정 이유"
+          sub={acquisitionCrossTotal ? `유입 경로와 등록 이유가 모두 있는 회원 ${acquisitionCrossTotal}명 기준 · 등록 이유는 복수 선택이라 합계가 100%를 넘을 수 있습니다` : ""}>
+          {acquisitionCross.length === 0 ? (
+            <AcqEmpty msg="유입 경로와 등록 이유가 함께 기록된 회원이 아직 없습니다. 사전 문진의 “등록하기로 결정한 이유”가 쌓이면 자동으로 채워집니다." />
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {acquisitionCross.map(c => (
+                <div key={c.channel} style={{ border: `1px solid ${DB.border}`, borderRadius: 14, background: DB.bg, padding: "11px 12px" }}>
+                  <button type="button" onClick={() => setAcqCrossOpen(p => ({ ...p, [c.channel]: !p[c.channel] }))}
+                    style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: DB.font, display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: DB.text, wordBreak: "keep-all" }}>{c.channel}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: DB.faint }}>{c.members}명</span>
+                    <span style={{ marginLeft: "auto", color: DB.faint, fontSize: 11, transform: acqCrossOpen[c.channel] === false ? "none" : "rotate(180deg)" }}>▼</span>
+                  </button>
+                  {acqCrossOpen[c.channel] !== false && (
+                    <div style={{ display: "grid", gap: 2, marginTop: 7 }}>
+                      {c.reasons.map(r => <PersonaBarRow key={r.value} label={r.label} count={r.count} pct={r.pct} total={c.members} />)}
+                      {c.members < PERSONA_SMALL_SAMPLE && (
+                        <div style={{ fontSize: 10.5, color: DB.faint, fontWeight: 700, padding: "4px 8px 0" }}>표본 {c.members}명 — 참고용</div>
                       )}
                     </div>
                   )}

@@ -2298,20 +2298,34 @@ export async function getMemberOnboarding(memberId) {
   }
 }
 
-// 유입 분석 전용 — 여러 회원의 온보딩 유입 응답(v2.acquisition)만 한 번에 모아 온다.
+// 유입 분석 + 페르소나 초안 전용 — 여러 회원의 온보딩 응답 중 집계에 쓰는 두 부분
+// (v2.acquisition = 유입·등록 결정, v2.goals = 운동 목표·PT 시작 계기)만 한 번에 모아 온다.
 // 저장 구조는 그대로 두고 읽기만 한다(새 컬렉션·필드 없음). 문서 하나가 실패해도 전체가 깨지지 않도록
 // 회원 단위로 개별 catch 하고, 값이 있는 회원만 map에 담는다.
+//
+// 반환 형태: { [memberId]: { v2: { acquisition, goals }, onboardingUpdatedAt } }
+// 제출 시각을 v2.updatedAt이 아니라 최상위 onboardingUpdatedAt으로 따로 내려주는 이유:
+// normalizeMemberAcquisitionData가 v2.updatedAt을 "온보딩 후보의 timestamp"로 읽어 프로필(survey)과
+// 우선순위를 겨루기 때문에, 여기에 값을 채우면 기존 유입 분석의 최종 선택 결과가 바뀐다.
+// 유입 집계 동작은 종전 그대로 두고, 페르소나 초안의 "문진 제출일" 표시에만 쓴다.
 export async function getMemberAcquisitionOnboardingMap(memberIds = []) {
   requireUid();
   const ids = Array.from(new Set((memberIds || []).filter(Boolean).map(String)));
   if (!ids.length) return {};
-  dbLog("getMemberAcquisitionOnboardingMap", `${ids.length}명 온보딩 유입 응답 조회`);
+  dbLog("getMemberAcquisitionOnboardingMap", `${ids.length}명 온보딩 유입·목표 응답 조회`);
   const entries = await Promise.all(ids.map(async (id) => {
     try {
       const snap = await getDoc(doc(db, "members", id, "memberOnboarding", "main"));
       if (!snap.exists()) return null;
-      const acquisition = snap.data()?.v2?.acquisition;
-      return acquisition ? [id, { v2: { acquisition } }] : null;
+      const v2 = snap.data()?.v2;
+      const acquisition = v2?.acquisition;
+      const goals = v2?.goals;
+      if (!acquisition && !goals) return null;
+      const payload = { v2: {} };
+      if (acquisition) payload.v2.acquisition = acquisition;
+      if (goals) payload.v2.goals = goals;
+      if (v2?.updatedAt) payload.onboardingUpdatedAt = v2.updatedAt;
+      return [id, payload];
     } catch (e) {
       console.warn("[DB:getMemberAcquisitionOnboardingMap] skip:", { memberId: id, code: e?.code, message: e?.message });
       return null;

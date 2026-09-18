@@ -1,4 +1,4 @@
-// 관리자앱 히스토리 카드 · 관리자 수업 상세 · 회원 공유 리포트 카드 렌더 회귀 테스트
+// 관리자앱 히스토리 카드 · 관리자 수업 상세(수업 리포트) 렌더 회귀 테스트
 // 실행: npm run regression (또는 프로젝트 루트에서 node tests/render/history-exercise-display.test.js)
 //
 // App.jsx 원본의 헬퍼·컴포넌트를 그대로 슬라이스해 jsdom에서 실제로 렌더한다(값을 옮겨 적지 않음).
@@ -8,10 +8,11 @@
 //   CASE C  운동 12개 → 생략·"외 N개"·"+N" 없이 전부 표시
 //   CASE D  name 없는 레거시 기록 → 깨지지 않고 가장 구체적인 fallback 표시(빈 카드는 제외)
 //   CASE E  name이 있으면 fallback(목적 문구)보다 항상 name 우선
-//   CASE F  중량 미기록 운동 → "0kg"/"최고 0kg" 미표시(관리자 상세·공유 카드 모두)
+//   CASE F  중량 미기록 운동 → "0kg"/"최고 0kg" 미표시(관리자 상세)
 //   CASE G  정상 중량운동 → 최고 중량·세트·횟수 정상 표시, 어시스트 0kg은 숨기지 않음
-//   CASE H  회원 공유 카드 → 다크 디자인(#0F172A)·캡처 대상 id 유지, 이미지 저장은 공유 카드를 캡처
-//   CASE I  관리자 상세 → 기본 화면이 밝은 톤(다크 배경 미사용)
+//   CASE I  관리자 상세 → 기본 화면이 밝은 톤(다크 배경 미사용), 수업 강도·회원 상태는 더 이상 표시되지 않음
+//   CASE J  기능+근력이 하나의 exercises 배열에 저장된 실제 순서 그대로 1~N 순서 번호가 이어져서 표시된다
+//   CASE K  "공유 카드"/"공유 이미지 저장" 관련 UI와 캡처 대상(#report-card-capture)이 더 이상 존재하지 않는다(기능 완전 제거 확인)
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +29,6 @@ function slice(start, end) {
 const src = [
   slice('const DUAL_WEIGHT_EXERCISE_NAME', '// ─── 운동 분류 상수 ───'),
   slice('const EQUIP_LIST', 'function mSubs('),
-  slice('const IC = {', '// ── 수업 유형 선택 항목'),
   slice('function normalizeTypes(raw) {', 'function calculateKoreanAgeFromBirthYear('),
   slice('const FUNC_CATEGORIES = [', 'const FUNC_BODY_PARTS = ['),
   slice('// 기능 운동을 카테고리별로 그룹핑', '// ── Pointer Event 기반 드래그 정렬 훅'),
@@ -68,8 +68,7 @@ const stubs = {
   formatSorenessBodyParts: () => '-',
   stimRatingLabel: () => '',
   nextPlanLabel: () => '',
-  // babel 런타임 헬퍼는 실제 require, html2canvas는 jsdom에서 캔버스를 그릴 수 없으므로 로드 실패로 흉내(handleSaveImage의 catch로 흡수)
-  require: (m) => { if (m === 'html2canvas') throw new Error('html2canvas stub'); return require(m); },
+  require, // 슬라이스된 코드가 참조할 수 있는 babel 런타임 헬퍼 등을 위한 실제 require
 };
 const names = Object.keys(stubs);
 try {
@@ -114,6 +113,13 @@ check('CASE B: 기능 4 + 근력 4 → 8개 실제 운동명이 전부 표시된
 check('CASE B: 기능 · 워밍업 / 근력운동 구분 헤더가 표시된다', t.includes('기능 · 워밍업') && t.includes('근력운동'));
 check('CASE B: 카테고리 목적 문구("요추 코어")가 운동명 대신 나오지 않는다', !t.includes('요추 코어'), t);
 
+// CASE J — 기능+근력이 하나의 exercises 배열에 저장된 실제 순서 그대로 번호가 이어진다(가나다순·부위별 재정렬 없음)
+const splitOrder = L.splitHistoryExercises([...funcEx, ...strengthEx]);
+check('CASE J: splitHistoryExercises가 원래 배열 인덱스 그대로 기능=1~4, 근력=5~8 번호를 부여한다',
+  splitOrder.func.map(e => e._histOrder).join(',') === '1,2,3,4' && splitOrder.strength.map(e => e._histOrder).join(',') === '5,6,7,8');
+check('CASE J: 히스토리 카드에 각 운동명 앞에 실제 수행 순서 번호가 붙어서 표시된다(1전경골근…, 4버드독, 5오버헤드 스쿼트, 8레그 익스텐션)',
+  t.includes('1전경골근') && t.includes('4버드독') && t.includes('5오버헤드 스쿼트') && t.includes('8레그 익스텐션'), t);
+
 // CASE C
 const many = Array.from({ length: 12 }, (_, i) => ({ name: `테스트 운동 ${String(i + 1).padStart(2, '0')}`, equipment: i % 2 ? '덤벨' : '기능', funcCategory: i % 2 ? '' : '가동성', muscleTop: '하체', unitType: 'kg', sets: [set(i % 2 ? '10' : '', '10')] }));
 t = render(React.createElement(L.HistExerciseTags, { exercises: many }));
@@ -151,7 +157,8 @@ check('CASE G: 어시스트 머신은 보조 중량 0이어도 의미가 있으�
 check('CASE F: 히스토리 요약에서 중량 미기록 운동은 "최고 0kg" 없이 세트·횟수만 표시한다', L.getHistoryExerciseSummary(strengthEx[0]) === '2세트 · 10회', L.getHistoryExerciseSummary(strengthEx[0]));
 check('CASE G: 히스토리 요약에서 정상 중량운동은 세트·최고 중량·횟수 범위를 표시한다', L.getHistoryExerciseSummary(strengthEx[1]) === '3세트 · 최고 60kg · 8~10회', L.getHistoryExerciseSummary(strengthEx[1]));
 
-// 관리자 상세 (CASE F/G/I)
+// 관리자 상세 (CASE F/G/I/J) — intensity/condition은 과거 저장값 호환을 위해 필드 자체는 여전히 보존하지만
+// (2026-09-18 이후 입력 UI 자체가 없어 항상 기존 기본값인 상태) 화면에는 더 이상 표시하지 않는다.
 const session = { id: 's1', date: '2026-09-10', sessionNo: 1, selectedTypes: ['하체'], intensity: '중강도', condition: '상', isPublished: true, status: 'completed',
   exercises: [...funcEx, ...strengthEx], totalVolume: 1220, trainerComment: '총평', nextPlan: '다음엔 박스 스쿼트 65kg' };
 t = render(React.createElement(L.SessionAdminDetail, { s: session, member: { name: '홍길동' }, sessions: [session], bodyData: null }));
@@ -159,51 +166,31 @@ const detailHtml = rootEl.innerHTML;
 check('CASE I: 관리자 상세에 8개 실제 운동명과 기능/근력 구분이 모두 표시된다', eight.every(n => t.includes(n)) && t.includes('기능 · 워밍업') && t.includes('근력운동'), t);
 check('CASE I: 관리자 상세는 밝은 톤(흰 카드·#F6F7F9 계열)이며 다크 배경(#0F172A/#111827)을 쓰지 않는다',
   /background:\s*(#FFFFFF|rgb\(255, 255, 255\))/i.test(detailHtml) && !/background:\s*(#0F172A|#111827|rgb\(15, 23, 42\)|rgb\(17, 24, 39\))/i.test(detailHtml));
-check('CASE I: 상단 요약에 날짜·회차·부위·체중·강도·회원 상태가 표시된다',
-  t.includes('9월') && t.includes('10') && t.includes('회차') && t.includes('하체') && t.includes('72.3kg') && t.includes('중강도') && t.includes('상'), t.slice(0, 300));
+check('CASE I: 상단 요약에 날짜·회차·부위·체중이 표시된다',
+  t.includes('9월') && t.includes('10') && t.includes('회차') && t.includes('하체') && t.includes('72.3kg'), t.slice(0, 300));
+check('CASE I: 저장된 데이터에 intensity/condition 값이 있어도 "수업 강도"·"회원 상태" 타일과 값("중강도"/이모지)은 더 이상 표시되지 않는다',
+  !t.includes('수업 강도') && !t.includes('회원 상태') && !t.includes('중강도') && !t.includes('😀'), t.slice(0, 400));
 check('CASE G: 관리자 상세에 정상 중량운동의 세트별 중량·횟수가 표시된다(박스 스쿼트 60kg × 8회, 최고 60kg)',
   t.includes('60kg') && t.includes('8회') && t.includes('40kg') && t.includes('35kg') && t.includes('15회'));
 check('CASE F: 관리자 상세에 "0kg"·"최고 0kg"이 어디에도 표시되지 않는다', !/(^|[^0-9.,])0kg/.test(t), t.match(/.{20}0kg/g));
 check('CASE I: 총 볼륨은 유지하되 하단 지표 영역에 표시된다(운동 목록 뒤)', t.includes('총 운동 볼륨') && t.indexOf('총 운동 볼륨') > t.indexOf('레그 익스텐션'));
 check('CASE I: 다음 수업 포인트·총평 등 트레이너 기록이 유지된다', t.includes('다음엔 박스 스쿼트 65kg') && t.includes('총평'));
+check('CASE J: 관리자 상세에도 운동명 앞에 실제 수행 순서 번호가 이어져서 표시된다(1전경골근…, 8레그 익스텐션)',
+  t.includes('1전경골근') && t.includes('8레그 익스텐션'), t);
 
-// 리포트 모달: 기본 관리자 보기 ↔ 공유 카드 (CASE H)
-let saveTarget = null;
-const origGet = document.getElementById.bind(document);
-document.getElementById = (id) => { const el = origGet(id); if (id === 'report-card-capture') saveTarget = el; return el; };
-const origErr = console.error; console.error = () => {}; // html2canvas 동적 import는 jsdom에서 실패 → handleSaveImage의 catch로 흡수(캡처 대상 확인이 목적)
-const modal = (props = {}) => React.createElement(function Wrap() {
-  const [cardMode, setCardMode] = React.useState('simple');
-  return React.createElement(L.SessionReportModal, Object.assign({ s: session, member: { name: '홍길동' }, sessions: [session], bodyData: null, cardMode, setCardMode,
-    onClose() {}, onEdit() {}, onPublish() {}, onUnpublish() {}, onSendPair() {} }, props));
-});
+// 리포트 모달 — 공유 카드/공유 이미지 저장 기능은 완전히 제거됐다(CASE K)
+const modal = (props = {}) => React.createElement(L.SessionReportModal, Object.assign({ s: session, member: { name: '홍길동' }, sessions: [session], bodyData: null,
+  onClose() {}, onEdit() {}, onPublish() {}, onUnpublish() {}, onSendPair() {} }, props));
 t = render(modal());
-check('CASE I: 리포트 보기의 기본 화면은 관리자 상세(밝은 톤)이고 다크 공유 카드는 렌더되지 않는다',
-  !!rootEl.querySelector('.session-admin-detail') && !origGet('report-card-capture'));
+check('CASE I: 리포트 보기는 관리자 상세(밝은 톤) 하나만 렌더된다(별도 보기 전환 없음)',
+  !!rootEl.querySelector('.session-admin-detail'));
 const btnByText = (txt) => [...rootEl.querySelectorAll('button')].find(b => b.textContent.includes(txt));
-act(() => { btnByText('공유 카드').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
-const cap = origGet('report-card-capture');
-check('CASE H: "공유 카드"로 전환하면 기존 다크 리포트 카드(#report-card-capture, #0F172A 배경)가 그대로 렌더된다',
-  !!cap && /background:\s*(#0F172A|rgb\(15, 23, 42\))/i.test(cap.innerHTML) && cap.textContent.includes('TEO GYM · PERSONAL TRAINING') && cap.textContent.includes("TODAY'S WORKOUT"));
-check('CASE H: 공유 카드의 간단/상세 전환이 유지된다', !!btnByText('간단') && !!btnByText('상세'));
-check('CASE H: 공유 카드의 기록 데이터(운동명·세트 중량/횟수·총 볼륨)가 유지된다',
-  !!cap && cap.textContent.includes('박스 스쿼트') && cap.textContent.includes('최고 60kg') && cap.textContent.includes('1,220'));
-check('CASE F: 공유 카드에서도 중량 미기록 운동(오버헤드 스쿼트)의 "0kg / 최고 0kg"이 사라지고 총 횟수로 표시된다',
-  !!cap && !cap.textContent.includes('최고 0kg') && cap.textContent.includes('총 20회'));
-// 관리자 보기로 돌아가 저장 버튼 → 공유 카드로 전환 후 그 카드를 캡처
-act(() => { btnByText('관리자 보기').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
-saveTarget = null;
-const wait = (ms) => new Promise(r => setTimeout(r, ms));
-(async () => {
-  // act 안의 상태 변경·effect는 act가 끝날 때 반영되므로, 전환 effect가 건 저장 타이머(60ms)는 act 밖에서 기다린다
-  await act(async () => { btnByText('공유 이미지 저장').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); });
-  await act(async () => { await wait(200); });
-  check('CASE H: 관리자 보기에서 이미지 저장을 누르면 공유 카드로 전환한 뒤 #report-card-capture(다크 카드)를 캡처 대상으로 사용한다',
-    !!saveTarget && saveTarget.id === 'report-card-capture' && !!origGet('report-card-capture'));
-  console.error = origErr;
+check('CASE K: "공유 카드"/"관리자 보기" 보기 전환 버튼이 더 이상 존재하지 않는다', !btnByText('공유 카드') && !btnByText('관리자 보기'));
+check('CASE K: "공유 이미지 저장" 버튼이 더 이상 존재하지 않는다', !btnByText('공유 이미지 저장'));
+check('CASE K: 공유 카드 캡처 대상(#report-card-capture)이 DOM에 존재하지 않는다', !document.getElementById('report-card-capture'));
+check('CASE K: "공개 취소"(전송 완료 상태)·"수정" 등 실제 운영 버튼은 그대로 유지된다(공개된 세션 기준)', !!btnByText('공개 취소') && !!btnByText('수정'));
 
-  let failed = 0;
-  for (const [n, ok] of results) { console.log((ok ? 'PASS ' : 'FAIL ') + n); if (!ok) failed++; }
-  console.log(failed ? `\n${failed} 건 실패` : '\n전부 통과');
-  process.exit(failed ? 1 : 0);
-})();
+let failed = 0;
+for (const [n, ok] of results) { console.log((ok ? 'PASS ' : 'FAIL ') + n); if (!ok) failed++; }
+console.log(failed ? `\n${failed} 건 실패` : '\n전부 통과');
+process.exit(failed ? 1 : 0);

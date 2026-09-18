@@ -205,8 +205,6 @@ function WeeklyAverageCard({body,nutrition}){const a=estimateMaintenance({}, {},
 const CPARTS    = ["경추/목","흉추/등","요추/허리","어깨","고관절","무릎","발목"];
 const ROMLEVELS = ["정상","약간 제한","중등도 제한","심한 제한"];
 const ROMNUM    = {"정상":0,"약간 제한":1,"중등도 제한":2,"심한 제한":3};
-const IC = {저강도:"#5EEAD4",중강도:"#ffd166",고강도:"#ff6b6b"};
-const CC = {상:{color:"#5EEAD4",emoji:"😀"},중:{color:"#ffd166",emoji:"😐"},하:{color:"#ff6b6b",emoji:"😓"}};
 
 // ── 수업 유형 선택 항목 ─────────────────────────────────
 const SESSION_TYPE_OPTIONS = [
@@ -10587,6 +10585,7 @@ export default function App() {
   const [sessionReadsMap, setSessionReadsMap] = useState({});
   // 회원 앱 이용 현황 — 홈 "최근 이용 없음" 판정용(회원별 요약 문서만 경량 조회, loadMembers에서 로드)
   const [appUsageSummaryByMember, setAppUsageSummaryByMember] = useState({}); // {memberId: {lastActiveAt,...}|null}
+  const [latestCheckinByMember, setLatestCheckinByMember] = useState({}); // {memberId: memberCheckins 최신 1건|null} — 홈 "오늘 수업"에서 수업 전 컨디션·통증 확인용
   // 회원 앱 이용 현황 — 현재 선택된 회원의 상세(요약 + 최근 30일 이용일 수, loadMemberData에서 로드)
   const [memberAppUsage, setMemberAppUsage] = useState({ summary: null, activeDays30: 0 });
   // 회원 목록 카드 체중 표시용 bodyCheck 요약 — 회원 상세와 같은 원본(bodyCheck.records)을 쓰기 위해 목록 로드 시 함께 읽는다
@@ -10896,6 +10895,17 @@ export default function App() {
     if (isStale()) return;
     setWeightBodyById(Object.fromEntries(bodyEntries));
 
+    // 홈 "오늘 수업" 카드용 — 회원이 회원앱에서 직접 입력한 가장 최근 컨디션·통증(memberCheckins) 1건.
+    // 오늘 날짜인지 여부는 화면에서 판단(날짜가 다르면 표시하지 않음). 회원별 문서 1건 읽기.
+    const checkinEntries = await Promise.all(
+      mbs.map(async m => {
+        try { const rows = await getMemberCheckins(m.id, 1); return [m.id, rows[0] || null]; }
+        catch (e) { console.warn("[TEO GYM] loadMembers — 최근 체크인 조회 실패:", m.id, e.message); return [m.id, null]; }
+      })
+    );
+    if (isStale()) return;
+    setLatestCheckinByMember(Object.fromEntries(checkinEntries));
+
     // 홈 "페르소나 확인 필요" 집계용 — 고객 페르소나는 관리자 전용이라 members 문서가 아니라
     // members/{id}/private/admin 에만 저장된다(회원이 자기 문서를 읽어도 절대 내려가지 않는다).
     // 초기 배포에서 members 문서에 저장됐던 값이 남아 있으면 여기서 1회만 private으로 옮기고 원본을 지운다.
@@ -11096,6 +11106,7 @@ export default function App() {
     setAppUsageSummaryByMember({});
     setMemberAppUsage({ summary: null, activeDays30: 0 });
     setWeightBodyById({});
+    setLatestCheckinByMember({});
     setSessions([]);
     setBodyData(null);
     setNutritionData(null);
@@ -11944,7 +11955,7 @@ export default function App() {
         width:"100%",overflowX:"hidden",boxSizing:"border-box",
         paddingBottom:"calc(18px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} sessionReadsMapByMember={sessionReadsMapByMember} appUsageSummaryByMember={appUsageSummaryByMember} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} onOpenMemberUnreadHistory={openMemberUnreadHistory} />}
+        {screen==="home"       && <HomeScreen setScreen={setScreen} loadMembers={loadMembers} members={members} membersLoading={membersLoading} sessionsMap={sessionsMap} sessionReadsMapByMember={sessionReadsMapByMember} appUsageSummaryByMember={appUsageSummaryByMember} latestCheckinByMember={latestCheckinByMember} pairSessions={pairSessions} loadPairSessions={loadPairSessions} onLogout={handleLogout} showToast={showToast} liveMembersById={liveMembersById} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onSelectMember={goHub} onOpenPairSession={goPairSession} onOpenMemberUnreadHistory={openMemberUnreadHistory} />}
         {screen==="members"    && <MembersScreen members={members} liveMembersById={liveMembersById} sessionsMap={sessionsMap} weightBodyById={weightBodyById} loading={membersLoading} membersError={membersError} onSelect={goHub} onAdd={() => setScreen("newMember")} onAddTestMember={handleAddTestMember} onRefresh={loadMembers} onDelete={handleDeleteMember} onStatusChange={handleStatusChange} onTestStatusChange={handleTestMemberStatusChange} onResumeDraft2_1={resumeDraft2_1} onPair21={()=>{ loadPairSessions(); setScreen("pair21"); }} pairSessions={pairSessions} notificationReads={notificationReads} onMarkEventsRead={markFeedEventsRead} onBack={()=>{ setMember(null); setScreen("home"); }} setScreen={setScreen} loadPairSessions={loadPairSessions} showToast={showToast} initialFilter={membersInitialFilter} onInitialFilterConsumed={()=>setMembersInitialFilter(null)} />}
         {screen==="newMember"  && <MemberForm prefill={memberFormPrefill} onBack={() => { setMemberFormPrefill(null); if (memberFormPrefill) { setScreen("consultations"); return; } loadMembers(); setScreen("members"); }} onSave={handleAddMember} />}
         {screen==="consultations" && <ConsultationsScreen consultations={consultations} loading={consultationsLoading} onBack={()=>setScreen("home")} onRefresh={loadConsultations} onAdd={()=>{ setEditConsultation(null); setScreen("consultationForm"); }} onEdit={c=>{ setEditConsultation(c); setScreen("consultationForm"); }} onConvert={handleStartConvert} onDelete={handleDeleteConsultation} setScreen={setScreen} loadMembers={loadMembers} loadPairSessions={loadPairSessions} showToast={showToast} />}
@@ -12954,7 +12965,7 @@ function NotificationDrawer({ open, onClose, items, summary, onOpenItem, onMarkE
   );
 }
 
-function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, sessionReadsMapByMember, appUsageSummaryByMember, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession, onOpenMemberUnreadHistory }) {
+function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, sessionsMap, sessionReadsMapByMember, appUsageSummaryByMember, latestCheckinByMember={}, pairSessions, loadPairSessions, onLogout, showToast, liveMembersById={}, notificationReads=null, onMarkEventsRead, onSelectMember, onOpenPairSession, onOpenMemberUnreadHistory }) {
   const [winW, setWinW] = useState(typeof window!=="undefined"?window.innerWidth:1200);
   const [winH, setWinH] = useState(typeof window!=="undefined"?window.innerHeight:800);
   const [comingSoon, setComingSoon] = useState(false);
@@ -13661,7 +13672,15 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
               <div>
                 {todaySess.slice(0,6).map((item,i)=>{
                   const st = TODAY_STATUS_STYLE[item.status];
-                  const cond = item.todayDoc ? (CC[item.todayDoc.condition] || null) : null;
+                  // 회원이 오늘 회원앱에서 직접 입력한 컨디션·통증(memberCheckins/{오늘 날짜}) — 수업 시작 전 대표가 바로 확인할 수 있게 표시.
+                  // 문서가 있어도 날짜가 오늘이 아니면(며칠 전 마지막 입력) 보여주지 않는다.
+                  const todayCheckin = latestCheckinByMember[item.m.id];
+                  const hasTodayCheckin = todayCheckin && (todayCheckin.date || todayCheckin.id) === todayKST;
+                  const checkinPain = hasTodayCheckin && todayCheckin.painPart && todayCheckin.painPart !== "없음"
+                    ? `${todayCheckin.painPart} 불편감 ${todayCheckin.painVas ?? 0}/10` : "";
+                  const checkinLine = hasTodayCheckin
+                    ? [todayCheckin.condition ? `컨디션 ${todayCheckin.condition}` : "", checkinPain].filter(Boolean).join(" · ")
+                    : "";
                   // 오늘 완료 회원은 오늘 수업 시간이 더 이상 중요하지 않으므로 시간 대신 다음 수업 준비 요약을 보여준다(상태 판별·정렬은 그대로).
                   const isDone = item.status === "done";
                   const nextSummary = isDone ? getNextWorkoutSummary(item.m) : "";
@@ -13685,9 +13704,9 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                           {item.isPair && <span style={{fontSize:10.5,fontWeight:800,color:DB.mintSoft,background:DB.mintTint,borderRadius:20,padding:"2px 7px",marginRight:6}}>2:1 PT</span>}
                           {item.isPair ? <>{item.m.name} + {item.mB.name}</> : <>{item.m.name} 회원</>}
                         </div>
-                        {/* 2순위: 오늘 운동 부위 — 2:1은 부위 뒤에 강도도 함께 표시 */}
+                        {/* 2순위: 오늘 운동 부위 — 2:1은 부위 뒤에 강도도 함께 표시, 회원이 오늘 입력한 컨디션·통증이 있으면 이어서 표시 */}
                         <div style={{fontFamily:DB.font,fontSize:12.5,color:DB.sub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {item.part}{item.isPair?` · ${item.ps.intensity||"중강도"}`:""}{(cardWide&&cond)?` · 컨디션 ${item.todayDoc.condition}`:""}
+                          {item.part}{item.isPair?` · ${item.ps.intensity||"중강도"}`:""}{checkinLine?` · ${checkinLine}`:""}
                         </div>
                         {/* 3순위: 다음 수업 메모(오늘 완료 회원만 해당) */}
                         {isDone && (
@@ -13700,7 +13719,6 @@ function HomeScreen({ setScreen, loadMembers, members, membersLoading=false, ses
                           <div style={{display:"inline-block",fontFamily:DB.font,fontSize:10.5,fontWeight:800,padding:"2px 8px",borderRadius:20,background:st.tint,color:st.soft,marginTop:4}}>{compactStatusLabel}</div>
                         )}
                       </div>
-                      {cardWide && cond && <div title={`컨디션 ${item.todayDoc.condition}`} style={{fontSize:17,flexShrink:0}}>{cond.emoji}</div>}
                       {cardWide && (
                         <div style={{fontFamily:DB.font,fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:20,background:st.tint,color:st.soft,flexShrink:0}}>{st.label}</div>
                       )}
@@ -21721,7 +21739,6 @@ function SessionPrepCard({ prep, onImport = null, title = "오늘 수업 준비"
 
 function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, bodyData,
   allMembers=[], classifications={}, onLearnExercise, personalWorkouts=[] }) {
-  const isCorr = false;
   const isEdit = !!(editData?.id);
   const last   = sessions?.length>0 ? sessions[sessions.length-1] : null;
 
@@ -21746,7 +21763,6 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   const draftKey  = getDraftKey(draftType, member.id, new Date().toISOString().split("T")[0]);
   const [draftStatus, setDraftStatus] = useState(""); // "저장됨 HH:MM" | "저장 중..." | ""
   const [draftPopup,  setDraftPopup]  = useState(null); // draft 복원 팝업 데이터sessions.length > 0 ? sessions[sessions.length-1] : null;
-  const pRef   = useRef(null);
 
   // ── 저장 진행 상태 & 중복 제출 방지 ──────────────────────────────────
   // 좁은 화면에서는 폼이 길어져 상단 sticky 저장 버튼(handleSaveTop)을 반복해서 누르기 쉽고,
@@ -21842,7 +21858,6 @@ function SessionScreen({ member, sessions, editData, onSave, onBack, showToast, 
   // 통증 기록 (운동 전/후) — 회원이 회원앱에서 직접 입력하므로 이 화면 렌더링에서는 제거됨.
   // state·handleSave 저장 로직은 유지(다른 화면의 통증 조회/기존 기록 재저장 호환성).
   const [painRecord,     setPainRecord]     = useState(editData?.painRecord || { before:{vas:0,part:"",situation:"",memo:""}, after:{vas:0,change:"",memo:""} });
-  const [showCard,       setShowCard]       = useState(false);
   const [activeCardIdx, setActiveCardIdx]   = useState(null); // 현재 입력 중인 카드
 
   // ── 가로모드 2패널 레이아웃 (좌: 회원 브리핑 / 우: 운동 기록) — HubScreen·MembersScreen의 winW 판별 패턴 재사용 ──
@@ -22447,23 +22462,6 @@ function updateEx(ei, key, val) {
   }
 
   function handleSaveTop() { handleSave(); }
-
-  if (showCard) {
-    const cardioData = (cardioType||cardioMinutes) ? {
-      type:cardioType,
-      minutes:parseInt(cardioMinutes)||null,
-      calories:parseInt(cardioCalories)||null,
-      intensity:cardioIntensity
-    } : null;
-    return (
-      <CardSaveView
-        member={member} trainerName={trainerName} gymName={gymName}
-        date={date} sessionNo={sessionNo} intensity={intensity} condition={condition}
-        exercises={exercises} totalVol={totalVol} trainerComment={trainerComment}
-        bodyWeight={bodyWeight} cardio={cardioData} onClose={() => setShowCard(false)} showToast={showToast}
-      />
-    );
-  }
 
   return (
     <div className="session-light" style={{width:"100%",maxWidth:isLandscape?"100%":1200,margin:"0 auto",padding:"18px 20px 40px",boxSizing:"border-box"}}>
@@ -23618,284 +23616,16 @@ function updateEx(ei, key, val) {
       <div style={{marginTop:14,paddingBottom:32}}>
         <Btn full onClick={handleSave} disabled={saving} style={{background:"#39C7B8",color:"#fff",opacity:saving?0.65:1,cursor:saving?"default":"pointer"}}>{saving ? "저장 중..." : (isOwner(member) ? (isEdit ? "운동 수정 저장 →" : "운동 기록 저장 →") : (isEdit ? "관리자용 저장 →" : "관리자용 저장 →"))}</Btn>
       </div>
-
-      <div ref={pRef} style={{display:"none"}}>
-        <PrintReport memberName={member.name} trainerName={trainerName} gymName={gymName}
-          date={date} sessionNo={sessionNo} type={formatTypes(selectedTypes)} intensity={intensity}
-          condition={condition} exercises={exercises} totalVol={totalVol}
-          stretchNotes={stretchNotes} nextPlan={nextPlan} trainerComment={trainerComment}
-          bodyWeight={bodyWeight} calories={calories} dietNote={dietNote}
-          romData={romData} painData={painData} isCorr={isCorr} />
-      </div>
       </div>
     </div>
   );
 }
 
-// ════════════════════════════════════════════
-// CARD SAVE VIEW — 이미지 저장 (iOS 대응)
-// ════════════════════════════════════════════
-function CardSaveView({ member, trainerName, gymName, date, sessionNo, intensity,
-  condition, exercises, totalVol, trainerComment, bodyWeight, cardio, onClose, showToast }) {
-
-  const [imgDataUrl, setImgDataUrl] = useState(null);
-  const [generating, setGenerating] = useState(false);
-
-  async function generateImage() {
-    const el = document.getElementById("summary-card-capture");
-    if (!el) return;
-    setGenerating(true);
-    try {
-      const h2c = (await import("html2canvas")).default;
-      const canvas = await h2c(el, {
-        backgroundColor: "#0F172A", scale: 2, useCORS: true, logging: false,
-        allowTaint: true,
-      });
-      const dataUrl = canvas.toDataURL("image/png");
-      setImgDataUrl(dataUrl);
-
-      // PC/Android: 자동 다운로드 시도
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      if (!isIOS) {
-        const link = document.createElement("a");
-        link.download = member.name + "_" + sessionNo + "회차_" + date + ".png";
-        link.href = dataUrl;
-        link.click();
-        showToast("이미지 저장 완료 ✓");
-      } else {
-        showToast("아래 이미지를 길게 눌러 저장하세요");
-      }
-    } catch(e) {
-      showToast("생성 실패. 기기 스크린샷을 이용해주세요","err");
-      console.error(e);
-    }
-    setGenerating(false);
-  }
-
-  return (
-    <div>
-      <SH title="📸 수업 요약 카드" sub="이미지 저장 후 회원에게 전송"
-        right={<Btn ghost sm onClick={onClose}>← 닫기</Btn>} />
-
-      {/* 원본 카드 (캡처 대상) */}
-      {!imgDataUrl && (
-        <div id="summary-card-capture">
-          <SummaryCard member={member} trainerName={trainerName} gymName={gymName}
-            date={date} sessionNo={sessionNo} intensity={intensity} condition={condition}
-            exercises={exercises} totalVol={totalVol} trainerComment={trainerComment} bodyWeight={bodyWeight}
-            cardio={cardio} />
-        </div>
-      )}
-
-      {/* 생성된 이미지 — iOS에서 길게 눌러 저장 */}
-      {imgDataUrl && (
-        <div style={{marginBottom:12}}>
-          <div style={{marginBottom:8,padding:"8px 12px",background:"rgba(0,229,160,.1)",
-            borderRadius:8,border:"1px solid rgba(0,229,160,.25)",textAlign:"center"}}>
-            <Mo c="#5EEAD4" s={10}>✓ 이미지 생성 완료 — 아래 이미지를 <strong>길게 눌러</strong> 저장하세요</Mo>
-          </div>
-          <img src={imgDataUrl} alt="수업 요약 카드"
-            style={{width:"100%",borderRadius:12,display:"block"}}
-          />
-        </div>
-      )}
-
-      <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:imgDataUrl?0:12}}>
-        <button onClick={generateImage} disabled={generating}
-          style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
-            background:generating?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#5EEAD4,#2DD4BF)",
-            color:generating?"#94a3b8":"#0B1120",fontFamily:"'Syne',sans-serif",fontWeight:800,
-            fontSize:15,cursor:generating?"not-allowed":"pointer",
-            display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          {generating ? "⏳ 이미지 생성 중..." : imgDataUrl ? "🔄 다시 생성" : "📥 이미지 생성"}
-        </button>
-        {!imgDataUrl && (
-          <div style={{padding:"10px 14px",background:"#111827",borderRadius:8,
-            border:"1px dashed rgba(255,255,255,0.08)",fontSize:11,color:"#94a3b8",textAlign:"center",lineHeight:1.9}}>
-            📥 버튼을 누르면 이미지가 생성됩니다<br/>
-            <strong style={{color:"#ddddf0"}}>아이폰/아이패드</strong>: 생성된 이미지를 <strong style={{color:"#5EEAD4"}}>길게 눌러</strong> 사진 저장<br/>
-            <strong style={{color:"#ddddf0"}}>맥/PC</strong>: 자동으로 파일이 다운로드됩니다
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════
-// SUMMARY CARD
-// ════════════════════════════════════════════
-function SummaryCard({ member, trainerName, gymName, date, sessionNo, intensity, condition, exercises, totalVol, trainerComment, bodyWeight, cardio }) {
-  const ic  = IC[intensity] || "#ffd166";
-  const cc  = CC[condition] || CC["상"];
-  const ds  = date ? new Date(date+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"}) : "";
-  const exList = (exercises||[]).filter(e => e.name);
-  const byMuscle = {};
-  exList.forEach(ex => {
-    const key = ex.muscleTop;
-    if (!byMuscle[key]) byMuscle[key] = 0;
-    byMuscle[key] += exVol(ex);
-  });
-  return (
-    <div style={{background:"#0F172A",borderRadius:16,overflow:"hidden",maxWidth:480,margin:"0 auto",border:"1px solid rgba(255,255,255,0.08)"}}>
-      <div style={{background:"linear-gradient(135deg,#0d2018,#0F172A)",padding:"16px 18px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#5EEAD4",letterSpacing:".12em",marginBottom:3}}>PERSONAL TRAINING</div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,color:"#fff",letterSpacing:"-0.5px"}}>{member.name}</div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#94a3b8",marginTop:2}}>{gymName}{trainerName?" · "+trainerName:""}</div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#7070a0"}}>{ds}</div>
-            <div style={{display:"flex",gap:4,marginTop:5,justifyContent:"flex-end",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:10,background:ic+"22",color:ic}}>{intensity}</span>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:"2px 7px",borderRadius:10,background:cc.color+"22",color:cc.color}}>{cc.emoji} {condition}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div style={{padding:"14px 18px"}}>
-        {/* ── 1. 기능 회복 섹션 (최상단, 카테고리별 그룹핑) ── */}
-        {exList.some(e=>isFuncEx(e)) && (
-          <div style={{marginBottom:12,borderRadius:10,overflow:"hidden",
-            border:"1px solid rgba(94,234,212,.18)",background:"rgba(94,234,212,.02)"}}>
-            <div style={{padding:"7px 13px",background:"rgba(94,234,212,.07)"}}>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
-            </div>
-            <div style={{padding:"9px 13px"}}>
-              {groupFuncExercises(exList.filter(e=>isFuncEx(e))).map((group, gi, arr)=>{
-                const isLastGroup = gi === arr.length - 1;
-                return (
-                  <div key={gi} style={{
-                    marginBottom:isLastGroup?0:10,
-                    paddingBottom:isLastGroup?0:10,
-                    borderBottom:isLastGroup?"none":"1px solid rgba(255,255,255,0.05)"}}>
-                    {/* 카테고리 제목 */}
-                    <div style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:12,
-                      color:"#d1fae5",fontWeight:700,marginBottom:4,lineHeight:1.4}}>
-                      {group.displayTitle}
-                    </div>
-                    {/* 해당 카테고리 운동 목록 */}
-                    {group.exercises.map((ex, xi)=>{
-                      const sub = funcExSubLine(ex);
-                      return sub ? (
-                        <div key={xi} style={{display:"flex",alignItems:"baseline",gap:5,paddingLeft:8,marginBottom:2}}>
-                          <span style={{color:"#3a5a4a",fontSize:10,flexShrink:0}}>└</span>
-                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#52687a",lineHeight:1.5}}>
-                            {sub}
-                          </span>
-                        </div>
-                      ) : null;
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── 2. 웨이트 트레이닝 (기능운동 제외) ── */}
-        {exList.some(e=>!isFuncEx(e)) && (
-          <>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",letterSpacing:".1em",marginBottom:10}}>
-              {exList.some(e=>isFuncEx(e)) ? "웨이트 트레이닝" : "TODAY'S WORKOUT"}
-            </div>
-            {exList.filter(e=>!isFuncEx(e)).map((ex, ei) => {
-              const vol=exVol(ex); const ec=EQUIP_COLOR[ex.equipment]||"#888"; const gc=mColor(ex.muscleTop);
-              const maxW=Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
-              const unitP = getRecordUnit(ex);
-              const totalReps = (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.reps)||0),0);
-              return (
-                <div key={ei} style={{marginBottom:10,background:"#111827",borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
-                  <div style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
-                      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff"}}>{ex.name}</div>
-                      <div style={{display:"flex",gap:4,marginTop:3}}>
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,background:ec+"22",color:ec}}>{ex.equipment}</span>
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 6px",borderRadius:3,background:gc+"22",color:gc}}>{ex.muscleTop}</span>
-                      </div>
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      {unitP==="kg" ? (<>
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>{vol.toLocaleString()} kg</div>
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8"}}>최고 {maxW}kg</div>
-                      </>) : unitP==="step" ? (
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>최고 {maxW}단</div>
-                      ) : (
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:500}}>총 {totalReps}회</div>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{padding:"6px 12px"}}>
-                    {(() => {
-                      const dualWCard = isDualWeightEx(ex);
-                      const cardCols = dualWCard ? "30px 1fr 1fr 1fr 1fr" : "30px 1fr 1fr 1fr";
-                      const cardHeaders = dualWCard ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP),"횟수","볼륨"];
-                      return (
-                        <div style={{display:"grid",gridTemplateColumns:cardCols,gap:4,marginBottom:4}}>
-                          {cardHeaders.map((h,i) => <Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
-                        </div>
-                      );
-                    })()}
-                    {(ex.sets||[]).map((row,si) => {
-                      const dualWCard = isDualWeightEx(ex);
-                      const cardCols = dualWCard ? "30px 1fr 1fr 1fr 1fr" : "30px 1fr 1fr 1fr";
-                      return (
-                        <div key={si} style={{display:"grid",gridTemplateColumns:cardCols,gap:4,marginBottom:3}}>
-                          <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
-                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{unitP==="bodyweight"?"—":(row.weight||"—")}</Mo>
-                          {dualWCard && <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.dbWeight||"—"}</Mo>}
-                          <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                          <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </>
-        )}
-        <div style={{background:"linear-gradient(135deg,#0d2018,#0F172A)",borderRadius:10,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}>
-          <div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#94a3b8",marginBottom:2}}>TOTAL VOLUME</div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:24,color:"#5EEAD4"}}>{totalVol.toLocaleString()} <span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}>kg</span></div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            {Object.entries(byMuscle).slice(0,4).map(([k,v]) => (
-              <div key={k} style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#7070a0",marginBottom:1}}>
-                <span style={{color:mColor(k)}}>{k}</span><span style={{color:"#94a3b8"}}> {v.toLocaleString()}kg</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        {bodyWeight && <div style={{background:"#111827",borderRadius:8,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><Mo c="#94a3b8" s={10}>체중</Mo><Mo c="#ffd166" s={14}>{bodyWeight} kg</Mo></div>}
-        {/* 유산소 기록 — 회원 카드에 표시 가능 */}
-        {cardio && (cardio.type || cardio.minutes) && (
-          <div style={{background:"rgba(249,115,22,.05)",borderRadius:8,padding:"8px 12px",
-            border:"1px solid rgba(249,115,22,.2)",marginBottom:7,
-            display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-            <Mo c="#f97316" s={9} style={{fontWeight:700}}>🔥 유산소</Mo>
-            {cardio.type  && <Mo c="#fdba74" s={10}>{cardio.type}</Mo>}
-            {cardio.minutes && <Mo c="#fdba74" s={10}>{cardio.minutes}분</Mo>}
-            {cardio.calories && <Mo c="#fdba74" s={10}>{cardio.calories}kcal</Mo>}
-            {cardio.intensity && <Mo c="#94a3b8" s={9}>{cardio.intensity}</Mo>}
-          </div>
-        )}
-        {trainerComment && <div style={{background:"rgba(0,229,160,.05)",borderRadius:8,padding:"10px 12px",border:"1px solid rgba(0,229,160,.2)",marginBottom:10}}><Mo c="#5EEAD4" s={8} style={{marginBottom:5,display:"block"}}>TRAINER COMMENT</Mo><div style={{fontSize:12,color:"#ddddf0",lineHeight:1.65}}>{trainerComment}</div></div>}
-        <div style={{marginTop:8,borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <Mo c="#cbd5e1" s={8}>TEO GYM</Mo>
-          <Mo c="#5EEAD4" s={9}>{trainerName}{gymName?" · "+gymName:""}</Mo>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ════════════════════════════════════════════
 // HISTORY
 // ════════════════════════════════════════════
-// 히스토리 카드 전용 색상 보정 — EQUIP_COLOR/MUSCLE_COLOR/IC/CC는 다크 카드용으로 튜닝된 값이라
+// 히스토리 카드 전용 색상 보정 — EQUIP_COLOR/MUSCLE_COLOR는 다크 카드용으로 튜닝된 값이라
 // 옅은 색(민트·노랑 등)을 밝은 카드 위 글자색으로 그대로 쓰면 가독성이 떨어진다. 배경은 원래 색의 옅은 틴트로,
 // 글자는 아래 매핑의 더 짙은 값으로 표시해 "연한 배경 + 진한 텍스트" 규칙을 지킨다(공용 색상 상수 자체는 미변경).
 const HIST_DARK_TEXT = {
@@ -24193,9 +23923,12 @@ function getHistoryExerciseSummary(ex) {
   if (secs) parts.push(secs);
   return parts.join(" · ");
 }
-// 수업 운동을 "기능 · 워밍업"(isFuncEx — 회원 공유 리포트의 기능 회복 섹션과 같은 기준)과 "근력운동"으로 입력 순서 그대로 나눈다
+// 수업 운동을 "기능 · 워밍업"(isFuncEx 기준)과 "근력운동"으로 입력 순서 그대로 나눈다.
+// 기능운동·근력운동이 실제로는 하나의 exercises 배열에 함께 저장되므로(트레이너가 자유롭게 순서를 바꿔가며 기록),
+// 그 배열 인덱스가 곧 "실제 수업 수행 순서"다 — _histOrder로 원래 순서 번호를 붙여 두 섹션에 나눠 표시해도 번호가 이어지게 한다.
 function splitHistoryExercises(exercises) {
-  const list = (Array.isArray(exercises) ? exercises : []).filter(hasHistoryExerciseContent);
+  const list = (Array.isArray(exercises) ? exercises : []).filter(hasHistoryExerciseContent)
+    .map((ex, i) => ({ ...ex, _histOrder: i + 1 }));
   return { func: list.filter(ex => isFuncEx(ex)), strength: list.filter(ex => !isFuncEx(ex)) };
 }
 
@@ -24222,10 +23955,13 @@ function HistExerciseTags({ exercises }) {
               const sub = [cat, summary].filter(Boolean).join(" · ");
               return (
                 <div key={j} style={{minWidth:0,paddingLeft:9,borderLeft:`3px solid ${base}88`}}>
-                  <div style={{fontFamily:DB.font,fontSize:14.5,fontWeight:700,color:isFallback?DB.sub:DB.text,lineHeight:1.4,
-                    whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"anywhere"}}>
-                    {name}
-                    {isFallback && <span style={{fontSize:11,fontWeight:600,color:DB.faint,marginLeft:5}}>(운동명 미입력)</span>}
+                  <div style={{display:"flex",alignItems:"baseline",gap:5}}>
+                    {ex._histOrder && <HistNum weight={700} style={{fontSize:11.5,color:DB.faint,flexShrink:0}}>{ex._histOrder}</HistNum>}
+                    <div style={{fontFamily:DB.font,fontSize:14.5,fontWeight:700,color:isFallback?DB.sub:DB.text,lineHeight:1.4,
+                      whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"anywhere"}}>
+                      {name}
+                      {isFallback && <span style={{fontSize:11,fontWeight:600,color:DB.faint,marginLeft:5}}>(운동명 미입력)</span>}
+                    </div>
                   </div>
                   {sub && <div style={{fontFamily:DB.font,fontSize:12,color:DB.sub,lineHeight:1.45,overflowWrap:"anywhere"}}>{sub}</div>}
                 </div>
@@ -25819,7 +25555,6 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
   const [confirmPair, setConfirmPair] = useState(null);
   const [splitting, setSplitting] = useState(false);
   const [reportPublishing, setReportPublishing] = useState(false);
-  const [cardMode, setCardMode] = useState("simple");
   const [sortMode, setSortMode] = useState("no"); // 기본: 회차별 내림차순
   const [filterPart, setFilterPart] = useState(null);
   // 회원 확인 필터(전체/회원 확인/회원 미확인) — 기존 정렬 탭(sortMode)과 독립적으로 함께 적용된다.
@@ -25932,8 +25667,6 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
           member={member}
           sessions={sessions}
           bodyData={bodyData}
-          cardMode={cardMode}
-          setCardMode={setCardMode}
           onClose={() => setReportSession(null)}
           onEdit={() => { onEdit(reportSession); setReportSession(null); }}
           publishing={reportPublishing}
@@ -26033,8 +25766,6 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {readFilteredSessions.map((s,i) => {
             const typeLbl = formatTypes(s.selectedTypes || s.type);
-            const ic = IC[s.intensity] || "#ffd166";
-            const cc = CC[s.condition] || CC["상"];
             const { month, day, raw, weekday } = formatHistoryDateParts(s.date);
             const partVolumes = calcPartVolumes(s.exercises);
             const totalSets = calcTotalSets(s.exercises);
@@ -26105,16 +25836,10 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
                     )}
                 </div>
 
-                {/* ── 3순위: 수업 강도 · 회원 상태 / 4순위: 총 세트 · 총 볼륨 · 체중 등 보조 지표 ── */}
+                {/* ── 3순위: 근육통·회원 수업 후 상태 / 4순위: 총 세트 · 총 볼륨 · 체중 등 보조 지표 ── */}
                 <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${DB.border}`,display:"flex",flexDirection:"column",gap:8}}>
-                  {(s.intensity || s.condition || s.sorenessReport || s.memberFeedback) && (
+                  {(s.sorenessReport || s.memberFeedback) && (
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                      {s.intensity && (
-                        <span style={{...chip,background:ic+"1A",color:histDark(ic),border:`1px solid ${ic}40`}}>{s.intensity}</span>
-                      )}
-                      {s.condition && (
-                        <span style={{...chip,background:cc.color+"1A",color:histDark(cc.color),border:`1px solid ${cc.color}40`}}>{cc.emoji} {s.condition}</span>
-                      )}
                       {s.sorenessReport && (
                         <span style={{fontFamily:DB.font,fontSize:13.5,color:"#C2410C"}}>
                           근육통: {s.sorenessReport.part||"-"} · {s.sorenessReport.level||"-"} · {s.sorenessReport.timing||"-"}
@@ -26206,14 +25931,6 @@ function HistoryScreen({ sessions: rawSessions, sessionReadsMap, bodyData, nutri
                     fontFamily:DB.font,fontSize:12,color:DB.sub,fontStyle:"italic",overflow:"hidden",
                     display:"-webkit-box",WebkitLineClamp:1,WebkitBoxOrient:"vertical"}}>
                     {s.trainerComment}
-                  </div>
-                )}
-                {/* 내부 메모 — 트레이너 전용 */}
-                {!cardMode && s.trainerOnlyNote && (
-                  <div style={{marginTop:10,padding:"9px 12px",borderRadius:8,
-                    background:"rgba(124,111,255,.06)",border:"1px solid rgba(124,111,255,.2)"}}>
-                    <div style={{fontFamily:DB.font,fontSize:10.5,color:"#6D28D9",fontWeight:700,marginBottom:2}}>🔒 내부 메모</div>
-                    <div style={{fontFamily:DB.font,fontSize:11.5,color:"#6D28D9"}}>{s.trainerOnlyNote}</div>
                   </div>
                 )}
                 {/* 통증 기록 요약 — 기록 있을 때만 표시 */}
@@ -26418,10 +26135,9 @@ function PartVolBadges({ exercises, style={} }) {
   );
 }
 
-// ── 관리자 확인용 수업 상세(밝은 관리자앱 톤) ──────────────────────────────
-// 회원 공유·이미지 저장용 다크 리포트 카드(SessionReportModal의 #report-card-capture)와 역할을 분리한 관리자 전용 화면.
+// ── 수업 상세(밝은 관리자앱 톤) ──────────────────────────────
 // 읽기 전용 — 저장 구조와 볼륨/세트 계산은 기존 함수(exVol·calcTotalSets·calcPartVolumes·calcPartSets)를 그대로 사용한다.
-// 읽는 순서: 상단 요약(날짜·회차·부위·체중·강도·상태) → 오늘의 수업(모든 운동 + 세트별 중량×횟수) → 전체 결과 지표 → 트레이너 기록
+// 읽는 순서: 상단 요약(날짜·회차·부위·체중) → 오늘의 수업(모든 운동을 실제 수행 순서 번호와 함께 + 세트별 중량×횟수) → 전체 결과 지표 → 트레이너 기록
 function SessionAdminDetail({ s, member, sessions=[], bodyData }) {
   const exercises = Array.isArray(s?.exercises) ? s.exercises : [];
   const { func, strength } = splitHistoryExercises(exercises);
@@ -26433,8 +26149,6 @@ function SessionAdminDetail({ s, member, sessions=[], bodyData }) {
   const { month, day, raw, weekday } = formatHistoryDateParts(s.date);
   const typeLbl = formatTypes(s.selectedTypes || s.type) || "";
   const muscleParts = [...new Set(exercises.filter(e=>e&&e.muscleTop&&e.muscleTop!=="기능").map(e=>e.muscleTop))];
-  const ic = IC[s.intensity] || "#ffd166";
-  const cc = CC[s.condition] || CC["상"];
   const fb = s.memberFeedback || null;
   const painRecord = s.painRecord || null;
   const feedbacks = exercises.filter(e=>e&&e.feedback);
@@ -26463,10 +26177,13 @@ function SessionAdminDetail({ s, member, sessions=[], bodyData }) {
   const nameLine = (ex, size) => {
     const { name, isFallback } = getHistoryExerciseName(ex);
     return (
-      <div style={{fontFamily:DB.font,fontSize:size,fontWeight:800,color:isFallback?DB.sub:DB.text,lineHeight:1.35,
-        whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"anywhere"}}>
-        {name}
-        {isFallback && <span style={{fontSize:11,fontWeight:600,color:DB.faint,marginLeft:5}}>(운동명 미입력)</span>}
+      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+        {ex._histOrder && <HistNum weight={700} style={{fontSize:size*0.72,color:DB.faint,flexShrink:0}}>{ex._histOrder}</HistNum>}
+        <div style={{fontFamily:DB.font,fontSize:size,fontWeight:800,color:isFallback?DB.sub:DB.text,lineHeight:1.35,
+          whiteSpace:"normal",wordBreak:"keep-all",overflowWrap:"anywhere"}}>
+          {name}
+          {isFallback && <span style={{fontSize:11,fontWeight:600,color:DB.faint,marginLeft:5}}>(운동명 미입력)</span>}
+        </div>
       </div>
     );
   };
@@ -26503,20 +26220,12 @@ function SessionAdminDetail({ s, member, sessions=[], bodyData }) {
           ))}
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <div style={tile}>
+          <div style={{...tile,flex:"0 0 auto"}}>
             <div style={tileLabel}>체중</div>
             {weightRec?.weight ? (<>
               <HistNum weight={700} style={{fontSize:16,color:DB.text}}>{weightRec.weight}kg</HistNum>
               {weightRec.date && weightRec.date !== s.date && <div style={{fontSize:11,color:DB.faint,marginTop:1}}>{formatMonthDayKo(weightRec.date)} 기록</div>}
             </>) : <span style={{fontSize:13.5,color:DB.faint}}>기록 없음</span>}
-          </div>
-          <div style={tile}>
-            <div style={tileLabel}>수업 강도</div>
-            {s.intensity ? <span style={{...pill,fontSize:13,background:ic+"1A",color:histDark(ic),border:`1px solid ${ic}40`}}>{s.intensity}</span> : <span style={{fontSize:13.5,color:DB.faint}}>-</span>}
-          </div>
-          <div style={tile}>
-            <div style={tileLabel}>회원 상태</div>
-            {s.condition ? <span style={{...pill,fontSize:13,background:cc.color+"1A",color:histDark(cc.color),border:`1px solid ${cc.color}40`}}>{cc.emoji} {s.condition}</span> : <span style={{fontSize:13.5,color:DB.faint}}>-</span>}
           </div>
           {fb && (
             <div style={{...tile,flex:"2 1 200px"}}>
@@ -26759,90 +26468,9 @@ function SessionAdminDetail({ s, member, sessions=[], bodyData }) {
   );
 }
 
-function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCardMode, onClose, onEdit, onPublish, onUnpublish, onSendPair, publishing=false }) {
-  const [saving, setSaving] = useState(false);
-  // 관리자 확인용 상세(밝은 관리자앱 톤, 기본) ↔ 회원 공유·이미지 저장용 다크 리포트 카드(기존 디자인 그대로) 역할 분리
-  const [reportView, setReportView] = useState("admin");
-  const [pendingImageSave, setPendingImageSave] = useState(false);
-
-  // 세션 데이터에서 필드 추출
-  const exercises     = s.exercises     || [];
-  const totalVol      = s.totalVolume   || exercises.reduce((sum,e)=>sum+exVol(e),0);
-  const trainerComment= s.trainerComment|| "";
-  const stretchNotes  = s.stretchingNotes || s.stretchNotes || "";
-  const nextPlan      = s.nextPlan      || "";
-  const painRecord    = s.painRecord    || null;
-  const bodyWeight    = getLatestBodyWeight(bodyData, s.date)?.weight || "";
-  const trainerName   = s.trainerName   || "김태오";
-  const gymName       = s.gymName       || "테오짐";
-  const intensity     = s.intensity     || "";
-  const condition     = s.condition     || "";
-  const date          = s.date          || "";
-  const sessionNo     = s.sessionNo     || "";
-  const typeLbl       = formatTypes(s.selectedTypes || s.type) || "";
-  const isPublished   = s.isPublished === true;
-  const statusLabel   = isPublished ? "공개됨" : (s.status === "completed" ? "작성 완료·비공개" : "임시저장·비공개");
-
-  const ic = IC[intensity] || "#ffd166";
-  const cc = CC[condition] || CC["상"];
-  const ds = date ? new Date(date+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"}) : "";
-
-  // 운동 부위 요약
-  const parts = [...new Set(exercises.filter(e=>e.muscleTop).map(e=>e.muscleTop))].slice(0,3).join("·");
-
-  // 자세 피드백 (운동별 feedback 합산)
-  const feedbacks = exercises.filter(e=>e.feedback).map(e=>e.name ? `· ${e.name}: ${e.feedback}` : `· ${e.feedback}`);
-
-  // 오늘의 긍정 변화 감지 (상세 모달 전용, 회원 공유 카드에는 포함 안 됨)
-  const positiveChanges = (() => {
-    const prevSess = [...sessions]
-      .filter(ps => ps.id !== s.id)
-      .sort((a,b) => (b.date||"").localeCompare(a.date||""));
-    return detectPositiveChanges(s, prevSess);
-  })();
-
-  // 운동별 자극도 (관리자 전용 표시)
-  const stimExs = exercises.filter(e => e.stimRating || e.stimMemo || e.stimPrimary || e.stimNote || e.nextPlan);
-
-  async function handleSaveImage() {
-    const el = document.getElementById("report-card-capture");
-    if (!el) return;
-    setSaving(true);
-    try {
-      const h2c = (await import("html2canvas")).default;
-      const canvas = await h2c(el, { backgroundColor:"#0F172A", scale:2, useCORS:true, logging:false });
-      const dataUrl = canvas.toDataURL("image/png");
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      if (!isIOS) {
-        const link = document.createElement("a");
-        link.download = (member?.name||"회원") + "_" + sessionNo + "회차_" + date + ".png";
-        link.href = dataUrl;
-        link.click();
-      } else {
-        const w = window.open();
-        if (w) {
-          w.document.write('<img src="'+dataUrl+'" style="max-width:100%"/>');
-          w.document.title = (member?.name||"") + (isOwner(member) ? " 운동 리포트" : " 수업 리포트");
-        }
-      }
-    } catch(e) { console.error(e); }
-    setSaving(false);
-  }
-  // 이미지 저장은 항상 다크 공유 카드(#report-card-capture)를 캡처한다 — 관리자 보기에서 누르면 공유 카드로 전환한 뒤
-  // 렌더가 끝난 다음 기존 handleSaveImage를 그대로 실행한다(캡처 대상·옵션·파일명 미변경).
-  function requestSaveImage() {
-    if (saving) return;
-    if (reportView === "share") { handleSaveImage(); return; }
-    setReportView("share");
-    setPendingImageSave(true);
-  }
-  useEffect(() => {
-    if (!pendingImageSave || reportView !== "share") return;
-    // 대기 플래그는 타이머 안에서 내린다 — 여기서 먼저 내리면 effect가 다시 돌며 cleanup이 타이머를 취소해 저장이 실행되지 않는다
-    const t = setTimeout(() => { setPendingImageSave(false); handleSaveImage(); }, 60);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingImageSave, reportView]);
+function SessionReportModal({ s, member, sessions=[], bodyData, onClose, onEdit, onPublish, onUnpublish, onSendPair, publishing=false }) {
+  const isPublished = s.isPublished === true;
+  const statusLabel = isPublished ? "공개됨" : (s.status === "completed" ? "작성 완료·비공개" : "임시저장·비공개");
 
   const topBtn = { padding:"7px 12px",borderRadius:9,fontSize:12,fontWeight:700,fontFamily:DB.font,cursor:"pointer",whiteSpace:"nowrap",
     border:`1px solid ${DB.border}`,background:DB.card,color:DB.sub };
@@ -26852,32 +26480,6 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:8,flexWrap:"wrap"}}>
         <button onClick={onClose} style={topBtn}>← 뒤로</button>
         <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
-          {/* 관리자 보기 / 공유 카드 전환 */}
-          <div style={{display:"flex",background:"#EEF1F4",borderRadius:10,padding:2,gap:2}}>
-            {[["admin","관리자 보기"],["share","공유 카드"]].map(([k,l])=>(
-              <button key={k} onClick={()=>setReportView(k)}
-                style={{padding:"6px 11px",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:DB.font,
-                  background:reportView===k?DB.card:"transparent",
-                  color:reportView===k?DB.mintSoft:DB.sub,
-                  boxShadow:reportView===k?"0 1px 2px rgba(15,23,42,.08)":"none"}}>
-                {l}
-              </button>
-            ))}
-          </div>
-          {/* 간단/상세 전환 — 공유 카드 내용에만 적용 */}
-          {reportView === "share" && (
-            <div style={{display:"flex",background:"#EEF1F4",borderRadius:10,padding:2,gap:2}}>
-              {[["simple","간단"],["detail","상세"]].map(([k,l])=>(
-                <button key={k} onClick={()=>setCardMode(k)}
-                  style={{padding:"6px 11px",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:DB.font,
-                    background:cardMode===k?DB.card:"transparent",
-                    color:cardMode===k?DB.mintSoft:DB.sub,
-                    boxShadow:cardMode===k?"0 1px 2px rgba(15,23,42,.08)":"none"}}>
-                  {l}
-                </button>
-              ))}
-            </div>
-          )}
           <span style={{fontSize:12,fontWeight:800,fontFamily:DB.font,color:isPublished?"#0F9488":"#B45309",padding:"6px 9px",borderRadius:9,background:isPublished?"rgba(15,148,136,.08)":"rgba(245,158,11,.10)",border:"1px solid "+(isPublished?"rgba(15,148,136,.25)":"rgba(245,158,11,.30)")}}>{statusLabel}</span>
           {isPublished ? (
             <button onClick={onUnpublish} style={topBtn}>공개 취소</button>
@@ -26893,371 +26495,10 @@ function SessionReportModal({ s, member, sessions=[], bodyData, cardMode, setCar
             </button>
           )}
           <button onClick={onEdit} style={{...topBtn,border:"1px solid rgba(37,99,235,.35)",background:"rgba(37,99,235,.06)",color:"#2563EB"}}>✏️ 수정</button>
-          <button onClick={requestSaveImage} disabled={saving}
-            title="회원 공유용 다크 리포트 카드를 이미지로 저장합니다"
-            style={{...topBtn,border:"none",cursor:saving?"not-allowed":"pointer",
-              background:DB.mintSoft,color:"#fff",fontWeight:800}}>
-            {saving ? "⏳ 저장 중" : "📥 공유 이미지 저장"}
-          </button>
         </div>
       </div>
 
-      {reportView === "admin" && (
-        <SessionAdminDetail s={s} member={member} sessions={sessions} bodyData={bodyData} />
-      )}
-
-      {reportView === "share" && (<>
-      {/* 리포트 카드 (캡처 대상) — 회원 공유·이미지 저장용 다크 디자인 유지 */}
-      <div id="report-card-capture">
-        <div style={{background:"#0F172A",borderRadius:16,overflow:"hidden",
-          maxWidth:480,margin:"0 auto",border:"1px solid rgba(255,255,255,0.08)",fontFamily:"'Pretendard',sans-serif"}}>
-
-          {/* ─ 헤더 ─ */}
-          <div style={{background:"linear-gradient(135deg,#0d1e14,#090914)",
-            padding:"18px 20px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",
-                  letterSpacing:".14em",marginBottom:4}}>TEO GYM · PERSONAL TRAINING</div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,
-                  color:"#fff",letterSpacing:"-0.5px"}}>{member?.name || "회원"}</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#94a3b8",marginTop:2}}>
-                  {gymName}{trainerName?" · "+trainerName:""}
-                </div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#7070a0"}}>{ds}</div>
-                <div style={{display:"flex",gap:4,marginTop:5,justifyContent:"flex-end",flexWrap:"wrap"}}>
-                  {intensity && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
-                    padding:"2px 7px",borderRadius:10,background:ic+"22",color:ic}}>{intensity}</span>}
-                  {condition && <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,
-                    padding:"2px 7px",borderRadius:10,background:cc.color+"22",color:cc.color}}>
-                    {cc.emoji} {condition}</span>}
-                </div>
-              </div>
-            </div>
-
-            {/* 수업 요약 배지 — 부위만 (수업 유형이 부위와 겹치면 제거) */}
-            <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-              {parts && (
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,padding:"3px 10px",
-                  borderRadius:20,background:"rgba(0,229,160,.15)",color:"#5EEAD4",fontWeight:700}}>
-                  💪 {parts}
-                </span>
-              )}
-              {(() => {
-                // typeLbl에서 parts와 중복되는 부위 제거
-                const partsArr = parts ? parts.split("·") : [];
-                const filtered = (typeLbl||"").split(" · ").filter(t => !partsArr.includes(t)).join(" · ");
-                return filtered ? (
-                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,padding:"3px 10px",
-                    borderRadius:20,background:"rgba(124,111,255,.15)",color:"#a29bfe"}}>
-                    {filtered}
-                  </span>
-                ) : null;
-              })()}
-            </div>
-          </div>
-
-          {/* ─ 운동 목록 ─ */}
-          <div style={{padding:"14px 18px"}}>
-            {/* ── 1. 기능 회복 섹션 (최상단, 카테고리별 그룹핑) ── */}
-            {exercises.filter(e=>isFuncEx(e)).length > 0 && (
-              <div style={{marginBottom:10,borderRadius:10,overflow:"hidden",
-                border:"1px solid rgba(94,234,212,.18)",background:"rgba(94,234,212,.02)"}}>
-                <div style={{padding:"8px 13px",background:"rgba(94,234,212,.07)"}}>
-                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",fontWeight:800,letterSpacing:".12em"}}>기능 회복 · 움직임 개선</span>
-                </div>
-                <div style={{padding:"9px 13px",background:"rgba(94,234,212,.01)"}}>
-                  {groupFuncExercises(exercises.filter(e=>isFuncEx(e))).map((group,gi,arr)=>{
-                    const isLastGroup = gi === arr.length - 1;
-                    return (
-                      <div key={gi} style={{
-                        marginBottom:isLastGroup?0:10,
-                        paddingBottom:isLastGroup?0:10,
-                        borderBottom:isLastGroup?"none":"1px solid rgba(255,255,255,0.05)"}}>
-                        <div style={{fontFamily:"'Noto Sans KR',sans-serif",fontSize:12,
-                          color:"#d1fae5",fontWeight:700,marginBottom:4,lineHeight:1.4}}>
-                          {group.displayTitle}
-                        </div>
-                        {group.exercises.map((ex,xi)=>{
-                          const sub = funcExSubLine(ex);
-                          return sub ? (
-                            <div key={xi} style={{display:"flex",alignItems:"baseline",gap:5,paddingLeft:8,marginBottom:2}}>
-                              <span style={{color:"#3a5a4a",fontSize:10,flexShrink:0}}>└</span>
-                              <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"#52687a",lineHeight:1.5}}>
-                                {sub}
-                              </span>
-                            </div>
-                          ) : null;
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ── 2. TODAY'S WORKOUT (기능운동 제외) ── */}
-            {exercises.filter(e=>e.name&&!isFuncEx(e)).length > 0 && (
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#3a3a5a",
-                letterSpacing:".1em",marginBottom:10}}>TODAY'S WORKOUT</div>
-            )}
-
-            {exercises.filter(e=>e.name&&!isFuncEx(e)).map((ex, ei) => {
-              const isFunc = false; // 기능운동 이미 제외됨
-              const vol   = exVol(ex);
-              const ec    = EQUIP_COLOR[ex.equipment]||"#888";
-              const gc    = mColor(ex.muscleTop);
-              const maxW  = Math.max(0,...(ex.sets||[]).map(r=>parseFloat(r.weight)||0));
-              const avgRPE = ex.rpe ? ex.rpe : null;
-              const unitP2 = getRecordUnit(ex);
-              const totalReps2 = (ex.sets||[]).reduce((s,r)=>s+(parseInt(r.reps)||0),0);
-              return (
-                <div key={ei} style={{marginBottom:8,background:"#111827",borderRadius:10,
-                  overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)"}}>
-                  <div style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)",
-                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,
-                        color:"#fff",marginBottom:3}}>{ex.name}</div>
-                      <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 5px",
-                          borderRadius:3,background:ec+"22",color:ec}}>{ex.equipment}</span>
-                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"1px 5px",
-                          borderRadius:3,background:gc+"22",color:gc}}>{ex.muscleTop}</span>
-                        {/* RPE는 회원 공유 카드에서 제외 — 트레이너 전용 데이터 */}
-                      </div>
-                    </div>
-                    <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                      {/* 중량이 한 세트도 기록되지 않은 운동(isUnweightedRecord)은 의미 없는 "0kg / 최고 0kg" 대신 횟수만 표시 */}
-                      {(unitP2==="kg" && !isUnweightedRecord(ex)) ? (<>
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>{vol.toLocaleString()}kg</div>
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#3a3a5a"}}>최고 {maxW}kg</div>
-                      </>) : (unitP2==="step" && !isUnweightedRecord(ex)) ? (
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>최고 {maxW}단</div>
-                      ) : totalReps2 > 0 ? (
-                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#5EEAD4",fontWeight:700}}>총 {totalReps2}회</div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div style={{padding:"6px 12px"}}>
-                    <div>
-                      {(() => {
-                        const dualWRpt = isDualWeightEx(ex);
-                        const rptCols = dualWRpt ? "24px 1fr 1fr 1fr 1fr" : "24px 1fr 1fr 1fr";
-                        const rptHeaders = dualWRpt ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP2),"횟수","볼륨"];
-                        return (
-                          <div style={{display:"grid",gridTemplateColumns:rptCols,gap:4,marginBottom:4}}>
-                            {rptHeaders.map((h,i)=><Mo key={i} c="#cbd5e1" s={8} style={{textAlign:"center"}}>{h}</Mo>)}
-                          </div>
-                        );
-                      })()}
-                      {(ex.sets||[]).map((row,si)=>{
-                        const dualWRpt = isDualWeightEx(ex);
-                        const rptCols = dualWRpt ? "24px 1fr 1fr 1fr 1fr" : "24px 1fr 1fr 1fr";
-                        return (
-                          <div key={si} style={{display:"grid",gridTemplateColumns:rptCols,gap:4,marginBottom:3}}>
-                            <Mo c="#cbd5e1" s={9} style={{textAlign:"center",background:"#0F172A",borderRadius:3,padding:"2px 0"}}>{si+1}</Mo>
-                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{unitP2==="bodyweight"?"—":(row.weight||"—")}</Mo>
-                            {dualWRpt && <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.dbWeight||"—"}</Mo>}
-                            <Mo c="#ddddf0" s={10} style={{textAlign:"center"}}>{row.reps||"—"}</Mo>
-                            <Mo c="#5EEAD4" s={10} className="vol-col" style={{textAlign:"center"}}>{row.volume>0?row.volume.toLocaleString():"—"}</Mo>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* 총 볼륨 */}
-            <div style={{background:"linear-gradient(135deg,#0d2018,#0F172A)",borderRadius:10,
-              padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",
-              border:"1px solid rgba(0,229,160,.2)",marginBottom:12}}>
-              <div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94a3b8",marginBottom:2}}>TOTAL VOLUME</div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:"#5EEAD4"}}>
-                  {totalVol.toLocaleString()} <span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}>kg</span>
-                </div>
-                <PartVolBadges exercises={exercises} style={{marginTop:5}} />
-                {/* 세트 수 — 트레이너 전용, 공유 카드 미포함 */}
-                {!cardMode && calcTotalSets(exercises) > 0 && (
-                  <div style={{marginTop:5}}>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 7px",borderRadius:3,
-                        background:"rgba(255,255,255,0.06)",color:"#94a3b8",fontWeight:700}}>
-                        총 {calcTotalSets(exercises)}세트
-                      </span>
-                      {calcPartSets(exercises).map(([g,c])=>(
-                        <span key={g} style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 6px",
-                          borderRadius:3,background:"rgba(255,255,255,0.04)",color:"#475569"}}>
-                          {g} {c}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              {bodyWeight && (
-                <div style={{textAlign:"right"}}>
-                  <Mo c="#94a3b8" s={8}>체중</Mo>
-                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:16,color:"#ffd166"}}>{bodyWeight}kg</div>
-                </div>
-              )}
-            </div>
-
-            {/* ─ 상세 모드: 통증 기록 + 자세 피드백 + 총평 + 다음 계획 ─ */}
-            {cardMode === "detail" && (
-              <div>
-                {/* 유산소 기록 */}
-                {s.cardio && (s.cardio.type || s.cardio.minutes) && (
-                  <div style={{marginBottom:10,background:"rgba(249,115,22,.06)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(249,115,22,.2)"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#f97316",
-                      letterSpacing:".1em",marginBottom:8}}>🔥 유산소 기록</div>
-                    <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-                      {s.cardio.type     && <div><Mo c="#94a3b8" s={8}>종류</Mo><Mo c="#fdba74" s={11}> {s.cardio.type}</Mo></div>}
-                      {s.cardio.minutes  && <div><Mo c="#94a3b8" s={8}>시간</Mo><Mo c="#fdba74" s={11}> {s.cardio.minutes}분</Mo></div>}
-                      {s.cardio.calories && <div><Mo c="#94a3b8" s={8}>칼로리</Mo><Mo c="#fdba74" s={11}> {s.cardio.calories}kcal</Mo></div>}
-                      {s.cardio.intensity && <div><Mo c="#94a3b8" s={8}>강도</Mo><Mo c="#fdba74" s={11}> {s.cardio.intensity}</Mo></div>}
-                    </div>
-                  </div>
-                )}
-                {/* 통증 기록 */}
-                {painRecord && (painRecord.before?.vas > 0 || painRecord.after?.vas > 0 || painRecord.before?.part) && (() => {
-                  const b = painRecord.before || {};
-                  const a = painRecord.after  || {};
-                  const bColor = b.vas>=7?"#ff6b6b":b.vas>=4?"#ffd166":"#5EEAD4";
-                  const aColor = a.change==="감소"?"#5EEAD4":a.change==="증가"?"#ff6b6b":"#ffd166";
-                  return (
-                    <div style={{marginBottom:10,background:"rgba(255,159,67,.06)",borderRadius:10,
-                      padding:"11px 14px",border:"1px solid rgba(255,159,67,.2)"}}>
-                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#ff9f43",
-                        letterSpacing:".1em",marginBottom:8}}>💢 통증 기록</div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        {(b.vas > 0 || b.part) && (
-                          <div style={{flex:1,minWidth:120}}>
-                            <Mo c="#ff9f43" s={8} style={{fontWeight:700,display:"block",marginBottom:3}}>운동 전</Mo>
-                            {b.vas > 0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:bColor,fontWeight:800}}>VAS {b.vas}</div>}
-                            {b.part && <Mo c="#ddddf0" s={11} style={{display:"block",marginTop:2}}>{b.part}</Mo>}
-                            {b.situation && <Mo c="#7070a0" s={9} style={{display:"block"}}>{b.situation}</Mo>}
-                            {b.memo && <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{b.memo}</Mo>}
-                          </div>
-                        )}
-                        {(a.vas > 0 || a.change) && (
-                          <div style={{flex:1,minWidth:120}}>
-                            <Mo c="#5EEAD4" s={8} style={{fontWeight:700,display:"block",marginBottom:3}}>운동 후</Mo>
-                            {a.vas > 0 && <div style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:aColor,fontWeight:800}}>VAS {a.vas}</div>}
-                            {a.change && <Mo c={aColor} s={11} style={{display:"block",marginTop:2,fontWeight:700}}>{a.change==="감소"?"✅ 통증 감소":a.change==="증가"?"⚠️ 통증 증가":"➡️ 동일"}</Mo>}
-                            {a.memo && <Mo c="#94a3b8" s={9} style={{display:"block",marginTop:2}}>{a.memo}</Mo>}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-                {feedbacks.length > 0 && (
-                  <div style={{marginBottom:10,background:"rgba(124,111,255,.07)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(124,111,255,.2)"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#7c6fff",
-                      letterSpacing:".1em",marginBottom:7}}>📝 자세 피드백</div>
-                    {feedbacks.map((fb,i) => (
-                      <div key={i} style={{fontSize:11,color:"#c4bfff",lineHeight:1.7,marginBottom:2}}>{fb}</div>
-                    ))}
-                  </div>
-                )}
-
-                {/* 오늘의 긍정 변화 — 상세 모달 전용, 회원 친화적 문구 */}
-                {positiveChanges.length > 0 && (
-                  <div style={{marginBottom:10,background:"rgba(34,197,94,.06)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(34,197,94,.2)"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#22c55e",
-                      letterSpacing:".1em",marginBottom:8}}>✨ 오늘의 긍정 변화</div>
-                    {positiveChanges.map((msg,i) => (
-                      <div key={i} style={{display:"flex",gap:7,alignItems:"flex-start",marginBottom:5}}>
-                        <span style={{color:"#22c55e",fontSize:12,flexShrink:0,marginTop:1}}>·</span>
-                        <span style={{fontSize:11,color:"#86efac",lineHeight:1.7}}>{msg}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* 트레이너 전용: 자극도 요약 */}
-                {stimExs.length > 0 && (
-                  <div style={{marginBottom:10,background:"rgba(129,140,248,.05)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(129,140,248,.18)"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#818cf8",letterSpacing:".1em"}}>🎯 자극도 기록</div>
-                      <Mo c="#3a3a5a" s={7}>(트레이너 전용)</Mo>
-                    </div>
-                    {stimExs.map((ex,i) => (
-                      <div key={i} style={{marginBottom:5,padding:"5px 0",
-                        borderBottom:i<stimExs.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
-                        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                          <Mo c="#94a3b8" s={10} style={{fontWeight:700}}>{ex.name}</Mo>
-                          {ex.stimRating && (
-                            <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,
-                              color:"#a5b4fc",fontWeight:800}}>{stimRatingLabel(ex.stimRating)}</span>
-                          )}
-                          {ex.stimPrimary && <Mo c="#818cf8" s={8}>주: {ex.stimPrimary}</Mo>}
-                          {ex.stimSecondary && <Mo c="#94a3b8" s={8}>보조: {ex.stimSecondary}</Mo>}
-                          {ex.nextPlan && <Mo c="#ffd166" s={8}>다음 수업: {nextPlanLabel(ex.nextPlan)}</Mo>}
-                        </div>
-                        {ex.stimMemo && <Mo c="#a5b4fc" s={8} style={{display:"block",marginTop:2}}>대표 메모: {ex.stimMemo}</Mo>}
-                        {ex.stimNote && <Mo c="#475569" s={8} style={{display:"block",marginTop:2}}>📝 {ex.stimNote}</Mo>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {trainerComment && (
-                  <div style={{marginBottom:10,background:"rgba(0,229,160,.06)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(0,229,160,.18)"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#5EEAD4",
-                      letterSpacing:".1em",marginBottom:7}}>{isOwner(member)?'💬 오늘 운동 총평':'💬 오늘 수업 총평'}</div>
-                    <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.75,whiteSpace:"pre-wrap"}}>{trainerComment}</div>
-                  </div>
-                )}
-
-                {nextPlan && (
-                  <div style={{marginBottom:10,background:"rgba(255,209,102,.06)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(255,209,102,.18)"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#ffd166",
-                      letterSpacing:".1em",marginBottom:7}}>{isOwner(member)?'📌 다음 운동 포인트':'📌 다음 수업 포인트'}</div>
-                    <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.75,whiteSpace:"pre-wrap"}}>{nextPlan}</div>
-                  </div>
-                )}
-
-                {stretchNotes && (
-                  <div style={{marginBottom:10,background:"rgba(84,160,255,.06)",borderRadius:10,
-                    padding:"11px 14px",border:"1px solid rgba(84,160,255,.18)"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#54a0ff",
-                      letterSpacing:".1em",marginBottom:7}}>🧘 마무리 스트레칭</div>
-                    <div style={{fontSize:12,color:"#ddddf0",lineHeight:1.75,whiteSpace:"pre-wrap"}}>{stretchNotes}</div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 푸터 */}
-            <div style={{borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:10,marginTop:4,
-              display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <Mo c="#cbd5e1" s={8}>TEO GYM</Mo>
-              <Mo c="#5EEAD4" s={9}>{trainerName}{gymName?" · "+gymName:""}</Mo>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* iOS 안내 */}
-      <div style={{marginTop:10,padding:"9px 12px",background:"#111827",borderRadius:7,
-        border:"1px dashed rgba(255,255,255,0.08)",fontSize:10,color:"#94a3b8",textAlign:"center",lineHeight:1.8}}>
-        📱 아이폰: 저장 버튼 → 새 탭 이미지를 길게 눌러 저장<br/>
-        💻 맥/PC: 📥 저장 버튼으로 자동 다운로드
-      </div>
-      </>)}
+      <SessionAdminDetail s={s} member={member} sessions={sessions} bodyData={bodyData} />
     </div>
   );
 }
@@ -28705,32 +27946,6 @@ function CorrectionScreen({ sessions, loading, onBack }) {
       <Card title="통증 변화 (처음 vs 현재)"><ResponsiveContainer width="100%" height={200}><RadarChart data={rd} margin={{top:8,right:26,left:26,bottom:8}}><PolarGrid stroke="rgba(255,255,255,0.08)"/><PolarAngleAxis dataKey="part" tick={{fontFamily:"'DM Mono',monospace",fontSize:9,fill:"#94a3b8"}}/><Radar name="처음" dataKey="처음" stroke="#ff6b6b" fill="#ff6b6b" fillOpacity={0.15}/><Radar name="현재" dataKey="현재" stroke="#5EEAD4" fill="#5EEAD4" fillOpacity={0.15}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:9}}/><Tooltip contentStyle={tt}/></RadarChart></ResponsiveContainer><Mo c="#94a3b8" s={9} style={{textAlign:"center"}}>0=통증 없음 · 10=심함 · 낮을수록 개선</Mo></Card>
       <Card title="부위별 통증 추이" style={{marginTop:11}}><ResponsiveContainer width="100%" height={180}><LineChart data={pc} margin={{top:6,right:6,left:-22,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)"/><XAxis dataKey="name" tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><YAxis domain={[0,10]} tick={{fontFamily:"'DM Mono',monospace",fontSize:8,fill:"#94a3b8"}}/><Tooltip contentStyle={tt}/><Legend wrapperStyle={{fontFamily:"'DM Mono',monospace",fontSize:8}}/>{CPARTS.map((p,i)=><Line key={p} type="monotone" dataKey={p} stroke={cols[i%cols.length]} strokeWidth={1.5} dot={{r:2}}/>)}</LineChart></ResponsiveContainer></Card>
       <Card title="변화 요약" style={{marginTop:11}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:400}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["부위","통증처음","통증현재","변화","ROM처음","ROM현재","평가"].map(h=><th key={h} style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#94a3b8",padding:"5px 6px",textAlign:"center",fontWeight:500}}>{h}</th>)}</tr></thead><tbody>{CPARTS.map(p=>{const p0=f.painData?.[p]||0,p1=l.painData?.[p]||0,diff=p1-p0;const r0=f.romData?.[p]||"정상",r1=l.romData?.[p]||"정상",rD=ROMNUM[r1]-ROMNUM[r0];const imp=diff<0&&rD<=0,wor=diff>0||rD>0;return<tr key={p} style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}><td style={{padding:"5px 6px",fontFamily:"'DM Mono',monospace",fontSize:9,color:"#7070a0"}}>{p}</td><td style={{padding:"5px 6px",textAlign:"center"}}>{p0}</td><td style={{padding:"5px 6px",textAlign:"center"}}>{p1}</td><td style={{padding:"5px 6px",textAlign:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:diff<0?"#5EEAD4":diff>0?"#ff6b6b":"#94a3b8"}}>{diff<0?"▼"+Math.abs(diff):diff>0?"▲"+diff:"—"}</span></td><td style={{padding:"5px 6px",textAlign:"center",fontSize:9,color:"#6060a0"}}>{r0}</td><td style={{padding:"5px 6px",textAlign:"center",fontSize:9,color:"#6060a0"}}>{r1}</td><td style={{padding:"5px 6px",textAlign:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:8,padding:"2px 5px",borderRadius:4,background:imp?"rgba(0,229,160,.12)":wor?"rgba(255,107,107,.12)":"rgba(84,84,106,.12)",color:imp?"#5EEAD4":wor?"#ff6b6b":"#94a3b8"}}>{imp?"✓ 개선":wor?"⚠ 주의":"유지"}</span></td></tr>;})}   </tbody></table></div></Card>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════
-// PRINT REPORT
-// ════════════════════════════════════════════
-function PrintReport({ memberName, trainerName, gymName, date, sessionNo, type, intensity, condition, exercises, totalVol, stretchNotes, nextPlan, trainerComment, bodyWeight, calories, dietNote, romData, painData, isCorr }) {
-  const ic=IC[intensity]||"#ffd166"; const cc=CC[condition]||CC["상"];
-  const ds=date?new Date(date+"T00:00:00").toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"}):"";
-  const exList=(exercises||[]).filter(e=>e.name);
-  return (
-    <div style={{width:"210mm",minHeight:"297mm",background:"#fff",fontFamily:"'Noto Sans KR',sans-serif",color:"#111",display:"flex",flexDirection:"column"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=Noto+Sans+KR:wght@400;500;700;900&display=swap');`}</style>
-      <div style={{background:"#0B1120",padding:"14px 22px",display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}><div><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#5EEAD4",letterSpacing:".15em",marginBottom:2}}>PERSONAL TRAINING SESSION LOG</div><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"#fff"}}>{gymName||"PT 수업일지"}</div></div><div style={{textAlign:"right"}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#444",marginBottom:1}}>TRAINER</div><div style={{fontFamily:"'Syne',sans-serif",fontSize:11,fontWeight:700,color:"#ccc"}}>{trainerName||"—"}</div></div></div>
-      <div style={{padding:"10px 22px",borderBottom:"1px solid #eee",background:"#fafafa",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:32,height:32,borderRadius:8,background:"#0B1120",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏋️</div><div><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#aaa",letterSpacing:".1em"}}>MEMBER</div><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"#0B1120"}}>{memberName}</div></div></div><div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#666",marginBottom:3}}>{ds}</div><div style={{display:"flex",gap:3,justifyContent:"flex-end",flexWrap:"wrap"}}><PTag bg="#f0f0f0" color="#444">{type}</PTag><PTag bg={ic} color="#0B1120">{intensity}</PTag><PTag bg={cc.color+"22"} color={cc.color} border={"1px solid "+cc.color+"55"}>컨디션 {condition} {cc.emoji}</PTag></div></div></div>
-      <div style={{padding:"13px 22px",flex:1}}>
-        <PLbl>오늘의 운동</PLbl>
-        {exList.map((ex,ei)=>{const vol=exVol(ex);const ec=EQUIP_COLOR[ex.equipment]||"#888";const gc=mColor(ex.muscleTop);return(<div key={ei} style={{marginBottom:8}}><div style={{background:"#0B1120",borderRadius:"4px 4px 0 0",padding:"4px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#5EEAD4"}}>EX_{String(ei+1).padStart(2,"00")}</span><span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:11,color:"#fff"}}>{ex.name}</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 4px",borderRadius:3,background:ec+"33",color:ec}}>{ex.equipment}</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,padding:"1px 4px",borderRadius:3,background:gc+"33",color:gc}}>{ex.muscleTop} · {ex.muscleSub}</span></div><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#555"}}>{(ex.sets||[]).length}세트</span></div><table style={{width:"100%",borderCollapse:"collapse",fontSize:9,border:"1px solid #eee",borderTop:"none"}}><thead><tr style={{background:"#f7f7f7"}}>{["SET","무게(kg)","횟수","볼륨(kg)"].map(h=><th key={h} style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#aaa",padding:"3px 7px",textAlign:"center",fontWeight:500,borderBottom:"1px solid #eee"}}>{h}</th>)}</tr></thead><tbody>{(ex.sets||[]).map((r,si)=><tr key={si} style={{borderBottom:"1px solid #f4f4f4",background:si%2===0?"#fff":"#fafafa"}}><td style={{padding:"4px 7px",textAlign:"center",fontFamily:"'DM Mono',monospace",color:"#bbb",fontSize:8}}>{si+1}</td><td style={{padding:"4px 7px",textAlign:"center"}}>{r.weight||"—"}</td><td style={{padding:"4px 7px",textAlign:"center"}}>{r.reps||"—"}</td><td style={{padding:"4px 7px",textAlign:"center",fontFamily:"'DM Mono',monospace",color:"#2DD4BF",fontWeight:500,fontSize:8}}>{r.volume>0?r.volume.toLocaleString():"—"}</td></tr>)}</tbody></table><div style={{background:"#f7f7f7",borderRadius:"0 0 4px 4px",padding:"3px 8px",display:"flex",justifyContent:"space-between",border:"1px solid #eee",borderTop:"none"}}><span style={{fontSize:8,color:"#888",fontStyle:"italic"}}>{ex.feedback||""}</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#2DD4BF"}}>소계 {vol.toLocaleString()} kg</span></div></div>);})}
-        <div style={{background:"#0B1120",borderRadius:5,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:11}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#555",letterSpacing:".1em"}}>TOTAL VOLUME</span><div style={{display:"flex",alignItems:"baseline",gap:3}}><span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,color:"#5EEAD4"}}>{totalVol.toLocaleString()}</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#555"}}>kg</span></div></div>
-        {(stretchNotes||nextPlan)&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:9}}>{stretchNotes&&<PNote title="마무리 스트레칭" content={stretchNotes} accent="#7c6fff"/>}{nextPlan&&<PNote title="다음 수업 계획" content={nextPlan} accent="#5EEAD4"/>}</div>}
-        {trainerComment&&<div style={{border:"1.5px solid #5EEAD4",borderRadius:6,padding:"7px 10px",marginBottom:9,background:"rgba(0,229,160,.03)"}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#2DD4BF",letterSpacing:".1em",marginBottom:3}}>TRAINER COMMENT</div><div style={{fontSize:10,color:"#222",lineHeight:1.7,fontWeight:500}}>{trainerComment}</div></div>}
-        {isCorr&&romData&&<div style={{borderTop:"1px dashed #ddd",paddingTop:9,marginBottom:9}}><PLbl>교정 기록</PLbl><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#aaa",marginBottom:3}}>가동범위</div>{CPARTS.map(p=><div key={p} style={{display:"flex",justifyContent:"space-between",fontSize:8,marginBottom:2}}><span style={{color:"#666"}}>{p}</span><span style={{fontFamily:"'DM Mono',monospace",color:romData[p]==="정상"?"#2DD4BF":romData[p]==="약간 제한"?"#c8a000":"#ff6b6b"}}>{romData[p]||"—"}</span></div>)}</div><div><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#aaa",marginBottom:3}}>통증 강도</div>{CPARTS.map(p=>{const v=painData?.[p]||0;return<div key={p} style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}><span style={{fontSize:8,color:"#666",width:55,flexShrink:0}}>{p}</span><div style={{flex:1,height:3,background:"#f0f0f0",borderRadius:2}}><div style={{width:(v*10)+"%",height:"100%",background:v>6?"#ff6b6b":v>3?"#ffd166":"#5EEAD4",borderRadius:2}}/></div><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,width:10,textAlign:"right",color:v>6?"#ff6b6b":"#2DD4BF"}}>{v}</span></div>;})}></div></div></div>}
-        {(bodyWeight||calories||dietNote)&&<div style={{borderTop:"1px dashed #ddd",paddingTop:9}}><PLbl>식단 & 체중</PLbl><div style={{display:"flex",gap:7,marginBottom:dietNote?6:0}}>{bodyWeight&&<div style={{background:"#f5f5f5",border:"1px solid #eee",borderRadius:5,padding:"4px 9px",textAlign:"center",minWidth:68}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#aaa",marginBottom:1}}>체중</div><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:11}}>{bodyWeight} kg</div></div>}{calories&&<div style={{background:"#f5f5f5",border:"1px solid #eee",borderRadius:5,padding:"4px 9px",textAlign:"center",minWidth:68}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#aaa",marginBottom:1}}>칼로리</div><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:11}}>{calories} kcal</div></div>}</div>{dietNote&&<div style={{fontSize:9,color:"#555",lineHeight:1.6,background:"#fafafa",border:"1px solid #eee",borderRadius:5,padding:"4px 8px"}}>{dietNote}</div>}</div>}
-      </div>
-      <div style={{background:"#0B1120",padding:"7px 22px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#333"}}>TEO GYM</span><span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#5EEAD4"}}>{trainerName}{gymName?" · "+gymName:""}</span></div>
     </div>
   );
 }
@@ -37711,6 +36926,3 @@ function StatTile({ label, value, sub }) {
 function Spin({ sm }) { return <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:sm?0:40}}><div style={{width:sm?12:24,height:sm?12:24,border:(sm?2:3)+"px solid rgba(255,255,255,0.10)",borderTopColor:"#5EEAD4",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div>; }
 function Skel({ n }) { return <div style={{display:"flex",flexDirection:"column",gap:7}}>{Array.from({length:n||3},(_,i)=><div key={i} style={{height:48,background:"#111827",borderRadius:9}}/>)}</div>; }
 function Emp({ msg }) { return <div style={{textAlign:"center",padding:"36px 16px",fontFamily:"'DM Mono',monospace",fontSize:10,color:"#cbd5e1"}}>{msg}</div>; }
-function PTag({ children, bg, color, border }) { return <span style={{background:bg,color,fontSize:8,fontWeight:700,padding:"2px 6px",borderRadius:20,fontFamily:"'DM Mono',monospace",border:border||"none"}}>{children}</span>; }
-function PLbl({ children }) { return <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"#bbb",letterSpacing:".13em",textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:5}}><span style={{display:"inline-block",width:9,height:1,background:"#ddd"}}/>{children}<span style={{flex:1,display:"inline-block",height:1,background:"#eee"}}/></div>; }
-function PNote({ title, content, accent }) { return <div style={{background:"#fafafa",border:"1px solid #ebebeb",borderRadius:5,padding:"6px 8px",borderTop:"2px solid "+accent}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:accent,marginBottom:2,letterSpacing:".07em"}}>{title.toUpperCase()}</div><div style={{fontSize:9,color:"#444",lineHeight:1.6}}>{content}</div></div>; }

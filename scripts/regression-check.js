@@ -592,7 +592,7 @@ const checks = [
   ['수업일지 저장', app.includes('async function handleSaveSession') && app.includes('addSession(member.id, { ...payload, createdAt: now })') && app.includes('updateSession(member.id, editSess.id, payload)') && app.includes('await withTimeout(writePromise')],
   ['수업일지 저장: 좁은 화면 무한 로딩 원인(SessionScreen 저장 버튼에 중복 클릭 가드·저장 중 표시가 전혀 없던 문제) 수정', (() => {
     const i = app.indexOf('function SessionScreen(');
-    const j = app.indexOf('function CardSaveView');
+    const j = app.indexOf('const HIST_DARK_TEXT');
     const slice = app.slice(i, j);
     return slice.includes('const savingRef = useRef(false);') &&
       slice.includes('const [saving, setSaving] = useState(false);') &&
@@ -604,7 +604,7 @@ const checks = [
   })()],
   ['수업일지 저장: 상단·하단 저장 버튼 모두 저장 중에는 disabled + "저장 중..." 표시(중복 저장 방지)', (() => {
     const i = app.indexOf('function SessionScreen(');
-    const j = app.indexOf('function CardSaveView');
+    const j = app.indexOf('const HIST_DARK_TEXT');
     const slice = app.slice(i, j);
     return slice.includes('<button onClick={handleSaveTop} disabled={saving}') &&
       slice.includes('{saving ? "저장 중..." : `💾 ${isOwner(member) ? "운동 저장" : "저장"}`}') &&
@@ -7434,9 +7434,8 @@ const checks = [
     && app.includes('u.sets = u.sets.map(s => ({...s, dbWeight: s.dbWeight ?? ""}));')
     && app.includes('u.sets = u.sets.map(s => { const {dbWeight, ...rest} = s; return rest; });')
   ],
-  ['이중 중량 조회: 관리자앱 수업일지 조회(SessionReportModal)·저장 미리보기(SummaryCard)·회원전용앱(ExerciseAccordionRow) 3곳 모두 대상 운동일 때 "케이블"/"덤벨" 라벨이 붙은 열로 구분 표시한다(라벨 없이 숫자만 두 개 표시하지 않음)',
-    app.includes('const rptHeaders = dualWRpt ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP2),"횟수","볼륨"];')
-    && app.includes('const cardHeaders = dualWCard ? ["SET","케이블","덤벨","횟수","볼륨"] : ["SET",getWeightColumnLabel(unitP),"횟수","볼륨"];')
+  ['이중 중량 조회: 관리자앱 수업일지 조회(SessionAdminDetail)·회원전용앱(ExerciseAccordionRow) 2곳 모두 대상 운동일 때 "케이블"/"덤벨" 라벨이 붙은 열로 구분 표시한다(라벨 없이 숫자만 두 개 표시하지 않음)',
+    app.includes('cols.push(["케이블", r => weightCell(r.weight, "kg")], ["덤벨", r => weightCell(r.dbWeight, "kg")]);')
     && app.includes('{key:"weight",label:dualW?"케이블":getWeightColumnLabel(recordUnit)')
     && app.includes('{key:"dbWeight",label:"덤벨",fmt:x=>formatRecordValue(x.dbWeight,"kg")||"–"}')
   ],

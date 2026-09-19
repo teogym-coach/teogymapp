@@ -14521,14 +14521,32 @@ function countPtDebitedSessions(sessions, baselineAtMs, baselineDate, todayKST) 
   return seen.size;
 }
 
-function summarizePtRegistrations(registrations) {
-  let renewalAdded = 0, renewalCount = 0, adjustTotal = 0;
+// 기준(baseline)은 "그 시점의 잔여·재등록 횟수"를 확정한 값이므로, 기준 이후에 생성된 재등록·보정만 더한다.
+// 판정 기준은 createdAt(서버 시각) > ptBalanceBaselineAt(기준 저장 시각)이다.
+//   - date(YYYY-MM-DD)로 자르면 같은 날 "기준 설정 → 재등록"이 누락되거나 이중 계산되므로 쓰지 않는다.
+//   - PT 등록 추가·잔여 조정 버튼은 기준 설정 후에만 보이므로, 기준 시각 이전 기록은 "기준 재설정" 이전 기록뿐이다.
+//   - createdAt을 알 수 없는 기록은 판단 불가 → 기존 동작 그대로 포함한다(정상 회원 잔여가 갑자기 줄지 않게).
+function summarizePtRegistrations(registrations, baselineAtMs = null) {
+  let renewalAdded = 0, renewalCount = 0, adjustTotal = 0, excludedBeforeBaseline = 0;
   (registrations || []).forEach(r => {
+    const createdAt = toMillisSafe(r?.createdAt);
+    if (Number.isFinite(baselineAtMs) && createdAt != null && createdAt <= baselineAtMs) { excludedBeforeBaseline += 1; return; }
     const delta = Math.round(Number(r?.delta) || 0);
     if (r?.type === "adjustment") { adjustTotal += delta; return; }
     if (r?.type === "renewal") { renewalCount += 1; if (delta > 0) renewalAdded += delta; }
   });
-  return { renewalAdded, renewalCount, adjustTotal };
+  return { renewalAdded, renewalCount, adjustTotal, excludedBeforeBaseline };
+}
+
+// 최근 재등록일 — 기준 이전 기록도 실제로 있었던 재등록이므로 전체 renewal 문서 중 가장 최근 date를 쓴다(표시 전용).
+function getLatestPtRenewalDate(registrations) {
+  let latest = "";
+  (registrations || []).forEach(r => {
+    if (r?.type !== "renewal") return;
+    const d = String(r?.date || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > latest) latest = d;
+  });
+  return latest;
 }
 
 // 잔여 6회 이상 정상 / 5회 이하 재등록 준비 / 3회 이하 재등록 안내 필요 / 0회 수업 소진.
@@ -14550,11 +14568,11 @@ function getPtBalance(member, sessions = [], registrations = [], todayKST = "") 
     return {
       initialized: false, baselineDate: "", baselineRemaining: 0,
       renewalAdded: 0, adjustTotal: 0, debits: 0,
-      rawRemaining: null, remaining: null, renewalCount: 0,
+      rawRemaining: null, remaining: null, renewalCount: 0, excludedBeforeBaseline: 0,
       overdrawn: false, status: getPtBalanceStatus(null, false),
     };
   }
-  const reg = summarizePtRegistrations(registrations);
+  const reg = summarizePtRegistrations(registrations, base.at);
   const debits = countPtDebitedSessions(sessions, base.at, base.date, todayKST);
   const rawRemaining = base.remaining + reg.renewalAdded + reg.adjustTotal - debits;
   const overdrawn = rawRemaining < 0;
@@ -14569,6 +14587,7 @@ function getPtBalance(member, sessions = [], registrations = [], todayKST = "") 
     rawRemaining,
     remaining,
     renewalCount: base.renewalCount + reg.renewalCount,
+    excludedBeforeBaseline: reg.excludedBeforeBaseline,
     overdrawn,
     status: getPtBalanceStatus(remaining, overdrawn),
   };
@@ -20284,7 +20303,8 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   // 여기는 PT 횟수 정산용이라, 재등록을 추가해도 registrationType은 건드리지 않는다.
   // 계산(ptToday/ptBalance)은 상단 요약 스트립(topChrome)에서도 쓰므로 그보다 위에서 선언한다.
   const openPtModal = (mode) => {
-    if (mode === "init") setPtForm({ remaining:String(ptBalance.baselineRemaining||""), renewalCount:String(ptBalance.renewalCount||""), count:"", delta:"", date:ptToday, memo:"" });
+    // 기준 재설정 = "지금 이 순간" 잔여·재등록 횟수를 새 기준으로 확정 → 과거 기준값이 아니라 현재 계산값을 기본값으로 채운다.
+    if (mode === "init") setPtForm({ remaining:ptBalance.initialized?String(ptBalance.remaining):"", renewalCount:ptBalance.initialized?String(ptBalance.renewalCount):"", count:"", delta:"", date:ptToday, memo:"" });
     else if (mode === "renewal") setPtForm({ remaining:"", renewalCount:"", count:"", delta:"", date:ptToday, memo:"" });
     else setPtForm({ remaining:"", renewalCount:"", count:"", delta:"", date:ptToday, memo:"" });
     setPtModal(mode);
@@ -20372,6 +20392,7 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
     ptBalance.renewalAdded>0 ? `재등록 +${ptBalance.renewalAdded}회` : null,
     ptBalance.adjustTotal!==0 ? `보정 ${ptBalance.adjustTotal>0?"+":""}${ptBalance.adjustTotal}회` : null,
     ptBalance.debits>0 ? `수업 -${ptBalance.debits}회` : null,
+    ptBalance.excludedBeforeBaseline>0 ? `기준 이전 기록 ${ptBalance.excludedBeforeBaseline}건은 기준에 포함됨` : null,
   ].filter(Boolean).join(" · ") : "";
 
   const secPtBalance = (
@@ -20679,7 +20700,22 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
           </section>
   );
 
-  const secRegistration = (
+  // 영상 첨부 후기 1회 정책 회원(reviewPolicyVersion) — 회원앱 후기 공지가 등록 구분·등록일을 전혀 쓰지 않으므로
+  // 수동 "등록 구분" 입력을 보여주지 않는다(중복 입력 방지). 재등록의 기준 데이터는 PT 이용 현황 "PT 등록 추가"로 생기는
+  // ptRegistrations(type:"renewal")이며, 최근 재등록일은 저장하지 않고 읽기 시점에 파생한다.
+  // 시작일·잔여 PT·다음 수업은 상단 요약, 잔여·재등록 횟수는 아래 PT 이용 현황에 이미 있어 여기서 반복하지 않는다.
+  // legacy 회원(필드 없음)은 아래 기존 등록 관리 UI·기능을 그대로 유지한다.
+  const latestPtRenewalDate = getLatestPtRenewalDate(ptRegistrations);
+  const secRegistration = isVideoReviewPolicy ? (
+          <section id="hub-sec-registration" className="hub-sec-registration" style={{...card, padding:"14px 16px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+              <span style={cardTitle}>회원 이용 현황</span>
+              <span style={{fontSize:11.5,fontWeight:700,color:latestPtRenewalDate?DB.sub:DB.faint}}>{latestPtRenewalDate?`최근 재등록 ${latestPtRenewalDate}`:"재등록 기록 없음"}</span>
+            </div>
+            <div style={{fontSize:11,color:DB.faint,lineHeight:1.6}}>PT를 새로 구매하면 아래 "PT 등록 추가"만 입력하세요. 잔여·재등록 횟수·최근 재등록일이 자동으로 반영됩니다.</div>
+            {secPtBalance}
+          </section>
+  ) : (
           <section id="hub-sec-registration" className="hub-sec-registration" style={{...card, padding:"14px 16px 16px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
               <span style={cardTitle}>등록 관리</span>
@@ -20934,7 +20970,9 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
             </div>
             <div style={{fontSize:11.5,color:DB.sub,lineHeight:1.6,marginBottom:16}}>
               {ptModal==="init"
-                ? "지금 남아있는 횟수를 그대로 입력해주세요. 과거 수업 기록으로 다시 계산하지 않으며, 설정 이후 완료되는 수업부터 자동으로 차감됩니다."
+                ? (ptBalance.initialized
+                    ? "현재 계산된 잔여·재등록 횟수가 채워져 있습니다. 이 값이 새 기준이 되며, 지금까지의 재등록·보정 기록은 다시 더하지 않습니다. 이후 완료되는 수업부터 자동으로 차감됩니다."
+                    : "지금 남아있는 횟수를 그대로 입력해주세요. 과거 수업 기록으로 다시 계산하지 않으며, 설정 이후 완료되는 수업부터 자동으로 차감됩니다.")
                 : ptModal==="renewal"
                 ? "재등록한 PT 횟수를 입력하면 현재 잔여 횟수에 더해지고, 재등록 횟수도 1회 증가합니다."
                 : "누락 수업·서비스 수업 등으로 잔여 횟수를 보정합니다. 사유가 이력에 함께 남습니다."}

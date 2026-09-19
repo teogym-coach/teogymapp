@@ -331,7 +331,7 @@ try {
   const sliceFuncEx = app.slice(app.indexOf('function isFuncEx'), app.indexOf('function funcSetLabel'));
   const sliceMillis = app.slice(app.indexOf('function toMillisSafe'), app.indexOf('function isAtOrAfterHomeTaskCutoff'));
   const slicePt = app.slice(app.indexOf('function isTrialSessionNo'), app.indexOf('function buildUnsentSessionMembers'));
-  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isPtRenewalNoticeHandled, buildPtRenewalNoticeList, isTrialSessionNo, sessionNoToNumber, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
+  ptBalanceLib = new Function(`${sliceFuncEx}\n${sliceMillis}\n${slicePt}\nreturn { getPtBalance, getPtBalanceBaseline, isPtDebitableSession, countPtDebitedSessions, getPtSessionCompletedAtMs, summarizePtRegistrations, getLatestPtRenewalDate,getPtBalanceStatus, needsPtRenewalNotice, getPtBalanceSummary, buildPtBalanceCachePatch, isPtRenewalNoticeHandled, buildPtRenewalNoticeList, isTrialSessionNo, sessionNoToNumber, PT_BALANCE_LOW_THRESHOLD, PT_BALANCE_URGENT_THRESHOLD };`)();
 } catch (e) {
   console.error('[regression] PT 잔여 횟수 헬퍼 추출 실패:', e.message);
 }
@@ -6874,6 +6874,40 @@ const checks = [
     const minus = L.getPtBalance(ptMember(), [], [{ id: 'a2', type: 'adjustment', delta: -1, date: '2026-08-20', memo: '누락 수업 반영' }], PT_TODAY);
     return plus.remaining === 9 && plus.adjustTotal === 1 && minus.remaining === 7 && minus.adjustTotal === -1;
   }),
+  // 기준 재설정 이중 합산 방지 — 기준은 그 시점 상태를 확정한 값이라 createdAt(서버 시각) > 기준 시각인 재등록·보정만 더한다.
+  ptScenario('PT 기준 재설정: 10회 → 수업 2 → 재등록 +10(18/1) → 재설정 18/1 직후에도 18회·재등록 1회(28/2 아님)', L => {
+    const m0 = ptMember({ ptBalanceBaselineAt: '2026-08-07T00:00:00.000Z', ptBalanceBaselineRemaining: 10, ptBalanceBaselineRenewalCount: 0 });
+    const ss = [ptSession({ id: 'x1', date: '2026-08-10' }), ptSession({ id: 'x2', date: '2026-08-11', completedAt: '2026-08-11T02:00:00.000Z' })];
+    const r1 = { id: 'r1', type: 'renewal', delta: 10, date: '2026-08-12', createdAt: new Date('2026-08-12T03:00:00.000Z') };
+    const a = L.getPtBalance(m0, ss, [], PT_TODAY), b = L.getPtBalance(m0, ss, [r1], PT_TODAY);
+    const m1 = { ...m0, ptBalanceBaselineAt: '2026-08-13T00:00:00.000Z', ptBalanceBaselineDate: '2026-08-13', ptBalanceBaselineRemaining: 18, ptBalanceBaselineRenewalCount: 1 };
+    const c = L.getPtBalance(m1, ss, [r1], PT_TODAY);
+    const s3 = ptSession({ id: 'x3', date: '2026-08-14', completedAt: '2026-08-14T02:00:00.000Z' });
+    const d = L.getPtBalance(m1, [...ss, s3], [r1], PT_TODAY);
+    const r2 = { id: 'r2', type: 'renewal', delta: 10, date: '2026-08-15', createdAt: new Date('2026-08-15T03:00:00.000Z') };
+    const e = L.getPtBalance(m1, [...ss, s3], [r1, r2], PT_TODAY);
+    return a.remaining === 8 && b.remaining === 18 && b.renewalCount === 1
+      && c.remaining === 18 && c.renewalCount === 1 && c.excludedBeforeBaseline === 1
+      && d.remaining === 17 && e.remaining === 27 && e.renewalCount === 2;
+  }),
+  ptScenario('PT 기준 재설정: 기준 이전 보정은 다시 더하지 않고 기준 이후 보정만 반영한다', L => {
+    const m = ptMember({ ptBalanceBaselineAt: '2026-08-13T00:00:00.000Z', ptBalanceBaselineRemaining: 18, ptBalanceBaselineRenewalCount: 1 });
+    const pre = { id: 'a0', type: 'adjustment', delta: 1, date: '2026-08-12', memo: '서비스', createdAt: new Date('2026-08-12T04:00:00.000Z') };
+    const post = { id: 'a1', type: 'adjustment', delta: -1, date: '2026-08-16', memo: '누락', createdAt: new Date('2026-08-16T04:00:00.000Z') };
+    return L.getPtBalance(m, [], [pre], PT_TODAY).remaining === 18
+      && L.getPtBalance(m, [], [pre, post], PT_TODAY).remaining === 17;
+  }),
+  ptScenario('PT 기준 재설정: 같은 날짜라도 기준 저장 시각 이전 재등록은 제외, 이후 재등록은 1회만 포함한다', L => {
+    const m = ptMember({ ptBalanceBaselineAt: '2026-08-20T03:00:00.000Z', ptBalanceBaselineDate: '2026-08-20', ptBalanceBaselineRemaining: 5, ptBalanceBaselineRenewalCount: 0 });
+    const before = { id: 'h0', type: 'renewal', delta: 10, date: '2026-08-20', createdAt: new Date('2026-08-20T01:00:00.000Z') };
+    const after = { id: 'h1', type: 'renewal', delta: 20, date: '2026-08-20', createdAt: new Date('2026-08-20T05:00:00.000Z') };
+    const b = L.getPtBalance(m, [], [before, after], PT_TODAY);
+    return b.remaining === 25 && b.renewalCount === 1 && L.getLatestPtRenewalDate([before, after]) === '2026-08-20';
+  }),
+  ['PT 기준 재설정: 모달 기본값은 과거 기준값이 아니라 현재 계산된 잔여·재등록 횟수다',
+    app.includes('remaining:ptBalance.initialized?String(ptBalance.remaining):"", renewalCount:ptBalance.initialized?String(ptBalance.renewalCount):""')
+    && !app.includes('remaining:String(ptBalance.baselineRemaining||"")')
+  ],
   ptScenario('PT 잔여: 잔여 0회인데 수업이 완료되면 화면은 0회를 유지하고 "잔여 횟수 확인 필요"를 알린다', L => {
     const m = ptMember({ ptBalanceBaselineRemaining: 0 });
     const b = L.getPtBalance(m, [ptSession()], [], PT_TODAY);
@@ -7175,6 +7209,21 @@ const checks = [
     && app.includes('{regBtn("재등록", ()=>saveRegistrationType("renewal"), {primary:registrationType==="renewal"})}')
     // 재등록 추가(addPtRegistration) 저장 경로에서 registrationType을 함께 바꾸지 않는다
     && !/addPtRegistration\([^)]*registrationType/.test(app)
+  ],
+  ['등록 관리: 영상 후기 정책 회원만 수동 등록 구분 대신 "회원 이용 현황"(최근 재등록일 읽기 파생), legacy 회원은 기존 카드 그대로',
+    app.includes('const secRegistration = isVideoReviewPolicy ? (')
+    && app.includes('<span style={cardTitle}>회원 이용 현황</span>')
+    && app.includes('const latestPtRenewalDate = getLatestPtRenewalDate(ptRegistrations);')
+    // legacy 분기에는 기존 등록 관리 제목·버튼 3개·날짜·완료 처리가 그대로 남아 있다
+    && app.includes('<span style={cardTitle}>등록 관리</span>')
+    && app.includes('{regBtn("첫 등록", ()=>saveRegistrationType("first"), {primary:registrationType==="first"})}')
+    && app.includes('regBtn("등록 후기 완료 처리", ()=>saveRegistrationNoticeDone(true), {primary:true})')
+    // 신규 정책 분기에서 registrationType·등록일을 자동 저장하지 않는다(읽기 전용)
+    && (() => {
+      const start = app.indexOf('const latestPtRenewalDate');
+      const region = app.slice(start, app.indexOf(') : (', app.indexOf('const secRegistration = isVideoReviewPolicy')));
+      return start > 0 && region.length > 0 && !region.includes('saveRegistration') && !region.includes('updateMember');
+    })()
   ],
   ['PT 잔여: 회원 상세 "등록 관리" 카드 안에 PT 이용 현황이 들어가고 상단 요약과 같은 계산(getPtBalance) 하나만 쓴다',
     app.includes('{secPtBalance}')

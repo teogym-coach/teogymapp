@@ -857,6 +857,29 @@ export async function getRecentSessions(memberId, n = 5) {
   return snap.docs.map(d => ({ id: d.id, ...normalizeSessionForRead(d.data()) }));
 }
 
+// 회원앱 "앱 복귀 시 최신 수업일지 확인" 전용 — 세션 문서만 다시 읽고 memberFeedback은 재조회하지 않는다.
+// 이미 화면이 가진 세션(knownSessionIds)의 feedback은 호출부가 sessionId 기준으로 그대로 잇고,
+// 처음 보는 세션(공개 취소 후 재공개·신규 공개)만 기존 attachSessionMemberFeedback으로 1건씩 붙인다.
+// getPublishedSessions와 달리 읽기 실패를 []로 삼키지 않고 throw한다 — 실패 시 화면의 기존 목록을 비우지 않기 위함.
+export async function refreshPublishedSessions(memberId, knownSessionIds = []) {
+  requireUid();
+  const known = new Set(knownSessionIds || []);
+  const snap = await getDocs(query(
+    collection(db, "members", memberId, "sessions"),
+    where("isPublished", "==", true)
+  ));
+  const sessions = snap.docs
+    .map(d => publicSession({ id: d.id, ...normalizeSessionForRead(d.data()) }))
+    .sort((a, b) => {
+      const sessionNoDiff = (Number(a.sessionNo) || 0) - (Number(b.sessionNo) || 0);
+      if (sessionNoDiff) return sessionNoDiff;
+      return String(a.date || "").localeCompare(String(b.date || ""));
+    });
+  const fresh = sessions.filter(s => !known.has(s.id));
+  const attached = new Map((await attachSessionMemberFeedback(memberId, fresh)).map(s => [s.id, s]));
+  return sessions.map(s => attached.get(s.id) || s);
+}
+
 export async function getPublishedSessions(memberId) {
   requireUid();
   const path = `members/${memberId}/sessions`;

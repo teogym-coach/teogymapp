@@ -9469,6 +9469,7 @@ function runRenderTests() {
     ['체중 기록 유실 방지(조회 실패·stale 화면·동시 쓰기에서 bodyCheck 병합 저장)', path.join(root, 'tests', 'render', 'body-weight-records-safety.test.js')],
     ['히스토리 실제 운동명 전체 표시·관리자 상세 밝은 톤·공유 카드 보존·0kg 표시', path.join(root, 'tests', 'render', 'history-exercise-display.test.js')],
     ['회원앱 사전 문진 신규 2문항(등록 결정 이유·PT 시작 계기) 입력·저장·페르소나 변환', path.join(root, 'tests', 'render', 'member-onboarding-persona-sync.test.js')],
+    ['네이버 후기 정책 분리(기존 회원 1·2회 보호 · 신규 회원 영상 첨부 1회 · 회원앱 공지 · 후기 미작성)', path.join(root, 'tests', 'render', 'review-policy-video.test.js')],
   ];
   let bad = 0;
   for (const [label, file] of files) {

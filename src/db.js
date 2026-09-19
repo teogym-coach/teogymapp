@@ -467,6 +467,11 @@ export async function migrateMemberPersonaToPrivate(members = []) {
   return { moved };
 }
 
+// 후기 정책 버전 — 2026-09-19 배포 이후 addMember()로 새로 생성되는 회원에게만 저장한다(영상 첨부 네이버 영수증 후기 1회).
+// 필드가 없는 기존 회원은 legacy 정책(후기 1·2회 선택, 기존 공지 문구)으로 해석하며 마이그레이션하지 않는다.
+// 생성 시점에 한 번만 확정되고 updateMember()에서는 절대 바뀌지 않는다(회원 수정·재등록으로 정책이 바뀌지 않도록).
+export const REVIEW_POLICY_VERSION_VIDEO_1 = "2026-09-19";
+
 // 유입 분석이 "가장 최근 방문계기 기록"을 판단하려면 방문계기(survey.visit*)를 실제로 언제 고쳤는지가
 // 필요하다. 그런데 survey는 MemberForm이 8개 탭 전체를 한 번에 통째로 다시 저장하는 구조라(다른 탭만
 // 고쳐도 survey 전체가 재기록됨), 문서에 그냥 updatedAt만 있으면 이름·체중·스케줄 수정으로도 "방문계기가
@@ -495,6 +500,7 @@ export async function addMember(data) {
   const { memo, ticketInfo, persona, ...publicData } = data;
   const payload = {
     ...clean(normalizeMemberData(publicData)),
+    reviewPolicyVersion: REVIEW_POLICY_VERSION_VIDEO_1,
     trainerUid: uid,
     createdAt:  serverTimestamp(),
     updatedAt:  serverTimestamp(),
@@ -508,7 +514,7 @@ export async function addMember(data) {
     await saveMemberPrivateFields(ref.id, clean({ memo, ticketInfo, persona }));
   }
   dbLog("addMember", `생성 완료: ${ref.id} (회원앱은 members.memberUid 직접 조회)`);
-  return { id: ref.id, ...data, trainerUid: uid };
+  return { id: ref.id, ...data, reviewPolicyVersion: REVIEW_POLICY_VERSION_VIDEO_1, trainerUid: uid };
 }
 
 export async function updateMember(id, data) {
@@ -526,6 +532,8 @@ export async function updateMember(id, data) {
   // memo/ticketInfo와 동일하게 private 서브컬렉션에만 저장한다(회원은 Rules catch-all로 접근 자체가 불가).
   const { memo, ticketInfo, persona, ...publicData } = data;
   const normalized = clean(normalizeMemberData(publicData));
+  // 후기 정책 버전은 생성 시점(addMember)에만 확정된다 — 회원 정보 수정·재등록 등 어떤 수정 경로로도 추가·변경·삭제하지 않는다.
+  delete normalized.reviewPolicyVersion;
   const hasPrivate = 'memo' in data || 'ticketInfo' in data || 'persona' in data;
 
   // 방문계기 필드가 실제로 바뀐 경우에만 survey.visitUpdatedAt을 새로 찍는다(그 외엔 기존 값을 그대로 이어간다).

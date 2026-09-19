@@ -15,7 +15,7 @@ import {
   setPersistence, browserLocalPersistence, browserSessionPersistence,
 } from "firebase/auth";
 import {
-  getMembers, addMember, updateMember, deleteMember,
+  getMembers, addMember, updateMember, deleteMember, REVIEW_POLICY_VERSION_VIDEO_1,
   getSessions, getSession, addSession, updateSession, deleteSession, publishSession, unpublishSession, setSessionJournalDeferred,
   getBodyCheck, saveBodyCheck,
   getNutrition, saveNutrition, saveMemberDietMeal,
@@ -4262,8 +4262,19 @@ const REGISTRATION_NOTICE_POLICY_START_DATE = "2026-07-20";
 // 후기 관리(reviewStatus.requiredCount/completedCount, HubScreen 후기 관리 카드와 동일 필드) 데이터만으로 판정한다.
 // 판정 순서: ① 정책 적용 대상(2026-07-20 이후 신규 등록 또는 재등록) 여부 확인 → ② 대상일 때만 필수 후기 남은 횟수 확인(기간 제한 없음) → ③ 필수 후기가 없으면 등록·재등록일 기준 5일 안내.
 // TEO·test member도 회원앱 기능 판정 대상이므로 관리자용 isExcludedAdminMember 필터를 여기서는 사용하지 않는다.
+// 영상 첨부 후기 1회 정책 회원 — addMember()가 생성 시점에 reviewPolicyVersion을 저장한 회원만 해당(필드 없는 기존 회원은 legacy).
+function isVideoReviewPolicyMember(m) {
+  return m?.reviewPolicyVersion === REVIEW_POLICY_VERSION_VIDEO_1;
+}
 function buildRegistrationReviewNotice(profile) {
   if (!profile) return null;
+  // ⓪ 영상 첨부 후기 1회 정책 회원 — 등록일(2026-07-20)·첫 등록/재등록 조건과 무관하게, 관리자가 후기 1회를 설정했고
+  // 아직 완료하지 않은 동안에만 계속 표시한다(기간 제한 없음). 후기 목표가 없으면(일반가 등) 어떤 후기 공지도 띄우지 않는다.
+  if (isVideoReviewPolicyMember(profile)) {
+    const required = Number(profile.reviewStatus?.requiredCount);
+    const completed = Math.max(Number(profile.reviewStatus?.completedCount) || 0, 0);
+    return required === 1 && completed < required ? { type: "video" } : null;
+  }
   const todayKST = getKoreaDateString();
   const isPolicyDate = (d) => { const s = String(d || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayKST && s >= REGISTRATION_NOTICE_POLICY_START_DATE; };
   // ① 정책 적용 대상 — 2026-07-20 이후 날짜의 첫 등록(first) 또는 재등록(renewal)이 있어야만 아래 어떤 공지도 대상이 된다.
@@ -4292,7 +4303,14 @@ function buildRegistrationReviewNotice(profile) {
 // 후기 작성 여부/공지 종료는 전적으로 관리자앱 데이터(buildRegistrationReviewNotice)로만 판정하며, 회원은 이 카드로 아무 것도 입력·완료 처리할 수 없다.
 function ReviewReminderCard({ notice }) {
   if (!notice) return null;
-  const content = notice.type === "required"
+  const content = notice.type === "video"
+    ? {
+        icon: "💬",
+        eyebrow: "후기 작성 안내",
+        title: "네이버 영수증 후기 작성 부탁드립니다",
+        desc: "수업 영상을 함께 첨부해 주시면 됩니다.",
+      }
+    : notice.type === "required"
     ? {
         icon: "💬",
         eyebrow: "소중한 경험을 들려주세요",
@@ -20143,8 +20161,11 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
   const reviewCompleted = hasReviewGoal ? Math.min(Math.max(Number(member.reviewStatus.completedCount) || 0, 0), reviewRequired) : 0;
   const reviewRemaining = hasReviewGoal ? Math.max(reviewRequired - reviewCompleted, 0) : 0;
   const reviewDone = hasReviewGoal && reviewCompleted >= reviewRequired;
+  // 영상 첨부 후기 1회 정책 회원(reviewPolicyVersion) — 목표는 1회만 설정·다시 시작할 수 있다. 필드 없는 기존 회원은 1·2회 선택 그대로.
+  const isVideoReviewPolicy = isVideoReviewPolicyMember(member);
   const saveReviewStatus = async (requiredCount, completedCount, { designate=false } = {}) => {
     if (reviewSaving) return;
+    if (isVideoReviewPolicy && requiredCount !== 1) return;
     setReviewSaving(true);
     try {
       const requiredSetAt = designate ? new Date().toISOString() : (member.reviewStatus?.requiredSetAt || null);
@@ -20176,18 +20197,25 @@ function HubScreen({ member, allMembers, sessions, sessionReadsMap, memberAppUsa
               <>
                 <div style={{fontSize:12.5,color:DB.faint,marginBottom:10}}>아직 후기 목표가 설정되지 않았습니다.</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {reviewBtn("후기 1회 설정", ()=>saveReviewStatus(1,0,{designate:true}), {primary:true})}
-                  {reviewBtn("후기 2회 설정", ()=>saveReviewStatus(2,0,{designate:true}), {primary:true})}
+                  {isVideoReviewPolicy ? (
+                    reviewBtn("후기 1회 설정 (영상 첨부)", ()=>saveReviewStatus(1,0,{designate:true}), {primary:true})
+                  ) : (
+                    <>
+                      {reviewBtn("후기 1회 설정", ()=>saveReviewStatus(1,0,{designate:true}), {primary:true})}
+                      {reviewBtn("후기 2회 설정", ()=>saveReviewStatus(2,0,{designate:true}), {primary:true})}
+                    </>
+                  )}
                 </div>
               </>
             ) : reviewRestarting ? (
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {reviewBtn("1회로 다시 시작", ()=>saveReviewStatus(1,0,{designate:true}), {primary:true})}
-                {reviewBtn("2회로 다시 시작", ()=>saveReviewStatus(2,0,{designate:true}), {primary:true})}
+                {!isVideoReviewPolicy && reviewBtn("2회로 다시 시작", ()=>saveReviewStatus(2,0,{designate:true}), {primary:true})}
                 {reviewBtn("취소", ()=>setReviewRestarting(false))}
               </div>
             ) : (
               <>
+                {isVideoReviewPolicy && <div style={{fontSize:11,fontWeight:700,color:DB.mintSoft,marginBottom:4}}>네이버 영수증 후기 · 수업 영상 첨부</div>}
                 <div style={{fontSize:13,fontWeight:800,color:DB.text,marginBottom:reviewDone?10:2}}>{reviewCompleted} / {reviewRequired}회 완료</div>
                 {!reviewDone && <div style={{fontSize:11.5,color:DB.faint,marginBottom:10}}>{reviewRemaining}회 남음</div>}
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
